@@ -4,6 +4,13 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
+"""Low-level quantization/dequantization ops wrapping Triton and C++ kernels.
+
+These are pure stateless functions — no autograd, no scaling history.  For
+autograd-aware quantized linear, see :mod:`~.linear`.  For the nn.Module
+wrapper, see :mod:`transformer_light.pytorch.modules.quantize`.
+"""
+
 import logging
 from typing import Optional, Tuple
 
@@ -63,20 +70,13 @@ def quant_fp8_blockwise_impl(
     axis: int,
     block_size: int = 128,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Quantize a 2D tensor using blockwise FP8 scaling along *axis*.
+
+    Returns ``(x_fp8, x_scales)`` where ``x_scales`` is per-block in float32.
     """
-    Quantization for fp8 blockwise.
-
-    Quantizes a 2D tensor using blockwise scale along the specified axis.
-    Assumes `x` is contiguous and 2D.
-
-    Returns:
-        x_fp8: FP8-quantized tensor.
-        x_scales: Per-block scale tensor in float32.
-    """
-
     assert x.is_contiguous() and x.dim() == 2, "Input must be 2D and contiguous"
     assert axis in (-2, -1, 0, 1), f"axis must be 0 or 1 (or -1, -2), got {axis}"
-    axis = axis % 2  # Convert negative axis to positive
+    axis = axis % 2
 
     M, N = x.shape
     x_fp8 = torch.empty((M, N), dtype=dtype, device=x.device)
@@ -85,14 +85,7 @@ def quant_fp8_blockwise_impl(
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
     wrap_triton(quant_fp8_blockwise_kernel)[grid](
-        x,
-        x_fp8,
-        x_scales,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-        axis,
+        x, x_fp8, x_scales, M, N, block_size, torch.finfo(dtype).max, axis,
     )
     return x_fp8, x_scales
 
@@ -106,7 +99,7 @@ def quant_fp8_blockwise_impl_meta(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert x.dim() == 2, "Input must be 2D"
     assert axis in (-2, -1, 0, 1), f"axis must be 0 or 1 (or -1, -2), got {axis}"
-    axis = axis % 2  # Convert negative axis to positive
+    axis = axis % 2
     M, N = x.shape
     x_fp8 = torch.empty((M, N), dtype=dtype, device=x.device)
     scales_shape = (triton.cdiv(M, block_size), N) if axis == 0 else (M, triton.cdiv(N, block_size))
@@ -127,22 +120,12 @@ def quant_fp8_blockwise_segment_m_impl(
     M, N = x.shape
     x_fp8 = torch.empty((M, N), dtype=dtype, device=x.device)
 
-    scales_shape = (
-        triton.cdiv(M, block_size) + batch_size,
-        N,
-    )  # M dim add batchsize.
+    scales_shape = (triton.cdiv(M, block_size) + batch_size, N)
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
     grid = (triton.cdiv(M, block_size) + seg_lens.shape[0], triton.cdiv(N, block_size))
     quant_fp8_blockwise_segment_m_kernel[grid](
-        x,
-        x_fp8,
-        x_scales,
-        N,
-        batch_size,
-        seg_indptr,
-        scales_seg_indptr,
-        block_size,
-        torch.finfo(dtype).max,
+        x, x_fp8, x_scales, N, batch_size, seg_indptr, scales_seg_indptr,
+        block_size, torch.finfo(dtype).max,
     )
     return x_fp8, x_scales
 
@@ -206,23 +189,12 @@ def convert_to_mxfp8(
     if philox_offset is None:
         philox_offset = torch.randint(0, 2**31 - 1, (1,)).item()
     wrap_triton(_convert_to_mxfp8_kernel)[grid](
-        data_hp,
-        data_lp,
-        scales,
-        stride_xm,
-        stride_xn,
-        stride_ym,
-        stride_yn,
-        stride_sm,
-        stride_sn,
-        philox_seed,
-        philox_offset,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
+        data_hp, data_lp, scales,
+        stride_xm, stride_xn, stride_ym, stride_yn, stride_sm, stride_sn,
+        philox_seed, philox_offset,
+        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
         QUANT_BLOCK_SIZE=block_size,
-        IS_2D_BLOCK=is_2d_block,
-        USE_SR=use_sr,
-        USE_ASM=use_asm,
+        IS_2D_BLOCK=is_2d_block, USE_SR=use_sr, USE_ASM=use_asm,
     )
 
     return data_lp.reshape(data_shape).transpose(axis, -1), scales.reshape(scales_shape).transpose(axis, -1)
@@ -261,20 +233,11 @@ def convert_from_mxfp8(
     BLOCK_M = 64 if M >= 64 else M
     BLOCK_N = 64 if N >= 64 else N
     wrap_triton(_convert_from_mxfp8_kernel)[grid](
-        data_lp,
-        data_hp,
-        scales,
-        stride_xm,
-        stride_xn,
-        stride_ym,
-        stride_yn,
-        stride_sm,
-        stride_sn,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
+        data_lp, data_hp, scales,
+        stride_xm, stride_xn, stride_ym, stride_yn, stride_sm, stride_sn,
+        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
         QUANT_BLOCK_SIZE=block_size,
-        IS_2D_BLOCK=is_2d_block,
-        USE_ASM=use_asm,
+        IS_2D_BLOCK=is_2d_block, USE_ASM=use_asm,
     )
     return data_hp.reshape(orig_shape).transpose(axis, -1)
 

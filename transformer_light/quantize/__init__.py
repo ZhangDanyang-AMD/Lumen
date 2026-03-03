@@ -30,28 +30,32 @@ Usage::
 
 import functools
 import logging
+from typing import Optional
+
+import torch
+import torch.nn as nn
 
 from transformer_light.quantize.config import (
+    AmaxAlgo,
     QuantConfig,
     QuantFormat,
     ScalingType,
 )
 from transformer_light.quantize.scaling_manager import ScalingManager
-from transformer_light.quantize.autograd import QuantLinear
-from transformer_light.quantize.communication import QuantAllGather
-from transformer_light.quantize.ops import (
+from transformer_light.pytorch.ops.quantize import (
     convert_to_mxfp8,
     convert_from_mxfp8,
     quant_fp8_blockwise_impl,
     quant_fp8_tensorwise_impl,
     dequant_fp8_tensorwise_impl,
     quant_fp8_blockwise_segment_m_impl,
+    QuantizedLinearFunction,
+    quantized_linear,
 )
 
-# Backward-compat aliases
+# Backward-compat aliases (autograd.py and communication.py removed)
 FP8ScalingManager = ScalingManager
-FP8Linear = QuantLinear
-FP8AllGather = QuantAllGather
+FP8Linear = QuantizedLinearFunction
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +102,47 @@ def get_attention_backend(prefer: str = "auto") -> str:
     return "triton"
 
 
+def get_quant_backend(prefer: str = "auto") -> str:
+    """Determine which quantization backend to use.
+
+    Args:
+        prefer: One of ``"auto"``, ``"aiter"``, ``"triton"``.
+
+    Returns:
+        ``"aiter"`` or ``"triton"``
+    """
+    if prefer == "triton":
+        return "triton"
+    if prefer == "aiter":
+        if not is_aiter_available():
+            raise RuntimeError(
+                "AITER is not installed. Install it or use backend='triton'."
+            )
+        return "aiter"
+    return "aiter" if is_aiter_available() else "triton"
+
+
 # ---------------------------------------------------------------------------
 # Quantization enablement
 # ---------------------------------------------------------------------------
 
-def enable(model, config=None, *, format="fp8_e4m3", scaling="delayed",
-           recipe=None, **kwargs):
-    """Non-invasive: patch existing model, no module replacement.
+def enable(
+    model,
+    config: Optional[QuantConfig] = None,
+    *,
+    format: str = "fp8_e4m3",
+    scaling: str = "delayed",
+    backend: str = "auto",
+    recipe: Optional[str] = None,
+    dp_group=None,
+    **kwargs,
+) -> ScalingManager:
+    """Non-invasive: patch existing model's ``nn.Linear`` layers with FP8
+    quantized forward/backward.
+
+    Every ``nn.Linear`` in *model* gets a forward hook that quantizes
+    input and weight, runs an FP8 GEMM, and dequantizes the output — all
+    transparently.  The training loop does not need to change.
 
     Args:
         model: The ``nn.Module`` to patch.
@@ -112,7 +150,10 @@ def enable(model, config=None, *, format="fp8_e4m3", scaling="delayed",
                 kwargs are ignored.
         format: Shorthand format string (ignored when *config* is given).
         scaling: Shorthand scaling string (ignored when *config* is given).
+        backend: ``"auto"``, ``"aiter"``, or ``"triton"``.
         recipe: Legacy alias — maps to *scaling*. Deprecated.
+        dp_group: Data-parallel process group for ``reduce_amax``.
+            Required when ``config.reduce_amax=True``.
         **kwargs: Forwarded to :class:`QuantConfig` (e.g. ``block_size``).
 
     Returns:
@@ -123,16 +164,85 @@ def enable(model, config=None, *, format="fp8_e4m3", scaling="delayed",
             scaling = recipe
         config = QuantConfig.from_str(format=format, scaling=scaling, **kwargs)
 
+    resolved_backend = get_quant_backend(backend)
     manager = ScalingManager(config)
-    _patch_linear_layers(model, manager)
+
+    if config.reduce_amax and dp_group is not None:
+        manager.set_dp_group(dp_group)
+
+    _patch_linear_layers(model, manager, resolved_backend, config)
     return manager
 
 
-def _patch_linear_layers(model, manager):
-    """Hook quantized dispatch into existing nn.Linear layers."""
-    import torch.nn as nn
+def _patch_linear_layers(
+    model: nn.Module,
+    manager: ScalingManager,
+    backend: str,
+    config: QuantConfig,
+) -> None:
+    """Hook quantized dispatch into every ``nn.Linear`` layer.
 
+    Each layer gets a unique ``tensor_id`` derived from its module path so that
+    :class:`ScalingManager` tracks independent amax histories per layer (fixes
+    the shared-``"weight"`` bug where all layers polluted a single deque).
+    """
+    fp8_dtype = config.torch_dtype or torch.float8_e4m3fn
+    block_size = config.block_size
+    quant_act = config.quantize_activation
+
+    count = 0
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear):
+            tensor_id = f"{name}.weight" if name else "weight"
             module._quant_manager = manager
+            module._quant_backend = backend
             module._quant_enabled = True
+            module._quant_tensor_id = tensor_id
+
+            handle = module.register_forward_hook(_make_quant_hook(
+                manager, backend, fp8_dtype, block_size, tensor_id, quant_act,
+            ))
+            module._quant_hook_handle = handle
+            count += 1
+
+    act_str = "weight+activation" if quant_act else "weight-only"
+    logger.info(
+        "Quantization enabled on %d nn.Linear layers "
+        "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s)",
+        count, backend, config.format.value, config.scaling.value,
+        config.amax_algo.value, act_str,
+    )
+
+
+def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
+                     quantize_activation):
+    """Create a forward hook closure that replaces the vanilla linear output.
+
+    *tensor_id* is unique per layer so that delayed-scaling amax histories
+    are tracked independently.
+    """
+
+    def hook(module, args, output):
+        input_tensor = args[0]
+        return quantized_linear(
+            input_tensor,
+            module.weight,
+            module.bias,
+            scaling_manager=manager,
+            backend=backend,
+            fp8_dtype=fp8_dtype,
+            block_size=block_size,
+            tensor_id=tensor_id,
+            quantize_activation=quantize_activation,
+        )
+
+    return hook
+
+
+def disable(model: nn.Module) -> None:
+    """Remove quantized hooks from all ``nn.Linear`` layers."""
+    for module in model.modules():
+        if isinstance(module, nn.Linear) and hasattr(module, "_quant_hook_handle"):
+            module._quant_hook_handle.remove()
+            del module._quant_hook_handle
+            module._quant_enabled = False

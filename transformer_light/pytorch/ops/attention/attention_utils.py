@@ -12,7 +12,7 @@ import torch
 from transformer_light.kernels.attention.attention_triton_impl import (
     get_f8_fwd_dtype,
 )
-from transformer_light.quantize.ops import convert_to_mxfp8
+from transformer_light.pytorch.ops.quantize import convert_to_mxfp8
 from transformer_light.triton.attention.attention_kernel import FIXED_BLOCK_M
 
 

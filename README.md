@@ -44,6 +44,13 @@ Transformer Light owns the following and delegates everything else:
 │     - CK backend via AITER                       │
 │     - Context parallelism (All-to-All)           │
 │     - TransformerLightAttention module            │
+├──────────────────────────────────────────────────┤
+│  5. MODEL LIBRARY                                │
+│     - LLaMA2 SFT (Megatron-LM-AMD backbone)     │
+│     - LoRA / PEFT with A2A comm optimisation     │
+│     - FP8 quantised training (non-invasive)      │
+│     - Packed sequences + attention boundaries    │
+│     - Synthetic warmup + early stopping          │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -62,44 +69,50 @@ config = QuantConfig(format=QuantFormat.FP8_E4M3,
 # Non-invasive: patch existing model, no module replacement
 quant.enable(model, config=config)
 
-# Or use string shorthand
-quant.enable(model, format="fp8_e4m3", scaling="delayed")
-
 # Training loop is unchanged
 output = model(input)       # framework handles quantized dispatch
 loss.backward()             # framework handles quantized gradients
 optimizer.step()            # stays FP32 (or quantized with opt-in)
-
-# Communication is automatic
-# - intra-node: RCCL with quantized tensors
-# - inter-node: mori RDMA with quantized tensors
 ```
 
-### FP8 Attention (direct use)
+### FP8 Attention (module API)
 
 ```python
-from transformer_light.modules import TransformerLightAttention
+from transformer_light.pytorch.modules import TransformerLightAttention
 
 attn = TransformerLightAttention(
     causal=True,
     backend_type="triton",
-    quant_type="mxfp8",       # or "fp8_blockwise"
+    quant_type="mxfp8",       # or "fp8_blockwise", or None for BF16
     quant_block_size=32,
 )
 
-output = attn(q, k, v)
+output = attn(q, k, v)       # q, k, v: [B, S, H, D]
 ```
 
 ### Functional API
 
 ```python
-from transformer_light.ops.attention import attention, attention_fp8_quant
+from transformer_light.pytorch.ops.attention import attention, attention_fp8_quant
 
 # Standard attention (CK or Triton backend)
 output = attention(q, k, v, causal=True, backend_type="triton")
 
 # FP8 quantized attention
 output = attention_fp8_quant(q, k, v, causal=True, quant_type="mxfp8")
+```
+
+### LLaMA2 SFT (library API)
+
+```python
+from transformer_light.models.llama2 import (
+    tl_gpt_builder,
+    apply_lora,
+    apply_fp8_training,
+    forward_step,
+    add_finetune_args,
+    train_valid_test_datasets_provider,
+)
 ```
 
 ## What It Does NOT Do
@@ -115,45 +128,77 @@ output = attention_fp8_quant(q, k, v, causal=True, quant_type="mxfp8")
 
 ## Installation
 
+**Requirements**: PyTorch 2.x, ROCm, Triton.
+
+### User Install (recommended)
+
 ```bash
-# Clone with third-party dependencies
-git clone --recursive git@github.com:ZhangDanyang-AMD/Transformer_Light.git
-cd Transformer_Light
+# Core (Triton-only attention backends)
+pip install transformer_light
 
-# Or, if already cloned, initialize submodules
-git submodule update --init --recursive
+# With AITER CK attention backend
+pip install transformer_light[aiter]
 
-# Install Transformer Light
-pip install -e .
-
-# (Optional) Build AITER from bundled source
-pip install -e 3rdparty/aiter
+# All optional dependencies
+pip install transformer_light[all]
 ```
 
-**Requirements**: PyTorch 2.x, ROCm, Triton.
+### Developer Install
+
+```bash
+git clone git@github.com:ZhangDanyang-AMD/Transformer_Light.git
+cd Transformer_Light
+
+# Editable install with dev dependencies
+pip install -e ".[dev]"
+```
 
 ### Third-party Libraries
 
-Transformer Light bundles the following as git submodules under `3rdparty/`:
+| Library | PyPI Package | Purpose |
+|---------|-------------|---------|
+| [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised kernels: FP8 quantization, hipBLASLt GEMM, CK attention (MHA) |
+| [Composable Kernel (CK)](https://github.com/ROCm/composable_kernel) | *(bundled in aiter)* | High-performance GPU kernel primitives used by AITER |
 
-| Library | Path | Purpose |
-|---------|------|---------|
-| [AITER](https://github.com/ROCm/aiter) | `3rdparty/aiter/` | AMD-optimised kernels: FP8 quantization, hipBLASLt GEMM, CK attention (MHA) |
-| [Composable Kernel (CK)](https://github.com/ROCm/composable_kernel) | `3rdparty/aiter/3rdparty/composable_kernel/` | High-performance GPU kernel primitives used by AITER |
-
-AITER is **optional** — if not installed, Transformer Light falls back to Triton-only backends. When the CK attention backend (`backend_type="ck"`) is needed, AITER must be built with CK support.
+AITER is **optional** — if not installed, Transformer Light falls back to Triton-only backends.
 
 ## Examples
 
-### LLaMA 2 70B LoRA Finetune
+### LLaMA2 SFT with Megatron-LM-AMD
+
+Full fine-tuning or LoRA on LLaMA2 (7B / 13B / 70B) with FP8 attention, packed sequences, and early stopping.
 
 ```bash
-# 1. Prepare data and model
-bash examples/llama2_finetune/scripts/prepare_data_and_model.sh
+# 1. Prepare data and model checkpoint
+bash examples/llama2_finetune_megatron/scripts/prepare_data_and_model.sh
 
-# 2. Run training (8 GPUs)
-cd examples/llama2_finetune
-bash run_and_time.sh
+# 2. Run training (8 GPUs, single node)
+bash examples/llama2_finetune_megatron/run_finetune.sh
+```
+
+The training script is a thin entry point (`examples/llama2_finetune_megatron/finetune_llama2.py`) that imports all components from `transformer_light.models.llama2`:
+
+| Feature | CLI Flag |
+|---------|----------|
+| Attention backend | `--tl-attn-backend {aiter,triton,triton_fp8}` |
+| FP8 quantised training | `--fp8-training --fp8-format fp8_e4m3` |
+| MXFP8 block sizes | `--mxfp8-block-m-fwd 128 ...` (6 independent dims) |
+| LoRA | `--lora-rank 16 --lora-alpha 32` |
+| LoRA A2A comm opt | `--lora-a2a` |
+| Synthetic warmup | `--warmup-steps 5` |
+| Early stopping | `--val-loss-target 1.5` |
+| Context Parallelism | `--context-parallel-size 2` |
+
+See `run_finetune.sh` for the full list of environment variables and defaults.
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# FP8 attention correctness: TransformerLight vs TransformerEngine AMD
+pytest tests/module/test_fp8_attention.py -v -s
 ```
 
 ## Software Stack
@@ -164,13 +209,14 @@ bash run_and_time.sh
 ├─────────────────────────────────────────────┤
 │  Transformer Light                          │
 │    quant.enable(model, config=QuantConfig)  │
-│    ├─ ScalingManager                        │
-│    ├─ QuantLinear (autograd)                │
-│    ├─ QuantAllGather (communication)        │
-│    └─ Attention Kernels                     │
-│       ├─ Triton FP8 blockwise              │
-│       ├─ Triton MXFP8 (gfx950)            │
-│       └─ CK backend (via AITER)           │
+│    ├─ ScalingManager (per-layer amax)       │
+│    ├─ QuantizedLinearFunction (autograd)    │
+│    ├─ Attention Kernels                     │
+│    │   ├─ Triton FP8 blockwise             │
+│    │   ├─ Triton MXFP8 (gfx950)           │
+│    │   └─ CK backend (via AITER)           │
+│    └─ Models                               │
+│        └─ LLaMA2 SFT (LoRA, FP8, CP)      │
 ├─────────────────────────────────────────────┤
 │  AITER          ← quant kernels + hipBLASLt │
 │  Liger Kernel   ← fused ops + RL losses     │
@@ -184,40 +230,39 @@ bash run_and_time.sh
 
 ```
 Transformer_Light/
-├── 3rdparty/                      # Third-party dependencies (git submodules)
-│   └── aiter/                     # AMD AITER — FP8 kernels, hipBLASLt, CK attention
-│       └── 3rdparty/
-│           └── composable_kernel/ # ROCm Composable Kernel (CK)
-├── transformer_light/             # Main Python package
-│   ├── quantize/                  # Quantization lifecycle management
-│   │   ├── config.py              # QuantConfig, QuantFormat, ScalingType
-│   │   ├── scaling_manager.py     # Per-tensor scale tracking (ScalingManager)
-│   │   ├── autograd.py            # Quantized linear autograd (QuantLinear)
-│   │   ├── communication.py       # Quantized all-gather / RDMA (QuantAllGather)
-│   │   └── ops.py                 # Quantization kernel dispatch
-│   ├── triton/                    # Triton GPU kernels
-│   │   ├── attention/
-│   │   │   ├── attention_kernel.py        # FP8 blockwise flash attention
-│   │   │   └── mxfp8_attention_kernel.py  # MXFP8 attention (gfx950)
-│   │   └── quantize/
-│   │       ├── quant_mxfp8.py     # MXFP8 quantization kernel
-│   │       └── quant_blockwise.py # Blockwise FP8 quantization
-│   ├── kernels/                   # Kernel dispatch layer
-│   │   └── attention/
-│   │       ├── attention_triton_impl.py   # Triton attention dispatch
-│   │       └── attention_csrc_impl.py     # CK/AITER attention dispatch
-│   ├── ops/                       # High-level ops API
-│   │   └── attention/
-│   │       ├── attention.py       # attention() + attention_fp8_quant()
-│   │       ├── attention_utils.py # Scaling utilities
-│   │       └── attention_cp_dispatcher.py  # Context parallelism
-│   ├── modules/                   # nn.Module wrappers
-│   │   └── attention.py           # TransformerLightAttention
-│   └── core/                      # Core utilities
-│       ├── float8.py              # FP8 dtype definitions
-│       └── utils.py               # Device capability detection
-├── examples/                      # Training examples
-│   └── llama2_finetune/           # LLaMA 2 70B LoRA finetune
+├── transformer_light/                  # Main Python package
+│   ├── quantize/                       # Quantization lifecycle management
+│   │   ├── config.py                   # QuantConfig, QuantFormat, ScalingType
+│   │   └── scaling_manager.py          # Per-layer scale tracking + amax history
+│   ├── triton/                         # Triton GPU kernels
+│   │   ├── attention/                  # FP8 blockwise & MXFP8 flash attention kernels
+│   │   └── quantize/                   # FP8 / MXFP8 quantization kernels
+│   ├── pytorch/                        # PyTorch integration layer
+│   │   ├── core/                       # FP8 dtypes & device capability detection
+│   │   ├── kernels/                    # Kernel dispatch (Triton + AITER)
+│   │   ├── ops/                        # High-level ops API
+│   │   │   ├── attention/              # attention(), attention_fp8_quant()
+│   │   │   │   ├── attention.py        # Functional API + autograd.Function
+│   │   │   │   ├── attention_megatron.py  # Megatron DotProductAttention replacement
+│   │   │   │   └── attention_with_cp_a2a.py  # Context Parallelism (All-to-All)
+│   │   └── quantize/                  # Quantization ops
+│   │       ├── ops.py                 # Pure quant/dequant functions
+│   │       └── linear.py             # QuantizedLinearFunction (autograd)
+│   │   └── modules/                    # nn.Module wrappers
+│   │       ├── attention.py            # TransformerLightAttention
+│   │       └── quantize.py            # TransformerLightLinear
+│   └── models/                         # Reusable model definitions
+│       └── llama2/                     # LLaMA2 model family
+│           ├── __init__.py             # Public API re-exports
+│           └── sft.py                  # SFT: dataset, model builder, LoRA, FP8, loss
+├── examples/                           # Training examples (thin entry points)
+│   └── llama2_finetune_megatron/       # LLaMA2 SFT with Megatron-LM-AMD
+│       ├── finetune_llama2.py          # Entry point (~60 lines)
+│       ├── run_finetune.sh             # Launch script with env var configuration
+│       └── scripts/                    # Data/model download & conversion
+├── tests/                              # Test suite
+│   └── module/                         # Module-level tests
+│       └── test_fp8_attention.py       # TL vs TE FP8 attention correctness
 ├── setup.py
 └── README.md
 ```

@@ -9,8 +9,13 @@ from typing import Optional, Union
 
 import torch
 
-from transformer_light.quantize.config import QuantConfig, QuantFormat, ScalingType
-from transformer_light.pytorch.ops import (
+from transformer_light.quantize.config import (
+    AmaxAlgo,
+    QuantConfig,
+    QuantFormat,
+    ScalingType,
+)
+from transformer_light.pytorch.ops.quantize import (
     convert_to_mxfp8,
     quant_fp8_blockwise_impl,
 )
@@ -28,6 +33,10 @@ class ScalingManager:
         # With QuantConfig
         mgr = ScalingManager(QuantConfig(format=QuantFormat.MXFP8,
                                          scaling=ScalingType.BLOCKWISE))
+
+        # MLPerf-style: most_recent amax, history=4
+        mgr = ScalingManager(QuantConfig(amax_algo=AmaxAlgo.MOST_RECENT,
+                                         history_len=4))
 
         # Legacy style (still supported)
         mgr = ScalingManager(recipe="delayed")
@@ -57,10 +66,15 @@ class ScalingManager:
         self.fp8_dtype = config.torch_dtype or fp8_dtype if config else fp8_dtype
         self.amax_history = defaultdict(lambda: deque(maxlen=self.config.history_len))
         self.scale_cache = {}
+        self._dp_group = None
 
     @property
     def recipe(self) -> str:
         return self.config.recipe
+
+    def set_dp_group(self, group) -> None:
+        """Set the data-parallel process group for ``reduce_amax``."""
+        self._dp_group = group
 
     def get_scale(self, tensor_id: str, tensor: torch.Tensor):
         """Return the scale factor for this tensor (None for block/mxfp8)."""
@@ -69,11 +83,26 @@ class ScalingManager:
             history = self.amax_history[tensor_id]
             if len(history) == 0:
                 amax = tensor.abs().amax()
+            elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
+                amax = torch.tensor(history[-1], device=tensor.device)
             else:
-                amax = max(history)
+                amax = torch.tensor(max(history), device=tensor.device)
+
+            if self.config.reduce_amax and self._dp_group is not None:
+                torch.distributed.all_reduce(
+                    amax, op=torch.distributed.ReduceOp.MAX,
+                    group=self._dp_group,
+                )
+
             return amax / FP8_MAX
         elif recipe == "dynamic":
-            return tensor.abs().amax() / FP8_MAX
+            amax = tensor.abs().amax()
+            if self.config.reduce_amax and self._dp_group is not None:
+                torch.distributed.all_reduce(
+                    amax, op=torch.distributed.ReduceOp.MAX,
+                    group=self._dp_group,
+                )
+            return amax / FP8_MAX
         elif recipe in ("blockwise", "mxfp8"):
             return None
 
