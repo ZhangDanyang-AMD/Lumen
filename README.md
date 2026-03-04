@@ -46,10 +46,11 @@ Transformer Light owns the following and delegates everything else:
 │     - TransformerLightAttention module            │
 ├──────────────────────────────────────────────────┤
 │  5. MODEL LIBRARY                                │
-│     - LLaMA2 SFT (Megatron-LM-AMD backbone)     │
+│     - LLaMA2 SFT (Megatron / FSDP)              │
+│     - LLaMA 3.1 Pretrain (Megatron / FSDP)      │
 │     - LoRA / PEFT with A2A comm optimisation     │
 │     - FP8 quantised training (non-invasive)      │
-│     - Packed sequences + attention boundaries    │
+│     - MXFP8 attention (MLPerf config)            │
 │     - Synthetic warmup + early stopping          │
 └──────────────────────────────────────────────────┘
 ```
@@ -170,13 +171,16 @@ Full fine-tuning or LoRA on LLaMA2 (7B / 13B / 70B) with FP8 attention, packed s
 
 ```bash
 # 1. Prepare data and model checkpoint
-bash examples/llama2_finetune_megatron/scripts/prepare_data_and_model.sh
+bash examples/llama2/scripts/prepare_data_and_model.sh
 
-# 2. Run training (8 GPUs, single node)
-bash examples/llama2_finetune_megatron/run_finetune.sh
+# 2. Run training — Megatron backend (default)
+BACKEND=megatron bash examples/llama2/run_finetune.sh
+
+# 2. Or: FSDP backend (no Megatron dependency)
+BACKEND=fsdp bash examples/llama2/run_finetune.sh
 ```
 
-The training script is a thin entry point (`examples/llama2_finetune_megatron/finetune_llama2.py`) that imports all components from `transformer_light.models.llama2`:
+The training script (`examples/llama2/finetune_llama2.py`) selects the backend via `--backend megatron|fsdp`:
 
 | Feature | CLI Flag |
 |---------|----------|
@@ -190,6 +194,36 @@ The training script is a thin entry point (`examples/llama2_finetune_megatron/fi
 | Context Parallelism | `--context-parallel-size 2` |
 
 See `run_finetune.sh` for the full list of environment variables and defaults.
+
+### LLaMA 3.1 Pretraining
+
+Pretraining LLaMA 3.1 (8B) with FP8 hybrid training and MXFP8 attention, aligned with MLPerf LLM pretraining config.
+
+```bash
+# 1. Prepare data and model checkpoint
+bash examples/llama31/scripts/prepare_data_and_model.sh
+
+# 2. Run training — Megatron backend (default)
+BACKEND=megatron bash examples/llama31/run_pretrain.sh
+
+# 2. Or: FSDP backend (no Megatron dependency)
+BACKEND=fsdp bash examples/llama31/run_pretrain.sh
+```
+
+The entry point (`examples/llama31/pretrain_llama31.py`) selects the backend via `--backend megatron|fsdp`:
+
+| Feature | CLI Flag | Default |
+|---------|----------|---------|
+| Model size | `SIZE=8b` (env var) | 8b |
+| MXFP8 attention | `--tl-fp8-quant-type mxfp8` | mxfp8 |
+| FP8 training | `--fp8-training` | enabled |
+| Amax algorithm | `--fp8-amax-algo most_recent` | most_recent |
+| Amax history | `--fp8-amax-history 4` | 4 |
+| Learning rate | `MAX_LR=8e-4` (env var) | 8e-4 |
+| Cosine LR warmup | `LR_WARMUP_STEPS=128` | 128 |
+| GQA (8 KV heads) | auto from SIZE | 32 heads / 8 KV groups |
+
+See `run_pretrain.sh` for all environment variables.
 
 ## Testing
 
@@ -216,7 +250,8 @@ pytest tests/module/test_fp8_attention.py -v -s
 │    │   ├─ Triton MXFP8 (gfx950)           │
 │    │   └─ CK backend (via AITER)           │
 │    └─ Models                               │
-│        └─ LLaMA2 SFT (LoRA, FP8, CP)      │
+│        ├─ LLaMA2 SFT (LoRA, FP8, CP)      │
+│        └─ LLaMA 3.1 Pretrain (FP8, MXFP8) │
 ├─────────────────────────────────────────────┤
 │  AITER          ← quant kernels + hipBLASLt │
 │  Liger Kernel   ← fused ops + RL losses     │
@@ -252,13 +287,24 @@ Transformer_Light/
 │   │       ├── attention.py            # TransformerLightAttention
 │   │       └── quantize.py            # TransformerLightLinear
 │   └── models/                         # Reusable model definitions
-│       └── llama2/                     # LLaMA2 model family
-│           ├── __init__.py             # Public API re-exports
-│           └── sft.py                  # SFT: dataset, model builder, LoRA, FP8, loss
-├── examples/                           # Training examples (thin entry points)
-│   └── llama2_finetune_megatron/       # LLaMA2 SFT with Megatron-LM-AMD
-│       ├── finetune_llama2.py          # Entry point (~60 lines)
-│       ├── run_finetune.sh             # Launch script with env var configuration
+│       ├── utils.py                    # Common helpers (peek_backend, download, sha256)
+│       ├── perf_env.sh                 # AMD MI GPU perf tuning env vars (sourceable)
+│       ├── llama2/            # LLaMA2 SFT
+│       │   ├── dataset.py              # LLaMA2SFTDataset (shared, no framework dep)
+│       │   ├── megatron/sft.py         # Megatron-LM-AMD backend
+│       │   └── fsdp/sft.py            # PyTorch FSDP backend
+│       └── llama31/           # LLaMA 3.1 Pretraining
+│           ├── dataset.py              # PretrainTextDataset (shared)
+│           ├── megatron/pretrain.py    # Megatron-LM-AMD backend
+│           └── fsdp/pretrain.py       # PyTorch FSDP backend
+├── examples/                           # Training examples
+│   ├── llama2/                # LLaMA2 SFT (Megatron or FSDP)
+│   │   ├── finetune_llama2.py          # Unified entry point (--backend switch)
+│   │   ├── run_finetune.sh             # Unified launcher (BACKEND env var)
+│   │   └── scripts/                    # Data/model download & conversion
+│   └── llama31/               # LLaMA 3.1 Pretrain (Megatron or FSDP)
+│       ├── pretrain_llama31.py         # Unified entry point (--backend switch)
+│       ├── run_pretrain.sh             # Unified launcher (BACKEND env var)
 │       └── scripts/                    # Data/model download & conversion
 ├── tests/                              # Test suite
 │   └── module/                         # Module-level tests

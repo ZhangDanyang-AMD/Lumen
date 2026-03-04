@@ -1,0 +1,299 @@
+#!/bin/bash
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# LLaMA2 SFT fine-tuning — unified launcher.
+#
+# Supports two backends via the BACKEND environment variable:
+#   BACKEND=megatron  — Megatron-LM-AMD (TP/PP/CP/VP/SP)  [default]
+#   BACKEND=fsdp      — PyTorch FSDP + HuggingFace
+#
+# Usage:
+#   BACKEND=megatron bash run_finetune.sh
+#   BACKEND=fsdp     bash run_finetune.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+BACKEND=${BACKEND:-"megatron"}
+
+# ---- Performance tuning (model-agnostic, from common module) -----------------
+source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
+
+# ---- Shared defaults ---------------------------------------------------------
+
+NGPU=${NGPU:-8}
+NNODES=${NNODES:-1}
+MBS=${MBS:-1}
+SEQ_LEN=${SEQ_LEN:-8192}
+LR=${LR:-4e-4}
+MIN_LR=${MIN_LR:-0}
+TRAIN_STEPS=${TRAIN_STEPS:-800}
+LOG_INTERVAL=${LOG_INTERVAL:-1}
+SAVE_INTERVAL=${SAVE_INTERVAL:-200}
+SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
+
+TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
+VALID_DATA=${VALID_DATA:-"/data/validation.jsonl"}
+TOKENIZER=${TOKENIZER:-"meta-llama/Llama-2-70b-hf"}
+
+# LoRA (shared)
+LORA_RANK=${LORA_RANK:-0}
+LORA_ALPHA=${LORA_ALPHA:-32}
+LORA_DROPOUT=${LORA_DROPOUT:-0.1}
+
+# FP8 (shared)
+FP8_TRAINING=${FP8_TRAINING:-0}
+FP8_FORMAT=${FP8_FORMAT:-"fp8_e4m3"}
+FP8_SCALING=${FP8_SCALING:-"delayed"}
+FP8_BLOCK_SIZE=${FP8_BLOCK_SIZE:-128}
+FP8_AMAX_ALGO=${FP8_AMAX_ALGO:-"max"}
+FP8_REDUCE_AMAX=${FP8_REDUCE_AMAX:-0}
+FP8_AMAX_HISTORY=${FP8_AMAX_HISTORY:-16}
+FP8_ACTIVATION=${FP8_ACTIVATION:-1}
+
+# Warmup / early stopping (shared)
+WARMUP_STEPS=${WARMUP_STEPS:-0}
+VAL_LOSS_TARGET=${VAL_LOSS_TARGET:-""}
+
+
+###############################################################################
+# MEGATRON BACKEND
+###############################################################################
+
+run_megatron() {
+    python -c "import megatron" 2>/dev/null || {
+        echo "ERROR: Megatron-LM is not installed."
+        echo "  pip install git+https://github.com/ROCm/Megatron-LM.git"
+        exit 1
+    }
+
+    MODEL_SIZE=${MODEL_SIZE:-"llama2-70B"}
+    TP=${TP:-8}
+    PP=${PP:-1}
+    CP=${CP:-1}
+    VP=${VP:-0}
+    SP=${SP:-0}
+    GBS=${GBS:-8}
+    WEIGHT_DECAY=${WEIGHT_DECAY:-1e-4}
+    GRADIENT_CLIP=${GRADIENT_CLIP:-0.3}
+    EVAL_INTERVAL=${EVAL_INTERVAL:-50}
+    PRECISION=${PRECISION:-"bf16"}
+    CKPT_DIR=${CKPT_DIR:-"/ckpt"}
+    LORA_A2A=${LORA_A2A:-0}
+
+    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter"}
+    TL_FP8_QUANT=${TL_FP8_QUANT:-"fp8_blockwise"}
+
+    MXFP8_BLOCK_M_FWD=${MXFP8_BLOCK_M_FWD:-128}
+    MXFP8_BLOCK_N_FWD=${MXFP8_BLOCK_N_FWD:-128}
+    MXFP8_BLOCK_M_DQ_BWD=${MXFP8_BLOCK_M_DQ_BWD:-128}
+    MXFP8_BLOCK_N_DQ_BWD=${MXFP8_BLOCK_N_DQ_BWD:-128}
+    MXFP8_BLOCK_M_DKV_BWD=${MXFP8_BLOCK_M_DKV_BWD:-128}
+    MXFP8_BLOCK_N_DKV_BWD=${MXFP8_BLOCK_N_DKV_BWD:-128}
+    MXFP8_QUANT_BLOCK_SIZE=${MXFP8_QUANT_BLOCK_SIZE:-128}
+
+    case "${MODEL_SIZE}" in
+        llama2-7B|llama2-7b)
+            NUM_LAYERS=32; HIDDEN=4096; FFN_HIDDEN=11008; HEADS=32; KV_HEADS=32 ;;
+        llama2-13B|llama2-13b)
+            NUM_LAYERS=40; HIDDEN=5120; FFN_HIDDEN=13824; HEADS=40; KV_HEADS=40 ;;
+        llama2-70B|llama2-70b)
+            NUM_LAYERS=80; HIDDEN=8192; FFN_HIDDEN=28672; HEADS=64; KV_HEADS=8 ;;
+        *)
+            echo "ERROR: Unknown MODEL_SIZE=${MODEL_SIZE} (use llama2-7B/13B/70B)"
+            exit 1 ;;
+    esac
+
+    GQA_ARGS=""
+    if [ "${KV_HEADS}" -ne "${HEADS}" ]; then
+        GQA_ARGS="--group-query-attention --num-query-groups ${KV_HEADS}"
+    fi
+
+    VP_ARGS=""; [ "${VP}" -gt 0 ] && VP_ARGS="--num-layers-per-virtual-pipeline-stage ${VP}"
+    SP_ARGS=""; [ "${SP}" -eq 1 ] && SP_ARGS="--sequence-parallel"
+
+    LORA_ARGS=""
+    if [ "${LORA_RANK}" -gt 0 ]; then
+        LORA_ARGS="--lora-rank ${LORA_RANK} --lora-alpha ${LORA_ALPHA} --lora-dropout ${LORA_DROPOUT}"
+        [ "${LORA_A2A}" -eq 1 ] && LORA_ARGS="${LORA_ARGS} --lora-a2a"
+    fi
+
+    FP8_ARGS=""
+    if [ "${FP8_TRAINING}" -eq 1 ]; then
+        FP8_ARGS="--fp8-training --fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING} --fp8-block-size ${FP8_BLOCK_SIZE}"
+        FP8_ARGS+=" --fp8-amax-algo ${FP8_AMAX_ALGO} --fp8-amax-history ${FP8_AMAX_HISTORY}"
+        [ "${FP8_REDUCE_AMAX}" = "1" ] && FP8_ARGS+=" --fp8-reduce-amax"
+        [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"
+    fi
+
+    WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
+    EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
+
+    echo "================================================================"
+    echo "LLaMA2 SFT — MEGATRON backend"
+    echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
+    echo "  GPUs:     ${NGPU}x${NNODES}"
+    echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
+    echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT})"
+    echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
+    echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT}"
+    echo "================================================================"
+
+    torchrun --nproc_per_node=${NGPU} --nnodes=${NNODES} \
+        "${SCRIPT_DIR}/finetune_llama2.py" \
+        --backend megatron \
+        --num-layers ${NUM_LAYERS} \
+        --hidden-size ${HIDDEN} \
+        --ffn-hidden-size ${FFN_HIDDEN} \
+        --num-attention-heads ${HEADS} \
+        ${GQA_ARGS} \
+        --seq-length ${SEQ_LEN} \
+        --max-position-embeddings ${SEQ_LEN} \
+        --use-rotary-position-embeddings \
+        --no-position-embedding \
+        --normalization RMSNorm \
+        --swiglu \
+        --untie-embeddings-and-output-weights \
+        --disable-bias-linear \
+        --attention-dropout 0.0 \
+        --hidden-dropout 0.0 \
+        --no-masked-softmax-fusion \
+        --attention-softmax-in-fp32 \
+        --tensor-model-parallel-size ${TP} \
+        --pipeline-model-parallel-size ${PP} \
+        --context-parallel-size ${CP} \
+        ${VP_ARGS} ${SP_ARGS} \
+        --micro-batch-size ${MBS} \
+        --global-batch-size ${GBS} \
+        --train-iters ${TRAIN_STEPS} \
+        --lr ${LR} --min-lr ${MIN_LR} \
+        --lr-decay-style cosine --lr-warmup-fraction 0.0 \
+        --weight-decay ${WEIGHT_DECAY} \
+        --clip-grad ${GRADIENT_CLIP} \
+        --adam-beta1 0.9 --adam-beta2 0.999 --adam-eps 1e-8 \
+        --${PRECISION} \
+        --no-gradient-accumulation-fusion \
+        --reset-position-ids --reset-attention-mask --eod-mask-loss \
+        --tokenizer-type HuggingFaceTokenizer \
+        --tokenizer-model ${TOKENIZER} \
+        --train-data-path ${TRAIN_DATA} \
+        --valid-data-path ${VALID_DATA} \
+        --split 100,0,0 \
+        --load ${CKPT_DIR} \
+        --save ${SAVE_DIR} \
+        --finetune --no-load-optim --no-load-rng --auto-detect-ckpt-format \
+        --eval-iters 10 --eval-interval ${EVAL_INTERVAL} \
+        --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
+        --tl-attn-backend ${TL_ATTN_BACKEND} \
+        --tl-fp8-quant-type ${TL_FP8_QUANT} \
+        --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD} \
+        --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD} \
+        --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD} \
+        --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD} \
+        --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD} \
+        --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD} \
+        --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE} \
+        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS}
+}
+
+
+###############################################################################
+# FSDP BACKEND
+###############################################################################
+
+run_fsdp() {
+    python -c "import transformers" 2>/dev/null || {
+        echo "ERROR: HuggingFace Transformers is not installed."
+        echo "  pip install transformers peft"
+        exit 1
+    }
+
+    MODEL=${MODEL:-"meta-llama/Llama-2-7b-hf"}
+    GRAD_ACCUM=${GRAD_ACCUM:-8}
+    WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
+    MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}
+    NUM_WORKERS=${NUM_WORKERS:-4}
+    TRAIN_SAMPLES=${TRAIN_SAMPLES:-10000}
+    VAL_SAMPLES=${VAL_SAMPLES:-500}
+    SHARDING=${SHARDING:-"full_shard"}
+
+    CMD="torchrun --nproc_per_node=${NGPU}"
+    CMD+=" ${SCRIPT_DIR}/finetune_llama2.py"
+    CMD+=" --backend fsdp"
+    CMD+=" --model-name-or-path ${MODEL}"
+    CMD+=" --tokenizer-name-or-path ${TOKENIZER}"
+    CMD+=" --seq-length ${SEQ_LEN}"
+    CMD+=" --micro-batch-size ${MBS}"
+    CMD+=" --gradient-accumulation-steps ${GRAD_ACCUM}"
+    CMD+=" --max-steps ${TRAIN_STEPS}"
+    CMD+=" --lr ${LR}"
+    CMD+=" --min-lr ${MIN_LR}"
+    CMD+=" --weight-decay ${WEIGHT_DECAY}"
+    CMD+=" --max-grad-norm ${MAX_GRAD_NORM}"
+    CMD+=" --log-interval ${LOG_INTERVAL}"
+    CMD+=" --save-interval ${SAVE_INTERVAL}"
+    CMD+=" --save-dir ${SAVE_DIR}"
+    CMD+=" --num-workers ${NUM_WORKERS}"
+    CMD+=" --train-data-path ${TRAIN_DATA}"
+    CMD+=" --train-samples ${TRAIN_SAMPLES}"
+    CMD+=" --val-samples ${VAL_SAMPLES}"
+    CMD+=" --sharding-strategy ${SHARDING}"
+
+    [ -n "${VALID_DATA}" ] && CMD+=" --val-data-path ${VALID_DATA}"
+
+    if [ "${LORA_RANK}" -gt 0 ]; then
+        CMD+=" --lora-rank ${LORA_RANK} --lora-alpha ${LORA_ALPHA} --lora-dropout ${LORA_DROPOUT}"
+    fi
+
+    if [ "${FP8_TRAINING}" = "1" ]; then
+        CMD+=" --fp8-training"
+        CMD+=" --fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING}"
+        CMD+=" --fp8-block-size ${FP8_BLOCK_SIZE} --fp8-amax-algo ${FP8_AMAX_ALGO}"
+        CMD+=" --fp8-amax-history ${FP8_AMAX_HISTORY}"
+        [ "${FP8_REDUCE_AMAX}" = "1" ] && CMD+=" --fp8-reduce-amax"
+        [ "${FP8_ACTIVATION}" = "0" ] && CMD+=" --no-fp8-activation"
+    fi
+
+    [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"
+    [ -n "${VAL_LOSS_TARGET}" ] && CMD+=" --val-loss-target ${VAL_LOSS_TARGET}"
+
+    echo "================================================================"
+    echo "LLaMA2 SFT — FSDP backend"
+    echo "  Model:      ${MODEL}"
+    echo "  GPUs:       ${NGPU}"
+    echo "  Batch:      MBS=${MBS} x accum=${GRAD_ACCUM} | seq_len=${SEQ_LEN}"
+    echo "  Sharding:   ${SHARDING}"
+    echo "  LoRA:       rank=${LORA_RANK}"
+    echo "  FP8:        training=${FP8_TRAINING} format=${FP8_FORMAT}"
+    echo "================================================================"
+
+    eval ${CMD}
+}
+
+
+###############################################################################
+# DISPATCH
+###############################################################################
+
+start=$(date +%s)
+start_fmt=$(date +%Y-%m-%d\ %r)
+echo "STARTING LLAMA2 FINETUNE AT ${start_fmt} (backend=${BACKEND})"
+
+case "${BACKEND}" in
+    megatron) run_megatron ;;
+    fsdp)     run_fsdp ;;
+    *)
+        echo "ERROR: Unknown BACKEND=${BACKEND}. Use 'megatron' or 'fsdp'."
+        exit 1 ;;
+esac
+
+ret_code=$?
+
+end=$(date +%s)
+end_fmt=$(date +%Y-%m-%d\ %r)
+echo "ENDING LLAMA2 FINETUNE AT ${end_fmt}"
+result=$(( end - start ))
+echo "RESULT,LLM_FINETUNING,,${result},AMD,${start_fmt}"
+
+exit ${ret_code}

@@ -4,38 +4,38 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""LLaMA2 Supervised Fine-Tuning components for Megatron-LM-AMD.
+"""LLaMA 3.1 Pretraining components for Megatron-LM-AMD.
 
-This module provides the building blocks for SFT on LLaMA2 models using
-Megatron-LM-AMD as the training backbone and Transformer Light for the
-core dot-product attention (AITER / Triton / FP8).
+This module provides the building blocks for pretraining LLaMA 3.1 models
+using Megatron-LM-AMD as the training backbone and Transformer Light for
+the core dot-product attention (AITER / Triton / FP8).
 
 Features:
-    - Full fine-tuning or LoRA (parameter-efficient fine-tuning, with A2A comm opt)
-    - FP8 quantised training (weight/activation quantisation via Transformer Light)
+    - LLaMA 3.1 8B architecture (GQA, RoPE theta=500000)
+    - FP8 hybrid training (weight/activation quantisation via Transformer Light)
+    - FP8 attention (MXFP8 / FP8 blockwise via Transformer Light)
     - Transformer Light attention backends: AITER, Triton, Triton-FP8
     - Fine-grained MXFP8 block configuration (6 independent block sizes)
     - Context Parallelism, Tensor Parallelism, Pipeline Parallelism, VP, SP
-    - Packed sequences with cross-sample attention boundary tracking (seq_start_id)
-    - Answer-only loss masking for SFT
+    - Distributed optimizer with FP8 param gather
+    - Cosine annealing LR with warmup
     - Synthetic warmup with FP8 state reset
     - Early stopping based on validation loss target
 
 Example::
 
-    from transformer_light.models.llama2 import (
-        add_finetune_args,
+    from transformer_light.models.llama31.megatron import (
+        add_pretrain_args,
         forward_step,
         tl_gpt_builder,
         train_valid_test_datasets_provider,
     )
 """
 
-import json
 import logging
 import os
 from functools import partial
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import torch
 
@@ -53,13 +53,17 @@ from megatron.training.utils import (
 from transformer_light.pytorch.ops.attention.attention_megatron import (
     TransformerLightDotProductAttention,
 )
+from transformer_light.models.llama31.dataset import PretrainTextDataset
 
 __all__ = [
-    "LLaMA2SFTDataset",
-    "add_finetune_args",
+    "PretrainTextDataset",
+    "add_pretrain_args",
+    "apply_fp8_training",
+    "apply_lora",
     "forward_step",
     "get_batch",
     "loss_func",
+    "reset_fp8_state",
     "tl_gpt_builder",
     "train_valid_test_datasets_provider",
 ]
@@ -67,6 +71,24 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 stimer = StragglerDetector()
+
+# ---------------------------------------------------------------------------
+# LLaMA 3.1 architecture constants
+# ---------------------------------------------------------------------------
+
+LLAMA31_CONFIGS = {
+    "8b": {
+        "num_layers": 32,
+        "hidden_size": 4096,
+        "ffn_hidden_size": 14336,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "vocab_size": 128256,
+        "seq_length": 8192,
+        "max_position_embeddings": 131072,
+        "rotary_base": 500000,
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +102,7 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
     Always uses the Megatron-Core local spec (no Transformer Engine dependency).
     The core_attention submodule is patched to TransformerLightDotProductAttention.
     """
-    print_rank_0("building GPT model with Transformer Light attention ...")
+    print_rank_0("building LLaMA 3.1 model with Transformer Light attention ...")
 
     if config is None:
         config = core_transformer_config_from_args(args)
@@ -141,11 +163,7 @@ def _patch_core_attention(spec):
 # ---------------------------------------------------------------------------
 
 def apply_lora(model: GPTModel, args) -> None:
-    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning.
-
-    Freezes the base model weights and injects low-rank adapter matrices into
-    the embedding, attention projections, MLP layers, and output layer.
-    """
+    """Wrap linear layers with LoRA adapters."""
     from megatron.core.transformer.lora_adapter import LoraAdapter
 
     common = {
@@ -192,12 +210,7 @@ def apply_lora(model: GPTModel, args) -> None:
 # ---------------------------------------------------------------------------
 
 def apply_fp8_training(model: GPTModel, args) -> None:
-    """Enable FP8 quantised training via Transformer Light's non-invasive patching.
-
-    Reads the following args (with defaults matching MLPerf/TE conventions):
-      --fp8-format, --fp8-scaling, --fp8-block-size,
-      --fp8-amax-algo, --fp8-reduce-amax, --fp8-amax-history, --fp8-activation
-    """
+    """Enable FP8 quantised training via Transformer Light's non-invasive patching."""
     import transformer_light.quantize as quant
     from transformer_light.quantize import (
         AmaxAlgo, QuantConfig, QuantFormat, ScalingType,
@@ -206,9 +219,9 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     fmt = getattr(args, "fp8_format", "fp8_e4m3")
     scaling = getattr(args, "fp8_scaling", "delayed")
     block_size = getattr(args, "fp8_block_size", 128)
-    amax_algo = getattr(args, "fp8_amax_algo", "max")
+    amax_algo = getattr(args, "fp8_amax_algo", "most_recent")
     reduce_amax = getattr(args, "fp8_reduce_amax", False)
-    history_len = getattr(args, "fp8_amax_history", 16)
+    history_len = getattr(args, "fp8_amax_history", 4)
     quant_act = getattr(args, "fp8_activation", True)
 
     config = QuantConfig(
@@ -254,9 +267,14 @@ def _get_synthetic_batch(args):
     tokens[:, -1] = 2
     labels = tokens.clone()
     loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
-    loss_mask[:, -1] = 0
-    attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
-    position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
+    attention_mask = torch.ones(
+        mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda"
+    )
+    position_ids = (
+        torch.arange(seq_length, dtype=torch.long, device="cuda")
+        .unsqueeze(0)
+        .expand(mbs, -1)
+    )
 
     return tokens, labels, loss_mask, attention_mask, position_ids
 
@@ -280,174 +298,11 @@ def reset_fp8_state(model):
 
 
 # ---------------------------------------------------------------------------
-# SFT Dataset
-# ---------------------------------------------------------------------------
-
-class LLaMA2SFTDataset(torch.utils.data.Dataset):
-    """SFT dataset that loads jsonl data and packs sequences.
-
-    Each jsonl line should have the format::
-
-        {"input": "<prompt text>", "output": "<completion text>"}
-
-    or::
-
-        {"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
-
-    Sequences are tokenized, packed to ``seq_length``, and loss is masked
-    so that only the completion (output/assistant) tokens contribute.
-    """
-
-    LLAMA2_CHAT_TEMPLATE = "[INST] {input} [/INST] {output}"
-
-    def __init__(
-        self,
-        num_samples: int,
-        data_path: Optional[str],
-        seq_length: int,
-        tokenizer,
-        is_hf_tokenizer: bool = False,
-    ):
-        self.num_samples = num_samples
-        self.seq_length = seq_length
-        self.tokenizer = tokenizer
-        self.is_hf_tokenizer = is_hf_tokenizer
-        self.indexed_dataset: List[Dict[str, list]] = []
-        self._raw_idx = 0
-
-        if data_path is None:
-            self._raw_samples = []
-            return
-
-        if data_path.endswith(".jsonl"):
-            with open(data_path, "r", encoding="utf-8") as f:
-                self._raw_samples = [json.loads(line) for line in f if line.strip()]
-        elif data_path.endswith(".json"):
-            with open(data_path, "r", encoding="utf-8") as f:
-                self._raw_samples = json.load(f)
-        else:
-            raise ValueError(f"Unsupported data format: {data_path}")
-
-        print_rank_0(f"> Loaded {len(self._raw_samples)} raw SFT samples from {data_path}")
-
-    def __len__(self) -> int:
-        return self.num_samples
-
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        while idx >= len(self.indexed_dataset):
-            packed = self._pack_next()
-            if packed is None:
-                break
-            self.indexed_dataset.append(packed)
-
-        idx = idx % max(len(self.indexed_dataset), 1)
-        sample = self.indexed_dataset[idx]
-        out: Dict[str, torch.Tensor] = {}
-        for k, v in sample.items():
-            out[k] = torch.LongTensor(v)
-        return out
-
-    # -- internal helpers --
-
-    def _tokenize(self, text: str) -> List[int]:
-        if self.is_hf_tokenizer:
-            return self.tokenizer.encode(text, add_special_tokens=False)
-        return self.tokenizer.tokenize(text)
-
-    def _get_eos_id(self) -> int:
-        if self.is_hf_tokenizer:
-            return self.tokenizer.eos_token_id
-        return self.tokenizer.eod
-
-    def _process_sample(self, sample: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Tokenize one raw sample and compute the answer-only loss mask."""
-        if "messages" in sample:
-            messages = sample["messages"]
-            if len(messages) < 2:
-                return None
-            prompt_parts, completion_parts = [], []
-            for msg in messages:
-                if msg["role"] in ("user", "system"):
-                    prompt_parts.append(msg["content"])
-                elif msg["role"] == "assistant":
-                    completion_parts.append(msg["content"])
-            input_text = " ".join(prompt_parts)
-            output_text = " ".join(completion_parts)
-        elif "input" in sample and "output" in sample:
-            input_text = sample["input"]
-            output_text = sample["output"]
-        else:
-            return None
-
-        prompt_str = self.LLAMA2_CHAT_TEMPLATE.format(input=input_text, output="")
-        prompt_ids = self._tokenize(prompt_str)
-        completion_ids = self._tokenize(output_text)
-        eos_id = self._get_eos_id()
-
-        input_ids = prompt_ids + completion_ids + [eos_id]
-        loss_mask = [0] * len(prompt_ids) + [1] * len(completion_ids) + [0]
-
-        if len(input_ids) > self.seq_length:
-            input_ids = input_ids[: self.seq_length]
-            loss_mask = loss_mask[: self.seq_length]
-
-        return {
-            "input_ids": input_ids,
-            "loss_mask": loss_mask,
-            "token_count": len(input_ids),
-        }
-
-    def _pack_next(self) -> Optional[Dict[str, list]]:
-        """Pack multiple samples into one fixed-length sequence.
-
-        Tracks sample boundaries via ``seq_start_id`` — a list of cumulative
-        token offsets marking where each packed sample begins.  This enables
-        proper cross-sample attention masking when used with flash-attention
-        ``cu_seqlens`` APIs.
-        """
-        required = self.seq_length + 1
-        all_ids: List[int] = []
-        all_mask: List[int] = []
-        seq_start_id: List[int] = [0]
-        total = 0
-
-        while total < required:
-            if self._raw_idx >= len(self._raw_samples):
-                if total == 0:
-                    return None
-                break
-            sample = self._raw_samples[self._raw_idx]
-            self._raw_idx += 1
-            processed = self._process_sample(sample)
-            if processed is None:
-                continue
-            all_ids.extend(processed["input_ids"])
-            all_mask.extend(processed["loss_mask"])
-            total += processed["token_count"]
-            seq_start_id.append(total)
-
-        eos_id = self._get_eos_id()
-        while len(all_ids) < required:
-            all_ids.append(eos_id)
-            all_mask.append(0)
-
-        seq_start_id = [min(s, required) for s in seq_start_id]
-        if seq_start_id[-1] != required:
-            seq_start_id.append(required)
-
-        return {
-            "input_ids": all_ids[:required],
-            "loss_mask": all_mask[:required],
-            "seq_start_id": seq_start_id,
-        }
-
-
-# ---------------------------------------------------------------------------
 # Dataset provider
 # ---------------------------------------------------------------------------
 
 def train_valid_test_datasets_provider(train_val_test_num_samples):
-    """Build train, validation, and test SFT datasets."""
+    """Build train, validation, and test pretraining datasets."""
     args = get_args()
 
     tokenizer_obj = get_tokenizer()
@@ -460,22 +315,22 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     valid_path = args.valid_data_path[0] if args.valid_data_path else None
     test_path = args.test_data_path[0] if args.test_data_path else None
 
-    print_rank_0("> building train, validation, and test SFT datasets ...")
+    print_rank_0("> building train, validation, and test pretraining datasets ...")
 
-    train_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[0], train_path, args.seq_length,
-        raw_tokenizer, is_hf,
+    train_ds = PretrainTextDataset(
+        train_path, args.seq_length, raw_tokenizer, is_hf,
+        max_samples=train_val_test_num_samples[0],
     )
-    valid_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[1], valid_path, args.seq_length,
-        raw_tokenizer, is_hf,
+    valid_ds = PretrainTextDataset(
+        valid_path, args.seq_length, raw_tokenizer, is_hf,
+        max_samples=train_val_test_num_samples[1],
     )
-    test_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[2], test_path, args.seq_length,
-        raw_tokenizer, is_hf,
+    test_ds = PretrainTextDataset(
+        test_path, args.seq_length, raw_tokenizer, is_hf,
+        max_samples=train_val_test_num_samples[2],
     )
 
-    print_rank_0("> finished creating SFT datasets ...")
+    print_rank_0("> finished creating pretraining datasets ...")
     return train_ds, valid_ds, test_ds
 
 
@@ -484,7 +339,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 # ---------------------------------------------------------------------------
 
 def get_batch(data_iterator, vp_stage=None):
-    """Generate a batch with answer-only loss masking and packed sequence params."""
+    """Generate a batch for pretraining (standard LM, all tokens contribute)."""
     if not is_first_or_last_pipeline_stage(vp_stage):
         return None, None, None, None, None
 
@@ -496,16 +351,16 @@ def get_batch(data_iterator, vp_stage=None):
         data = None
 
     data_b = tensor_parallel.broadcast_data(
-        ["input_ids", "loss_mask"], data, torch.int64
+        ["input_ids", "labels"], data, torch.int64
     )
 
-    tokens_ = data_b["input_ids"]
-    tokens = tokens_[:, : args.seq_length].contiguous()
-    labels = tokens_[:, 1 : args.seq_length + 1].contiguous()
-    answer_loss_mask = data_b["loss_mask"][:, 1 : args.seq_length + 1].contiguous()
+    tokens = data_b["input_ids"].contiguous()
+    labels = data_b["labels"].contiguous()
 
     tokenizer = get_tokenizer()
-    if hasattr(tokenizer, "_tokenizer") and hasattr(tokenizer._tokenizer, "eos_token_id"):
+    if hasattr(tokenizer, "_tokenizer") and hasattr(
+        tokenizer._tokenizer, "eos_token_id"
+    ):
         eod_token = tokenizer._tokenizer.eos_token_id
     else:
         eod_token = tokenizer.eod
@@ -515,7 +370,6 @@ def get_batch(data_iterator, vp_stage=None):
         args.reset_position_ids, args.reset_attention_mask,
         args.eod_mask_loss, False,
     )
-    loss_mask = loss_mask * answer_loss_mask.to(dtype=loss_mask.dtype)
 
     batch = {
         "tokens": tokens,
@@ -537,7 +391,7 @@ _early_stop_logged = False
 
 
 def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
-    """SFT loss with answer-only masking and optional early stopping."""
+    """Standard LM pretraining loss with optional early stopping."""
     global _val_loss_ema, _early_stop_logged
 
     losses = output_tensor.view(-1).float()
@@ -557,8 +411,7 @@ def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
         if _val_loss_ema < val_target:
             print_rank_0(
                 f"> [Early Stop] Loss EMA ({_val_loss_ema:.4f}) < "
-                f"target ({val_target:.4f}). "
-                f"Setting train_iters to current iteration to stop training."
+                f"target ({val_target:.4f}). Stopping."
             )
             if hasattr(args, "iteration"):
                 args.train_iters = args.iteration
@@ -572,7 +425,7 @@ def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
 # ---------------------------------------------------------------------------
 
 def forward_step(data_iterator, model: GPTModel):
-    """Forward step for SFT training with optional synthetic warmup."""
+    """Forward step for pretraining with optional synthetic warmup."""
     global _warmup_step_counter, _warmup_completed
 
     args = get_args()
@@ -626,136 +479,103 @@ def forward_step(data_iterator, model: GPTModel):
 # Extra CLI arguments
 # ---------------------------------------------------------------------------
 
-def add_finetune_args(parser):
-    """Add finetune-specific arguments."""
+def add_pretrain_args(parser):
+    """Add pretrain-specific arguments."""
 
-    # -- Transformer Light attention ----------------------------------------
+    parser.add_argument("--backend", type=str, default="megatron",
+                        choices=["megatron", "fsdp"], help="Training backend.")
+
     tl = parser.add_argument_group(title="transformer-light-attention")
     tl.add_argument(
         "--tl-attn-backend", type=str, default="aiter",
         choices=["aiter", "triton", "triton_fp8"],
-        help="Transformer Light attention backend. "
-             "'aiter' uses AITER flash-attention (fastest on MI300X), "
-             "'triton' uses Triton flash-attention, "
-             "'triton_fp8' uses Triton FP8 quantised attention.",
+        help="Transformer Light attention backend.",
     )
     tl.add_argument(
-        "--tl-fp8-quant-type", type=str, default="fp8_blockwise",
+        "--tl-fp8-quant-type", type=str, default="mxfp8",
         choices=["fp8_blockwise", "mxfp8"],
         help="FP8 quantisation type for triton_fp8 backend.",
     )
 
-    # -- Fine-grained MXFP8 block configuration ----------------------------
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
-    mxfp8.add_argument(
-        "--mxfp8-block-m-fwd", type=int, default=128,
-        help="Block size for query seq dim in MXFP8 forward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-block-n-fwd", type=int, default=128,
-        help="Block size for key/value seq dim in MXFP8 forward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-block-m-dq-bwd", type=int, default=128,
-        help="Block size for dQ seq dim in MXFP8 backward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-block-n-dq-bwd", type=int, default=128,
-        help="Block size for dQ key dim in MXFP8 backward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-block-m-dkv-bwd", type=int, default=128,
-        help="Block size for dKV seq dim in MXFP8 backward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-block-n-dkv-bwd", type=int, default=128,
-        help="Block size for dKV key dim in MXFP8 backward pass.",
-    )
-    mxfp8.add_argument(
-        "--mxfp8-quant-block-size", type=int, default=128,
-        help="Quantisation block size for MXFP8 scaling.",
-    )
+    mxfp8.add_argument("--mxfp8-block-m-fwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-block-n-fwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-block-m-dq-bwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-block-n-dq-bwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-block-m-dkv-bwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-block-n-dkv-bwd", type=int, default=128)
+    mxfp8.add_argument("--mxfp8-quant-block-size", type=int, default=128)
 
-    # -- LoRA / PEFT --------------------------------------------------------
     lora = parser.add_argument_group(title="lora")
-    lora.add_argument(
-        "--lora-rank", type=int, default=0,
-        help="LoRA rank. 0 = disabled (full fine-tuning). Typical: 8, 16, 32.",
-    )
-    lora.add_argument(
-        "--lora-alpha", type=float, default=32.0,
-        help="LoRA scaling alpha.",
-    )
-    lora.add_argument(
-        "--lora-dropout", type=float, default=0.1,
-        help="Dropout applied to LoRA adapter outputs.",
-    )
-    lora.add_argument(
-        "--lora-a2a", action="store_true", default=False,
-        help="Enable all-to-all communication optimisation for LoRA. "
-             "Distributes LoRA forward computation across DP ranks. "
-             "Effective when multiple GPUs participate in data parallelism.",
-    )
+    lora.add_argument("--lora-rank", type=int, default=0,
+                       help="LoRA rank. 0 = disabled (full pretraining).")
+    lora.add_argument("--lora-alpha", type=float, default=32.0)
+    lora.add_argument("--lora-dropout", type=float, default=0.1)
+    lora.add_argument("--lora-a2a", action="store_true", default=False,
+                       help="Enable LoRA all-to-all communication optimisation.")
 
-    # -- FP8 quantised training (weight/activation) -------------------------
     fp8 = parser.add_argument_group(title="fp8-training")
-    fp8.add_argument(
-        "--fp8-training", action="store_true", default=False,
-        help="Enable FP8 quantised training for linear layers "
-             "(weight + activation quantisation via Transformer Light).",
-    )
-    fp8.add_argument(
-        "--fp8-format", type=str, default="fp8_e4m3",
-        choices=["fp8_e4m3", "fp8_e5m2", "mxfp8"],
-        help="FP8 number format for weight/activation quantisation.",
-    )
-    fp8.add_argument(
-        "--fp8-scaling", type=str, default="delayed",
-        choices=["dynamic", "delayed", "blockwise"],
-        help="FP8 scaling strategy.",
-    )
-    fp8.add_argument(
-        "--fp8-block-size", type=int, default=128,
-        help="Block size for blockwise FP8 scaling.",
-    )
-    fp8.add_argument(
-        "--fp8-amax-algo", type=str, default="max",
-        choices=["max", "most_recent"],
-        help="Amax algorithm for delayed scaling. "
-             "'max' uses the maximum over the entire history window (TE default). "
-             "'most_recent' uses only the latest recorded amax (MLPerf default).",
-    )
-    fp8.add_argument(
-        "--fp8-reduce-amax", action="store_true", default=False,
-        help="All-reduce amax across data-parallel ranks before computing "
-             "the FP8 scale factor. Useful for large-scale runs where per-rank "
-             "amax values can diverge.",
-    )
-    fp8.add_argument(
-        "--fp8-amax-history", type=int, default=16,
-        help="Length of the amax history window for delayed scaling. "
-             "Shorter windows (e.g. 4) react faster to distribution changes.",
-    )
-    fp8.add_argument(
-        "--fp8-activation", action="store_true", default=True,
-        help="Quantise activations (inputs to linear layers) in addition to "
-             "weights. Use --no-fp8-activation for weight-only FP8.",
-    )
-    fp8.add_argument(
-        "--no-fp8-activation", dest="fp8_activation", action="store_false",
-        help="Disable activation quantisation (weight-only FP8 mode).",
-    )
+    fp8.add_argument("--fp8-training", action="store_true", default=False)
+    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3",
+                      choices=["fp8_e4m3", "fp8_e5m2", "mxfp8"])
+    fp8.add_argument("--fp8-scaling", type=str, default="delayed",
+                      choices=["dynamic", "delayed", "blockwise"])
+    fp8.add_argument("--fp8-block-size", type=int, default=128)
+    fp8.add_argument("--fp8-amax-algo", type=str, default="most_recent",
+                      choices=["max", "most_recent"])
+    fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
+    fp8.add_argument("--fp8-amax-history", type=int, default=4)
+    fp8.add_argument("--fp8-activation", action="store_true", default=True)
+    fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
+                      action="store_false")
 
-    # -- Warmup + Early stopping --------------------------------------------
-    sft = parser.add_argument_group(title="sft-training")
-    sft.add_argument(
-        "--warmup-steps", type=int, default=0,
-        help="Number of synthetic-data warmup steps before real training. "
-             "Warms up GPU kernels and FP8 scaling state, then resets FP8 stats.",
-    )
-    sft.add_argument(
-        "--val-loss-target", type=float, default=None,
-        help="Early stop when loss EMA drops below this value.",
-    )
+    pt = parser.add_argument_group(title="pretrain-training")
+    pt.add_argument("--warmup-steps", type=int, default=0,
+                     help="Synthetic warmup steps before real training.")
+    pt.add_argument("--val-loss-target", type=float, default=None,
+                     help="Early stop when loss EMA falls below this target.")
+
+    ckpt = parser.add_argument_group(title="checkpoint-management")
+    ckpt.add_argument("--use-ckpt", action="store_true", default=False,
+                       help="Resume from checkpoint.")
+    ckpt.add_argument("--save-ckpt", action="store_true", default=False,
+                       help="Save checkpoint at end of training.")
+    ckpt.add_argument("--resume-from-hf", action="store_true", default=False,
+                       help="Checkpoint is a weight-only HuggingFace format.")
+    ckpt.add_argument("--continual-ckpt-path", type=str, default=None,
+                       help="Path for saving/loading continual checkpoints.")
+    ckpt.add_argument("--ckpt-start-step", type=int, default=0,
+                       help="Steps already trained in the resumed checkpoint.")
+    ckpt.add_argument("--fp8-params", action="store_true", default=False,
+                       help="Load model parameters in FP8.")
+    ckpt.add_argument("--initial-ckpt-path", type=str, default=None,
+                       help="Path to initial checkpoint for resume.")
+
+    mlperf = parser.add_argument_group(title="mlperf")
+    mlperf.add_argument("--tag", type=str, default="",
+                         help="Optional experiment tag.")
+    mlperf.add_argument("--target-log-ppl", type=float, default=3.3,
+                         help="Target log perplexity for convergence.")
+    mlperf.add_argument("--step-time-atol", type=int, default=18000,
+                         help="Maximum tolerable step time (ms).")
+    mlperf.add_argument("--eval-every", type=int, default=0,
+                         help="Evaluate every N training sequences.")
+    mlperf.add_argument("--start-eval-at", type=int, default=0,
+                         help="Start evaluation at N training sequences.")
+    mlperf.add_argument("--size", type=str, default="8b",
+                         choices=["8b"],
+                         help="Model size (for Docker compatibility).")
+    mlperf.add_argument("--nodes", type=int, default=None,
+                         help="Number of nodes (Docker compat, unused by Megatron).")
+    mlperf.add_argument("--gpus-per-node", type=int, default=None,
+                         help="GPUs per node (Docker compat, unused by Megatron).")
+
+    primus = parser.add_argument_group(title="primus-turbo-attention")
+    primus.add_argument("--primus-turbo-fp8-attention", type=int, default=0,
+                         help="Enable Primus Turbo FP8 Attention.")
+    primus.add_argument("--primus-turbo-mxfp8-attention", type=int, default=0,
+                         help="Enable Primus Turbo MXFP8 Attention.")
+    primus.add_argument("--dbg-attn-output", type=int, default=0,
+                         help="Enable debug attention output.")
 
     return parser

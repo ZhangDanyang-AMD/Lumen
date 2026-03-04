@@ -4,4 +4,15 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""Reusable model definitions and training utilities for Megatron-LM-AMD."""
+"""Reusable model definitions and training utilities.
+
+Common, model-agnostic helpers are available from ``transformer_light.models.utils``.
+Model-specific implementations live in subpackages (e.g. ``llama2``).
+"""
+
+from transformer_light.models.utils import (  # noqa: F401
+    download_hf_dataset,
+    download_hf_model,
+    peek_backend,
+    sha256_file,
+)

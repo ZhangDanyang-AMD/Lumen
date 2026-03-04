@@ -4,10 +4,29 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""LLaMA2 model components for Megatron-LM-AMD + Transformer Light."""
+"""LLaMA2 model components for Transformer Light.
 
-from transformer_light.models.llama2.sft import (
-    LLaMA2SFTDataset,
+Two training backends are available:
+
+- **Megatron** (``transformer_light.models.llama2.megatron``)
+  Full-featured SFT using Megatron-LM-AMD with TP/PP/CP/VP/SP parallelism,
+  Transformer Light attention, and the ``pretrain`` driver.
+
+- **FSDP** (``transformer_light.models.llama2.fsdp``)
+  SFT using PyTorch FSDP + HuggingFace LlamaForCausalLM, with LoRA (PEFT),
+  FP8 training, and a standard PyTorch training loop.
+
+Both backends share the same :class:`LLaMA2SFTDataset` (packed sequences,
+answer-only loss masking, jsonl format).
+
+For backward compatibility, the Megatron APIs are re-exported at this level::
+
+    from transformer_light.models.llama2 import tl_gpt_builder  # Megatron
+"""
+
+from transformer_light.models.llama2.dataset import LLaMA2SFTDataset
+
+from transformer_light.models.llama2.megatron import (
     add_finetune_args,
     apply_fp8_training,
     apply_lora,
@@ -20,7 +39,9 @@ from transformer_light.models.llama2.sft import (
 )
 
 __all__ = [
+    # Shared
     "LLaMA2SFTDataset",
+    # Megatron (backward-compat re-exports)
     "add_finetune_args",
     "apply_fp8_training",
     "apply_lora",
