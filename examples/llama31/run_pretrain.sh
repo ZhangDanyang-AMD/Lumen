@@ -8,104 +8,28 @@
 #   BACKEND=fsdp      — PyTorch FSDP + HuggingFace
 #
 # Usage:
-#   BACKEND=megatron bash run_pretrain.sh
-#   BACKEND=fsdp     bash run_pretrain.sh
-#
-# Environment variables reference (see config_MI355X_1x8x1_8b.sh for MLPerf defaults):
-#   BACKEND, SIZE, TP, PP, CP, VP, SP, MBS, GBS, SEQ_LEN, MAX_LR, MIN_LR,
-#   TRAIN_STEPS, WARMUP_STEPS, NGPU, NNODES, CKPT_DIR, TRAIN_DATA, VALID_DATA,
-#   SAVE_DIR, TOKENIZER, LORA_RANK, FP8_TRAINING, MXFP8_*, ...
+#   bash run_pretrain.sh                                       # default config
+#   CONFIG=config_MI355X_1x8x1_8b.sh bash run_pretrain.sh     # MI355X config
+#   GBS=64 TRAIN_STEPS=500 bash run_pretrain.sh                # override vars
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BACKEND=${BACKEND:-"megatron"}
+
+# ---- Load configuration -----------------------------------------------------
+CONFIG=${CONFIG:-"${SCRIPT_DIR}/config_MI355X_1x8x1.sh"}
+source "${CONFIG}"
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
 source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
 
-# ---- Shared defaults ---------------------------------------------------------
-
-NGPU=${NGPU:-8}
-NNODES=${NNODES:-1}
-SIZE=${SIZE:-"8b"}
-MBS=${MBS:-2}
-GBS=${GBS:-32}
-SEQ_LEN=${SEQ_LEN:-8192}
-MAX_LR=${MAX_LR:-"8e-4"}
-MIN_LR=${MIN_LR:-"8e-5"}
-TRAIN_STEPS=${TRAIN_STEPS:-1200000}
-LR_WARMUP_STEPS=${LR_WARMUP_STEPS:-128}
-LOG_INTERVAL=${LOG_INTERVAL:-1}
-SAVE_INTERVAL=${SAVE_INTERVAL:-0}
-EVAL_INTERVAL=${EVAL_INTERVAL:-0}
-SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
-SEED=${SEED:-1234}
-
-TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
-VALID_DATA=${VALID_DATA:-""}
-TOKENIZER=${TOKENIZER:-"meta-llama/Llama-3.1-8B"}
-
-# LoRA (shared)
-LORA_RANK=${LORA_RANK:-0}
-LORA_ALPHA=${LORA_ALPHA:-32}
-LORA_DROPOUT=${LORA_DROPOUT:-0.1}
-
-# FP8 (shared, MLPerf defaults)
-FP8_TRAINING=${FP8_TRAINING:-1}
-FP8_FORMAT=${FP8_FORMAT:-"fp8_e4m3"}
-FP8_SCALING=${FP8_SCALING:-"delayed"}
-FP8_BLOCK_SIZE=${FP8_BLOCK_SIZE:-128}
-FP8_AMAX_ALGO=${FP8_AMAX_ALGO:-"most_recent"}
-FP8_REDUCE_AMAX=${FP8_REDUCE_AMAX:-0}
-FP8_AMAX_HISTORY=${FP8_AMAX_HISTORY:-4}
-FP8_ACTIVATION=${FP8_ACTIVATION:-1}
-
-# Warmup / early stopping (shared)
-WARMUP_STEPS=${WARMUP_STEPS:-0}
-VAL_LOSS_TARGET=${VAL_LOSS_TARGET:-""}
-
-# MXFP8 attention block sizes
-MXFP8_BLOCK_M_FWD=${MXFP8_BLOCK_M_FWD:-128}
-MXFP8_BLOCK_N_FWD=${MXFP8_BLOCK_N_FWD:-128}
-MXFP8_BLOCK_M_DQ_BWD=${MXFP8_BLOCK_M_DQ_BWD:-128}
-MXFP8_BLOCK_N_DQ_BWD=${MXFP8_BLOCK_N_DQ_BWD:-128}
-MXFP8_BLOCK_M_DKV_BWD=${MXFP8_BLOCK_M_DKV_BWD:-128}
-MXFP8_BLOCK_N_DKV_BWD=${MXFP8_BLOCK_N_DKV_BWD:-128}
-MXFP8_QUANT_BLOCK_SIZE=${MXFP8_QUANT_BLOCK_SIZE:-128}
-
-# Checkpoint management (Docker run_and_time.sh compatibility)
-GPUS_PER_NODE=${GPUS_PER_NODE:-${NGPU}}
-USE_CKPT=${USE_CKPT:-0}
-FROM_HF=${FROM_HF:-1}
-SAVE_CKPT=${SAVE_CKPT:-0}
-CONTINUAL_CKPT=${CONTINUAL_CKPT:-"/data/model/saved_ckpts"}
-CKPT_START_STEP=${CKPT_START_STEP:-0}
-FP8_PARAMS=${FP8_PARAMS:-1}
-
-# MLPerf / experiment management
-TAG=${TAG:-""}
-TARGET_LOG_PPL=${TARGET_LOG_PPL:-"3.3"}
-STEP_TIME_ATOL=${STEP_TIME_ATOL:-18000}
-
-# Evaluation (in training sequences, Docker convention)
-EVAL_EVERY=${EVAL_EVERY:-12288}
-START_EVAL_AT=${START_EVAL_AT:-0}
-
-# Compute EVAL_INTERVAL from EVAL_EVERY if not explicitly set
+# ---- Compute EVAL_INTERVAL from EVAL_EVERY if not explicitly set -------------
 if [ "${EVAL_EVERY}" -gt 0 ] && [ "${EVAL_INTERVAL}" -eq 0 ]; then
     EVAL_INTERVAL=$(( (EVAL_EVERY + GBS - 1) / GBS ))
 fi
 
-# Primus Turbo attention
-PRIMUS_FP8_ATTN=${PRIMUS_FP8_ATTN:-0}
-PRIMUS_MXFP8_ATTN=${PRIMUS_MXFP8_ATTN:-1}
-DBG_ATTN_OUTPUT=${DBG_ATTN_OUTPUT:-0}
-
-
-# ---- Conditional command suffix (Docker run_and_time.sh compat) -----------
-
+# ---- Conditional command suffix (Docker run_and_time.sh compat) --------------
 CMD_SUFFIX=""
 
 if [ "${USE_CKPT}" -gt 0 ]; then
@@ -138,18 +62,6 @@ run_megatron() {
         echo "  pip install git+https://github.com/ROCm/Megatron-LM.git"
         exit 1
     }
-
-    TP=${TP:-1}
-    PP=${PP:-1}
-    CP=${CP:-1}
-    VP=${VP:-0}
-    SP=${SP:-0}
-    WEIGHT_DECAY=${WEIGHT_DECAY:-0.1}
-    GRADIENT_CLIP=${GRADIENT_CLIP:-1.0}
-    EVAL_ITERS=${EVAL_ITERS:-10}
-    PRECISION=${PRECISION:-"bf16"}
-    CKPT_DIR=${CKPT_DIR:-"/ckpt"}
-    LORA_A2A=${LORA_A2A:-0}
 
     # Map Primus Turbo flags to TL attention backend
     TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"triton_fp8"}
@@ -198,6 +110,7 @@ run_megatron() {
 
     echo "================================================================"
     echo "LLaMA 3.1 Pretrain — MEGATRON backend"
+    echo "  Config:   ${CONFIG}"
     echo "  Model:    ${SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
@@ -291,15 +204,6 @@ run_fsdp() {
         exit 1
     }
 
-    MODEL=${MODEL:-"meta-llama/Llama-3.1-8B"}
-    GRAD_ACCUM=${GRAD_ACCUM:-8}
-    WEIGHT_DECAY=${WEIGHT_DECAY:-0.1}
-    MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}
-    NUM_WORKERS=${NUM_WORKERS:-4}
-    TRAIN_SAMPLES=${TRAIN_SAMPLES:-""}
-    VAL_SAMPLES=${VAL_SAMPLES:-""}
-    SHARDING=${SHARDING:-"full_shard"}
-
     CMD="torchrun --nproc_per_node=${NGPU}"
     CMD+=" ${SCRIPT_DIR}/pretrain_llama31.py"
     CMD+=" --backend fsdp"
@@ -355,6 +259,7 @@ run_fsdp() {
 
     echo "================================================================"
     echo "LLaMA 3.1 Pretrain — FSDP backend"
+    echo "  Config:     ${CONFIG}"
     echo "  Model:      ${MODEL}"
     echo "  GPUs:       ${NGPU}"
     echo "  Batch:      MBS=${MBS} x accum=${GRAD_ACCUM} | seq_len=${SEQ_LEN}"
@@ -375,7 +280,6 @@ run_fsdp() {
 # DISPATCH
 ###############################################################################
 
-# start timing
 start=$(date +%s)
 start_fmt=$(date +%Y-%m-%d\ %r)
 echo "STARTING TIMING RUN AT ${start_fmt} (backend=${BACKEND})"
@@ -393,11 +297,9 @@ esac
 
 if [[ ${ret_code} != 0 ]]; then exit ${ret_code}; fi
 
-# end timing
 end=$(date +%s)
 end_fmt=$(date +%Y-%m-%d\ %r)
 echo "ENDING TIMING RUN AT ${end_fmt}"
-# report result
 result=$(( end - start ))
 result_name="LLM_PRETRAINING"
 echo "RESULT,${result_name},,${result},AMD,${start_fmt}"

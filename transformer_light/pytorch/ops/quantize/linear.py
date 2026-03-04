@@ -37,6 +37,19 @@ __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
 
 # ---------------------------------------------------------------------------
+# torch.compile support — treat the custom autograd Function as an opaque
+# graph node so Dynamo does not trace through the FP8 quantization internals
+# (which contain .item() calls and mutable ScalingManager state).
+# ---------------------------------------------------------------------------
+def _mark_allow_in_graph(cls):
+    try:
+        from torch._dynamo import allow_in_graph
+        allow_in_graph(cls)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # AITER backend helpers
 # ---------------------------------------------------------------------------
 
@@ -164,6 +177,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
         return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+
+
+_mark_allow_in_graph(QuantizedLinearFunction)
 
 
 # ---------------------------------------------------------------------------

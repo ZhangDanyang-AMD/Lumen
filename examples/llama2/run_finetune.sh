@@ -8,53 +8,21 @@
 #   BACKEND=fsdp      — PyTorch FSDP + HuggingFace
 #
 # Usage:
-#   BACKEND=megatron bash run_finetune.sh
-#   BACKEND=fsdp     bash run_finetune.sh
+#   bash run_finetune.sh                                       # default config
+#   CONFIG=config_MI300X_1x8x1.sh bash run_finetune.sh         # MI300X config
+#   TP=2 TRAIN_STEPS=500 bash run_finetune.sh                  # override vars
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BACKEND=${BACKEND:-"megatron"}
+
+# ---- Load configuration -----------------------------------------------------
+CONFIG=${CONFIG:-"${SCRIPT_DIR}/config_MI355X_1x8x1.sh"}
+source "${CONFIG}"
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
 source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
-
-# ---- Shared defaults ---------------------------------------------------------
-
-NGPU=${NGPU:-8}
-NNODES=${NNODES:-1}
-MBS=${MBS:-1}
-SEQ_LEN=${SEQ_LEN:-8192}
-LR=${LR:-4e-4}
-MIN_LR=${MIN_LR:-0}
-TRAIN_STEPS=${TRAIN_STEPS:-800}
-LOG_INTERVAL=${LOG_INTERVAL:-1}
-SAVE_INTERVAL=${SAVE_INTERVAL:-200}
-SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
-
-TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
-VALID_DATA=${VALID_DATA:-"/data/validation.jsonl"}
-TOKENIZER=${TOKENIZER:-"meta-llama/Llama-2-70b-hf"}
-
-# LoRA (shared)
-LORA_RANK=${LORA_RANK:-0}
-LORA_ALPHA=${LORA_ALPHA:-32}
-LORA_DROPOUT=${LORA_DROPOUT:-0.1}
-
-# FP8 (shared)
-FP8_TRAINING=${FP8_TRAINING:-0}
-FP8_FORMAT=${FP8_FORMAT:-"fp8_e4m3"}
-FP8_SCALING=${FP8_SCALING:-"delayed"}
-FP8_BLOCK_SIZE=${FP8_BLOCK_SIZE:-128}
-FP8_AMAX_ALGO=${FP8_AMAX_ALGO:-"max"}
-FP8_REDUCE_AMAX=${FP8_REDUCE_AMAX:-0}
-FP8_AMAX_HISTORY=${FP8_AMAX_HISTORY:-16}
-FP8_ACTIVATION=${FP8_ACTIVATION:-1}
-
-# Warmup / early stopping (shared)
-WARMUP_STEPS=${WARMUP_STEPS:-0}
-VAL_LOSS_TARGET=${VAL_LOSS_TARGET:-""}
 
 
 ###############################################################################
@@ -67,31 +35,6 @@ run_megatron() {
         echo "  pip install git+https://github.com/ROCm/Megatron-LM.git"
         exit 1
     }
-
-    MODEL_SIZE=${MODEL_SIZE:-"llama2-70B"}
-    TP=${TP:-8}
-    PP=${PP:-1}
-    CP=${CP:-1}
-    VP=${VP:-0}
-    SP=${SP:-0}
-    GBS=${GBS:-8}
-    WEIGHT_DECAY=${WEIGHT_DECAY:-1e-4}
-    GRADIENT_CLIP=${GRADIENT_CLIP:-0.3}
-    EVAL_INTERVAL=${EVAL_INTERVAL:-50}
-    PRECISION=${PRECISION:-"bf16"}
-    CKPT_DIR=${CKPT_DIR:-"/ckpt"}
-    LORA_A2A=${LORA_A2A:-0}
-
-    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter"}
-    TL_FP8_QUANT=${TL_FP8_QUANT:-"fp8_blockwise"}
-
-    MXFP8_BLOCK_M_FWD=${MXFP8_BLOCK_M_FWD:-128}
-    MXFP8_BLOCK_N_FWD=${MXFP8_BLOCK_N_FWD:-128}
-    MXFP8_BLOCK_M_DQ_BWD=${MXFP8_BLOCK_M_DQ_BWD:-128}
-    MXFP8_BLOCK_N_DQ_BWD=${MXFP8_BLOCK_N_DQ_BWD:-128}
-    MXFP8_BLOCK_M_DKV_BWD=${MXFP8_BLOCK_M_DKV_BWD:-128}
-    MXFP8_BLOCK_N_DKV_BWD=${MXFP8_BLOCK_N_DKV_BWD:-128}
-    MXFP8_QUANT_BLOCK_SIZE=${MXFP8_QUANT_BLOCK_SIZE:-128}
 
     case "${MODEL_SIZE}" in
         llama2-7B|llama2-7b)
@@ -132,12 +75,13 @@ run_megatron() {
 
     echo "================================================================"
     echo "LLaMA2 SFT — MEGATRON backend"
+    echo "  Config:   ${CONFIG}"
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
     echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT})"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
-    echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT}"
+    echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"
 
     torchrun --nproc_per_node=${NGPU} --nnodes=${NNODES} \
@@ -209,15 +153,6 @@ run_fsdp() {
         exit 1
     }
 
-    MODEL=${MODEL:-"meta-llama/Llama-2-7b-hf"}
-    GRAD_ACCUM=${GRAD_ACCUM:-8}
-    WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
-    MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}
-    NUM_WORKERS=${NUM_WORKERS:-4}
-    TRAIN_SAMPLES=${TRAIN_SAMPLES:-10000}
-    VAL_SAMPLES=${VAL_SAMPLES:-500}
-    SHARDING=${SHARDING:-"full_shard"}
-
     CMD="torchrun --nproc_per_node=${NGPU}"
     CMD+=" ${SCRIPT_DIR}/finetune_llama2.py"
     CMD+=" --backend fsdp"
@@ -260,6 +195,7 @@ run_fsdp() {
 
     echo "================================================================"
     echo "LLaMA2 SFT — FSDP backend"
+    echo "  Config:     ${CONFIG}"
     echo "  Model:      ${MODEL}"
     echo "  GPUs:       ${NGPU}"
     echo "  Batch:      MBS=${MBS} x accum=${GRAD_ACCUM} | seq_len=${SEQ_LEN}"
@@ -280,15 +216,18 @@ start=$(date +%s)
 start_fmt=$(date +%Y-%m-%d\ %r)
 echo "STARTING LLAMA2 FINETUNE AT ${start_fmt} (backend=${BACKEND})"
 
+set -x
+
+ret_code=0
 case "${BACKEND}" in
-    megatron) run_megatron ;;
-    fsdp)     run_fsdp ;;
+    megatron) run_megatron || ret_code=$? ;;
+    fsdp)     run_fsdp || ret_code=$? ;;
     *)
         echo "ERROR: Unknown BACKEND=${BACKEND}. Use 'megatron' or 'fsdp'."
         exit 1 ;;
 esac
 
-ret_code=$?
+if [[ ${ret_code} != 0 ]]; then exit ${ret_code}; fi
 
 end=$(date +%s)
 end_fmt=$(date +%Y-%m-%d\ %r)
@@ -296,4 +235,4 @@ echo "ENDING LLAMA2 FINETUNE AT ${end_fmt}"
 result=$(( end - start ))
 echo "RESULT,LLM_FINETUNING,,${result},AMD,${start_fmt}"
 
-exit ${ret_code}
+exit 0

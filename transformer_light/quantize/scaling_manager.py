@@ -84,9 +84,9 @@ class ScalingManager:
             if len(history) == 0:
                 amax = tensor.abs().amax()
             elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
-                amax = torch.tensor(history[-1], device=tensor.device)
+                amax = history[-1].to(device=tensor.device)
             else:
-                amax = torch.tensor(max(history), device=tensor.device)
+                amax = torch.stack(list(history)).amax().to(device=tensor.device)
 
             if self.config.reduce_amax and self._dp_group is not None:
                 torch.distributed.all_reduce(
@@ -107,8 +107,8 @@ class ScalingManager:
             return None
 
     def update_amax(self, tensor_id: str, tensor: torch.Tensor):
-        """Record amax for delayed scaling."""
-        self.amax_history[tensor_id].append(tensor.abs().amax().item())
+        """Record amax for delayed scaling (tensor-based, no .item() sync)."""
+        self.amax_history[tensor_id].append(tensor.detach().abs().amax())
 
     def quantize(self, tensor_id: str, tensor: torch.Tensor):
         """Quantize tensor. Returns (quantized_tensor, scale)."""

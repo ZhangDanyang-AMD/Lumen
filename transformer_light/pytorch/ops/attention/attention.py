@@ -34,6 +34,20 @@ from transformer_light.ops.attention.attention_utils import (
 __all__ = ["attention", "attention_fp8_quant"]
 
 
+# ---------------------------------------------------------------------------
+# torch.compile support — treat custom autograd Functions as opaque graph
+# nodes so that Dynamo does not attempt to trace through their forward/
+# backward (which contain Triton kernel calls and mutable scaling state).
+# ---------------------------------------------------------------------------
+def _mark_allow_in_graph(*classes):
+    try:
+        from torch._dynamo import allow_in_graph
+        for cls in classes:
+            allow_in_graph(cls)
+    except Exception:
+        pass
+
+
 def _attention_aiter_impl(
     q,
     k,
@@ -399,6 +413,9 @@ class AttentionTritonMXFP8Function(torch.autograd.Function):
             None,
             None,
         )
+
+
+_mark_allow_in_graph(AttentionTritonFunction, AttentionTritonMXFP8Function)
 
 
 def attention(
