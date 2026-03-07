@@ -6,22 +6,76 @@
 
 """Quantization configuration for Transformer Light.
 
-Supports FP8 (E4M3 / E5M2), MXFP8, and FP4 formats with multiple scaling
-strategies.
+Supports FP8 (E4M3 / E5M2 / HYBRID), MXFP8, and FP4 formats with multiple
+scaling strategies.  Matches TransformerEngine_AMD recipe semantics.
 """
 
-from dataclasses import dataclass, field
+import functools
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
 import torch
 
 
+# ---------------------------------------------------------------------------
+# FNUZ / OCP detection (matches TE's ``is_fp8_fnuz``)
+# ---------------------------------------------------------------------------
+
+@functools.lru_cache(maxsize=1)
+def _is_fp8_fnuz() -> bool:
+    """Return True when the current GPU uses FNUZ FP8 encodings (gfx94x)."""
+    try:
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        return (props.major, props.minor) < (9, 5)
+    except Exception:
+        return False
+
+
+def _get_float8_e4m3() -> torch.dtype:
+    return torch.float8_e4m3fnuz if _is_fp8_fnuz() else torch.float8_e4m3fn
+
+
+def _get_float8_e5m2() -> torch.dtype:
+    return torch.float8_e5m2fnuz if _is_fp8_fnuz() else torch.float8_e5m2
+
+
+# ---------------------------------------------------------------------------
+# FP8 representable-max values  (OCP, FNUZ) — mirrors TE _FormatMaxVals
+# ---------------------------------------------------------------------------
+
+_E4M3_MAX = (448.0, 240.0)   # (OCP, FNUZ)
+_E5M2_MAX = (57344.0, 57344.0)
+
+
+def get_fp8_max(fmt: "QuantFormat") -> float:
+    """Return the maximum representable FP8 value for *fmt* on this GPU."""
+    idx = 1 if _is_fp8_fnuz() else 0
+    if fmt in (QuantFormat.FP8_E4M3, QuantFormat.MXFP8, QuantFormat.HYBRID):
+        return _E4M3_MAX[idx]
+    elif fmt == QuantFormat.FP8_E5M2:
+        return _E5M2_MAX[idx]
+    return _E4M3_MAX[idx]
+
+
+def get_fp8_max_bwd(fmt: "QuantFormat") -> float:
+    """Return the backward-pass FP8 max (differs from fwd for HYBRID)."""
+    idx = 1 if _is_fp8_fnuz() else 0
+    if fmt == QuantFormat.HYBRID:
+        return _E5M2_MAX[idx]
+    return get_fp8_max(fmt)
+
+
+# ---------------------------------------------------------------------------
+# Enumerations
+# ---------------------------------------------------------------------------
+
 class QuantFormat(Enum):
     """Supported low-precision number formats."""
 
     FP8_E4M3 = "fp8_e4m3"
     FP8_E5M2 = "fp8_e5m2"
+    HYBRID = "hybrid"       # E4M3 forward, E5M2 backward (TE-style)
     MXFP8 = "mxfp8"
     FP4 = "fp4"
 
@@ -41,14 +95,37 @@ class AmaxAlgo(Enum):
     MOST_RECENT = "most_recent"    # use only the latest recorded amax
 
 
-# Mapping from QuantFormat to PyTorch dtype (where applicable)
-_FORMAT_TO_DTYPE = {
-    QuantFormat.FP8_E4M3: torch.float8_e4m3fn,
-    QuantFormat.FP8_E5M2: torch.float8_e5m2,
-    QuantFormat.MXFP8: torch.float8_e4m3fn,
-    QuantFormat.FP4: None,  # no native torch dtype yet
-}
+# ---------------------------------------------------------------------------
+# Format → dtype mapping (auto-detects FNUZ)
+# ---------------------------------------------------------------------------
 
+def _build_format_to_dtype():
+    e4m3 = _get_float8_e4m3()
+    e5m2 = _get_float8_e5m2()
+    return {
+        QuantFormat.FP8_E4M3: e4m3,
+        QuantFormat.FP8_E5M2: e5m2,
+        QuantFormat.HYBRID: e4m3,   # forward dtype
+        QuantFormat.MXFP8: e4m3,
+        QuantFormat.FP4: None,
+    }
+
+
+def _format_to_dtype_bwd():
+    e4m3 = _get_float8_e4m3()
+    e5m2 = _get_float8_e5m2()
+    return {
+        QuantFormat.FP8_E4M3: e4m3,
+        QuantFormat.FP8_E5M2: e5m2,
+        QuantFormat.HYBRID: e5m2,   # backward dtype differs
+        QuantFormat.MXFP8: e4m3,
+        QuantFormat.FP4: None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# QuantConfig
+# ---------------------------------------------------------------------------
 
 @dataclass
 class QuantConfig:
@@ -69,6 +146,9 @@ class QuantConfig:
                           history_len=4,
                           quantize_activation=True)
 
+        # HYBRID format with margin (TE-style)
+        cfg = QuantConfig(format=QuantFormat.HYBRID, margin=0)
+
         # From strings (handy for YAML / env-var configs)
         cfg = QuantConfig.from_str("fp8_e4m3", "delayed",
                                    amax_algo="most_recent")
@@ -81,6 +161,10 @@ class QuantConfig:
 
     # Amax algorithm for delayed scaling
     amax_algo: AmaxAlgo = AmaxAlgo.MAX
+
+    # Margin for scaling factor computation (TE-compatible).
+    # ``sf = (FP8_MAX / amax) / (2 ** margin)``
+    margin: int = 0
 
     # Whether to all-reduce amax across data-parallel ranks before computing
     # the scale.  Useful for large-scale runs where per-rank amax can diverge.
@@ -97,7 +181,8 @@ class QuantConfig:
         """Construct a QuantConfig from plain strings.
 
         Args:
-            format: One of ``"fp8_e4m3"``, ``"fp8_e5m2"``, ``"mxfp8"``, ``"fp4"``.
+            format: One of ``"fp8_e4m3"``, ``"fp8_e5m2"``, ``"hybrid"``,
+                ``"mxfp8"``, ``"fp4"``.
             scaling: One of ``"dynamic"``, ``"delayed"``, ``"blockwise"``.
             **kwargs: Forwarded to :class:`QuantConfig`.  String values for
                 enum fields (``amax_algo``) are auto-converted.
@@ -112,8 +197,23 @@ class QuantConfig:
 
     @property
     def torch_dtype(self) -> Optional[torch.dtype]:
-        """Return the PyTorch FP8 dtype for this format, or None if unavailable."""
-        return _FORMAT_TO_DTYPE.get(self.format)
+        """Return the forward-pass PyTorch FP8 dtype, or None if unavailable."""
+        return _build_format_to_dtype().get(self.format)
+
+    @property
+    def torch_dtype_bwd(self) -> Optional[torch.dtype]:
+        """Return the backward-pass FP8 dtype (differs from fwd for HYBRID)."""
+        return _format_to_dtype_bwd().get(self.format)
+
+    @property
+    def fp8_max(self) -> float:
+        """Max representable FP8 value for the forward pass."""
+        return get_fp8_max(self.format)
+
+    @property
+    def fp8_max_bwd(self) -> float:
+        """Max representable FP8 value for the backward pass."""
+        return get_fp8_max_bwd(self.format)
 
     @property
     def recipe(self) -> str:

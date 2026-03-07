@@ -203,6 +203,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     amax_algo = getattr(args, "fp8_amax_algo", "max")
     reduce_amax = getattr(args, "fp8_reduce_amax", False)
     history_len = getattr(args, "fp8_amax_history", 16)
+    margin = getattr(args, "fp8_margin", 0)
     quant_act = getattr(args, "fp8_activation", True)
 
     config = QuantConfig(
@@ -210,6 +211,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         scaling=ScalingType(scaling),
         block_size=block_size,
         amax_algo=AmaxAlgo(amax_algo),
+        margin=margin,
         reduce_amax=reduce_amax,
         history_len=history_len,
         quantize_activation=quant_act,
@@ -495,7 +497,7 @@ def add_finetune_args(parser):
     fp8 = parser.add_argument_group(title="fp8-training")
     fp8.add_argument("--fp8-training", action="store_true", default=False)
     fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3",
-                      choices=["fp8_e4m3", "fp8_e5m2", "mxfp8"])
+                      choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
     fp8.add_argument("--fp8-scaling", type=str, default="delayed",
                       choices=["dynamic", "delayed", "blockwise"])
     fp8.add_argument("--fp8-block-size", type=int, default=128)
@@ -503,6 +505,8 @@ def add_finetune_args(parser):
                       choices=["max", "most_recent"])
     fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
     fp8.add_argument("--fp8-amax-history", type=int, default=16)
+    fp8.add_argument("--fp8-margin", type=int, default=0,
+                      help="Margin for FP8 scaling factor computation (TE-compatible).")
     fp8.add_argument("--fp8-activation", action="store_true", default=True)
     fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
                       action="store_false")

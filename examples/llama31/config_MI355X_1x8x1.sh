@@ -101,11 +101,11 @@ export WEIGHT_DECAY=${WEIGHT_DECAY:-0.1}
 export GRADIENT_CLIP=${GRADIENT_CLIP:-1.0}
 export EVAL_ITERS=${EVAL_ITERS:-10}
 export PRECISION=${PRECISION:-"bf16"}
-export CKPT_DIR=${CKPT_DIR:-"/ckpt"}
+export CKPT_DIR=${CKPT_DIR:-"/model"}
 export LORA_A2A=${LORA_A2A:-0}
 
 # ---- FSDP backend ------------------------------------------------------------
-export MODEL=${MODEL:-"meta-llama/Llama-3.1-8B"}
+export MODEL=${MODEL:-"/model"}
 export GRAD_ACCUM=${GRAD_ACCUM:-8}
 export MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}
 export NUM_WORKERS=${NUM_WORKERS:-4}

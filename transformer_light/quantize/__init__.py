@@ -40,6 +40,8 @@ from transformer_light.quantize.config import (
     QuantConfig,
     QuantFormat,
     ScalingType,
+    get_fp8_max,
+    get_fp8_max_bwd,
 )
 from transformer_light.quantize.scaling_manager import ScalingManager
 from transformer_light.pytorch.ops.quantize import (

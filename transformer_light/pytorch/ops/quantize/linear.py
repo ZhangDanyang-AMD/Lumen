@@ -76,7 +76,17 @@ def _triton_quant(x: torch.Tensor, dtype: torch.dtype, block_size: int = 128):
 
 
 def _triton_mm(a_fp8: torch.Tensor, b_fp8: torch.Tensor, scale_a, scale_b):
-    """Scaled matrix multiply using PyTorch's native scaled_mm."""
+    """Scaled matrix multiply using PyTorch's native scaled_mm.
+
+    Handles mixed scale formats: per-tensor (scalar/1-element) from delayed
+    scaling and per-block (2-D) from blockwise quantization.
+    """
+    if isinstance(scale_a, (int, float)):
+        scale_a = torch.tensor(scale_a, dtype=torch.float32, device=a_fp8.device)
+    if isinstance(scale_b, (int, float)):
+        scale_b = torch.tensor(scale_b, dtype=torch.float32, device=b_fp8.device)
+    scale_a = scale_a.to(dtype=torch.float32, device=a_fp8.device)
+    scale_b = scale_b.to(dtype=torch.float32, device=b_fp8.device)
     return torch._scaled_mm(a_fp8, b_fp8, scale_a=scale_a, scale_b=scale_b)
 
 
@@ -155,11 +165,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         backend = ctx.backend
-        fp8_dtype = ctx.fp8_dtype
         block_size = ctx.block_size
 
+        # For HYBRID format the backward pass uses E5M2 dtype; the
+        # ScalingManager stores the backward dtype separately.
+        mgr = ctx.scaling_manager
+        bwd_dtype = getattr(mgr, "fp8_dtype_bwd", ctx.fp8_dtype)
+
         if backend == "aiter":
-            grad_fp8, grad_scale = _aiter_quant(grad_output, fp8_dtype)
+            grad_fp8, grad_scale = _aiter_quant(grad_output, bwd_dtype)
             grad_input = _aiter_mm(grad_fp8, weight_fp8.t(), grad_scale, weight_scale)
             grad_weight = _aiter_mm(
                 grad_fp8.reshape(-1, grad_output.shape[-1]).t(),
@@ -167,7 +181,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 grad_scale, input_scale,
             )
         else:
-            grad_fp8, grad_scale = _triton_quant(grad_output, fp8_dtype, block_size)
+            grad_fp8, grad_scale = _triton_quant(grad_output, bwd_dtype, block_size)
             grad_flat = grad_fp8.reshape(-1, grad_output.shape[-1])
             input_flat = input_fp8.reshape(-1, input_fp8.shape[-1])
             grad_input = _triton_mm(grad_flat, weight_fp8, grad_scale, weight_scale)

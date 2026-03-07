@@ -3,3 +3,7 @@
 #
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
+
+"""Alias module — re-exports from ``transformer_light.pytorch.ops.attention.attention``."""
+
+from transformer_light.pytorch.ops.attention.attention import *  # noqa: F401,F403

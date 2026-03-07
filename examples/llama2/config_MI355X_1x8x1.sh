@@ -64,7 +64,7 @@ export WEIGHT_DECAY=${WEIGHT_DECAY:-1e-4}
 export GRADIENT_CLIP=${GRADIENT_CLIP:-0.3}
 export EVAL_INTERVAL=${EVAL_INTERVAL:-50}
 export PRECISION=${PRECISION:-"bf16"}
-export CKPT_DIR=${CKPT_DIR:-"/ckpt"}
+export CKPT_DIR=${CKPT_DIR:-"/model"}
 export LORA_A2A=${LORA_A2A:-0}
 
 # Transformer Light attention
@@ -81,7 +81,7 @@ export MXFP8_BLOCK_N_DKV_BWD=${MXFP8_BLOCK_N_DKV_BWD:-128}
 export MXFP8_QUANT_BLOCK_SIZE=${MXFP8_QUANT_BLOCK_SIZE:-128}
 
 # ---- FSDP backend ------------------------------------------------------------
-export MODEL=${MODEL:-"meta-llama/Llama-2-7b-hf"}
+export MODEL=${MODEL:-"/model"}
 export GRAD_ACCUM=${GRAD_ACCUM:-8}
 export MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}
 export NUM_WORKERS=${NUM_WORKERS:-4}
