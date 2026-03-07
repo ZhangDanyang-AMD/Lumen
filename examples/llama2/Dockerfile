@@ -20,7 +20,7 @@ RUN pip uninstall -y megatron-core
 RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
     && pip install -e . && cd megatron/core/datasets && make
 
-ENV PYTHONPATH "${PYTHONPATH}:/workspace/deps/megatron_lm"
+ENV PYTHONPATH="/workspace/deps/megatron_lm:${PYTHONPATH:-}"
 
 # AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
 RUN pip install amd-aiter || echo "AITER not available — falling back to Triton-only backends"
@@ -38,7 +38,7 @@ WORKDIR /workspace
 COPY . /workspace/Transformer_Light
 RUN cd /workspace/Transformer_Light && pip install -e ".[all]"
 
-ENV PYTHONPATH "${PYTHONPATH}:/workspace/Transformer_Light"
+ENV PYTHONPATH="/workspace/Transformer_Light:${PYTHONPATH:-}"
 
 # ---------------------------------------------------------------------------
 # AMD MI GPU performance tuning (from perf_env.sh)
