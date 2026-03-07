@@ -70,6 +70,20 @@ run_megatron() {
         [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"
     fi
 
+    TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
+    if [ "${TL_ATTN_BACKEND}" = "triton_fp8" ]; then
+        TL_ATTN_ARGS+=" --tl-fp8-quant-type ${TL_FP8_QUANT}"
+        if [ "${TL_FP8_QUANT}" = "mxfp8" ]; then
+            TL_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
+            TL_ATTN_ARGS+=" --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD}"
+            TL_ATTN_ARGS+=" --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD}"
+            TL_ATTN_ARGS+=" --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD}"
+            TL_ATTN_ARGS+=" --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD}"
+            TL_ATTN_ARGS+=" --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD}"
+            TL_ATTN_ARGS+=" --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE}"
+        fi
+    fi
+
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
 
@@ -79,7 +93,7 @@ run_megatron() {
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT})"
+    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "triton_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})")"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"
@@ -129,15 +143,7 @@ run_megatron() {
         --finetune --no-load-optim --no-load-rng --auto-detect-ckpt-format \
         --eval-iters 10 --eval-interval ${EVAL_INTERVAL} \
         --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
-        --tl-attn-backend ${TL_ATTN_BACKEND} \
-        --tl-fp8-quant-type ${TL_FP8_QUANT} \
-        --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD} \
-        --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD} \
-        --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD} \
-        --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD} \
-        --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD} \
-        --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD} \
-        --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE} \
+        ${TL_ATTN_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS}
 }
 
