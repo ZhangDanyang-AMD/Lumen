@@ -1,3 +1,15 @@
-from .attention import *
-from .normalization import *  # noqa: F401,F403 — re-export normalization ops
-from .quantize import *  # noqa: F401,F403 — re-export quantize ops
+# Lazy subpackage re-exports (PEP 562).
+# Avoids eagerly importing GPU kernel code when only a single subpackage
+# (e.g. ops.quantize) is needed.
+
+_SUBMODULES = ("attention", "normalization", "quantize")
+
+
+def __getattr__(name):
+    import importlib
+    for sub in _SUBMODULES:
+        mod = importlib.import_module(f".{sub}", __name__)
+        if hasattr(mod, name):
+            globals()[name] = getattr(mod, name)
+            return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
