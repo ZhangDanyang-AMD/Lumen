@@ -3,5 +3,3 @@
 #
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
-
-"""Alias package — re-exports from ``transformer_light.pytorch.kernels.attention``."""

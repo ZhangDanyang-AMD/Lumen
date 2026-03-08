@@ -9,7 +9,7 @@
 
 Usage::
 
-    from transformer_light.pytorch.modules import TransformerLightLinear
+    from transformer_light.modules import TransformerLightLinear
 
     linear = TransformerLightLinear(
         in_features=4096,
@@ -25,7 +25,7 @@ import torch
 import torch.nn as nn
 
 from transformer_light.quantize import ScalingManager, QuantConfig, is_aiter_available
-from transformer_light.pytorch.ops.quantize import quantized_linear
+from transformer_light.ops.quantize import quantized_linear
 
 __all__ = ["TransformerLightLinear"]
 
@@ -34,7 +34,7 @@ class TransformerLightLinear(nn.Module):
     """Drop-in replacement for ``nn.Linear`` with FP8 quantized forward + backward.
 
     Supports AITER (hipBLASLt) and Triton (blockwise) backends, mirroring
-    :class:`~transformer_light.pytorch.modules.attention.TransformerLightAttention`.
+    :class:`~transformer_light.modules.attention.TransformerLightAttention`.
 
     Args:
         in_features: Size of each input sample.

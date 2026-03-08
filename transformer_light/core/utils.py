@@ -1,9 +1,21 @@
 ###############################################################################
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #
-# Licensed under the Apache License, Version 2.0
+# See LICENSE for license information.
 ###############################################################################
 
-"""Alias module — re-exports from ``transformer_light.pytorch.core.utils``."""
+import functools
+from typing import Tuple
 
-from transformer_light.pytorch.core.utils import *  # noqa: F401,F403
+import torch
+
+
+@functools.lru_cache
+def _get_device_compute_capability(device: torch.device) -> Tuple[int, int]:
+    props = torch.cuda.get_device_properties(device)
+    return (props.major, props.minor)
+
+
+def get_device_compute_capability() -> Tuple[int, int]:
+    """CUDA compute capability of current GPU"""
+    return _get_device_compute_capability(torch.cuda.current_device())

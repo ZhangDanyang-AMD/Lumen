@@ -33,7 +33,7 @@ import torch
 
 _tl_available = True
 try:
-    from transformer_light.pytorch.modules.attention import TransformerLightAttention
+    from transformer_light.modules.attention import TransformerLightAttention
 except ImportError:
     _tl_available = False
 

@@ -67,9 +67,10 @@ export PRECISION=${PRECISION:-"bf16"}
 export CKPT_DIR=${CKPT_DIR:-"/model"}
 export LORA_A2A=${LORA_A2A:-0}
 
-# Transformer Light attention
+# Transformer Light
 export TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter"}
 export TL_FP8_QUANT=${TL_FP8_QUANT:-"fp8_blockwise"}
+export TL_RMSNORM=${TL_RMSNORM:-0}
 
 # MXFP8 attention block sizes
 export MXFP8_BLOCK_M_FWD=${MXFP8_BLOCK_M_FWD:-128}

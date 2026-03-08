@@ -8,7 +8,7 @@
 
 These are pure stateless functions — no autograd, no scaling history.  For
 autograd-aware quantized linear, see :mod:`~.linear`.  For the nn.Module
-wrapper, see :mod:`transformer_light.pytorch.modules.quantize`.
+wrapper, see :mod:`transformer_light.modules.quantize`.
 """
 
 import logging
@@ -18,11 +18,11 @@ import torch
 import triton
 from torch.library import triton_op, wrap_triton
 
-from transformer_light.triton.quantize.quant_blockwise import (
+from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
     quant_fp8_blockwise_kernel,
     quant_fp8_blockwise_segment_m_kernel,
 )
-from transformer_light.triton.quantize.quant_mxfp8 import (
+from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
     _convert_from_mxfp8_kernel,
     _convert_to_mxfp8_kernel,
 )

@@ -13,9 +13,9 @@ It bridges the Megatron ``[s, b, h, d]`` tensor layout to the Transformer
 Light ``[b, s, h, d]`` layout and delegates the actual Q·K^T·V computation
 (both forward **and** backward) to the TL public API:
 
-* :func:`~transformer_light.pytorch.ops.attention.attention`
+* :func:`~transformer_light.ops.attention.attention`
   – dispatches to AITER or Triton backends
-* :func:`~transformer_light.pytorch.ops.attention.attention_fp8_quant`
+* :func:`~transformer_light.ops.attention.attention_fp8_quant`
   – dispatches to Triton FP8 (blockwise / MXFP8) backends
 
 Each of these functions internally uses a ``torch.autograd.Function`` with
@@ -39,7 +39,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import divide
 from megatron.training import get_args
 
-from transformer_light.pytorch.ops.attention.attention import (
+from transformer_light.ops.attention.attention import (
     attention,
     attention_fp8_quant,
 )

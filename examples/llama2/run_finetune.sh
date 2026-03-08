@@ -84,6 +84,9 @@ run_megatron() {
         fi
     fi
 
+    TL_RMSNORM_ARGS=""
+    [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
+
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
 
@@ -93,7 +96,7 @@ run_megatron() {
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "triton_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})")"
+    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "triton_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})") rmsnorm=${TL_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"
@@ -143,7 +146,7 @@ run_megatron() {
         --finetune --no-load-optim --no-load-rng --auto-detect-ckpt-format \
         --eval-iters 10 --eval-interval ${EVAL_INTERVAL} \
         --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
-        ${TL_ATTN_ARGS} \
+        ${TL_ATTN_ARGS} ${TL_RMSNORM_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS}
 }
 

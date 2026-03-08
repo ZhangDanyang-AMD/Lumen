@@ -6,7 +6,7 @@
 
 """Quantization ops — functional API and autograd-aware quantized linear."""
 
-from transformer_light.pytorch.ops.quantize.ops import (
+from transformer_light.ops.quantize.ops import (
     convert_from_mxfp8,
     convert_to_mxfp8,
     dequant_fp8_tensorwise_impl,
@@ -15,7 +15,7 @@ from transformer_light.pytorch.ops.quantize.ops import (
     quant_fp8_blockwise_segment_m_impl,
     quant_fp8_tensorwise_impl,
 )
-from transformer_light.pytorch.ops.quantize.linear import (
+from transformer_light.ops.quantize.linear import (
     QuantizedLinearFunction,
     quantized_linear,
 )

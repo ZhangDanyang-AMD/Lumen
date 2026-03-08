@@ -102,6 +102,10 @@ run_megatron() {
         [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"
     fi
 
+    TL_RMSNORM=${TL_RMSNORM:-0}
+    TL_RMSNORM_ARGS=""
+    [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
+
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
 
@@ -115,7 +119,7 @@ run_megatron() {
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
     echo "  LR:       max=${MAX_LR} min=${MIN_LR} warmup=${LR_WARMUP_STEPS}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT})"
+    echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT}) rmsnorm=${TL_RMSNORM}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "  LoRA:     rank=${LORA_RANK}"
     echo "  Primus:   fp8_attn=${PRIMUS_FP8_ATTN} mxfp8_attn=${PRIMUS_MXFP8_ATTN} dbg=${DBG_ATTN_OUTPUT}"
@@ -188,7 +192,7 @@ run_megatron() {
         --primus-turbo-fp8-attention ${PRIMUS_FP8_ATTN} \
         --primus-turbo-mxfp8-attention ${PRIMUS_MXFP8_ATTN} \
         --dbg-attn-output ${DBG_ATTN_OUTPUT} \
-        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
+        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${TL_RMSNORM_ARGS} \
         ${CMD_SUFFIX}
 }
 

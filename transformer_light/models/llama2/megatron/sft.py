@@ -49,7 +49,7 @@ from megatron.training.utils import (
     get_ltor_masks_and_position_ids,
     is_first_or_last_pipeline_stage,
 )
-from transformer_light.pytorch.ops.attention.attention_megatron import (
+from transformer_light.modules.attention_megatron import (
     TransformerLightDotProductAttention,
 )
 from transformer_light.models.llama2.dataset import LLaMA2SFTDataset
@@ -82,6 +82,8 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
 
     Always uses the Megatron-Core local spec (no Transformer Engine dependency).
     The core_attention submodule is patched to TransformerLightDotProductAttention.
+    When ``--tl-rmsnorm`` is set, RMSNorm modules are also replaced with the
+    Triton-accelerated :class:`TransformerLightRMSNorm`.
     """
     print_rank_0("building GPT model with Transformer Light attention ...")
 
@@ -116,6 +118,10 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
         rope_scaling=args.use_rope_scaling,
         vp_stage=vp_stage,
     )
+
+    if getattr(args, "tl_rmsnorm", False):
+        _patch_rmsnorm(model)
+
     return model
 
 
@@ -137,6 +143,26 @@ def _patch_core_attention(spec):
         if hasattr(subs, "layer_specs"):
             for layer_spec in subs.layer_specs:
                 _patch_core_attention(layer_spec)
+
+
+def _patch_rmsnorm(model):
+    """Replace all Megatron-Core RMSNorm modules with Transformer Light's
+    Triton-accelerated :class:`TransformerLightRMSNorm`."""
+    from transformer_light.ops.normalization import TransformerLightRMSNorm
+
+    count = 0
+    for name, module in model.named_modules():
+        for attr_name, child in list(module.named_children()):
+            cls_name = type(child).__name__
+            if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm"):
+                hidden_size = child.weight.shape[0]
+                eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
+                replacement = TransformerLightRMSNorm(hidden_size, eps=eps)
+                replacement.weight.data.copy_(child.weight.data)
+                setattr(module, attr_name, replacement)
+                count += 1
+
+    print_rank_0(f"> Replaced {count} RMSNorm modules with TransformerLightRMSNorm")
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +491,7 @@ def add_finetune_args(parser):
     parser.add_argument("--backend", type=str, default="megatron",
                         choices=["megatron", "fsdp"], help="Training backend.")
 
-    tl = parser.add_argument_group(title="transformer-light-attention")
+    tl = parser.add_argument_group(title="transformer-light")
     tl.add_argument(
         "--tl-attn-backend", type=str, default="aiter",
         choices=["aiter", "triton", "triton_fp8"],
@@ -475,6 +501,10 @@ def add_finetune_args(parser):
         "--tl-fp8-quant-type", type=str, default="fp8_blockwise",
         choices=["fp8_blockwise", "mxfp8"],
         help="FP8 quantisation type for triton_fp8 backend.",
+    )
+    tl.add_argument(
+        "--tl-rmsnorm", action="store_true", default=False,
+        help="Replace RMSNorm with Transformer Light Triton-accelerated RMSNorm.",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")

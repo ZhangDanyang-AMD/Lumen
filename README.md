@@ -79,7 +79,7 @@ optimizer.step()            # stays FP32 (or quantized with opt-in)
 ### FP8 Attention (module API)
 
 ```python
-from transformer_light.pytorch.modules import TransformerLightAttention
+from transformer_light.modules import TransformerLightAttention
 
 attn = TransformerLightAttention(
     causal=True,
@@ -94,7 +94,7 @@ output = attn(q, k, v)       # q, k, v: [B, S, H, D]
 ### Functional API
 
 ```python
-from transformer_light.pytorch.ops.attention import attention, attention_fp8_quant
+from transformer_light.ops.attention import attention, attention_fp8_quant
 
 # Standard attention (CK or Triton backend)
 output = attention(q, k, v, causal=True, backend_type="triton")

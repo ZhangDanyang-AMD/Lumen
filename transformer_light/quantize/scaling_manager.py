@@ -17,7 +17,7 @@ from transformer_light.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
-from transformer_light.pytorch.ops.quantize import (
+from transformer_light.ops.quantize import (
     convert_to_mxfp8,
     quant_fp8_blockwise_impl,
 )

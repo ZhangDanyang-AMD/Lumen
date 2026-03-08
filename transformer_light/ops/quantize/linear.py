@@ -18,7 +18,7 @@ Supports two backends:
 - **triton** — Transformer Light Triton blockwise quant + ``torch._scaled_mm``.
 
 The nn.Module wrapper lives in
-:class:`transformer_light.pytorch.modules.quantize.TransformerLightLinear`.
+:class:`transformer_light.modules.quantize.TransformerLightLinear`.
 """
 
 from typing import Literal, Optional, Tuple
@@ -27,7 +27,7 @@ import torch
 import torch.nn.functional as F
 
 from transformer_light.quantize import is_aiter_available
-from transformer_light.pytorch.ops.quantize.ops import (
+from transformer_light.ops.quantize.ops import (
     quant_fp8_blockwise_impl,
     convert_to_mxfp8,
     convert_from_mxfp8,
