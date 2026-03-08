@@ -26,7 +26,6 @@ from typing import Literal, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from transformer_light.quantize import is_aiter_available
 from transformer_light.ops.quantize.ops import (
     quant_fp8_blockwise_impl,
     convert_to_mxfp8,
@@ -239,6 +238,7 @@ def quantized_linear(
     Returns:
         Output tensor ``[*, out_features]``.
     """
+    from transformer_light.quantize import is_aiter_available
     if quantize_activation and backend == "aiter" and not is_aiter_available():
         raise RuntimeError(
             "AITER is not installed. Install it or use backend='triton'."

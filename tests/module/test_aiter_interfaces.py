@@ -149,7 +149,7 @@ class TestAttentionAiterInterface:
 
         mock_flash = MagicMock(return_value=mock_output)
 
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):
@@ -184,7 +184,7 @@ class TestAttentionAiterInterface:
         alibi = torch.randn(H)
 
         mock_flash = MagicMock(return_value=torch.randn(B, S, H, D))
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):
@@ -197,7 +197,7 @@ class TestAttentionAiterInterface:
         assert torch.equal(kw["alibi_slopes"], alibi)
 
     def test_attention_aiter_raises_when_unavailable(self):
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=False):
             from transformer_light.ops.attention.attention import attention
             with pytest.raises(RuntimeError, match="AITER is not installed"):
@@ -209,7 +209,7 @@ class TestAttentionAiterInterface:
     def test_attention_auto_selects_aiter_when_available(self):
         B, S, H, D = 2, 64, 4, 32
         mock_flash = MagicMock(return_value=torch.randn(B, S, H, D))
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):
@@ -225,7 +225,7 @@ class TestAttentionAiterInterface:
         mock_out = torch.randn(B, S, H, D)
         mock_lse = torch.randn(B, H, S)
         mock_flash = MagicMock(return_value=(mock_out, mock_lse))
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):
@@ -239,7 +239,7 @@ class TestAttentionAiterInterface:
     def test_attention_return_attn_probs_with_dropout(self):
         B, S, H, D = 1, 32, 2, 16
         mock_flash = MagicMock(return_value=torch.randn(B, S, H, D))
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):
@@ -255,7 +255,7 @@ class TestAttentionAiterInterface:
     def test_attention_accepts_grad_quant_type(self):
         B, S, H, D = 2, 64, 4, 32
         mock_flash = MagicMock(return_value=torch.randn(B, S, H, D))
-        with patch("transformer_light.ops.attention.attention.is_aiter_available",
+        with patch("transformer_light.ops.attention.attention._is_aiter_available",
                     return_value=True), \
              patch("transformer_light.ops.attention.attention.flash_attn_func",
                     mock_flash, create=True):

@@ -8,10 +8,18 @@ from typing import Literal, Optional
 
 import torch
 
-from transformer_light.quantize import is_aiter_available
 from transformer_light.core.grad_quant import quantize_grad_tensor
 
-if is_aiter_available():
+
+def _is_aiter_available() -> bool:
+    try:
+        import aiter  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
 from transformer_light.kernels.attention.attention_impl import (
@@ -203,7 +211,7 @@ def attention(
 
     # Resolve "auto": prefer C++ (aiter) when available, fall back to Triton.
     if backend_type == "auto":
-        backend_type = "aiter" if is_aiter_available() else "triton"
+        backend_type = "aiter" if _is_aiter_available() else "triton"
 
     # Context-parallelism path
     if cp_param_bundle is not None:
@@ -235,7 +243,7 @@ def attention(
 
     # Single-GPU path: prefer C++ (aiter), fall back to Triton.
     if backend_type == "aiter":
-        if not is_aiter_available():
+        if not _is_aiter_available():
             raise RuntimeError(
                 "AITER is not installed. The aiter attention backend requires "
                 "'aiter' — install it or use backend_type='triton'."

@@ -15,10 +15,18 @@ from typing import Tuple
 
 import torch
 
-from transformer_light.quantize import is_aiter_available
 from transformer_light.core.grad_quant import quantize_grad_tensor
 
-if is_aiter_available():
+
+def _is_aiter_available() -> bool:
+    try:
+        import aiter  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
 from transformer_light.kernels.attention.attention_impl import (
