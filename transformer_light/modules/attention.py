@@ -34,6 +34,7 @@ class TransformerLightAttention(torch.nn.Module):
         block_m_dkv_bwd: int = 64,  # block of dkv seq len in bwd
         block_n_dkv_bwd: int = 64,  # block of dkv seq len in bwd
         quant_block_size: int = 32,
+        grad_quant_type: Optional[str] = None,
     ):
         super().__init__()
 
@@ -59,6 +60,7 @@ class TransformerLightAttention(torch.nn.Module):
         self.block_m_dkv_bwd = block_m_dkv_bwd
         self.block_n_dkv_bwd = block_n_dkv_bwd
         self.quant_block_size = quant_block_size
+        self.grad_quant_type = grad_quant_type
 
         if backend_type == "aiter" and quant_type is None:
             if not is_aiter_available():
@@ -92,6 +94,9 @@ class TransformerLightAttention(torch.nn.Module):
             }
         else:
             kwargs = {}
+
+        if self.grad_quant_type is not None:
+            kwargs["grad_quant_type"] = self.grad_quant_type
 
         return self.attention_fn(
             q,

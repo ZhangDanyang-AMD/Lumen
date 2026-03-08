@@ -120,7 +120,7 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
     )
 
     if getattr(args, "tl_rmsnorm", False):
-        _patch_rmsnorm(model)
+        _patch_rmsnorm(model, getattr(args, "grad_quant_type", None))
 
     return model
 
@@ -145,7 +145,7 @@ def _patch_core_attention(spec):
                 _patch_core_attention(layer_spec)
 
 
-def _patch_rmsnorm(model):
+def _patch_rmsnorm(model, grad_quant_type=None):
     """Replace all Megatron-Core RMSNorm modules with Transformer Light's
     Triton-accelerated :class:`TransformerLightRMSNorm`."""
     from transformer_light.ops.normalization import TransformerLightRMSNorm
@@ -157,7 +157,9 @@ def _patch_rmsnorm(model):
             if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm"):
                 hidden_size = child.weight.shape[0]
                 eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
-                replacement = TransformerLightRMSNorm(hidden_size, eps=eps)
+                replacement = TransformerLightRMSNorm(
+                    hidden_size, eps=eps, grad_quant_type=grad_quant_type,
+                )
                 replacement.weight.data.copy_(child.weight.data)
                 setattr(module, attr_name, replacement)
                 count += 1
@@ -231,6 +233,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     history_len = getattr(args, "fp8_amax_history", 16)
     margin = getattr(args, "fp8_margin", 0)
     quant_act = getattr(args, "fp8_activation", True)
+    grad_quant_type = getattr(args, "grad_quant_type", None)
 
     config = QuantConfig(
         format=QuantFormat(fmt),
@@ -241,6 +244,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         reduce_amax=reduce_amax,
         history_len=history_len,
         quantize_activation=quant_act,
+        quantize_grad=grad_quant_type,
     )
 
     dp_group = None
@@ -255,7 +259,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
         f"block_size={block_size}, amax_algo={amax_algo}, "
         f"reduce_amax={reduce_amax}, history={history_len}, "
-        f"activation={quant_act})"
+        f"activation={quant_act}, grad_quant={grad_quant_type})"
     )
 
 
@@ -540,6 +544,9 @@ def add_finetune_args(parser):
     fp8.add_argument("--fp8-activation", action="store_true", default=True)
     fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
                       action="store_false")
+    fp8.add_argument("--grad-quant-type", type=str, default=None,
+                      choices=["fp8", "mxfp8", "fp4"],
+                      help="Gradient quantization type (None=disabled).")
 
     sft = parser.add_argument_group(title="sft-training")
     sft.add_argument("--warmup-steps", type=int, default=0)

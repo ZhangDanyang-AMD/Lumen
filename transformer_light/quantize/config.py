@@ -175,6 +175,13 @@ class QuantConfig:
     # the original precision (BF16/FP16).
     quantize_activation: bool = True
 
+    # Gradient quantization type for the backward pass.  When set, gradients
+    # are rounded to the specified low-precision format (quant → dequant)
+    # before being returned from autograd backward.  This reduces gradient
+    # communication bandwidth in distributed training.
+    # Valid values: None (disabled), "fp8", "mxfp8", "fp4" (placeholder).
+    quantize_grad: Optional[str] = None
+
     @classmethod
     def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed",
                  **kwargs) -> "QuantConfig":

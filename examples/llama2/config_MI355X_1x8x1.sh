@@ -47,6 +47,7 @@ export FP8_AMAX_ALGO=${FP8_AMAX_ALGO:-"max"}
 export FP8_REDUCE_AMAX=${FP8_REDUCE_AMAX:-0}
 export FP8_AMAX_HISTORY=${FP8_AMAX_HISTORY:-16}
 export FP8_ACTIVATION=${FP8_ACTIVATION:-1}
+export GRAD_QUANT_TYPE=${GRAD_QUANT_TYPE:-""}
 
 # ---- Warmup / early stopping -------------------------------------------------
 export WARMUP_STEPS=${WARMUP_STEPS:-0}

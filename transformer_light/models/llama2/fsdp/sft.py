@@ -146,6 +146,7 @@ def apply_fp8_training(model: nn.Module, args) -> None:
         reduce_amax=args.fp8_reduce_amax,
         history_len=args.fp8_amax_history,
         quantize_activation=args.fp8_activation,
+        quantize_grad=getattr(args, "grad_quant_type", None),
     )
 
     dp_group = dist.group.WORLD if dist.is_initialized() else None
@@ -153,7 +154,7 @@ def apply_fp8_training(model: nn.Module, args) -> None:
     _rank0_print(
         f"> FP8 training enabled (format={args.fp8_format}, "
         f"scaling={args.fp8_scaling}, amax_algo={args.fp8_amax_algo}, "
-        f"activation={args.fp8_activation})"
+        f"activation={args.fp8_activation}, grad_quant={config.quantize_grad})"
     )
 
 
@@ -486,6 +487,9 @@ def get_args() -> argparse.Namespace:
     fp8.add_argument("--fp8-activation", action="store_true", default=True)
     fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
                       action="store_false")
+    fp8.add_argument("--grad-quant-type", type=str, default=None,
+                      choices=["fp8", "mxfp8", "fp4"],
+                      help="Gradient quantization type (None=disabled).")
 
     # -- Warmup + Early stopping --
     sft = parser.add_argument_group("sft")

@@ -68,6 +68,7 @@ run_megatron() {
         FP8_ARGS+=" --fp8-amax-algo ${FP8_AMAX_ALGO} --fp8-amax-history ${FP8_AMAX_HISTORY}"
         [ "${FP8_REDUCE_AMAX}" = "1" ] && FP8_ARGS+=" --fp8-reduce-amax"
         [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"
+        [ -n "${GRAD_QUANT_TYPE}" ] && FP8_ARGS+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
     fi
 
     TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
@@ -197,6 +198,7 @@ run_fsdp() {
         CMD+=" --fp8-amax-history ${FP8_AMAX_HISTORY}"
         [ "${FP8_REDUCE_AMAX}" = "1" ] && CMD+=" --fp8-reduce-amax"
         [ "${FP8_ACTIVATION}" = "0" ] && CMD+=" --no-fp8-activation"
+        [ -n "${GRAD_QUANT_TYPE}" ] && CMD+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
     fi
 
     [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"

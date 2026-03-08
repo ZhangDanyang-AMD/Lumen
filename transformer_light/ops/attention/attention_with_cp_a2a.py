@@ -16,6 +16,7 @@ from typing import Tuple
 import torch
 
 from transformer_light.quantize import is_aiter_available
+from transformer_light.core.grad_quant import quantize_grad_tensor
 
 if is_aiter_available():
     from aiter.ops.mha import flash_attn_func
@@ -182,7 +183,7 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
     def forward(
         ctx, q, k, v, dropout_p, softmax_scale, causal, window_size,
         bias, alibi_slopes, return_lse, return_softmax, is_grad,
-        use_fp8, cp_group,
+        use_fp8, cp_group, grad_quant_type=None,
     ):
         assert bias is None
         q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(q, k, v, cp_group)
@@ -210,6 +211,7 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
             ctx.max_seqlens_k = k_lh.shape[1]
             ctx.attn_helper = attn_helper
             ctx.cp_group = cp_group
+            ctx.grad_quant_type = grad_quant_type
 
         output_tokens = _a2a_post_forward(output, attn_helper, cp_group)
 
@@ -236,7 +238,11 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
             window_size=ctx.window_size,
         )
         dq_t, dk_t, dv_t = _a2a_post_backward(dq, dk, dv, ctx.attn_helper, ctx.cp_group)
-        return (dq_t, dk_t, dv_t,) + (None,) * 11
+        gqt = ctx.grad_quant_type
+        dq_t = quantize_grad_tensor(dq_t, gqt)
+        dk_t = quantize_grad_tensor(dk_t, gqt)
+        dv_t = quantize_grad_tensor(dv_t, gqt)
+        return (dq_t, dk_t, dv_t,) + (None,) * 12
 
 
 class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
@@ -248,6 +254,7 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
         block_m_fwd=64, block_n_fwd=64,
         block_m_dq_bwd=64, block_n_dq_bwd=64,
         block_m_dkv_bwd=64, block_n_dkv_bwd=64, quant_block_size=32,
+        grad_quant_type=None,
     ):
         assert bias is None
         q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(q, k, v, cp_group)
@@ -281,6 +288,7 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
             ctx.max_seqlens_k = k_lh.shape[1]
             ctx.attn_helper = attn_helper
             ctx.cp_group = cp_group
+            ctx.grad_quant_type = grad_quant_type
 
         output_tokens = _a2a_post_forward(output, attn_helper, cp_group)
 
@@ -309,7 +317,11 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
             window_size=ctx.window_size,
         )
         dq_t, dk_t, dv_t = _a2a_post_backward(dq, dk, dv, ctx.attn_helper, ctx.cp_group)
-        return (dq_t, dk_t, dv_t,) + (None,) * 18
+        gqt = ctx.grad_quant_type
+        dq_t = quantize_grad_tensor(dq_t, gqt)
+        dk_t = quantize_grad_tensor(dk_t, gqt)
+        dv_t = quantize_grad_tensor(dv_t, gqt)
+        return (dq_t, dk_t, dv_t,) + (None,) * 19
 
 
 # ---------------------------------------------------------------------------

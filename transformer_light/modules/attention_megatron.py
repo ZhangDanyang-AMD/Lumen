@@ -153,6 +153,7 @@ class TransformerLightDotProductAttention(MegatronModule):
         self.mxfp8_quant_block_size = getattr(
             args, "mxfp8_quant_block_size", 128
         )
+        self.grad_quant_type = getattr(args, "grad_quant_type", None)
 
     def forward(
         self,
@@ -203,6 +204,7 @@ class TransformerLightDotProductAttention(MegatronModule):
                 block_m_dkv_bwd=self.block_m_dkv_bwd,
                 block_n_dkv_bwd=self.block_n_dkv_bwd,
                 quant_block_size=self.mxfp8_quant_block_size,
+                grad_quant_type=self.grad_quant_type,
             )
         else:
             if self.backend == "aiter" and not is_aiter_available():
@@ -218,6 +220,7 @@ class TransformerLightDotProductAttention(MegatronModule):
                 causal=causal,
                 backend_type=self.backend,
                 cp_param_bundle=cp_param_bundle,
+                grad_quant_type=self.grad_quant_type,
             )
 
         # out: [b, sq, np, hn] -> [sq, b, np*hn]
