@@ -18,11 +18,14 @@ from transformer_light.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
-from transformer_light.ops.quantize import (
-    convert_to_mxfp8,
-    convert_from_mxfp8,
-    quant_fp8_blockwise_impl,
-)
+def _get_quant_ops():
+    """Lazy import to avoid circular dependency with transformer_light.ops."""
+    from transformer_light.ops.quantize import (
+        convert_to_mxfp8,
+        convert_from_mxfp8,
+        quant_fp8_blockwise_impl,
+    )
+    return convert_to_mxfp8, convert_from_mxfp8, quant_fp8_blockwise_impl
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +57,7 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
         flat = torch.nn.functional.pad(flat, (0, pad_n))
 
     data_bf16 = flat.to(torch.bfloat16)
+    convert_to_mxfp8, convert_from_mxfp8, _ = _get_quant_ops()
     data_lp, scales = convert_to_mxfp8(data_bf16, block_size=block_size, axis=-1)
     data_hp = convert_from_mxfp8(
         data_lp, scales, output_dtype=torch.bfloat16,
@@ -186,6 +190,7 @@ class ScalingManager:
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
 
         if scale is None and self.config.format == QuantFormat.MXFP8:
+            convert_to_mxfp8, _, _ = _get_quant_ops()
             return convert_to_mxfp8(
                 tensor,
                 block_size=self.config.block_size,
@@ -194,6 +199,7 @@ class ScalingManager:
             )
 
         if scale is None and self.config.scaling == ScalingType.BLOCKWISE:
+            _, _, quant_fp8_blockwise_impl = _get_quant_ops()
             orig_shape = tensor.shape
             flat = tensor.reshape(-1, orig_shape[-1])
             fp8_tensor, fp8_scales = quant_fp8_blockwise_impl(
@@ -408,6 +414,7 @@ class ScalingManager:
         else:
             raise ValueError(f"Unsupported layout: {layout}")
 
+        convert_to_mxfp8, _, _ = _get_quant_ops()
         quanted_bhsd, scale_bhsd = convert_to_mxfp8(
             tensor_bhsd,
             block_size=block_size,
