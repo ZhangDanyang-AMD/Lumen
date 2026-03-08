@@ -289,8 +289,10 @@ class TestAttentionAiterCPA2AInterface:
         scale = D ** -0.5
 
         mock_flash = MagicMock()
-        mock_output = torch.randn(B, S_local, H // cp_size, D)
-        mock_lse = torch.randn(B, H // cp_size, S_local)
+        S_full = S_local * cp_size
+        H_local = H // cp_size
+        mock_output = torch.randn(B, S_full, H_local, D)
+        mock_lse = torch.randn(B, H_local, S_full)
         mock_flash.return_value = (mock_output, mock_lse)
 
         mock_cp_group = MagicMock()
@@ -912,7 +914,7 @@ class TestAttentionQuantPrimitives:
         block_size = 32
         t = torch.randn(B, S, H, D)
         mock_quant = MagicMock(return_value=(
-            torch.randn(B, H, S, D, dtype=torch.float8_e4m3fn),
+            torch.randn(B, H, S, D).to(torch.float8_e4m3fn),
             torch.randn(B, H, S // block_size, D // block_size),
         ))
         with patch("transformer_light.quantize.scaling_manager.convert_to_mxfp8",
@@ -931,7 +933,7 @@ class TestAttentionQuantPrimitives:
         B, H, S, D = 2, 4, 64, 32
         t = torch.randn(B, H, S, D)
         mock_quant = MagicMock(return_value=(
-            torch.randn(B, H, S, D, dtype=torch.float8_e4m3fn),
+            torch.randn(B, H, S, D).to(torch.float8_e4m3fn),
             torch.randn(B, H, 2, 1),
         ))
         with patch("transformer_light.quantize.scaling_manager.convert_to_mxfp8",
@@ -965,9 +967,9 @@ class TestAttentionQuantPrimitives:
         """attention_forward with use_fp8=True calls ScalingManager.quantize_block_fp8."""
         from transformer_light.quantize import ScalingManager
         t = torch.randn(2, 128, 8, 64)
-        block_result = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+        block_result = (torch.randn(2, 128, 8, 64).to(torch.float8_e4m3fn),
                         torch.randn(2, 8, 2))
-        v_result = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+        v_result = (torch.randn(2, 128, 8, 64).to(torch.float8_e4m3fn),
                     torch.tensor(1.0), 448.0)
         with patch.object(ScalingManager, "quantize_block_fp8",
                           return_value=block_result) as mock_block, \
@@ -980,7 +982,7 @@ class TestAttentionQuantPrimitives:
         """attention_forward per-tensor path calls ScalingManager.quantize_per_tensor_fp8."""
         from transformer_light.quantize import ScalingManager
         t = torch.randn(2, 128, 8, 64)
-        expected = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+        expected = (torch.randn(2, 128, 8, 64).to(torch.float8_e4m3fn),
                     torch.tensor([0.5]))
         with patch.object(ScalingManager, "quantize_per_tensor_fp8",
                           return_value=expected) as mock_fn:
