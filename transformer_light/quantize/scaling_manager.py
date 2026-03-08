@@ -14,13 +14,56 @@ from transformer_light.quantize.config import (
     QuantConfig,
     QuantFormat,
     ScalingType,
+    _get_float8_e4m3,
     get_fp8_max,
     get_fp8_max_bwd,
 )
 from transformer_light.ops.quantize import (
     convert_to_mxfp8,
+    convert_from_mxfp8,
     quant_fp8_blockwise_impl,
 )
+
+
+# ---------------------------------------------------------------------------
+# Gradient quantization helpers
+# ---------------------------------------------------------------------------
+
+GRAD_QUANT_TYPES = (None, "fp8", "mxfp8", "fp4")
+
+
+def _round_to_fp8(tensor: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
+    """Per-tensor FP8 quant-dequant round-trip."""
+    orig_dtype = tensor.dtype
+    amax = tensor.abs().amax().clamp(min=1e-12)
+    fp8_max = torch.finfo(fp8_dtype).max
+    scale = fp8_max / amax
+    tensor_fp8 = (tensor.float() * scale).clamp(-fp8_max, fp8_max).to(fp8_dtype)
+    return tensor_fp8.to(orig_dtype) / scale
+
+
+def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
+    """Microscaling FP8 quant-dequant round-trip."""
+    orig_dtype = tensor.dtype
+    orig_shape = tensor.shape
+
+    flat = tensor.reshape(-1, orig_shape[-1]).contiguous()
+    M, N = flat.shape
+    pad_n = (block_size - N % block_size) % block_size
+    if pad_n > 0:
+        flat = torch.nn.functional.pad(flat, (0, pad_n))
+
+    data_bf16 = flat.to(torch.bfloat16)
+    data_lp, scales = convert_to_mxfp8(data_bf16, block_size=block_size, axis=-1)
+    data_hp = convert_from_mxfp8(
+        data_lp, scales, output_dtype=torch.bfloat16,
+        block_size=block_size, axis=-1,
+    )
+
+    if pad_n > 0:
+        data_hp = data_hp[:, :N]
+
+    return data_hp.reshape(orig_shape).to(orig_dtype)
 
 
 class ScalingManager:
@@ -171,6 +214,256 @@ class ScalingManager:
         """Clear all tracked state (e.g. after warmup)."""
         self.amax_history.clear()
         self.scale_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Gradient quantization
+    # ------------------------------------------------------------------
+
+    def quantize_grad(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Apply gradient quantization based on ``self.config.quantize_grad``.
+
+        Performs a quant-dequant round-trip that reduces the gradient tensor
+        to the representable precision of the configured low-precision format,
+        then returns a tensor with the original shape and dtype.
+
+        The format is read from ``self.config.quantize_grad`` (one of
+        ``None``, ``"fp8"``, ``"mxfp8"``, ``"fp4"``).  When ``None``, the
+        tensor is returned unchanged.
+        """
+        return self.quantize_grad_tensor(
+            tensor,
+            self.config.quantize_grad,
+            fp8_dtype=self.fp8_dtype,
+            block_size=self.config.block_size,
+        )
+
+    @staticmethod
+    def quantize_grad_tensor(
+        tensor: torch.Tensor,
+        grad_quant_type: Optional[str],
+        fp8_dtype: Optional[torch.dtype] = None,
+        block_size: int = 32,
+    ) -> torch.Tensor:
+        """Stateless gradient quant-dequant round-trip.
+
+        Can be called without a :class:`ScalingManager` instance.
+
+        Args:
+            tensor: The gradient tensor.
+            grad_quant_type: ``"fp8"``, ``"mxfp8"``, ``"fp4"``, or ``None``.
+            fp8_dtype: Explicit FP8 dtype for the ``"fp8"`` path.  Auto-detects
+                when ``None``.
+            block_size: Block size for ``"mxfp8"`` quantization.
+        """
+        if grad_quant_type is None:
+            return tensor
+
+        if grad_quant_type == "fp8":
+            if fp8_dtype is None:
+                fp8_dtype = _get_float8_e4m3()
+            return _round_to_fp8(tensor, fp8_dtype)
+
+        if grad_quant_type == "mxfp8":
+            return _round_to_mxfp8(tensor, block_size=block_size)
+
+        if grad_quant_type == "fp4":
+            raise NotImplementedError(
+                "FP4 gradient quantization is not yet implemented. "
+                "Use 'fp8' or 'mxfp8' for now."
+            )
+
+        raise ValueError(
+            f"Unknown grad_quant_type={grad_quant_type!r}. "
+            f"Valid options: {GRAD_QUANT_TYPES}"
+        )
+
+    # ------------------------------------------------------------------
+    # Attention quantization primitives
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def quantize_per_tensor_fp8(
+        tensor: torch.Tensor,
+        float8_dtype: Optional[torch.dtype] = None,
+    ):
+        """Per-tensor FP8 quantization.
+
+        Returns ``(tensor_fp8, descale)`` where *descale* has shape ``(1,)``
+        matching the aiter per-tensor convention.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+        dtype_max = torch.finfo(float8_dtype).max
+        amax = tensor.abs().amax()
+        amax = torch.where(
+            amax == 0,
+            torch.tensor(dtype_max, device=tensor.device, dtype=tensor.dtype),
+            amax,
+        )
+        scale = dtype_max / amax
+        tensor_fp8 = (tensor * scale).clamp(-dtype_max, dtype_max).to(float8_dtype)
+        descale = (1.0 / scale).to(torch.float32).reshape(1)
+        return tensor_fp8, descale
+
+    @staticmethod
+    def quantize_block_fp8(
+        tensor: torch.Tensor,
+        block_m: int,
+        float8_dtype: Optional[torch.dtype] = None,
+    ):
+        """Per-block FP8 quantization for attention Q/K tensors.
+
+        Expects input in ``[B, S, H, D]`` (BSHD) layout.  Internally permutes
+        to ``[B, H, S, D]``, reshapes into blocks of *block_m* rows, computes
+        per-block max for scaling, quantizes, and permutes back to BSHD.
+
+        Returns ``(tensor_fp8, scale_inv)`` where *scale_inv* is the inverse
+        scale suitable for dequantization.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+        tensor = tensor.permute(0, 2, 1, 3)  # [B, H, S, D]
+        B, H, L, D = tensor.shape
+        MAX_FP8 = torch.finfo(float8_dtype).max
+        tensor = tensor.reshape(B, H, L // block_m, block_m, D).reshape(
+            B, H, L // block_m, block_m * D,
+        )
+        tensor_max = tensor.abs().max(dim=-1)[0]
+        tensor_max = torch.where(tensor_max == 0, MAX_FP8, tensor_max)
+        scale = MAX_FP8 / tensor_max
+        tensor = tensor * scale.reshape(scale.shape + (1,))
+        tensor = tensor.clamp(-MAX_FP8, MAX_FP8).to(float8_dtype)
+        tensor = tensor.reshape(B, H, L, D).permute(0, 2, 1, 3).contiguous()
+        return tensor, 1.0 / scale.to(torch.float32).contiguous()
+
+    @staticmethod
+    def quantize_v_fp8(
+        v: torch.Tensor,
+        float8_dtype: Optional[torch.dtype] = None,
+    ):
+        """Per-tensor FP8 quantization for attention V tensor.
+
+        Returns ``(v_fp8, v_scale, p_scale)`` where *p_scale* is the FP8 max
+        value used for softmax scaling in the attention kernel.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+        range_v = torch.max(torch.abs(v))
+        dtype_max = torch.finfo(float8_dtype).max
+        v_scale = dtype_max / range_v
+        p_scale = dtype_max
+        finfo = torch.finfo(float8_dtype)
+        v_fp8 = (v * v_scale).clamp(min=finfo.min, max=finfo.max).to(float8_dtype)
+        return v_fp8, v_scale, p_scale
+
+    @staticmethod
+    def quantize_block_mxfp8(
+        tensor: torch.Tensor,
+        block_size: int,
+        layout: str = "bshd",
+        *,
+        is_2d_block: bool = True,
+        float8_dtype: Optional[torch.dtype] = None,
+        cu_seqlens=None,
+        max_seqlens=None,
+    ):
+        """MXFP8 block quantization with attention layout support.
+
+        Supports ``"bhsd"``, ``"bshd"``, and ``"thd"`` layouts.
+
+        Returns ``(tensor_mxfp8, scale)``.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+
+        if layout == "bhsd":
+            tensor_bhsd = tensor
+            B, H, S, D = tensor_bhsd.shape
+        elif layout == "bshd":
+            tensor_bhsd = tensor.permute(0, 2, 1, 3).contiguous()
+            B, H, S, D = tensor_bhsd.shape
+        elif layout == "thd":
+            assert cu_seqlens is not None, "thd layout requires cu_seqlens"
+            assert tensor.dim() == 3, (
+                f"expected thd tensor shape [T,H,D], got {tensor.shape}"
+            )
+            T, H, D = tensor.shape
+            B = int(cu_seqlens.numel() - 1)
+            assert max_seqlens is not None, "thd layout requires max_seqlens"
+            max_seqlen = (
+                int(max_seqlens) if isinstance(max_seqlens, int)
+                else int(max(max_seqlens))
+            )
+            if is_2d_block:
+                padded = ((max_seqlen + block_size - 1) // block_size) * block_size
+            else:
+                padded = max_seqlen
+            tensor_bhsd = torch.zeros(
+                (B, H, padded, D), device=tensor.device, dtype=tensor.dtype,
+            )
+            for b in range(B):
+                s = int(cu_seqlens[b].item())
+                e = int(cu_seqlens[b + 1].item())
+                tensor_bhsd[b, :, :e - s, :] = tensor[s:e].transpose(0, 1)
+        else:
+            raise ValueError(f"Unsupported layout: {layout}")
+
+        quanted_bhsd, scale_bhsd = convert_to_mxfp8(
+            tensor_bhsd,
+            block_size=block_size,
+            axis=-1,
+            is_2d_block=is_2d_block,
+            float8_dtype_pt=float8_dtype,
+        )
+
+        if layout == "bshd":
+            return (
+                quanted_bhsd.permute(0, 2, 1, 3).contiguous(),
+                scale_bhsd.permute(0, 2, 1, 3).contiguous(),
+            )
+
+        if layout == "thd":
+            qs, ss = [], []
+            for b in range(B):
+                s0 = int(cu_seqlens[b].item())
+                e0 = int(cu_seqlens[b + 1].item())
+                L = e0 - s0
+                qs.append(quanted_bhsd[b, :, :L, :].transpose(0, 1).contiguous())
+                if is_2d_block:
+                    m_blocks = (L + block_size - 1) // block_size
+                    ss.append(
+                        scale_bhsd[b, :, :m_blocks, :].transpose(0, 1).contiguous()
+                    )
+                else:
+                    ss.append(
+                        scale_bhsd[b, :, :L, :].transpose(0, 1).contiguous()
+                    )
+            return torch.cat(qs, dim=0), torch.cat(ss, dim=0)
+
+        return quanted_bhsd, scale_bhsd
+
+    @staticmethod
+    def compute_p_scale_mxfp8(
+        float8_dtype: Optional[torch.dtype] = None,
+    ) -> int:
+        """Compute softmax P scale constant for MXFP8 attention kernels.
+
+        Returns an integer scale derived from the FP8 format's exponent
+        encoding, used by Triton MXFP8 attention kernels for correct
+        softmax rescaling.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+        p_scale_f = torch.finfo(float8_dtype).max
+        if float8_dtype == torch.float8_e4m3fn:
+            mask_s, mbits, s_bias = 0b1111, 3, 7
+        else:
+            mask_s, mbits, s_bias = 0b11111, 2, 15
+        hp_ebias = 127
+        raw = torch.bitwise_right_shift(
+            torch.tensor(p_scale_f).to(float8_dtype).view(torch.uint8), mbits,
+        ) & mask_s
+        return (raw - s_bias + hp_ebias).to(torch.uint32).item()
 
 
 # Backward-compat alias

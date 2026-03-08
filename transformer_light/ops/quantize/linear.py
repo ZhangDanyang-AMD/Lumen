@@ -27,7 +27,6 @@ import torch
 import torch.nn.functional as F
 
 from transformer_light.quantize import is_aiter_available
-from transformer_light.core.grad_quant import quantize_grad_tensor
 from transformer_light.ops.quantize.ops import (
     quant_fp8_blockwise_impl,
     convert_to_mxfp8,
@@ -115,7 +114,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
         block_size: int,
         tensor_id: str = "weight",
         quantize_activation: bool = True,
-        grad_quant_type: Optional[str] = None,
     ) -> torch.Tensor:
         if not quantize_activation:
             weight_fp8, weight_scale = scaling_manager.quantize(tensor_id, weight)
@@ -125,7 +123,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.scaling_manager = scaling_manager
             ctx.has_bias = bias is not None
             ctx.quantize_activation = False
-            ctx.grad_quant_type = grad_quant_type
             ctx.tensor_id = tensor_id
             return output
 
@@ -154,7 +151,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
         ctx.has_bias = bias is not None
         ctx.tensor_id = tensor_id
         ctx.quantize_activation = True
-        ctx.grad_quant_type = grad_quant_type
         return output
 
     @staticmethod
@@ -164,9 +160,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
             weight_dequant = weight_fp8.to(grad_output.dtype) * weight_scale
             grad_input = grad_output @ weight_dequant
             grad_weight = grad_output.reshape(-1, grad_output.shape[-1]).t() @ input_tensor.reshape(-1, input_tensor.shape[-1])
-            grad_weight = quantize_grad_tensor(grad_weight, ctx.grad_quant_type)
+            grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         backend = ctx.backend
@@ -193,11 +189,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_input = grad_input.view_as(grad_output).view(*grad_output.shape[:-1], weight_fp8.shape[-1])
             grad_weight = _triton_mm(grad_flat.t(), input_flat, grad_scale, input_scale)
 
-        grad_weight = quantize_grad_tensor(grad_weight, ctx.grad_quant_type)
+        grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
 
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
@@ -218,15 +214,18 @@ def quantized_linear(
     block_size: int = 128,
     tensor_id: str = "weight",
     quantize_activation: bool = True,
-    grad_quant_type: Optional[str] = None,
 ) -> torch.Tensor:
     """Functional quantized linear — mirrors ``attention()`` in the attention module.
+
+    Gradient quantization is controlled by
+    ``scaling_manager.config.quantize_grad`` (set via :class:`QuantConfig`).
 
     Args:
         input: Input tensor ``[*, in_features]``.
         weight: Weight matrix ``[out_features, in_features]``.
         bias: Optional bias ``[out_features]``.
         scaling_manager: A :class:`~transformer_light.quantize.ScalingManager`.
+            Also carries the gradient quantization config.
         backend: ``"aiter"`` or ``"triton"``.
         fp8_dtype: Target FP8 dtype (default ``torch.float8_e4m3fn``).
         block_size: Block size for blockwise quantization (triton backend).
@@ -236,8 +235,6 @@ def quantized_linear(
             (e.g. ``"decoder.layers.0.mlp.linear_fc1.weight"``).
         quantize_activation: If ``True`` (default), quantize both input and
             weight.  If ``False``, only quantize the weight (weight-only FP8).
-        grad_quant_type: Gradient quantization format — ``"fp8"``,
-            ``"mxfp8"``, ``"fp4"``, or ``None`` (disabled).
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -253,5 +250,5 @@ def quantized_linear(
 
     return QuantizedLinearFunction.apply(
         input, weight, bias, scaling_manager, backend, fp8_dtype, block_size,
-        tensor_id, quantize_activation, grad_quant_type,
+        tensor_id, quantize_activation,
     )

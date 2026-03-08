@@ -43,7 +43,10 @@ from transformer_light.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
-from transformer_light.quantize.scaling_manager import ScalingManager
+from transformer_light.quantize.scaling_manager import (
+    GRAD_QUANT_TYPES,
+    ScalingManager,
+)
 from transformer_light.ops.quantize import (
     convert_to_mxfp8,
     convert_from_mxfp8,
@@ -187,11 +190,13 @@ def _patch_linear_layers(
     Each layer gets a unique ``tensor_id`` derived from its module path so that
     :class:`ScalingManager` tracks independent amax histories per layer (fixes
     the shared-``"weight"`` bug where all layers polluted a single deque).
+
+    Gradient quantization is handled by the :class:`ScalingManager` itself
+    (configured via ``config.quantize_grad``).
     """
     fp8_dtype = config.torch_dtype or torch.float8_e4m3fn
     block_size = config.block_size
     quant_act = config.quantize_activation
-    grad_quant_type = config.quantize_grad
 
     count = 0
     for name, module in model.named_modules():
@@ -204,12 +209,13 @@ def _patch_linear_layers(
 
             handle = module.register_forward_hook(_make_quant_hook(
                 manager, backend, fp8_dtype, block_size, tensor_id,
-                quant_act, grad_quant_type,
+                quant_act,
             ))
             module._quant_hook_handle = handle
             count += 1
 
     act_str = "weight+activation" if quant_act else "weight-only"
+    grad_quant_type = config.quantize_grad
     grad_str = f"+grad({grad_quant_type})" if grad_quant_type else ""
     logger.info(
         "Quantization enabled on %d nn.Linear layers "
@@ -220,11 +226,12 @@ def _patch_linear_layers(
 
 
 def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
-                     quantize_activation, grad_quant_type):
+                     quantize_activation):
     """Create a forward hook closure that replaces the vanilla linear output.
 
     *tensor_id* is unique per layer so that delayed-scaling amax histories
-    are tracked independently.
+    are tracked independently.  Gradient quantization is handled by the
+    *manager* (:class:`ScalingManager`) based on its ``config.quantize_grad``.
     """
 
     def hook(module, args, output):
@@ -239,7 +246,6 @@ def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
             block_size=block_size,
             tensor_id=tensor_id,
             quantize_activation=quantize_activation,
-            grad_quant_type=grad_quant_type,
         )
 
     return hook

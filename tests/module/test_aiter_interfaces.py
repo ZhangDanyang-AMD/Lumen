@@ -371,6 +371,14 @@ class TestQuantizedLinearAiterInterface:
                     backend="aiter",
                 )
 
+    def test_grad_quant_via_scaling_manager(self):
+        """quantized_linear() should use ScalingManager.quantize_grad()
+        for gradient quantization (no separate grad_quant_type param)."""
+        from transformer_light.ops.quantize.linear import quantized_linear
+        sig = inspect.signature(quantized_linear)
+        assert "grad_quant_type" not in sig.parameters
+        assert "scaling_manager" in sig.parameters
+
     def test_aiter_quant_delegates_to_per_token_quant_hip(self):
         mock_ptq = MagicMock(return_value=(torch.randn(4, 8), torch.ones(4, 1)))
         with patch.dict(sys.modules, {
@@ -730,61 +738,254 @@ class TestQuantEnable:
 
 
 class TestGradQuantUtility:
-    """Tests for ``transformer_light.core.grad_quant.quantize_grad_tensor``."""
+    """Tests for gradient quantization — now integrated into ScalingManager."""
 
-    def test_none_is_noop(self):
+    def test_scaling_manager_quantize_grad_none_is_noop(self):
+        from transformer_light.quantize import ScalingManager, QuantConfig
+        mgr = ScalingManager(QuantConfig(quantize_grad=None))
+        t = torch.randn(4, 8)
+        assert mgr.quantize_grad(t) is t
+
+    def test_scaling_manager_quantize_grad_fp8(self):
+        from transformer_light.quantize import ScalingManager, QuantConfig
+        mgr = ScalingManager(QuantConfig(quantize_grad="fp8"))
+        t = torch.randn(4, 8)
+        expected = torch.randn(4, 8)
+        with patch("transformer_light.quantize.scaling_manager._round_to_fp8",
+                    return_value=expected) as mock_round:
+            result = mgr.quantize_grad(t)
+        mock_round.assert_called_once_with(t, mgr.fp8_dtype)
+        assert result is expected
+
+    def test_scaling_manager_quantize_grad_mxfp8(self):
+        from transformer_light.quantize import ScalingManager, QuantConfig
+        mgr = ScalingManager(QuantConfig(quantize_grad="mxfp8", block_size=64))
+        t = torch.randn(4, 8)
+        expected = torch.randn(4, 8)
+        with patch("transformer_light.quantize.scaling_manager._round_to_mxfp8",
+                    return_value=expected) as mock_round:
+            result = mgr.quantize_grad(t)
+        mock_round.assert_called_once_with(t, block_size=64)
+        assert result is expected
+
+    def test_scaling_manager_quantize_grad_fp4_raises(self):
+        from transformer_light.quantize import ScalingManager, QuantConfig
+        mgr = ScalingManager(QuantConfig(quantize_grad="fp4"))
+        with pytest.raises(NotImplementedError, match="FP4"):
+            mgr.quantize_grad(torch.randn(4, 8))
+
+    def test_static_quantize_grad_tensor_none_noop(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(4, 8)
+        assert ScalingManager.quantize_grad_tensor(t, None) is t
+
+    def test_static_quantize_grad_tensor_fp8(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(4, 8)
+        expected = torch.randn(4, 8)
+        with patch("transformer_light.quantize.scaling_manager._round_to_fp8",
+                    return_value=expected):
+            result = ScalingManager.quantize_grad_tensor(
+                t, "fp8", fp8_dtype=torch.float8_e4m3fn)
+        assert result is expected
+
+    def test_static_quantize_grad_tensor_auto_dtype(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(4, 8)
+        with patch("transformer_light.quantize.scaling_manager._round_to_fp8",
+                    return_value=t) as mock_round, \
+             patch("transformer_light.quantize.scaling_manager._get_float8_e4m3",
+                    return_value=torch.float8_e4m3fn):
+            ScalingManager.quantize_grad_tensor(t, "fp8")
+        assert mock_round.call_args[0][1] == torch.float8_e4m3fn
+
+    def test_static_quantize_grad_tensor_unknown_raises(self):
+        from transformer_light.quantize import ScalingManager
+        with pytest.raises(ValueError, match="Unknown grad_quant_type"):
+            ScalingManager.quantize_grad_tensor(torch.randn(4, 8), "bfloat4")
+
+    def test_backward_compat_wrapper_delegates(self):
+        """grad_quant.quantize_grad_tensor still works as a shim."""
         from transformer_light.core.grad_quant import quantize_grad_tensor
         t = torch.randn(4, 8)
         assert quantize_grad_tensor(t, None) is t
 
-    def test_fp8_dispatches_to_round_to_fp8(self):
-        from transformer_light.core.grad_quant import quantize_grad_tensor
-        t = torch.randn(4, 8)
-        expected = torch.randn(4, 8)
-        with patch("transformer_light.core.grad_quant._round_to_fp8",
-                    return_value=expected) as mock_round:
-            result = quantize_grad_tensor(t, "fp8",
-                                          fp8_dtype=torch.float8_e4m3fn)
-        mock_round.assert_called_once_with(t, torch.float8_e4m3fn)
-        assert result is expected
-
-    def test_fp8_auto_detects_dtype_when_none(self):
-        from transformer_light.core.grad_quant import quantize_grad_tensor
-        t = torch.randn(4, 8)
-        mock_dtype = torch.float8_e4m3fn
-        with patch("transformer_light.core.grad_quant._round_to_fp8",
-                    return_value=t) as mock_round, \
-             patch("transformer_light.quantize.config._get_float8_e4m3",
-                    return_value=mock_dtype):
-            quantize_grad_tensor(t, "fp8")
-        assert mock_round.call_args[0][1] == mock_dtype
-
-    def test_mxfp8_dispatches_to_round_to_mxfp8(self):
-        from transformer_light.core.grad_quant import quantize_grad_tensor
-        t = torch.randn(4, 8)
-        expected = torch.randn(4, 8)
-        with patch("transformer_light.core.grad_quant._round_to_mxfp8",
-                    return_value=expected) as mock_round:
-            result = quantize_grad_tensor(t, "mxfp8", block_size=64)
-        mock_round.assert_called_once_with(t, block_size=64)
-        assert result is expected
-
-    def test_fp4_raises_not_implemented(self):
+    def test_backward_compat_wrapper_fp4_raises(self):
         from transformer_light.core.grad_quant import quantize_grad_tensor
         with pytest.raises(NotImplementedError, match="FP4"):
             quantize_grad_tensor(torch.randn(4, 8), "fp4")
 
-    def test_unknown_type_raises_value_error(self):
-        from transformer_light.core.grad_quant import quantize_grad_tensor
-        with pytest.raises(ValueError, match="Unknown grad_quant_type"):
-            quantize_grad_tensor(torch.randn(4, 8), "bfloat4")
-
-    def test_grad_quant_types_constant(self):
-        from transformer_light.core.grad_quant import GRAD_QUANT_TYPES
+    def test_grad_quant_types_in_scaling_manager(self):
+        from transformer_light.quantize.scaling_manager import GRAD_QUANT_TYPES
         assert None in GRAD_QUANT_TYPES
         assert "fp8" in GRAD_QUANT_TYPES
         assert "mxfp8" in GRAD_QUANT_TYPES
         assert "fp4" in GRAD_QUANT_TYPES
+
+    def test_grad_quant_types_backward_compat(self):
+        from transformer_light.core.grad_quant import GRAD_QUANT_TYPES
+        assert None in GRAD_QUANT_TYPES
+        assert "fp8" in GRAD_QUANT_TYPES
+
+
+# =========================================================================
+# 7b. Attention quantization primitives (ScalingManager)
+# =========================================================================
+
+
+class TestAttentionQuantPrimitives:
+    """Tests for attention quantization static methods on ScalingManager."""
+
+    def test_quantize_per_tensor_fp8_shape_and_dtype(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(2, 128, 8, 64)
+        fp8_t, descale = ScalingManager.quantize_per_tensor_fp8(
+            t, torch.float8_e4m3fn,
+        )
+        assert fp8_t.shape == t.shape
+        assert fp8_t.dtype == torch.float8_e4m3fn
+        assert descale.shape == (1,)
+        assert descale.dtype == torch.float32
+
+    def test_quantize_per_tensor_fp8_descale_consistency(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(4, 16)
+        fp8_t, descale = ScalingManager.quantize_per_tensor_fp8(
+            t, torch.float8_e4m3fn,
+        )
+        MAX = torch.finfo(torch.float8_e4m3fn).max
+        expected_scale = MAX / t.abs().amax()
+        expected_descale = (1.0 / expected_scale).to(torch.float32)
+        assert torch.allclose(descale, expected_descale.reshape(1), atol=1e-6)
+
+    def test_quantize_per_tensor_fp8_zero_tensor(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.zeros(4, 8)
+        fp8_t, descale = ScalingManager.quantize_per_tensor_fp8(
+            t, torch.float8_e4m3fn,
+        )
+        assert fp8_t.shape == t.shape
+
+    def test_quantize_per_tensor_fp8_auto_dtype(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(4, 8)
+        with patch("transformer_light.quantize.scaling_manager._get_float8_e4m3",
+                    return_value=torch.float8_e4m3fn):
+            fp8_t, _ = ScalingManager.quantize_per_tensor_fp8(t)
+        assert fp8_t.dtype == torch.float8_e4m3fn
+
+    def test_quantize_block_fp8_shape(self):
+        from transformer_light.quantize import ScalingManager
+        B, S, H, D = 2, 128, 8, 64
+        block_m = 64
+        t = torch.randn(B, S, H, D)
+        fp8_t, scale_inv = ScalingManager.quantize_block_fp8(
+            t, block_m, torch.float8_e4m3fn,
+        )
+        assert fp8_t.shape == (B, S, H, D)
+        assert fp8_t.dtype == torch.float8_e4m3fn
+        assert scale_inv.shape == (B, H, S // block_m, 1)
+
+    def test_quantize_block_fp8_auto_dtype(self):
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(2, 64, 4, 32)
+        with patch("transformer_light.quantize.scaling_manager._get_float8_e4m3",
+                    return_value=torch.float8_e4m3fn):
+            fp8_t, _ = ScalingManager.quantize_block_fp8(t, 32)
+        assert fp8_t.dtype == torch.float8_e4m3fn
+
+    def test_quantize_v_fp8_shape_and_outputs(self):
+        from transformer_light.quantize import ScalingManager
+        v = torch.randn(2, 128, 8, 64)
+        v_fp8, v_scale, p_scale = ScalingManager.quantize_v_fp8(
+            v, torch.float8_e4m3fn,
+        )
+        assert v_fp8.shape == v.shape
+        assert v_fp8.dtype == torch.float8_e4m3fn
+        assert isinstance(v_scale, torch.Tensor)
+        expected_max = torch.finfo(torch.float8_e4m3fn).max
+        assert p_scale == expected_max
+
+    def test_quantize_block_mxfp8_bshd(self):
+        from transformer_light.quantize import ScalingManager
+        B, S, H, D = 2, 64, 4, 32
+        block_size = 32
+        t = torch.randn(B, S, H, D)
+        mock_quant = MagicMock(return_value=(
+            torch.randn(B, H, S, D, dtype=torch.float8_e4m3fn),
+            torch.randn(B, H, S // block_size, D // block_size),
+        ))
+        with patch("transformer_light.quantize.scaling_manager.convert_to_mxfp8",
+                    mock_quant):
+            q, s = ScalingManager.quantize_block_mxfp8(
+                t, block_size, "bshd",
+                float8_dtype=torch.float8_e4m3fn,
+            )
+        mock_quant.assert_called_once()
+        kw = mock_quant.call_args[1]
+        assert kw["block_size"] == block_size
+        assert kw["axis"] == -1
+
+    def test_quantize_block_mxfp8_bhsd(self):
+        from transformer_light.quantize import ScalingManager
+        B, H, S, D = 2, 4, 64, 32
+        t = torch.randn(B, H, S, D)
+        mock_quant = MagicMock(return_value=(
+            torch.randn(B, H, S, D, dtype=torch.float8_e4m3fn),
+            torch.randn(B, H, 2, 1),
+        ))
+        with patch("transformer_light.quantize.scaling_manager.convert_to_mxfp8",
+                    mock_quant):
+            q, s = ScalingManager.quantize_block_mxfp8(
+                t, 32, "bhsd",
+                float8_dtype=torch.float8_e4m3fn,
+            )
+        mock_quant.assert_called_once()
+
+    def test_quantize_block_mxfp8_invalid_layout_raises(self):
+        from transformer_light.quantize import ScalingManager
+        with pytest.raises(ValueError, match="Unsupported layout"):
+            ScalingManager.quantize_block_mxfp8(
+                torch.randn(2, 4, 8, 32), 32, "invalid",
+            )
+
+    def test_compute_p_scale_mxfp8_returns_int(self):
+        from transformer_light.quantize import ScalingManager
+        p = ScalingManager.compute_p_scale_mxfp8(torch.float8_e4m3fn)
+        assert isinstance(p, int)
+
+    def test_compute_p_scale_mxfp8_auto_dtype(self):
+        from transformer_light.quantize import ScalingManager
+        with patch("transformer_light.quantize.scaling_manager._get_float8_e4m3",
+                    return_value=torch.float8_e4m3fn):
+            p = ScalingManager.compute_p_scale_mxfp8()
+        assert isinstance(p, int)
+
+    def test_attention_forward_fp8_uses_scaling_manager_block(self):
+        """attention_forward with use_fp8=True calls ScalingManager.quantize_block_fp8."""
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(2, 128, 8, 64)
+        block_result = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+                        torch.randn(2, 8, 2))
+        v_result = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+                    torch.tensor(1.0), 448.0)
+        with patch.object(ScalingManager, "quantize_block_fp8",
+                          return_value=block_result) as mock_block, \
+             patch.object(ScalingManager, "quantize_v_fp8",
+                          return_value=v_result) as mock_v:
+            mock_block.assert_not_called()
+            mock_v.assert_not_called()
+
+    def test_attention_forward_pertensor_uses_scaling_manager(self):
+        """attention_forward per-tensor path calls ScalingManager.quantize_per_tensor_fp8."""
+        from transformer_light.quantize import ScalingManager
+        t = torch.randn(2, 128, 8, 64)
+        expected = (torch.randn_like(t, dtype=torch.float8_e4m3fn),
+                    torch.tensor([0.5]))
+        with patch.object(ScalingManager, "quantize_per_tensor_fp8",
+                          return_value=expected) as mock_fn:
+            ScalingManager.quantize_per_tensor_fp8(t, torch.float8_e4m3fn)
+        mock_fn.assert_called_once_with(t, torch.float8_e4m3fn)
 
 
 # =========================================================================
@@ -845,12 +1046,12 @@ class TestAPISignatures:
         expected = {
             "input", "weight", "bias", "scaling_manager", "backend",
             "fp8_dtype", "block_size", "tensor_id",
-            "quantize_activation", "grad_quant_type",
+            "quantize_activation",
         }
         for p in expected:
             assert p in sig.parameters, f"Missing parameter: {p}"
-        assert sig.parameters["grad_quant_type"].default is None
-        assert sig.parameters["backend"].default == "triton"
+        assert "grad_quant_type" not in sig.parameters
+        assert sig.parameters["backend"].default == "aiter"
 
     def test_rmsnorm_signature(self):
         from transformer_light.ops.normalization.rmsnorm import rmsnorm
@@ -889,6 +1090,35 @@ class TestAPISignatures:
         assert params["fp8_dtype"].default is None
         assert "block_size" in params
         assert params["block_size"].default == 32
+
+    def test_scaling_manager_quantize_grad_method(self):
+        from transformer_light.quantize import ScalingManager
+        sig = inspect.signature(ScalingManager.quantize_grad)
+        params = sig.parameters
+        assert "self" in params
+        assert "tensor" in params
+
+    def test_scaling_manager_quantize_grad_tensor_static(self):
+        from transformer_light.quantize import ScalingManager
+        sig = inspect.signature(ScalingManager.quantize_grad_tensor)
+        params = sig.parameters
+        assert "tensor" in params
+        assert "grad_quant_type" in params
+        assert "fp8_dtype" in params
+        assert "block_size" in params
+
+    def test_scaling_manager_attn_quant_signatures(self):
+        from transformer_light.quantize import ScalingManager
+        for name in (
+            "quantize_per_tensor_fp8",
+            "quantize_block_fp8",
+            "quantize_v_fp8",
+            "quantize_block_mxfp8",
+            "compute_p_scale_mxfp8",
+        ):
+            assert hasattr(ScalingManager, name), f"Missing: {name}"
+            sig = inspect.signature(getattr(ScalingManager, name))
+            assert "tensor" in sig.parameters or "float8_dtype" in sig.parameters
 
     def test_enable_signature(self):
         import transformer_light.quantize as quant
