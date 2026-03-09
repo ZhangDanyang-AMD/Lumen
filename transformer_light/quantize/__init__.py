@@ -245,20 +245,50 @@ def _patch_linear_layers(
 
 
 def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
-                     quantize_activation):
+                     quantize_activation, is_megatron: bool = False):
     """Create a forward hook closure that replaces the vanilla linear output.
 
     *tensor_id* is unique per layer so that delayed-scaling amax histories
     are tracked independently.  Gradient quantization is handled by the
     *manager* (:class:`ScalingManager`) based on its ``config.quantize_grad``.
+
+    For Megatron's ``ColumnParallelLinear`` / ``RowParallelLinear``:
+    - ``skip_bias_add=True`` layers return a ``(output, bias)`` tuple; the hook
+      preserves that format.
+    - ``RowParallelLinear`` all-reduces the local GEMM result across TP ranks;
+      the hook re-applies the all-reduce after the FP8 GEMM.
+    - ``ColumnParallelLinear`` with ``gather_output=True`` all-gathers the
+      result; the hook re-applies the all-gather.
     """
 
     def hook(module, args, output):
         input_tensor = args[0]
-        return quantized_linear(
+
+        if not is_megatron:
+            return quantized_linear(
+                input_tensor,
+                module.weight,
+                module.bias,
+                scaling_manager=manager,
+                backend=backend,
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                tensor_id=tensor_id,
+                quantize_activation=quantize_activation,
+            )
+
+        # --- Megatron parallel linear path ---
+        skip_bias_add = getattr(module, "skip_bias_add", False)
+        bias = getattr(module, "bias", None)
+
+        # For skip_bias_add layers the bias is returned separately; don't fuse
+        # it into the GEMM so callers can fuse it themselves (e.g. with SwiGLU).
+        bias_for_gemm = None if skip_bias_add else bias
+
+        result = quantized_linear(
             input_tensor,
             module.weight,
-            module.bias,
+            bias_for_gemm,
             scaling_manager=manager,
             backend=backend,
             fp8_dtype=fp8_dtype,
@@ -266,6 +296,34 @@ def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
             tensor_id=tensor_id,
             quantize_activation=quantize_activation,
         )
+
+        # RowParallelLinear: all-reduce the local GEMM result across TP ranks.
+        if getattr(module, "input_is_parallel", False) or (
+            hasattr(module, "sequence_parallel") and
+            not getattr(module, "gather_output", True)
+            and hasattr(module, "input_size_per_partition")
+        ):
+            try:
+                from megatron.core.tensor_parallel.mappings import (
+                    reduce_from_tensor_model_parallel_region,
+                )
+                result = reduce_from_tensor_model_parallel_region(result)
+            except ImportError:
+                pass
+
+        # ColumnParallelLinear with gather_output=True: all-gather shards.
+        elif getattr(module, "gather_output", False):
+            try:
+                from megatron.core.tensor_parallel.mappings import (
+                    gather_from_tensor_model_parallel_region,
+                )
+                result = gather_from_tensor_model_parallel_region(result)
+            except ImportError:
+                pass
+
+        if skip_bias_add:
+            return result, bias
+        return result
 
     return hook
 
