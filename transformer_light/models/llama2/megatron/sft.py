@@ -38,6 +38,38 @@ from typing import Optional
 
 import torch
 
+
+def _install_fused_layer_norm_patch():
+    """Patch FusedLayerNorm to support RMSNorm before any Megatron module
+    imports it.  Must run before GPTModel/TransformerBlock import."""
+    from megatron.core.fusions import fused_layer_norm as _fln_mod
+    from transformer_light.ops.normalization import TransformerLightRMSNorm
+    _OriginalFusedLayerNorm = _fln_mod.FusedLayerNorm
+
+    class _FusedLayerNormRMSNormCompat(torch.nn.Module):
+        """Dispatches to our RMSNorm impl when config.normalization=='RMSNorm'."""
+
+        def __new__(cls, config, hidden_size, eps=1e-6, **kwargs):
+            if getattr(config, "normalization", "") == "RMSNorm":
+                return object.__new__(cls)
+            return _OriginalFusedLayerNorm(config, hidden_size, eps, **kwargs)
+
+        def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
+            if getattr(config, "normalization", "") != "RMSNorm":
+                return
+            super().__init__()
+            self._norm = TransformerLightRMSNorm(hidden_size, eps=eps)
+            self.weight = self._norm.weight
+
+        def forward(self, x):
+            return self._norm(x)
+
+    _FusedLayerNormRMSNormCompat.__name__ = "FusedLayerNorm"
+    _fln_mod.FusedLayerNorm = _FusedLayerNormRMSNormCompat
+
+
+_install_fused_layer_norm_patch()
+
 from megatron.core import tensor_parallel
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
@@ -106,7 +138,6 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
 
     _patch_core_attention(transformer_layer_spec)
     _patch_norms_in_spec(transformer_layer_spec)
-    _patch_fused_layer_norm()
 
     model = GPTModel(
         config=config,
@@ -204,23 +235,6 @@ def _patch_norms_in_spec(spec):
     if layer_specs:
         for layer_spec in layer_specs:
             _patch_norms_in_spec(layer_spec)
-
-
-def _patch_fused_layer_norm():
-    """Monkey-patch ``FusedLayerNorm`` in every Megatron module that
-    references it, replacing it with :class:`_MegatronCompatibleTLRMSNorm`.
-
-    ``FusedLayerNorm`` only supports ``config.normalization == "LayerNorm"``
-    and asserts at construction time.  Since LLaMA uses RMSNorm and we run
-    without Transformer Engine, we redirect all ``FusedLayerNorm`` references
-    to our TE-free RMSNorm wrapper.
-    """
-    import megatron.core.fusions.fused_layer_norm as _fln_mod
-    _fln_mod.FusedLayerNorm = _MegatronCompatibleTLRMSNorm
-
-    import megatron.core.transformer.transformer_block as _tb_mod
-    if hasattr(_tb_mod, "FusedLayerNorm"):
-        _tb_mod.FusedLayerNorm = _MegatronCompatibleTLRMSNorm
 
 
 def _patch_rmsnorm(model, grad_quant_type=None):
