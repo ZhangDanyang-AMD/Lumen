@@ -53,22 +53,21 @@ def _mark_allow_in_graph(cls):
 # ---------------------------------------------------------------------------
 
 def _aiter_quant(x: torch.Tensor, dtype: torch.dtype):
-    from aiter.ops.quant import per_token_quant_hip
-    return per_token_quant_hip(x, quant_dtype=dtype)
+    from aiter.ops.quant import per_tensor_quant_hip
+    # Use per-tensor quantization so that scale_a is always a scalar (1,).
+    # hipb_mm TensorWise mode requires both scales to be shape (1, 1); per-token
+    # scales [M, 1] would require scale_b=(1, N) RowWise which is incompatible
+    # with the per-tensor weight scale produced by delayed/dynamic ScalingManager.
+    return per_tensor_quant_hip(x, quant_dtype=dtype)
 
 
 def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
     from aiter.ops.gradlib import hipb_mm
+    # hipb_mm TensorWise mode requires both scales to be shape (1, 1).
     if isinstance(scale_a, torch.Tensor):
-        scale_a = scale_a.float()
+        scale_a = scale_a.float().reshape(1, 1)
     if isinstance(scale_b, torch.Tensor):
-        scale_b = scale_b.float()
-    # hipb_mm requires both scales to have the same number of dimensions when
-    # either is non-TensorWise (2-D per-token).  Broadcast a scalar weight
-    # scale to [1, 1] so it matches a per-token input scale of shape [M, 1].
-    if (isinstance(scale_a, torch.Tensor) and scale_a.dim() == 2
-            and isinstance(scale_b, torch.Tensor) and scale_b.dim() < 2):
-        scale_b = scale_b.reshape(1, 1)
+        scale_b = scale_b.float().reshape(1, 1)
     # solution_index=-1: auto-select best solution (required positional arg in newer aiter)
     return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
 
