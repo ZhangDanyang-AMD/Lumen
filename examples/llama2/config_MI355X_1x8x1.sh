@@ -101,6 +101,19 @@ export NCCL_MIN_CTAS=${NCCL_MIN_CTAS:-32}
 export NCCL_NCHANNELS_PER_NET_PEER=${NCCL_NCHANNELS_PER_NET_PEER:-32}
 export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
 export TORCH_NCCL_AVOID_RECORD_STREAMS=${TORCH_NCCL_AVOID_RECORD_STREAMS:-1}
+# Disable SDMA engines — known to cause RCCL P2P hangs on MI-series GPUs.
+export HSA_ENABLE_SDMA=${HSA_ENABLE_SDMA:-0}
+# Disable InfiniBand probing — avoids "No device found" errors.
+export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1}
+# Force RCCL bootstrap sockets onto loopback for single-node runs.
+# Without this, RCCL scans all interfaces and may select a physical NIC
+# (eno1, eno0, …) that is unreachable inside Kubernetes / container
+# environments, causing "socketPollConnect: No route to host" at init time.
+# Actual GPU data transfers use PCIe/xGMI and are unaffected by this setting.
+# For multi-node runs override with the inter-node interface: NCCL_SOCKET_IFNAME=ens3
+export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-lo}
+# Set to INFO to debug RCCL errors; WARN for normal runs.
+export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 
 # ---- hipBLASLt ---------------------------------------------------------------
 export USE_HIPBLASLT=${USE_HIPBLASLT:-1}

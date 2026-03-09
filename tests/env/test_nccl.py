@@ -494,13 +494,29 @@ def _print_summary() -> None:
 # Worker entry-point (used by both torchrun and mp.spawn)
 # ---------------------------------------------------------------------------
 
-def _worker(rank: int, world_size: int, master_addr: str, master_port: str) -> None:
-    """Run all test phases for a single rank."""
+def _worker(
+    rank: int,
+    world_size: int,
+    master_addr: str,
+    master_port: str,
+    ifname: str = "lo",
+    ib_disable: str = "1",
+) -> None:
+    """Run all test phases for a single rank.
+
+    NCCL_SOCKET_IFNAME and NCCL_IB_DISABLE are passed as explicit function
+    arguments instead of relying on os.environ inheritance, because
+    torch.multiprocessing.start_processes(spawn) does NOT guarantee that
+    changes made to os.environ in the parent are visible in spawned children.
+    """
     os.environ["RANK"] = str(rank)
     os.environ["LOCAL_RANK"] = str(rank)
     os.environ["WORLD_SIZE"] = str(world_size)
     os.environ["MASTER_ADDR"] = master_addr
     os.environ["MASTER_PORT"] = master_port
+    # These MUST be set before any NCCL call (especially init_process_group).
+    os.environ["NCCL_SOCKET_IFNAME"] = ifname
+    os.environ["NCCL_IB_DISABLE"] = ib_disable
 
     check_environment()
 
@@ -568,7 +584,11 @@ def main() -> int:
         world_size = int(os.environ["WORLD_SIZE"])
         master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
         master_port = os.environ.get("MASTER_PORT", "29500")
-        _worker(rank, world_size, master_addr, master_port)
+        # In torchrun mode the user controls NCCL_SOCKET_IFNAME externally;
+        # default to "lo" only if not already set.
+        ifname = os.environ.get("NCCL_SOCKET_IFNAME") or args.ifname or "lo"
+        ib_disable = os.environ.get("NCCL_IB_DISABLE", "1")
+        _worker(rank, world_size, master_addr, master_port, ifname, ib_disable)
         return 0 if not FAILED else 1
 
     # ---- Standalone mode: spawn worker processes ourselves -----------------
@@ -580,29 +600,38 @@ def main() -> int:
     world_size = args.nproc if args.nproc is not None else n_gpus
     world_size = min(world_size, n_gpus)
 
-    # Determine which network interface to use for NCCL bootstrap sockets.
-    # This must be set in the parent process so every spawned child inherits it.
-    if "NCCL_SOCKET_IFNAME" not in os.environ:
-        if args.ifname:
-            ifname = args.ifname
-        else:
-            ifaces = _list_interfaces()
-            ifname = _suggest_ifname(ifaces)
-        os.environ["NCCL_SOCKET_IFNAME"] = ifname
+    # Determine which interface RCCL should use for bootstrap TCP sockets.
+    #
+    # IMPORTANT: we do NOT rely on os.environ inheritance here.  With
+    # torch.multiprocessing.start_processes(spawn), child processes start a
+    # fresh Python interpreter and changes made to os.environ in the parent
+    # are NOT reliably visible in workers.  Instead, we pass ifname as an
+    # explicit function argument so it is pickled and received correctly.
+    #
+    # Default is "lo" (loopback) because:
+    #   • standalone mode is always single-node (all GPUs on one host)
+    #   • loopback always works for intra-host TCP
+    #   • actual GPU data (all-reduce etc.) travels over PCIe/xGMI, not TCP
+    #   • physical NICs (eno1, eno0, …) may be unreachable inside containers
+    #     (e.g. Kubernetes pods with Cilium CNI)
+    if args.ifname:
+        ifname = args.ifname
+    elif "NCCL_SOCKET_IFNAME" in os.environ:
+        ifname = os.environ["NCCL_SOCKET_IFNAME"]
+    else:
+        ifname = "lo"
 
-    # Disable InfiniBand probing unless the user already set this.
-    os.environ.setdefault("NCCL_IB_DISABLE", "1")
+    ib_disable = os.environ.get("NCCL_IB_DISABLE", "1")
 
     print(f"[launcher] Standalone mode: spawning {world_size} worker process(es)")
     print(f"[launcher] master={args.master_addr}:{args.master_port}")
-    print(f"[launcher] NCCL_SOCKET_IFNAME={os.environ['NCCL_SOCKET_IFNAME']}"
-          f"  NCCL_IB_DISABLE={os.environ['NCCL_IB_DISABLE']}")
-    print(f"[launcher] tip: if init fails, retry with --ifname <interface> or "
-          f"NCCL_DEBUG=INFO for details\n")
+    print(f"[launcher] NCCL_SOCKET_IFNAME={ifname}  NCCL_IB_DISABLE={ib_disable}")
+    print(f"[launcher] tip: if init fails, retry with --ifname <interface>  "
+          f"(e.g. eth0, ens3, eno1) or NCCL_DEBUG=INFO\n")
 
     mp.start_processes(
         _worker,
-        args=(world_size, args.master_addr, args.master_port),
+        args=(world_size, args.master_addr, args.master_port, ifname, ib_disable),
         nprocs=world_size,
         start_method="spawn",
     )
