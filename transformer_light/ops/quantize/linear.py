@@ -61,14 +61,26 @@ def _aiter_quant(x: torch.Tensor, dtype: torch.dtype):
     return per_tensor_quant_hip(x, quant_dtype=dtype)
 
 
+_hipblas_initialized = False
+
+
+def _ensure_hipblas():
+    global _hipblas_initialized
+    if not _hipblas_initialized:
+        from aiter.ops.gradlib import hipb_create_extension
+        hipb_create_extension()
+        _hipblas_initialized = True
+
+
 def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
     from aiter.ops.gradlib import hipb_mm
-    # hipb_mm TensorWise mode requires both scales to be shape (1, 1).
-    if isinstance(scale_a, torch.Tensor):
-        scale_a = scale_a.float().reshape(1, 1)
-    if isinstance(scale_b, torch.Tensor):
-        scale_b = scale_b.float().reshape(1, 1)
-    # solution_index=-1: auto-select best solution (required positional arg in newer aiter)
+    _ensure_hipblas()
+    if isinstance(scale_a, (int, float)):
+        scale_a = torch.tensor(scale_a, dtype=torch.float32, device=a.device)
+    if isinstance(scale_b, (int, float)):
+        scale_b = torch.tensor(scale_b, dtype=torch.float32, device=b.device)
+    scale_a = scale_a.float().reshape(1, 1)
+    scale_b = scale_b.float().reshape(1, 1)
     return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
 
 
