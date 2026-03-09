@@ -81,7 +81,7 @@ def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
         scale_b = torch.tensor(scale_b, dtype=torch.float32, device=b.device)
     scale_a = scale_a.float().reshape(1, 1)
     scale_b = scale_b.float().reshape(1, 1)
-    return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
+    return hipb_mm(a, b, -1, out_dtype=torch.bfloat16, scaleA=scale_a, scaleB=scale_b)
 
 
 # ---------------------------------------------------------------------------
