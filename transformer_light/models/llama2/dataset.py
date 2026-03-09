@@ -84,15 +84,26 @@ class LLaMA2SFTDataset(Dataset):
                 self._raw_samples = json.load(f)
         elif data_path.endswith(".npy"):
             arr = np.load(data_path, allow_pickle=True)
-            if isinstance(arr, np.ndarray) and arr.ndim == 2:
-                ids_arr = arr.astype(np.int64)
-                mask_arr = np.ones_like(ids_arr, dtype=np.int64)
+            if arr.ndim == 1 and arr.dtype == object:
+                # Object array of dicts: {"input_ids": [...], "loss_mask": [...], ...}
+                # Produced by convert_dataset.py (MLPerf NeMo style).
                 self._raw_samples = [
-                    {"input_ids": ids_arr[i].tolist(), "loss_mask": mask_arr[i].tolist()}
-                    for i in range(len(ids_arr))
+                    {"input_ids": list(item["input_ids"]),
+                     "loss_mask": list(item["loss_mask"])}
+                    for item in arr
+                ]
+            elif arr.ndim == 2:
+                # Pre-split integer array: (N, seq_len)
+                arr = arr.astype(np.int64)
+                self._raw_samples = [
+                    {"input_ids": arr[i].tolist(), "loss_mask": [1] * arr.shape[1]}
+                    for i in range(len(arr))
                 ]
             else:
-                raise ValueError(f".npy must be 2D array (N, seq_len), got shape {getattr(arr, 'shape', 'unknown')}")
+                raise ValueError(
+                    f".npy must be a 1D object array of dicts or a 2D integer array, "
+                    f"got shape {arr.shape} dtype {arr.dtype}"
+                )
         elif data_path.endswith(".npz"):
             data = np.load(data_path, allow_pickle=True)
             ids_arr = data["input_ids"].astype(np.int64)
