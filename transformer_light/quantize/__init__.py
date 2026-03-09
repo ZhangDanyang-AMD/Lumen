@@ -270,6 +270,22 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
             bias = getattr(module, "bias", None)
             bias_for_gemm = None if skip_bias_add else bias
 
+            # ColumnParallelLinear with sequence parallelism: all-gather
+            # the input along the sequence dimension before the GEMM so
+            # the output has full sequence length (required for RoPE, etc.).
+            is_row_parallel = getattr(module, "input_is_parallel", False)
+            seq_parallel = getattr(module, "sequence_parallel", False)
+            tp_group = getattr(module, "tp_group", None)
+
+            if seq_parallel and not is_row_parallel:
+                from megatron.core.tensor_parallel.mappings import (
+                    gather_from_sequence_parallel_region,
+                )
+                input_tensor = gather_from_sequence_parallel_region(
+                    input_tensor, tensor_parallel_output_grad=True,
+                    group=tp_group,
+                )
+
             result = quantized_linear(
                 input_tensor,
                 module.weight,
@@ -282,7 +298,17 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                 quantize_activation=quantize_activation,
             )
 
-            if getattr(module, "input_is_parallel", False):
+            # RowParallelLinear: reduce across TP ranks.  With sequence
+            # parallelism use reduce-scatter (output splits along seq dim);
+            # without SP use a plain all-reduce.
+            if is_row_parallel and seq_parallel:
+                from megatron.core.tensor_parallel.mappings import (
+                    reduce_scatter_to_sequence_parallel_region,
+                )
+                result = reduce_scatter_to_sequence_parallel_region(
+                    result, group=tp_group,
+                )
+            elif is_row_parallel:
                 try:
                     from megatron.core.tensor_parallel.mappings import (
                         reduce_from_tensor_model_parallel_region,
