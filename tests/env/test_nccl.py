@@ -465,7 +465,10 @@ def test_dtype_collectives() -> None:
             t = torch.ones(1024, dtype=dtype,
                            device=f"cuda:{torch.cuda.current_device()}")
             dist.all_reduce(t, op=dist.ReduceOp.SUM)
-            ok = torch.allclose(t.float(), torch.full((1024,), float(_world())))
+            # torch.full() defaults to CPU; pass device=t.device so both
+            # sides of allclose are on the same GPU.
+            expected = torch.full((1024,), float(_world()), device=t.device)
+            ok = torch.allclose(t.float(), expected)
             record(f"all_reduce_{name}", ok)
         except Exception as exc:
             record(f"all_reduce_{name}", False, str(exc))
