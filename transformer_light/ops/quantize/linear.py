@@ -63,6 +63,12 @@ def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
         scale_a = scale_a.float()
     if isinstance(scale_b, torch.Tensor):
         scale_b = scale_b.float()
+    # hipb_mm requires both scales to have the same number of dimensions when
+    # either is non-TensorWise (2-D per-token).  Broadcast a scalar weight
+    # scale to [1, 1] so it matches a per-token input scale of shape [M, 1].
+    if (isinstance(scale_a, torch.Tensor) and scale_a.dim() == 2
+            and isinstance(scale_b, torch.Tensor) and scale_b.dim() < 2):
+        scale_b = scale_b.reshape(1, 1)
     # solution_index=-1: auto-select best solution (required positional arg in newer aiter)
     return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
 
