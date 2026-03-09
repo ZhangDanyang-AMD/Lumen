@@ -106,6 +106,8 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
 
     _patch_core_attention(transformer_layer_spec)
     _patch_norms_in_spec(transformer_layer_spec)
+    transformer_layer_spec = _wrap_as_block_spec(transformer_layer_spec)
+    _force_block_norm_default()
 
     model = GPTModel(
         config=config,
@@ -203,6 +205,33 @@ def _patch_norms_in_spec(spec):
     if layer_specs:
         for layer_spec in layer_specs:
             _patch_norms_in_spec(layer_spec)
+
+
+def _force_block_norm_default():
+    """Override the ``TransformerBlockSubmodules`` dataclass default for
+    ``final_layernorm`` so that ``FusedLayerNorm`` (which rejects RMSNorm)
+    is never instantiated, even when ``TransformerBlock`` creates a default
+    ``TransformerBlockSubmodules`` internally."""
+    from megatron.core.transformer.transformer_block import TransformerBlockSubmodules
+    fields = TransformerBlockSubmodules.__dataclass_fields__
+    if "final_layernorm" in fields:
+        fields["final_layernorm"].default = _MegatronCompatibleTLRMSNorm
+
+
+def _wrap_as_block_spec(spec):
+    """Wrap a layer-level ``ModuleSpec`` in a ``TransformerBlockSubmodules``
+    so that ``TransformerBlock.__init__`` does not default
+    ``final_layernorm`` to ``FusedLayerNorm``.
+
+    If *spec* is already a ``TransformerBlockSubmodules``, return it as-is.
+    """
+    from megatron.core.transformer.transformer_block import TransformerBlockSubmodules
+    if isinstance(spec, TransformerBlockSubmodules):
+        return spec
+    return TransformerBlockSubmodules(
+        layer_specs=[spec],
+        final_layernorm=_MegatronCompatibleTLRMSNorm,
+    )
 
 
 def _patch_rmsnorm(model, grad_quant_type=None):
