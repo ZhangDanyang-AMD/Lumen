@@ -189,19 +189,38 @@ class _MegatronCompatibleTLRMSNorm(torch.nn.Module):
         return self._norm(x)
 
 
+_NORM_ATTRS = (
+    "input_layernorm", "pre_mlp_layernorm",
+    "pre_cross_attn_layernorm", "post_cross_attn_layernorm",
+    "final_layernorm",
+)
+
+
 def _patch_norms_in_spec(spec):
-    """Replace norm classes in a layer spec with :class:`_MegatronCompatibleTLRMSNorm`
-    so that ``WrappedTorchNorm`` (which rejects SP / persist_layer_norm)
-    is never instantiated."""
-    if not hasattr(spec, "submodules") or spec.submodules is None:
-        return
-    subs = spec.submodules
-    for attr in ("input_layernorm", "pre_mlp_layernorm",
-                 "pre_cross_attn_layernorm", "post_cross_attn_layernorm"):
-        if hasattr(subs, attr) and getattr(subs, attr) is not None:
-            setattr(subs, attr, _MegatronCompatibleTLRMSNorm)
-    if hasattr(subs, "layer_specs"):
-        for layer_spec in subs.layer_specs:
+    """Replace **all** norm classes in a spec tree with
+    :class:`_MegatronCompatibleTLRMSNorm` so that ``WrappedTorchNorm``
+    and ``FusedLayerNorm`` (which reject SP / persist_layer_norm /
+    RMSNorm) are never instantiated.
+
+    Handles both:
+    - Block-level specs (``TransformerBlockSubmodules`` with
+      ``layer_specs`` and ``final_layernorm``)
+    - Layer-level specs (``ModuleSpec`` with ``submodules``)
+    """
+    for attr in _NORM_ATTRS:
+        if getattr(spec, attr, None) is not None:
+            setattr(spec, attr, _MegatronCompatibleTLRMSNorm)
+
+    if hasattr(spec, "submodules") and spec.submodules is not None:
+        for attr in _NORM_ATTRS:
+            if getattr(spec.submodules, attr, None) is not None:
+                setattr(spec.submodules, attr, _MegatronCompatibleTLRMSNorm)
+
+    layer_specs = getattr(spec, "layer_specs", None)
+    if layer_specs is None and hasattr(spec, "submodules"):
+        layer_specs = getattr(spec.submodules, "layer_specs", None)
+    if layer_specs:
+        for layer_spec in layer_specs:
             _patch_norms_in_spec(layer_spec)
 
 
