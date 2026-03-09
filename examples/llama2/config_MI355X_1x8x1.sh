@@ -31,7 +31,8 @@ export SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
 # ---- Data / tokenizer --------------------------------------------------------
 export TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
 export VALID_DATA=${VALID_DATA:-"/data/validation.jsonl"}
-export TOKENIZER=${TOKENIZER:-"${SCRIPT_DIR}/tokenizer"}
+_TL_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export TOKENIZER=${TOKENIZER:-"${_TL_CONFIG_DIR}/tokenizer"}
 
 # ---- LoRA --------------------------------------------------------------------
 export LORA_RANK=${LORA_RANK:-0}
