@@ -101,7 +101,7 @@ def _probe_aiter_csrc():
     To support a newly-added aiter kernel, add a ``hasattr`` check here
     and handle it in the corresponding dispatch function (Section 6).
     """
-    if _BACKEND_PREF == "triton":
+    if _BACKEND_PREF not in ("auto", "csrc"):
         return
     try:
         mha = _get_aiter_mha()
@@ -178,11 +178,22 @@ if csrc_available("flash_attn_fwd"):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         _mha = _get_aiter_mha()
+        _unit = torch.ones(1, device=q.device, dtype=torch.float32)
         out_padded, softmax_lse, S_dmask, rng_state = _mha._flash_attn_forward(
             q, k, v,
-            dropout_p, softmax_scale, causal,
-            window_size_left, window_size_right,
-            bias, alibi_slopes, return_lse, return_softmax,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            window_size_left=window_size_left,
+            window_size_right=window_size_right,
+            sink_size=0,
+            bias=bias,
+            alibi_slopes=alibi_slopes,
+            q_descale=_unit,
+            k_descale=_unit,
+            v_descale=_unit,
+            return_lse=return_lse,
+            return_softmax=return_softmax,
         )
         return out_padded, softmax_lse, S_dmask, rng_state
 
@@ -1364,7 +1375,7 @@ def attention_forward(q, k, v, use_fp8, dropout_p, softmax_scale, causal,
     Backend priority for FP8 (training):       triton per-block.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_fwd"):
+    if not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
         out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
             q, k, v, dropout_p, softmax_scale, causal,
             window_size[0], window_size[1],
@@ -1433,7 +1444,7 @@ def attention_backward(do, q, k, v, o, q_scale, k_scale, v_scale, p_scale,
     Backend priority for FP8:           (future csrc fp8) → triton fp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_bwd"):
+    if not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
@@ -1469,7 +1480,7 @@ def attention_mxfp8_forward(q, k, v, use_mxfp8, dropout_p, softmax_scale,
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_mxfp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_fwd"):
+    if not use_mxfp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
         out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
             q, k, v, dropout_p, softmax_scale, causal,
             window_size[0], window_size[1],
@@ -1534,7 +1545,7 @@ def attention_mxfp8_backward(do, q, k, v, o, softmax_lse, q_scale, k_scale,
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_mxfp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_bwd"):
+    if not use_mxfp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)

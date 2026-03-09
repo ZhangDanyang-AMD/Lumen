@@ -83,10 +83,15 @@ export STEP_TIME_ATOL=18000
 export EVAL_EVERY=12288
 export START_EVAL_AT=0
 
-# ---- Primus Turbo attention --------------------------------------------------
-export PRIMUS_FP8_ATTN=0
-export PRIMUS_MXFP8_ATTN=1
-export DBG_ATTN_OUTPUT=0
+# ---- Transformer Light -------------------------------------------------------
+# Attention backend: "aiter" (AMD AITER flash-attn), "triton", "triton_fp8"
+export TL_ATTN_BACKEND="triton_fp8"
+# FP8 attention quantization type (only used when TL_ATTN_BACKEND="triton_fp8"):
+#   "fp8_blockwise" — per-block FP8 scaling (standard blockwise)
+#   "mxfp8"         — AMD Microscaling FP8 (wider hardware support on MI3xx)
+export TL_FP8_QUANT="mxfp8"
+# Use Transformer Light Triton-accelerated RMSNorm (0 = native Megatron norm)
+export TL_RMSNORM=0
 
 # ---- Megatron backend --------------------------------------------------------
 export TP=1
@@ -113,3 +118,39 @@ export SHARDING="full_shard"
 # ---- MI355X platform ---------------------------------------------------------
 export MLPERF_SUBMISSION_ORG="AMD"
 export MLPERF_SUBMISSION_PLATFORM="MI355X"
+
+# ---- NCCL / ROCm performance (MI355X tuned) ----------------------------------
+export NCCL_MIN_P2P_NCHANNELS=32
+export NCCL_MIN_CTAS=32
+export NCCL_NCHANNELS_PER_NET_PEER=32
+export NCCL_NVLS_ENABLE=0
+export TORCH_NCCL_AVOID_RECORD_STREAMS=1
+# Disable SDMA engines — known to cause RCCL P2P hangs on MI-series GPUs.
+export HSA_ENABLE_SDMA=0
+# Disable InfiniBand probing — avoids "No device found" errors.
+export NCCL_IB_DISABLE=1
+# Force RCCL bootstrap sockets onto loopback for single-node runs.
+# For multi-node runs override with the inter-node interface: NCCL_SOCKET_IFNAME=ens3
+export NCCL_SOCKET_IFNAME=lo
+# Set to INFO to debug RCCL errors; WARN for normal runs.
+export NCCL_DEBUG=WARN
+
+# ---- hipBLASLt ---------------------------------------------------------------
+export USE_HIPBLASLT=1
+export TORCH_BLAS_PREFER_HIPBLASLT=1
+
+# ---- Misc ROCm perf ----------------------------------------------------------
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export PYTORCH_TUNABLEOP_ENABLED=1
+export PYTORCH_TUNABLEOP_FILENAME="tunableop_results.csv"
+export OMP_NUM_THREADS=1
+
+# ---- Torch Dynamo / Inductor -------------------------------------------------
+# Megatron's _warmup_jit_function calls torch.compile on bias_swiglu, which
+# triggers the Inductor backend.  Inductor imports triton_key from Triton at
+# graph-cache time; if the installed Triton build doesn't export that symbol
+# the warmup crashes — and even when it succeeds, async JIT compilation can
+# stall one rank while others proceed to a collective, causing the RCCL
+# watchdog to fire ("WorkNCCL ... ran for 600000 ms before timing out").
+# Disabling Dynamo skips the torch.compile path entirely.
+export TORCHDYNAMO_DISABLE=1

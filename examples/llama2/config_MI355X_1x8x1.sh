@@ -71,15 +71,18 @@ export LORA_A2A=0
 # contain compiled variants for every GQA configuration on gfx950 (MI355X).
 # For LLaMA2-70B with TP=8 the per-partition head ratio is 8Q:1KV, which
 # triggers "invalid argument for fmha_fwd" from aiter::mha_fwd returning -1.
-# Use the Triton backend instead; it supports all GQA ratios on gfx950.
-export TL_ATTN_BACKEND="triton"
+# Use the Triton FP8-blockwise backend; it supports all GQA ratios on gfx950.
+# TL_ATTN_BACKEND options:
+#   triton        – plain BF16/FP16 Triton attention (no attention quantization)
+#   triton_fp8    – Triton FP8-quantized attention; quant type set by TL_FP8_QUANT:
+#                     fp8_blockwise  – per-block FP8 scaling (works on all MI-series)
+#                     mxfp8          – microscaling FP8 (gfx950 / MI355X only)
+export TL_ATTN_BACKEND="triton_fp8"
 # TRANSFORMER_LIGHT_ATTN_BACKEND controls attention_impl.py's module-load-time
-# csrc probe (_probe_aiter_csrc). Without this, _BACKEND_PREF defaults to
-# "auto" and attention_impl.py detects and prefers the aiter csrc kernels even
-# when TL_ATTN_BACKEND=triton routes through AttentionTritonFunction — causing
-# fmha_v3_fwd to be called instead of the Triton kernel.
+# csrc probe (_probe_aiter_csrc). Keep as "triton" whenever TL_ATTN_BACKEND is
+# any triton-family value to prevent aiter csrc kernels from being probed.
 export TRANSFORMER_LIGHT_ATTN_BACKEND="triton"
-export TL_FP8_QUANT="fp8_blockwise"
+export TL_FP8_QUANT="mxfp8"
 export TL_RMSNORM=0
 
 # MXFP8 attention block sizes

@@ -63,13 +63,8 @@ run_megatron() {
         exit 1
     }
 
-    # Map Primus Turbo flags to TL attention backend
-    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"triton_fp8"}
-    if [ "${PRIMUS_FP8_ATTN}" -gt 0 ]; then
-        TL_FP8_QUANT=${TL_FP8_QUANT:-"fp8_blockwise"}
-    else
-        TL_FP8_QUANT=${TL_FP8_QUANT:-"mxfp8"}
-    fi
+    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter"}
+    TL_FP8_QUANT=${TL_FP8_QUANT:-"mxfp8"}
 
     # LLaMA 3.1 architecture
     case "${SIZE}" in
@@ -129,7 +124,6 @@ run_megatron() {
     echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT}) rmsnorm=${TL_RMSNORM}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "  LoRA:     rank=${LORA_RANK}"
-    echo "  Primus:   fp8_attn=${PRIMUS_FP8_ATTN} mxfp8_attn=${PRIMUS_MXFP8_ATTN} dbg=${DBG_ATTN_OUTPUT}"
     echo "  Target:   log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
     echo "  Ckpt:     use=${USE_CKPT} save=${SAVE_CKPT} fp8_params=${FP8_PARAMS} start_step=${CKPT_START_STEP}"
     echo "  Eval:     every=${EVAL_EVERY}seqs (${EVAL_INTERVAL}steps) start_at=${START_EVAL_AT}"
@@ -196,9 +190,6 @@ run_megatron() {
         --ckpt-start-step ${CKPT_START_STEP} \
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
-        --primus-turbo-fp8-attention ${PRIMUS_FP8_ATTN} \
-        --primus-turbo-mxfp8-attention ${PRIMUS_MXFP8_ATTN} \
-        --dbg-attn-output ${DBG_ATTN_OUTPUT} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${TL_RMSNORM_ARGS} \
         ${CMD_SUFFIX}
 }

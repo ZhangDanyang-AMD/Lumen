@@ -704,12 +704,4 @@ def add_pretrain_args(parser):
     mlperf.add_argument("--gpus-per-node", type=int, default=None,
                          help="GPUs per node (Docker compat, unused by Megatron).")
 
-    primus = parser.add_argument_group(title="primus-turbo-attention")
-    primus.add_argument("--primus-turbo-fp8-attention", type=int, default=0,
-                         help="Enable Primus Turbo FP8 Attention.")
-    primus.add_argument("--primus-turbo-mxfp8-attention", type=int, default=0,
-                         help="Enable Primus Turbo MXFP8 Attention.")
-    primus.add_argument("--dbg-attn-output", type=int, default=0,
-                         help="Enable debug attention output.")
-
     return parser
