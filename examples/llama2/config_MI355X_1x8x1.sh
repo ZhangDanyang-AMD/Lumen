@@ -136,6 +136,9 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 export PYTORCH_TUNABLEOP_ENABLED=1
 export PYTORCH_TUNABLEOP_FILENAME="tunableop_results.csv"
 export OMP_NUM_THREADS=1
+# Reduce fragmentation for large-model FSDP — allows PyTorch to expand
+# existing memory segments instead of allocating many fixed-size blocks.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ---- Torch Dynamo / Inductor ------------------------------------------------
 # Megatron's _warmup_jit_function calls torch.compile on bias_swiglu, which

@@ -211,6 +211,14 @@ class FSDPTrainer:
         args = self.args
         model = build_model(args)
 
+        if getattr(args, "gradient_checkpointing", True):
+            from torch.utils.checkpoint import checkpoint
+            from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+            model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False},
+            )
+            _rank0_print("> Gradient checkpointing enabled")
+
         if args.lora_rank > 0:
             model = apply_lora(model, args)
 
@@ -452,6 +460,10 @@ def get_args() -> argparse.Namespace:
                     help="Save checkpoint every N steps. 0 = disabled.")
     t.add_argument("--save-dir", type=str, default="./checkpoints")
     t.add_argument("--num-workers", type=int, default=4)
+    t.add_argument("--gradient-checkpointing", action="store_true", default=True,
+                    help="Enable gradient/activation checkpointing (default: on).")
+    t.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing",
+                    action="store_false")
 
     # -- Data --
     d = parser.add_argument_group("data")

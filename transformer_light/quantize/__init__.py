@@ -299,9 +299,10 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                 except ImportError:
                     pass
 
-            if skip_bias_add:
-                return result, bias
-            return result
+            # Megatron's ColumnParallelLinear/RowParallelLinear always return
+            # a (output, output_bias) tuple regardless of skip_bias_add.
+            output_bias = bias if skip_bias_add else None
+            return result, output_bias
 
     module._original_forward = original_forward
     module.forward = quant_forward
