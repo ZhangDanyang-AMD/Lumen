@@ -31,7 +31,7 @@ export SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
 # ---- Data / tokenizer --------------------------------------------------------
 export TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
 export VALID_DATA=${VALID_DATA:-"/data/validation.jsonl"}
-export TOKENIZER=${TOKENIZER:-"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tokenizer"}
+export TOKENIZER=${TOKENIZER:-"${SCRIPT_DIR}/tokenizer"}
 
 # ---- LoRA --------------------------------------------------------------------
 export LORA_RANK=${LORA_RANK:-0}
@@ -94,3 +94,20 @@ export SHARDING=${SHARDING:-"full_shard"}
 # ---- MI355X platform ---------------------------------------------------------
 export MLPERF_SUBMISSION_ORG=${MLPERF_SUBMISSION_ORG:-"AMD"}
 export MLPERF_SUBMISSION_PLATFORM=${MLPERF_SUBMISSION_PLATFORM:-"MI355X"}
+
+# ---- NCCL / ROCm performance (MI355X tuned) ----------------------------------
+export NCCL_MIN_P2P_NCHANNELS=${NCCL_MIN_P2P_NCHANNELS:-32}
+export NCCL_MIN_CTAS=${NCCL_MIN_CTAS:-32}
+export NCCL_NCHANNELS_PER_NET_PEER=${NCCL_NCHANNELS_PER_NET_PEER:-32}
+export NCCL_NVLS_ENABLE=${NCCL_NVLS_ENABLE:-0}
+export TORCH_NCCL_AVOID_RECORD_STREAMS=${TORCH_NCCL_AVOID_RECORD_STREAMS:-1}
+
+# ---- hipBLASLt ---------------------------------------------------------------
+export USE_HIPBLASLT=${USE_HIPBLASLT:-1}
+export TORCH_BLAS_PREFER_HIPBLASLT=${TORCH_BLAS_PREFER_HIPBLASLT:-1}
+
+# ---- Misc ROCm perf ----------------------------------------------------------
+export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
+export PYTORCH_TUNABLEOP_ENABLED=${PYTORCH_TUNABLEOP_ENABLED:-1}
+export PYTORCH_TUNABLEOP_FILENAME=${PYTORCH_TUNABLEOP_FILENAME:-"tunableop_results.csv"}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
