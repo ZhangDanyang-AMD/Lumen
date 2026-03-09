@@ -13,6 +13,7 @@ PyTorch and the Python standard library.
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -68,6 +69,12 @@ class LLaMA2SFTDataset(Dataset):
         if data_path is None:
             self._raw_samples: list = []
             return
+
+        if not os.path.isfile(data_path):
+            alt = data_path.rsplit(".", 1)[0] + ".npy"
+            if data_path.endswith((".jsonl", ".json")) and os.path.isfile(alt):
+                data_path = alt
+                logger.info("Using %s (requested path not found)", data_path)
 
         if data_path.endswith(".jsonl"):
             with open(data_path, "r", encoding="utf-8") as f:

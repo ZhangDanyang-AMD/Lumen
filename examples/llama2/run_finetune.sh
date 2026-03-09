@@ -21,6 +21,19 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CONFIG=${CONFIG:-"${SCRIPT_DIR}/config_MI355X_1x8x1.sh"}
 source "${CONFIG}"
 
+# ---- Data path fallback: .jsonl -> .npy when only .npy exists -----------------
+for _var in TRAIN_DATA VALID_DATA; do
+    _path="${!_var}"
+    [ -z "${_path}" ] && continue
+    if [ ! -f "${_path}" ] && [[ "${_path}" == *.jsonl ]]; then
+        _npy="${_path%.jsonl}.npy"
+        if [ -f "${_npy}" ]; then
+            echo "WARNING: ${_var}='${_path}' not found; using ${_npy}"
+            export "${_var}=${_npy}"
+        fi
+    fi
+done
+
 # ---- Validate tokenizer path (fall back to script-relative path) -------------
 if [ ! -d "${TOKENIZER:-}" ]; then
     _FALLBACK="${SCRIPT_DIR}/tokenizer"
