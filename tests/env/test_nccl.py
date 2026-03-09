@@ -12,8 +12,11 @@ Can be launched in two ways:
     torchrun --nproc_per_node=1 tests/env/test_nccl.py   # single-GPU smoke test
 
     # Standalone — script spawns worker processes itself (no torchrun needed):
-    python tests/env/test_nccl.py           # uses all visible GPUs
-    python tests/env/test_nccl.py --nproc 4 # use 4 GPUs only
+    python tests/env/test_nccl.py              # uses all visible GPUs
+    python tests/env/test_nccl.py --nproc 4   # use 4 GPUs only
+
+    # Explicitly set the NCCL socket interface (if auto-detect fails):
+    python tests/env/test_nccl.py --ifname eth0
 
     # With extra RCCL diagnostics:
     NCCL_DEBUG=INFO python tests/env/test_nccl.py
@@ -21,10 +24,20 @@ Can be launched in two ways:
 Exit code:
     0  — all tests passed
     1  — one or more tests failed
+
+Troubleshooting "socketPollConnect / no POLLOUT events":
+    This error means RCCL's bootstrap TCP sockets cannot connect.  The root
+    cause is almost always a wrong network interface selection.  Run with
+    NCCL_DEBUG=INFO, look for "NET" lines to see which interface RCCL chose,
+    then re-run with --ifname <correct-interface>.
+    Common values: lo, eth0, ens3, bond0, ib0 …
+    List available interfaces:  ip -o link show | awk -F': ' '{print $2}'
 """
 
 import argparse
 import os
+import socket
+import subprocess
 import sys
 import time
 
@@ -80,6 +93,104 @@ def record(name: str, ok: bool, detail: str = "") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Network interface helpers
+# ---------------------------------------------------------------------------
+
+def _list_interfaces() -> list[tuple[str, str]]:
+    """Return [(ifname, ip_addr)] for UP interfaces with an IPv4 address."""
+    results = []
+    try:
+        import ipaddress
+        # /proc/net/fib_trie approach — works inside containers without tools
+        with open("/proc/net/if_inet6") as _:
+            pass  # just a probe; we use a different file below
+    except Exception:
+        pass
+
+    try:
+        out = subprocess.check_output(
+            ["ip", "-o", "-4", "addr", "show"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        for line in out.splitlines():
+            parts = line.split()
+            # format: index  ifname  inet  ip/prefix  …
+            if len(parts) >= 4 and parts[2] == "inet":
+                ifname = parts[1]
+                ip = parts[3].split("/")[0]
+                results.append((ifname, ip))
+    except Exception:
+        # Fallback: just try to get hostname IP
+        try:
+            hostname_ip = socket.gethostbyname(socket.gethostname())
+            results.append(("(hostname)", hostname_ip))
+        except Exception:
+            pass
+    return results
+
+
+def _probe_loopback() -> bool:
+    """Check whether a TCP loopback connection on 127.0.0.1 works."""
+    import threading
+    success = [False]
+
+    def _server():
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(1)
+            port = srv.getsockname()[1]
+            # Signal port to client thread via shared list
+            success.append(port)
+            srv.settimeout(2.0)
+            try:
+                conn, _ = srv.accept()
+                conn.close()
+                success[0] = True
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_server, daemon=True)
+    t.start()
+    t.join(0.2)   # wait until port is known
+    if len(success) < 2:
+        return False
+    port = success[1]
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2.0):
+            pass
+    except Exception:
+        return False
+    t.join(2.0)
+    return success[0]
+
+
+def _suggest_ifname(interfaces: list[tuple[str, str]]) -> str:
+    """Pick the most suitable interface for NCCL_SOCKET_IFNAME."""
+    # Prefer loopback if TCP loopback works (single-node case)
+    if _probe_loopback():
+        for name, _ in interfaces:
+            if name.startswith("lo"):
+                return name
+
+    # Otherwise prefer non-virtual Ethernet interfaces
+    prefer = []
+    for name, ip in interfaces:
+        if name.startswith(("eth", "ens", "enp", "em", "bond", "ib")):
+            prefer.append(name)
+    if prefer:
+        return prefer[0]
+
+    # Fallback: first available (skip loopback)
+    for name, _ in interfaces:
+        if not name.startswith("lo"):
+            return name
+
+    return "lo"
+
+
+# ---------------------------------------------------------------------------
 # 1. Environment checks (no distributed required)
 # ---------------------------------------------------------------------------
 
@@ -111,13 +222,24 @@ def check_environment() -> None:
     except Exception as exc:
         record("nccl_library_available", False, str(exc))
 
+    # Network interfaces — critical for NCCL_SOCKET_IFNAME diagnosis
+    log("  Network interfaces (IPv4):")
+    ifaces = _list_interfaces()
+    if ifaces:
+        for name, ip in ifaces:
+            log(f"    {name:<12} {ip}")
+    else:
+        log("    (could not enumerate interfaces)")
+    loopback_ok = _probe_loopback()
+    log(f"  Loopback TCP probe : {'OK' if loopback_ok else 'FAIL — lo may not work for NCCL'}")
+    record("loopback_tcp_works", loopback_ok)
+
     log("  Key env vars:")
     for var in [
         "LOCAL_RANK", "RANK", "WORLD_SIZE",
         "MASTER_ADDR", "MASTER_PORT",
         "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES",
-        "NCCL_DEBUG", "NCCL_IB_DISABLE", "HSA_ENABLE_SDMA",
-        "NCCL_SOCKET_IFNAME",
+        "NCCL_DEBUG", "NCCL_SOCKET_IFNAME", "NCCL_IB_DISABLE", "HSA_ENABLE_SDMA",
     ]:
         log(f"    {var}={os.environ.get(var, '<unset>')}")
 
@@ -135,6 +257,7 @@ def init_distributed() -> bool:
     # rank and avoids the "device currently unknown" warning / hang.
     torch.cuda.set_device(local_rank)
     log(f"  local_rank={local_rank}  device=cuda:{local_rank}")
+    log(f"  NCCL_SOCKET_IFNAME={os.environ.get('NCCL_SOCKET_IFNAME', '<unset>')}")
 
     try:
         dist.init_process_group(
@@ -154,11 +277,35 @@ def init_distributed() -> bool:
         except Exception as exc:
             record("init_process_group", False, str(exc))
             log(str(exc), error=True)
+            _print_socket_hint()
             return False
     except Exception as exc:
         record("init_process_group", False, str(exc))
         log(str(exc), error=True)
+        _print_socket_hint()
         return False
+
+
+def _print_socket_hint() -> None:
+    """Print targeted hints when a socket error is detected."""
+    if not _is_rank0():
+        return
+    ifaces = _list_interfaces()
+    names = [n for n, _ in ifaces]
+    log("", error=True)
+    log("  ── Diagnosis: NCCL bootstrap socket failure ──────────────", error=True)
+    log("  RCCL could not establish its internal TCP bootstrap.", error=True)
+    log("  Most likely cause: wrong network interface selected.", error=True)
+    log("", error=True)
+    log(f"  Available interfaces: {names}", error=True)
+    log("", error=True)
+    log("  Try one of the following (re-run with the correct --ifname):", error=True)
+    for name, ip in ifaces:
+        log(f"    python tests/env/test_nccl.py --ifname {name}  # ip={ip}", error=True)
+    log("", error=True)
+    log("  Or get detailed RCCL logs:", error=True)
+    log("    NCCL_DEBUG=INFO python tests/env/test_nccl.py 2>&1 | grep -E 'NET|socket|IFNAME'",
+        error=True)
 
 
 # ---------------------------------------------------------------------------
@@ -359,9 +506,7 @@ def _worker(rank: int, world_size: int, master_addr: str, master_port: str) -> N
 
     ok = init_distributed()
     if not ok:
-        log("\nCannot continue — distributed init failed.", error=True)
         _print_summary()
-        # Signal failure to the spawner via exit code
         sys.exit(1)
 
     separator("3. Collective operations")
@@ -402,6 +547,13 @@ def _parse_args() -> argparse.Namespace:
         "--master-port", default="29500",
         help="Master port for standalone mode (default: 29500)",
     )
+    p.add_argument(
+        "--ifname", default=None,
+        help=(
+            "Network interface for NCCL bootstrap sockets "
+            "(sets NCCL_SOCKET_IFNAME).  Auto-detected when not specified."
+        ),
+    )
     return p.parse_args()
 
 
@@ -412,7 +564,6 @@ def main() -> int:
 
     if launched_by_torchrun:
         # torchrun already set RANK / LOCAL_RANK / WORLD_SIZE / MASTER_*
-        # Run the worker inline in the current process.
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
@@ -429,21 +580,25 @@ def main() -> int:
     world_size = args.nproc if args.nproc is not None else n_gpus
     world_size = min(world_size, n_gpus)
 
-    # Force NCCL bootstrap sockets onto the loopback interface for single-node
-    # runs.  Without this, NCCL scans all interfaces and may pick a VPN,
-    # disabled NIC, or RDMA device that cannot accept connections, producing:
-    #   "socketPollConnect poll() returned 1, no POLLOUT events"
-    # The env var must be set in the parent so every spawned child inherits it.
-    os.environ.setdefault("NCCL_SOCKET_IFNAME", "lo")
-    # Also disable IB probing — avoids spurious NCCL errors when InfiniBand is
-    # not present or not configured.
+    # Determine which network interface to use for NCCL bootstrap sockets.
+    # This must be set in the parent process so every spawned child inherits it.
+    if "NCCL_SOCKET_IFNAME" not in os.environ:
+        if args.ifname:
+            ifname = args.ifname
+        else:
+            ifaces = _list_interfaces()
+            ifname = _suggest_ifname(ifaces)
+        os.environ["NCCL_SOCKET_IFNAME"] = ifname
+
+    # Disable InfiniBand probing unless the user already set this.
     os.environ.setdefault("NCCL_IB_DISABLE", "1")
 
-    print(f"[launcher] Standalone mode: spawning {world_size} worker process(es) "
-          f"(torchrun not detected).")
+    print(f"[launcher] Standalone mode: spawning {world_size} worker process(es)")
     print(f"[launcher] master={args.master_addr}:{args.master_port}")
-    print(f"[launcher] NCCL_SOCKET_IFNAME={os.environ['NCCL_SOCKET_IFNAME']}  "
-          f"NCCL_IB_DISABLE={os.environ['NCCL_IB_DISABLE']}\n")
+    print(f"[launcher] NCCL_SOCKET_IFNAME={os.environ['NCCL_SOCKET_IFNAME']}"
+          f"  NCCL_IB_DISABLE={os.environ['NCCL_IB_DISABLE']}")
+    print(f"[launcher] tip: if init fails, retry with --ifname <interface> or "
+          f"NCCL_DEBUG=INFO for details\n")
 
     mp.start_processes(
         _worker,
@@ -451,8 +606,7 @@ def main() -> int:
         nprocs=world_size,
         start_method="spawn",
     )
-    # mp.start_processes raises an exception if any child exits non-zero,
-    # so reaching here means all workers exited cleanly.
+    # mp.start_processes raises if any child exits non-zero.
     return 0
 
 
