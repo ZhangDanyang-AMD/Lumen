@@ -89,7 +89,10 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
     print_rank_0("building GPT model with Transformer Light attention ...")
 
     if config is None:
+        args.apply_rope_fusion = False
         config = core_transformer_config_from_args(args)
+        config.persist_layer_norm = False
+        config.bias_swiglu_fusion = False
 
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
@@ -102,6 +105,7 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
     )
 
     _patch_core_attention(transformer_layer_spec)
+    _patch_norms_in_spec(transformer_layer_spec)
 
     model = GPTModel(
         config=config,
@@ -146,6 +150,42 @@ def _patch_core_attention(spec):
                 _patch_core_attention(layer_spec)
 
 
+class _MegatronCompatibleTLRMSNorm(torch.nn.Module):
+    """Wrapper that adapts :class:`TransformerLightRMSNorm` to the Megatron-Core
+    norm construction signature ``(config, hidden_size, eps=...)``.
+
+    Unlike ``WrappedTorchNorm``, this does **not** assert on
+    ``persist_layer_norm`` or ``sequence_parallel`` — RMSNorm normalises
+    over the hidden dimension only, so each position is independent and
+    works correctly with SP-scattered inputs.
+    """
+
+    def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
+        super().__init__()
+        from transformer_light.ops.normalization import TransformerLightRMSNorm
+        self._norm = TransformerLightRMSNorm(hidden_size, eps=eps)
+        self.weight = self._norm.weight
+
+    def forward(self, x):
+        return self._norm(x)
+
+
+def _patch_norms_in_spec(spec):
+    """Replace norm classes in a layer spec with :class:`_MegatronCompatibleTLRMSNorm`
+    so that ``WrappedTorchNorm`` (which rejects SP / persist_layer_norm)
+    is never instantiated."""
+    if not hasattr(spec, "submodules") or spec.submodules is None:
+        return
+    subs = spec.submodules
+    for attr in ("input_layernorm", "pre_mlp_layernorm",
+                 "pre_cross_attn_layernorm", "post_cross_attn_layernorm"):
+        if hasattr(subs, attr) and getattr(subs, attr) is not None:
+            setattr(subs, attr, _MegatronCompatibleTLRMSNorm)
+    if hasattr(subs, "layer_specs"):
+        for layer_spec in subs.layer_specs:
+            _patch_norms_in_spec(layer_spec)
+
+
 def _patch_rmsnorm(model, grad_quant_type=None):
     """Replace all Megatron-Core RMSNorm modules with Transformer Light's
     Triton-accelerated :class:`TransformerLightRMSNorm`."""
@@ -155,7 +195,8 @@ def _patch_rmsnorm(model, grad_quant_type=None):
     for name, module in model.named_modules():
         for attr_name, child in list(module.named_children()):
             cls_name = type(child).__name__
-            if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm"):
+            if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm",
+                            "_MegatronCompatibleTLRMSNorm"):
                 hidden_size = child.weight.shape[0]
                 eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
                 replacement = TransformerLightRMSNorm(

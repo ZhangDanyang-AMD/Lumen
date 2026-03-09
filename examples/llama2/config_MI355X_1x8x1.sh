@@ -125,3 +125,11 @@ export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export PYTORCH_TUNABLEOP_ENABLED=${PYTORCH_TUNABLEOP_ENABLED:-1}
 export PYTORCH_TUNABLEOP_FILENAME=${PYTORCH_TUNABLEOP_FILENAME:-"tunableop_results.csv"}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
+# ---- Torch Dynamo / Inductor ------------------------------------------------
+# Megatron's _warmup_jit_function calls torch.compile on bias_swiglu, which
+# triggers the Inductor backend.  Inductor imports triton_key from Triton at
+# graph-cache time; if the installed Triton build doesn't export that symbol
+# the warmup crashes.  Disabling Dynamo skips the torch.compile path entirely
+# — Megatron's own fused kernels are used instead, with no perf impact.
+export TORCHDYNAMO_DISABLE=${TORCHDYNAMO_DISABLE:-1}
