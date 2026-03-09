@@ -199,10 +199,12 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if backend == "aiter":
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
             grad_fp8, grad_scale = _aiter_quant(grad_flat, bwd_dtype)
-            grad_input = _aiter_mm(grad_fp8, weight_fp8.t(), grad_scale, weight_scale)
+            # grad_input = grad[M,N] @ W[N,K] = [M,K]
+            grad_input = _aiter_mm(grad_fp8, weight_fp8, grad_scale, weight_scale)
             grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
+            # grad_weight = grad^T[N,M] @ X[M,K] = [N,K]
             grad_weight = _aiter_mm(
-                grad_fp8.t(),
+                grad_fp8.t().contiguous(),
                 input_fp8,
                 grad_scale, input_scale,
             )
