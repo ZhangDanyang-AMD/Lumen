@@ -179,6 +179,18 @@ def enable(
     return manager
 
 
+def _get_megatron_linear_types():
+    """Return Megatron's parallel linear types if available, else empty tuple."""
+    try:
+        from megatron.core.tensor_parallel.layers import (
+            ColumnParallelLinear,
+            RowParallelLinear,
+        )
+        return ColumnParallelLinear, RowParallelLinear
+    except ImportError:
+        return ()
+
+
 def _patch_linear_layers(
     model: nn.Module,
     manager: ScalingManager,
@@ -191,6 +203,9 @@ def _patch_linear_layers(
     :class:`ScalingManager` tracks independent amax histories per layer (fixes
     the shared-``"weight"`` bug where all layers polluted a single deque).
 
+    Also handles Megatron's ``ColumnParallelLinear`` and ``RowParallelLinear``
+    which do not inherit ``nn.Linear`` but expose the same ``.weight`` attribute.
+
     Gradient quantization is handled by the :class:`ScalingManager` itself
     (configured via ``config.quantize_grad``).
     """
@@ -198,18 +213,22 @@ def _patch_linear_layers(
     block_size = config.block_size
     quant_act = config.quantize_activation
 
+    megatron_types = _get_megatron_linear_types()
+    quantizable_types = (nn.Linear,) + megatron_types
+
     count = 0
     for name, module in model.named_modules():
-        if isinstance(module, nn.Linear):
+        if isinstance(module, quantizable_types):
             tensor_id = f"{name}.weight" if name else "weight"
             module._quant_manager = manager
             module._quant_backend = backend
             module._quant_enabled = True
             module._quant_tensor_id = tensor_id
 
+            is_megatron = megatron_types and isinstance(module, megatron_types)
             handle = module.register_forward_hook(_make_quant_hook(
                 manager, backend, fp8_dtype, block_size, tensor_id,
-                quant_act,
+                quant_act, is_megatron=is_megatron,
             ))
             module._quant_hook_handle = handle
             count += 1

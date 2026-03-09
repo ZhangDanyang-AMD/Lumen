@@ -135,7 +135,9 @@ class ScalingManager:
         Matches TE convention: ``sf = (fp8_max / amax) / (2 ** margin)``,
         returned as ``amax / (fp8_max / (2 ** margin))`` so that the caller
         can divide by the scale to quantize.
+        Always returns fp32 to satisfy hipb_mm's scale dtype requirement.
         """
+        amax = amax.float()
         effective_max = fp8_max / (2 ** self._margin)
         scale = amax / effective_max
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))

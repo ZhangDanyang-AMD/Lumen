@@ -59,6 +59,10 @@ def _aiter_quant(x: torch.Tensor, dtype: torch.dtype):
 
 def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
     from aiter.ops.gradlib import hipb_mm
+    if isinstance(scale_a, torch.Tensor):
+        scale_a = scale_a.float()
+    if isinstance(scale_b, torch.Tensor):
+        scale_b = scale_b.float()
     # solution_index=-1: auto-select best solution (required positional arg in newer aiter)
     return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
 
