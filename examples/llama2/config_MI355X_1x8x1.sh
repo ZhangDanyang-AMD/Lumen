@@ -37,7 +37,7 @@ export LORA_ALPHA=32
 export LORA_DROPOUT=0.1
 
 # ---- FP8 training ------------------------------------------------------------
-export FP8_TRAINING=0
+export FP8_TRAINING=1
 export FP8_FORMAT="fp8_e4m3"
 export FP8_SCALING="delayed"
 export FP8_BLOCK_SIZE=128
@@ -67,7 +67,18 @@ export CKPT_DIR="/model"
 export LORA_A2A=0
 
 # Transformer Light
-export TL_ATTN_BACKEND="aiter"
+# AITER's asm-v3 flash-attention kernel (fmha_v3_fwd) does not currently
+# contain compiled variants for every GQA configuration on gfx950 (MI355X).
+# For LLaMA2-70B with TP=8 the per-partition head ratio is 8Q:1KV, which
+# triggers "invalid argument for fmha_fwd" from aiter::mha_fwd returning -1.
+# Use the Triton backend instead; it supports all GQA ratios on gfx950.
+export TL_ATTN_BACKEND="triton"
+# TRANSFORMER_LIGHT_ATTN_BACKEND controls attention_impl.py's module-load-time
+# csrc probe (_probe_aiter_csrc). Without this, _BACKEND_PREF defaults to
+# "auto" and attention_impl.py detects and prefers the aiter csrc kernels even
+# when TL_ATTN_BACKEND=triton routes through AttentionTritonFunction — causing
+# fmha_v3_fwd to be called instead of the Triton kernel.
+export TRANSFORMER_LIGHT_ATTN_BACKEND="triton"
 export TL_FP8_QUANT="fp8_blockwise"
 export TL_RMSNORM=0
 

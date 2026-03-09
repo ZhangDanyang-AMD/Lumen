@@ -249,18 +249,37 @@ def attention(
                 "'aiter' — install it or use backend_type='triton'."
             )
         _return_softmax = return_attn_probs and dropout_p > 0
-        return flash_attn_func(
-            q, k, v,
-            dropout_p=dropout_p,
-            softmax_scale=softmax_scale,
-            causal=causal,
-            window_size=window_size,
-            bias=bias,
-            alibi_slopes=alibi_slopes,
-            deterministic=deterministic,
-            return_lse=return_lse,
-            return_attn_probs=_return_softmax,
-        )
+        try:
+            return flash_attn_func(
+                q, k, v,
+                dropout_p=dropout_p,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                window_size=window_size,
+                bias=bias,
+                alibi_slopes=alibi_slopes,
+                deterministic=deterministic,
+                return_lse=return_lse,
+                return_attn_probs=_return_softmax,
+            )
+        except RuntimeError as _aiter_err:
+            # AITER's asm-v3 dispatch table may not include compiled variants for
+            # every (dtype, head_dim, GQA-ratio, architecture) combination.  When
+            # mha_fwd returns -1 ("invalid argument for fmha_fwd"), fall back to
+            # the Triton implementation which handles all configurations.
+            import warnings
+            warnings.warn(
+                f"AITER flash-attention kernel unavailable for this configuration "
+                f"(q={tuple(q.shape)}, k={tuple(k.shape)}, causal={causal}): "
+                f"{_aiter_err}. Falling back to Triton backend.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return AttentionTritonFunction.apply(
+                q, k, v, dropout_p, softmax_scale, causal, window_size,
+                bias, alibi_slopes, return_lse, return_attn_probs,
+                torch.is_grad_enabled(), False, grad_quant_type,
+            )
     elif backend_type == "triton":
         return AttentionTritonFunction.apply(
             q, k, v, dropout_p, softmax_scale, causal, window_size,

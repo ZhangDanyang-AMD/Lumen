@@ -1364,7 +1364,7 @@ def attention_forward(q, k, v, use_fp8, dropout_p, softmax_scale, causal,
     Backend priority for FP8 (training):       triton per-block.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and csrc_available("flash_attn_fwd"):
+    if not use_fp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_fwd"):
         out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
             q, k, v, dropout_p, softmax_scale, causal,
             window_size[0], window_size[1],
@@ -1433,7 +1433,7 @@ def attention_backward(do, q, k, v, o, q_scale, k_scale, v_scale, p_scale,
     Backend priority for FP8:           (future csrc fp8) → triton fp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and csrc_available("flash_attn_bwd"):
+    if not use_fp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_bwd"):
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
@@ -1469,7 +1469,7 @@ def attention_mxfp8_forward(q, k, v, use_mxfp8, dropout_p, softmax_scale,
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_mxfp8 and csrc_available("flash_attn_fwd"):
+    if not use_mxfp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_fwd"):
         out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
             q, k, v, dropout_p, softmax_scale, causal,
             window_size[0], window_size[1],
@@ -1534,7 +1534,7 @@ def attention_mxfp8_backward(do, q, k, v, o, softmax_lse, q_scale, k_scale,
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_mxfp8 and csrc_available("flash_attn_bwd"):
+    if not use_mxfp8 and _BACKEND_PREF != "triton" and csrc_available("flash_attn_bwd"):
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
