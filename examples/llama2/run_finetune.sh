@@ -14,12 +14,20 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ---- Load configuration -----------------------------------------------------
 CONFIG=${CONFIG:-"${SCRIPT_DIR}/config_MI355X_1x8x1.sh"}
 source "${CONFIG}"
+
+# ---- Validate tokenizer path ------------------------------------------------
+if [ ! -d "${TOKENIZER}" ]; then
+    echo "ERROR: Tokenizer directory not found: ${TOKENIZER}"
+    echo "  Set TOKENIZER=/path/to/tokenizer before running, or ensure the"
+    echo "  'tokenizer/' directory exists next to the config file."
+    exit 1
+fi
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
 source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
