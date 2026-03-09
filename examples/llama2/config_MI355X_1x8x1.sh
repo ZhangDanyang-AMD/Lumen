@@ -29,8 +29,13 @@ export SAVE_INTERVAL=${SAVE_INTERVAL:-200}
 export SAVE_DIR=${SAVE_DIR:-"/results/checkpoints"}
 
 # ---- Data / tokenizer --------------------------------------------------------
-export TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
-export VALID_DATA=${VALID_DATA:-"/data/validation.jsonl"}
+# Prefer .jsonl; fall back to .npy if jsonl does not exist (e.g. MLPerf pre-tokenized)
+if [ -z "${TRAIN_DATA}" ]; then
+    [ -f "/data/train.jsonl" ] && export TRAIN_DATA="/data/train.jsonl" || export TRAIN_DATA="/data/train.npy"
+fi
+if [ -z "${VALID_DATA}" ]; then
+    [ -f "/data/validation.jsonl" ] && export VALID_DATA="/data/validation.jsonl" || export VALID_DATA="/data/validation.npy"
+fi
 _TL_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export TOKENIZER=${TOKENIZER:-"${_TL_CONFIG_DIR}/tokenizer"}
 

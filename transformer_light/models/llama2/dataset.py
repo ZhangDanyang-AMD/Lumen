@@ -15,6 +15,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -74,10 +75,33 @@ class LLaMA2SFTDataset(Dataset):
         elif data_path.endswith(".json"):
             with open(data_path, "r", encoding="utf-8") as f:
                 self._raw_samples = json.load(f)
+        elif data_path.endswith(".npy"):
+            arr = np.load(data_path, allow_pickle=True)
+            if isinstance(arr, np.ndarray) and arr.ndim == 2:
+                ids_arr = arr.astype(np.int64)
+                mask_arr = np.ones_like(ids_arr, dtype=np.int64)
+                self._raw_samples = [
+                    {"input_ids": ids_arr[i].tolist(), "loss_mask": mask_arr[i].tolist()}
+                    for i in range(len(ids_arr))
+                ]
+            else:
+                raise ValueError(f".npy must be 2D array (N, seq_len), got shape {getattr(arr, 'shape', 'unknown')}")
+        elif data_path.endswith(".npz"):
+            data = np.load(data_path, allow_pickle=True)
+            ids_arr = data["input_ids"].astype(np.int64)
+            mask_arr = data.get("loss_mask")
+            if mask_arr is None:
+                mask_arr = np.ones_like(ids_arr, dtype=np.int64)
+            else:
+                mask_arr = mask_arr.astype(np.int64)
+            self._raw_samples = [
+                {"input_ids": ids_arr[i].tolist(), "loss_mask": mask_arr[i].tolist()}
+                for i in range(len(ids_arr))
+            ]
         else:
-            raise ValueError(f"Unsupported data format: {data_path}")
+            raise ValueError(f"Unsupported data format: {data_path} (use .jsonl, .json, .npy, or .npz)")
 
-        logger.info("Loaded %d raw SFT samples from %s", len(self._raw_samples), data_path)
+        logger.info("Loaded %d samples from %s", len(self._raw_samples), data_path)
 
     def __len__(self) -> int:
         return self.num_samples
@@ -107,6 +131,13 @@ class LLaMA2SFTDataset(Dataset):
 
     def _process_sample(self, sample: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Tokenize one raw sample and compute the answer-only loss mask."""
+        if "input_ids" in sample:
+            ids = sample["input_ids"]
+            mask = sample.get("loss_mask", [1] * len(ids))
+            if len(ids) > self.seq_length:
+                ids = ids[: self.seq_length]
+                mask = mask[: self.seq_length]
+            return {"input_ids": ids, "loss_mask": mask, "token_count": len(ids)}
         if "messages" in sample:
             messages = sample["messages"]
             if len(messages) < 2:
