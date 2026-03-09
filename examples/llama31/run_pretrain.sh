@@ -86,6 +86,12 @@ run_megatron() {
     GQA_ARGS="--group-query-attention --num-query-groups ${KV_HEADS}"
 
     VP_ARGS=""; [ "${VP}" -gt 0 ] && VP_ARGS="--num-layers-per-virtual-pipeline-stage ${VP}"
+    # Megatron-LM-AMD requires sequence parallelism whenever tensor parallelism is
+    # used (validate_args enforces this unconditionally for TP > 1).
+    if [ "${TP}" -gt 1 ] && [ "${SP}" -ne 1 ]; then
+        echo "WARNING: TP=${TP} > 1 requires SP=1 (Megatron-LM-AMD enforce). Enabling automatically."
+        SP=1
+    fi
     SP_ARGS=""; [ "${SP}" -eq 1 ] && SP_ARGS="--sequence-parallel"
 
     LORA_ARGS=""
