@@ -226,11 +226,8 @@ def _patch_linear_layers(
             module._quant_tensor_id = tensor_id
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
-            handle = module.register_forward_hook(_make_quant_hook(
-                manager, backend, fp8_dtype, block_size, tensor_id,
-                quant_act, is_megatron=is_megatron,
-            ))
-            module._quant_hook_handle = handle
+            _replace_forward(module, manager, backend, fp8_dtype, block_size,
+                             tensor_id, quant_act, is_megatron)
             count += 1
 
     act_str = "weight+activation" if quant_act else "weight-only"
@@ -244,27 +241,18 @@ def _patch_linear_layers(
     )
 
 
-def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
-                     quantize_activation, is_megatron: bool = False):
-    """Create a forward hook closure that replaces the vanilla linear output.
+def _replace_forward(module, manager, backend, fp8_dtype, block_size,
+                     tensor_id, quantize_activation, is_megatron):
+    """Replace the module's forward method with an FP8-quantized version.
 
-    *tensor_id* is unique per layer so that delayed-scaling amax histories
-    are tracked independently.  Gradient quantization is handled by the
-    *manager* (:class:`ScalingManager`) based on its ``config.quantize_grad``.
-
-    For Megatron's ``ColumnParallelLinear`` / ``RowParallelLinear``:
-    - ``skip_bias_add=True`` layers return a ``(output, bias)`` tuple; the hook
-      preserves that format.
-    - ``RowParallelLinear`` all-reduces the local GEMM result across TP ranks;
-      the hook re-applies the all-reduce after the FP8 GEMM.
-    - ``ColumnParallelLinear`` with ``gather_output=True`` all-gathers the
-      result; the hook re-applies the all-gather.
+    Unlike ``register_forward_hook``, this prevents the original (BF16) linear
+    from running at all, saving both compute and peak memory — critical for
+    70B-class models under FSDP.
     """
+    original_forward = module.forward
 
-    def hook(module, args, output):
-        input_tensor = args[0]
-
-        if not is_megatron:
+    if not is_megatron:
+        def quant_forward(input_tensor, *args, **kwargs):
             return quantized_linear(
                 input_tensor,
                 module.weight,
@@ -276,62 +264,53 @@ def _make_quant_hook(manager, backend, fp8_dtype, block_size, tensor_id,
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
             )
+    else:
+        def quant_forward(input_tensor, *args, **kwargs):
+            skip_bias_add = getattr(module, "skip_bias_add", False)
+            bias = getattr(module, "bias", None)
+            bias_for_gemm = None if skip_bias_add else bias
 
-        # --- Megatron parallel linear path ---
-        skip_bias_add = getattr(module, "skip_bias_add", False)
-        bias = getattr(module, "bias", None)
+            result = quantized_linear(
+                input_tensor,
+                module.weight,
+                bias_for_gemm,
+                scaling_manager=manager,
+                backend=backend,
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                tensor_id=tensor_id,
+                quantize_activation=quantize_activation,
+            )
 
-        # For skip_bias_add layers the bias is returned separately; don't fuse
-        # it into the GEMM so callers can fuse it themselves (e.g. with SwiGLU).
-        bias_for_gemm = None if skip_bias_add else bias
+            if getattr(module, "input_is_parallel", False):
+                try:
+                    from megatron.core.tensor_parallel.mappings import (
+                        reduce_from_tensor_model_parallel_region,
+                    )
+                    result = reduce_from_tensor_model_parallel_region(result)
+                except ImportError:
+                    pass
+            elif getattr(module, "gather_output", False):
+                try:
+                    from megatron.core.tensor_parallel.mappings import (
+                        gather_from_tensor_model_parallel_region,
+                    )
+                    result = gather_from_tensor_model_parallel_region(result)
+                except ImportError:
+                    pass
 
-        result = quantized_linear(
-            input_tensor,
-            module.weight,
-            bias_for_gemm,
-            scaling_manager=manager,
-            backend=backend,
-            fp8_dtype=fp8_dtype,
-            block_size=block_size,
-            tensor_id=tensor_id,
-            quantize_activation=quantize_activation,
-        )
+            if skip_bias_add:
+                return result, bias
+            return result
 
-        # RowParallelLinear: all-reduce the local GEMM result across TP ranks.
-        if getattr(module, "input_is_parallel", False) or (
-            hasattr(module, "sequence_parallel") and
-            not getattr(module, "gather_output", True)
-            and hasattr(module, "input_size_per_partition")
-        ):
-            try:
-                from megatron.core.tensor_parallel.mappings import (
-                    reduce_from_tensor_model_parallel_region,
-                )
-                result = reduce_from_tensor_model_parallel_region(result)
-            except ImportError:
-                pass
-
-        # ColumnParallelLinear with gather_output=True: all-gather shards.
-        elif getattr(module, "gather_output", False):
-            try:
-                from megatron.core.tensor_parallel.mappings import (
-                    gather_from_tensor_model_parallel_region,
-                )
-                result = gather_from_tensor_model_parallel_region(result)
-            except ImportError:
-                pass
-
-        if skip_bias_add:
-            return result, bias
-        return result
-
-    return hook
+    module._original_forward = original_forward
+    module.forward = quant_forward
 
 
 def disable(model: nn.Module) -> None:
-    """Remove quantized hooks from all ``nn.Linear`` layers."""
+    """Remove FP8 quantized forward from all patched layers."""
     for module in model.modules():
-        if isinstance(module, nn.Linear) and hasattr(module, "_quant_hook_handle"):
-            module._quant_hook_handle.remove()
-            del module._quant_hook_handle
+        if hasattr(module, "_original_forward"):
+            module.forward = module._original_forward
+            del module._original_forward
             module._quant_enabled = False
