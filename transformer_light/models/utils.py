@@ -20,6 +20,7 @@ from typing import Optional
 
 __all__ = [
     "peek_backend",
+    "safe_add_argument",
     "sha256_file",
     "download_hf_model",
     "download_hf_dataset",
@@ -31,6 +32,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------------
+
+def safe_add_argument(parser_or_group, *args, **kwargs):
+    """Add an argument only when none of its option strings are already registered.
+
+    Megatron-LM-AMD pre-registers several ``--fp8-*`` arguments (and potentially
+    others) in its own argument parser.  Calling ``add_argument`` a second time
+    for the same flag raises ``argparse.ArgumentError``.  This helper silently
+    skips registration when the argument is already present so that the Megatron
+    definition takes precedence.
+
+    Works with both a plain :class:`argparse.ArgumentParser` and an
+    :class:`argparse._ArgumentGroup` (created via ``parser.add_argument_group``).
+    """
+    root_parser = getattr(parser_or_group, "_parser", parser_or_group)
+    option_strings = [a for a in args if a.startswith("-")]
+    if any(opt in root_parser._option_string_actions for opt in option_strings):
+        return
+    parser_or_group.add_argument(*args, **kwargs)
+
 
 def peek_backend(default: str = "megatron") -> str:
     """Extract ``--backend`` from *sys.argv* without consuming it.

@@ -14,5 +14,6 @@ from transformer_light.models.utils import (  # noqa: F401
     download_hf_dataset,
     download_hf_model,
     peek_backend,
+    safe_add_argument,
     sha256_file,
 )

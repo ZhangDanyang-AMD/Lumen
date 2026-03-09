@@ -64,7 +64,7 @@ run_megatron() {
 
     FP8_ARGS=""
     if [ "${FP8_TRAINING}" -eq 1 ]; then
-        FP8_ARGS="--fp8-training --fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING} --fp8-block-size ${FP8_BLOCK_SIZE}"
+        FP8_ARGS="--fp8-training --tl-fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING} --fp8-block-size ${FP8_BLOCK_SIZE}"
         FP8_ARGS+=" --fp8-amax-algo ${FP8_AMAX_ALGO} --fp8-amax-history ${FP8_AMAX_HISTORY}"
         [ "${FP8_REDUCE_AMAX}" = "1" ] && FP8_ARGS+=" --fp8-reduce-amax"
         [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"

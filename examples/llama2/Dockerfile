@@ -14,17 +14,18 @@ RUN /usr/bin/python3 -m pip install pyYAML
 WORKDIR /workspace/deps
 
 # Megatron-LM-AMD (for Megatron backend)
-ARG MEGATRON_COMMIT=5c34c4cfe41dc304ff51c686358cf039621c7cb1
+# ARG MEGATRON_COMMIT=5c34c4cfe41dc304ff51c686358cf039621c7cb1
 RUN git clone --recursive https://github.com/ROCm/Megatron-LM.git megatron_lm
 RUN pip uninstall -y megatron-core
 RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
     && pip install -e . && cd megatron/core/datasets && make
 
-ENV PYTHONPATH="/workspace/deps/megatron_lm:${PYTHONPATH:-}"
-
 # AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
-RUN pip install amd-aiter || echo "AITER not available — falling back to Triton-only backends"
+RUN git clone --recursive https://github.com/ROCm/aiter.git aiter
+RUN cd aiter && pip install -e . --force-reinstall
 
+ENV PYTHONPATH="/workspace/deps/megatron_lm:/workspace/deps/aiter:${PYTHONPATH:-}"
+    
 # ---------------------------------------------------------------------------
 # Python dependencies
 # ---------------------------------------------------------------------------

@@ -54,6 +54,7 @@ from transformer_light.modules.attention_megatron import (
     TransformerLightDotProductAttention,
 )
 from transformer_light.models.llama31.dataset import PretrainTextDataset
+from transformer_light.models.utils import safe_add_argument
 
 __all__ = [
     "PretrainTextDataset",
@@ -244,7 +245,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         AmaxAlgo, QuantConfig, QuantFormat, ScalingType,
     )
 
-    fmt = getattr(args, "fp8_format", "fp8_e4m3")
+    fmt = getattr(args, "tl_fp8_format", "fp8_e4m3")
     scaling = getattr(args, "fp8_scaling", "delayed")
     block_size = getattr(args, "fp8_block_size", 128)
     amax_algo = getattr(args, "fp8_amax_algo", "most_recent")
@@ -514,61 +515,61 @@ def forward_step(data_iterator, model: GPTModel):
 def add_pretrain_args(parser):
     """Add pretrain-specific arguments."""
 
-    parser.add_argument("--backend", type=str, default="megatron",
-                        choices=["megatron", "fsdp"], help="Training backend.")
+    safe_add_argument(parser, "--backend", type=str, default="megatron",
+                       choices=["megatron", "fsdp"], help="Training backend.")
 
     tl = parser.add_argument_group(title="transformer-light")
-    tl.add_argument(
-        "--tl-attn-backend", type=str, default="aiter",
+    safe_add_argument(
+        tl, "--tl-attn-backend", type=str, default="aiter",
         choices=["aiter", "triton", "triton_fp8"],
         help="Transformer Light attention backend.",
     )
-    tl.add_argument(
-        "--tl-fp8-quant-type", type=str, default="mxfp8",
+    safe_add_argument(
+        tl, "--tl-fp8-quant-type", type=str, default="mxfp8",
         choices=["fp8_blockwise", "mxfp8"],
         help="FP8 quantisation type for triton_fp8 backend.",
     )
-    tl.add_argument(
-        "--tl-rmsnorm", action="store_true", default=False,
+    safe_add_argument(
+        tl, "--tl-rmsnorm", action="store_true", default=False,
         help="Replace RMSNorm with Transformer Light Triton-accelerated RMSNorm.",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
-    mxfp8.add_argument("--mxfp8-block-m-fwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-block-n-fwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-block-m-dq-bwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-block-n-dq-bwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-block-m-dkv-bwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-block-n-dkv-bwd", type=int, default=128)
-    mxfp8.add_argument("--mxfp8-quant-block-size", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-m-fwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-fwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-m-dq-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-dq-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-m-dkv-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-dkv-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-quant-block-size", type=int, default=128)
 
     lora = parser.add_argument_group(title="lora")
-    lora.add_argument("--lora-rank", type=int, default=0,
+    safe_add_argument(lora, "--lora-rank", type=int, default=0,
                        help="LoRA rank. 0 = disabled (full pretraining).")
-    lora.add_argument("--lora-alpha", type=float, default=32.0)
-    lora.add_argument("--lora-dropout", type=float, default=0.1)
-    lora.add_argument("--lora-a2a", action="store_true", default=False,
+    safe_add_argument(lora, "--lora-alpha", type=float, default=32.0)
+    safe_add_argument(lora, "--lora-dropout", type=float, default=0.1)
+    safe_add_argument(lora, "--lora-a2a", action="store_true", default=False,
                        help="Enable LoRA all-to-all communication optimisation.")
 
     fp8 = parser.add_argument_group(title="fp8-training")
-    fp8.add_argument("--fp8-training", action="store_true", default=False)
-    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3",
-                      choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
-    fp8.add_argument("--fp8-scaling", type=str, default="delayed",
-                      choices=["dynamic", "delayed", "blockwise"])
-    fp8.add_argument("--fp8-block-size", type=int, default=128)
-    fp8.add_argument("--fp8-amax-algo", type=str, default="most_recent",
-                      choices=["max", "most_recent"])
-    fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
-    fp8.add_argument("--fp8-amax-history", type=int, default=4)
-    fp8.add_argument("--fp8-margin", type=int, default=0,
-                      help="Margin for FP8 scaling factor computation (TE-compatible).")
-    fp8.add_argument("--fp8-activation", action="store_true", default=True)
-    fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
-                      action="store_false")
-    fp8.add_argument("--grad-quant-type", type=str, default=None,
-                      choices=["fp8", "mxfp8", "fp4"],
-                      help="Gradient quantization type (None=disabled).")
+    safe_add_argument(fp8, "--fp8-training", action="store_true", default=False)
+    safe_add_argument(fp8, "--tl-fp8-format", type=str, default="fp8_e4m3",
+                       choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
+    safe_add_argument(fp8, "--fp8-scaling", type=str, default="delayed",
+                       choices=["dynamic", "delayed", "blockwise"])
+    safe_add_argument(fp8, "--fp8-block-size", type=int, default=128)
+    safe_add_argument(fp8, "--fp8-amax-algo", type=str, default="most_recent",
+                       choices=["max", "most_recent"])
+    safe_add_argument(fp8, "--fp8-reduce-amax", action="store_true", default=False)
+    safe_add_argument(fp8, "--fp8-amax-history", type=int, default=4)
+    safe_add_argument(fp8, "--fp8-margin", type=int, default=0,
+                       help="Margin for FP8 scaling factor computation (TE-compatible).")
+    safe_add_argument(fp8, "--fp8-activation", action="store_true", default=True)
+    safe_add_argument(fp8, "--no-fp8-activation", dest="fp8_activation",
+                       action="store_false")
+    safe_add_argument(fp8, "--grad-quant-type", type=str, default=None,
+                       choices=["fp8", "mxfp8", "fp4"],
+                       help="Gradient quantization type (None=disabled).")
 
     pt = parser.add_argument_group(title="pretrain-training")
     pt.add_argument("--warmup-steps", type=int, default=0,
