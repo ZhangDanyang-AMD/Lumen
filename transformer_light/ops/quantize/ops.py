@@ -18,6 +18,7 @@ import torch
 import triton
 from torch.library import triton_op, wrap_triton
 
+from aiter.ops.quant import static_per_tensor_quant, dynamic_per_tensor_quant
 from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
     quant_fp8_blockwise_kernel,
     quant_fp8_blockwise_segment_m_kernel,
@@ -40,22 +41,13 @@ def is_cdna4():
 # ---------------------------------------------------------------------------
 
 
-def quant_fp8_tensorwise_impl(
-    x: torch.Tensor,
-    scale: torch.Tensor,
-    dtype: torch.dtype,
-):
-    x_fp8 = torch.ops.transformer_light_cpp_extension.fp8_quantize(x, scale, dtype)
-    return x_fp8
+def quant_fp8_tensorwise_impl(x, scale, dtype):
+    out = torch.empty(x.shape, dtype=dtype, device=x.device)
+    static_per_tensor_quant(out, x, scale)   
+    return out
 
-
-def dequant_fp8_tensorwise_impl(
-    x: torch.Tensor,
-    scale_inv: torch.Tensor,
-    dtype: torch.dtype,
-):
-    orig_x = torch.ops.transformer_light_cpp_extension.fp8_dequantize(x, scale_inv, dtype)
-    return orig_x
+def dequant_fp8_tensorwise_impl(x, scale_inv, dtype):
+    return x.to(dtype) * scale_inv
 
 
 # ---------------------------------------------------------------------------

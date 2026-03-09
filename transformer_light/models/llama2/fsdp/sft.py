@@ -81,7 +81,7 @@ def build_model(args) -> nn.Module:
         model = LlamaForCausalLM.from_pretrained(
             args.model_name_or_path,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation="sdpa",
         )
     else:
         _rank0_print("> Building LLaMA2 from config ...")
@@ -217,8 +217,10 @@ class FSDPTrainer:
         if args.fp8_training:
             apply_fp8_training(model, args)
 
+        from functools import partial
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-        auto_wrap_policy = transformer_auto_wrap_policy(
+        auto_wrap_policy = partial(
+            transformer_auto_wrap_policy,
             transformer_layer_cls={LlamaDecoderLayer},
         )
 

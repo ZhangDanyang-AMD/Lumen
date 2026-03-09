@@ -9,7 +9,7 @@
 #   TRAIN_STEPS=500 bash run_finetune.sh                      # override by editing this file
 
 # ---- Backend selection -------------------------------------------------------
-export BACKEND="megatron"
+export BACKEND="fsdp"
 
 # ---- Hardware ----------------------------------------------------------------
 export NGPU=8
@@ -95,7 +95,7 @@ export MXFP8_BLOCK_N_DKV_BWD=128
 export MXFP8_QUANT_BLOCK_SIZE=128
 
 # ---- FSDP backend ------------------------------------------------------------
-export MODEL="/model"
+export MODEL="/model-hf"
 export GRAD_ACCUM=8
 export MAX_GRAD_NORM=1.0
 export NUM_WORKERS=4

@@ -59,7 +59,8 @@ def _aiter_quant(x: torch.Tensor, dtype: torch.dtype):
 
 def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
     from aiter.ops.gradlib import hipb_mm
-    return hipb_mm(a, b, scaleA=scale_a, scaleB=scale_b)
+    # solution_index=-1: auto-select best solution (required positional arg in newer aiter)
+    return hipb_mm(a, b, -1, scaleA=scale_a, scaleB=scale_b)
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +127,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
             return output
 
         if backend == "aiter":
-            input_fp8, input_scale = _aiter_quant(input, fp8_dtype)
+            input_2d = input.reshape(-1, input.shape[-1])
+            input_fp8, input_scale = _aiter_quant(input_2d, fp8_dtype)
             weight_fp8, weight_scale = scaling_manager.quantize(tensor_id, weight)
-            output = _aiter_mm(input_fp8, weight_fp8, input_scale, weight_scale)
+            output = _aiter_mm(input_fp8, weight_fp8.t(), input_scale, weight_scale)
+            output = output.view(*input.shape[:-1], weight.shape[0])
         else:
             input_fp8, input_scale = _triton_quant(input, fp8_dtype, block_size)
             weight_fp8, weight_scale = scaling_manager.quantize(tensor_id, weight)
@@ -173,10 +176,12 @@ class QuantizedLinearFunction(torch.autograd.Function):
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", ctx.fp8_dtype)
 
         if backend == "aiter":
-            grad_fp8, grad_scale = _aiter_quant(grad_output, bwd_dtype)
+            grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+            grad_fp8, grad_scale = _aiter_quant(grad_flat, bwd_dtype)
             grad_input = _aiter_mm(grad_fp8, weight_fp8.t(), grad_scale, weight_scale)
+            grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
             grad_weight = _aiter_mm(
-                grad_fp8.reshape(-1, grad_output.shape[-1]).t(),
+                grad_fp8.t(),
                 input_fp8,
                 grad_scale, input_scale,
             )

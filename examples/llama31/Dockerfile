@@ -23,7 +23,10 @@ RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
 ENV PYTHONPATH="/workspace/deps/megatron_lm:${PYTHONPATH:-}"
 
 # AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
-RUN pip install amd-aiter || echo "AITER not available — falling back to Triton-only backends"
+RUN git clone --recursive https://github.com/ROCm/aiter.git aiter
+RUN cd aiter && pip install -e . --force-reinstall
+
+ENV PYTHONPATH="/workspace/deps/megatron_lm:/workspace/deps/aiter:${PYTHONPATH:-}"
 
 # ---------------------------------------------------------------------------
 # Python dependencies
