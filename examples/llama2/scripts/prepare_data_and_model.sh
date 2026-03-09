@@ -4,10 +4,13 @@
 # End-to-end data and model preparation for LLaMA2 SFT using Megatron-LM-AMD.
 #
 # This script:
-#   1. Downloads the LLaMA2 HuggingFace checkpoint
+#   1. (Optional) Downloads the LLaMA2 HuggingFace checkpoint
 #   2. Converts it to Megatron-LM format using tools/checkpoint/convert.py
-#   3. Downloads the Gov Report dataset
+#   3. (Optional) Downloads the Gov Report dataset
 #   4. Converts the dataset to SFT jsonl format
+#
+# Download steps are automatically skipped when the target directory/files
+# already exist.  Set SKIP_DOWNLOAD=1 to force-skip downloads regardless.
 #
 # Prerequisites:
 #   export MEGATRON_ROOT=/path/to/Megatron-LM-AMD
@@ -20,9 +23,10 @@
 #   MODEL_NAME      - HF model name (default: meta-llama/Llama-2-70b-hf)
 #   MODEL_SIZE      - Megatron model size tag (default: llama2-70B)
 #   TP              - target tensor parallel size (default: 8)
-#   HF_MODEL_DIR    - directory for HF checkpoint (default: /data/model_hf)
-#   MEGATRON_CKPT   - directory for Megatron checkpoint (default: /ckpt)
+#   HF_MODEL_DIR    - directory for HF checkpoint (default: /model)
+#   MEGATRON_CKPT   - directory for Megatron checkpoint (default: /results/megatron_ckpt)
 #   DATA_DIR        - base data directory (default: /data)
+#   SKIP_DOWNLOAD   - set to 1 to skip all download steps (default: auto)
 
 set -euo pipefail
 
@@ -52,8 +56,8 @@ export MEGATRON_ROOT
 MODEL_NAME=${MODEL_NAME:-"meta-llama/Llama-2-70b-hf"}
 MODEL_SIZE=${MODEL_SIZE:-"llama2-70B"}
 TP=${TP:-8}
-HF_MODEL_DIR=${HF_MODEL_DIR:-"/data/model_hf"}
-MEGATRON_CKPT=${MEGATRON_CKPT:-"/ckpt"}
+HF_MODEL_DIR=${HF_MODEL_DIR:-"/model"}
+MEGATRON_CKPT=${MEGATRON_CKPT:-"/results/megatron_ckpt"}
 DATA_DIR=${DATA_DIR:-"/data"}
 
 echo "============================================================"
@@ -68,13 +72,19 @@ echo " Data dir:     ${DATA_DIR}"
 echo "============================================================"
 
 # --------------------------------------------------------------------------
-# Step 1: Download HuggingFace model
+# Step 1: Download HuggingFace model (skipped when already present)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 1/4] Downloading HuggingFace model ..."
-python "${SCRIPT_DIR}/download_model.py" \
-    --model_name "${MODEL_NAME}" \
-    --output_dir "${HF_MODEL_DIR}"
+_model_present=0
+[ -f "${HF_MODEL_DIR}/config.json" ] && _model_present=1
+if [ "${SKIP_DOWNLOAD:-0}" = "1" ] || [ "${_model_present}" = "1" ]; then
+    echo "[Step 1/4] Skipping model download (already present at ${HF_MODEL_DIR})"
+else
+    echo "[Step 1/4] Downloading HuggingFace model ..."
+    python "${SCRIPT_DIR}/download_model.py" \
+        --model_name "${MODEL_NAME}" \
+        --output_dir "${HF_MODEL_DIR}"
+fi
 
 # --------------------------------------------------------------------------
 # Step 2: Convert HF checkpoint to Megatron format
@@ -99,21 +109,31 @@ python "${MEGATRON_ROOT}/tools/checkpoint/convert.py" \
 echo "  Megatron checkpoint saved to: ${MEGATRON_CKPT}"
 
 # --------------------------------------------------------------------------
-# Step 3: Download Gov Report dataset
+# Step 3: Download Gov Report dataset (skipped when already present)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 3/4] Downloading Gov Report dataset ..."
-python "${SCRIPT_DIR}/download_dataset.py" \
-    --output_dir "${DATA_DIR}/gov_report_raw"
+_data_present=0
+{ [ -f "${DATA_DIR}/train.jsonl" ] && [ -f "${DATA_DIR}/validation.jsonl" ]; } && _data_present=1
+if [ "${SKIP_DOWNLOAD:-0}" = "1" ] || [ "${_data_present}" = "1" ]; then
+    echo "[Step 3/4] Skipping dataset download (train.jsonl / validation.jsonl already present in ${DATA_DIR})"
+else
+    echo "[Step 3/4] Downloading Gov Report dataset ..."
+    python "${SCRIPT_DIR}/download_dataset.py" \
+        --output_dir "${DATA_DIR}/gov_report_raw"
+fi
 
 # --------------------------------------------------------------------------
-# Step 4: Convert dataset to SFT jsonl format
+# Step 4: Convert dataset to SFT jsonl format (skipped when already done)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 4/4] Converting dataset to SFT jsonl format ..."
-python "${SCRIPT_DIR}/convert_dataset.py" \
-    --input_dir "${DATA_DIR}/gov_report_raw" \
-    --output_dir "${DATA_DIR}"
+if [ "${_data_present}" = "1" ]; then
+    echo "[Step 4/4] Skipping dataset conversion (train.jsonl / validation.jsonl already present)"
+else
+    echo "[Step 4/4] Converting dataset to SFT jsonl format ..."
+    python "${SCRIPT_DIR}/convert_dataset.py" \
+        --input_dir "${DATA_DIR}/gov_report_raw" \
+        --output_dir "${DATA_DIR}"
+fi
 
 echo ""
 echo "============================================================"

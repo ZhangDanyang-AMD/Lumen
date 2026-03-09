@@ -4,25 +4,29 @@
 # End-to-end data and model preparation for LLaMA 3.1 pretraining.
 #
 # This script:
-#   1. Downloads the LLaMA 3.1 tokenizer/model from HuggingFace
+#   1. (Optional) Downloads the LLaMA 3.1 tokenizer/model from HuggingFace
 #   2. (Megatron only) Converts the HF checkpoint to Megatron-LM format
-#   3. Downloads the C4 pretraining dataset
+#   3. (Optional) Downloads the C4 pretraining dataset
 #   4. Converts/validates the dataset to jsonl format
+#
+# Download steps are automatically skipped when the target directory/files
+# already exist.  Set SKIP_DOWNLOAD=1 to force-skip downloads regardless.
 #
 # Usage:
 #   bash prepare_data_and_model.sh
 #
 # Environment variables:
-#   BACKEND         - training backend: megatron or fsdp (default: megatron)
-#   MEGATRON_ROOT   - path to Megatron-LM-AMD (required for megatron backend)
-#   MODEL_NAME      - HF model name (default: meta-llama/Llama-3.1-8B)
-#   MODEL_SIZE      - Megatron model size tag (default: llama3.1-8B)
-#   TP              - target tensor parallel size (default: 1)
-#   HF_MODEL_DIR    - directory for HF checkpoint (default: /data/model_hf)
-#   MEGATRON_CKPT   - directory for Megatron checkpoint (default: /ckpt)
-#   DATA_DIR        - base data directory (default: /data)
+#   BACKEND           - training backend: megatron or fsdp (default: megatron)
+#   MEGATRON_ROOT     - path to Megatron-LM-AMD (required for megatron backend)
+#   MODEL_NAME        - HF model name (default: meta-llama/Llama-3.1-8B)
+#   MODEL_SIZE        - Megatron model size tag (default: llama3.1-8B)
+#   TP                - target tensor parallel size (default: 1)
+#   HF_MODEL_DIR      - directory for HF checkpoint (default: /model)
+#   MEGATRON_CKPT     - directory for Megatron checkpoint (default: /results/megatron_ckpt)
+#   DATA_DIR          - base data directory (default: /data)
 #   MAX_TRAIN_SAMPLES - max training samples to download (default: 0 = all)
 #   MAX_VAL_SAMPLES   - max validation samples to download (default: 10000)
+#   SKIP_DOWNLOAD     - set to 1 to force-skip all download steps (default: auto)
 
 set -euo pipefail
 
@@ -32,8 +36,8 @@ BACKEND=${BACKEND:-"megatron"}
 MODEL_NAME=${MODEL_NAME:-"meta-llama/Llama-3.1-8B"}
 MODEL_SIZE=${MODEL_SIZE:-"llama3.1-8B"}
 TP=${TP:-1}
-HF_MODEL_DIR=${HF_MODEL_DIR:-"/data/model_hf"}
-MEGATRON_CKPT=${MEGATRON_CKPT:-"/ckpt"}
+HF_MODEL_DIR=${HF_MODEL_DIR:-"/model"}
+MEGATRON_CKPT=${MEGATRON_CKPT:-"/results/megatron_ckpt"}
 DATA_DIR=${DATA_DIR:-"/data"}
 MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:-0}
 MAX_VAL_SAMPLES=${MAX_VAL_SAMPLES:-10000}
@@ -68,13 +72,19 @@ echo " Val cap:      ${MAX_VAL_SAMPLES} (0=all)"
 echo "============================================================"
 
 # --------------------------------------------------------------------------
-# Step 1: Download HuggingFace model / tokenizer
+# Step 1: Download HuggingFace model / tokenizer (skipped when already present)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 1/4] Downloading HuggingFace model ..."
-python "${SCRIPT_DIR}/download_model.py" \
-    --model_name "${MODEL_NAME}" \
-    --output_dir "${HF_MODEL_DIR}"
+_model_present=0
+[ -f "${HF_MODEL_DIR}/config.json" ] && _model_present=1
+if [ "${SKIP_DOWNLOAD:-0}" = "1" ] || [ "${_model_present}" = "1" ]; then
+    echo "[Step 1/4] Skipping model download (already present at ${HF_MODEL_DIR})"
+else
+    echo "[Step 1/4] Downloading HuggingFace model ..."
+    python "${SCRIPT_DIR}/download_model.py" \
+        --model_name "${MODEL_NAME}" \
+        --output_dir "${HF_MODEL_DIR}"
+fi
 
 # --------------------------------------------------------------------------
 # Step 2: Convert HF checkpoint to Megatron format (megatron backend only)
@@ -109,28 +119,34 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# Step 3: Download C4 pretraining dataset
+# Step 3: Download C4 pretraining dataset (skipped when already present)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 3/4] Downloading C4 pretraining dataset ..."
-
-DOWNLOAD_ARGS="--output_dir ${DATA_DIR}/c4_raw"
-[ "${MAX_TRAIN_SAMPLES}" -gt 0 ] 2>/dev/null && DOWNLOAD_ARGS+=" --max_train_samples ${MAX_TRAIN_SAMPLES}"
-[ "${MAX_VAL_SAMPLES}" -gt 0 ] 2>/dev/null && DOWNLOAD_ARGS+=" --max_val_samples ${MAX_VAL_SAMPLES}"
-
-python "${SCRIPT_DIR}/download_dataset.py" ${DOWNLOAD_ARGS}
+_data_present=0
+[ -f "${DATA_DIR}/train.jsonl" ] && _data_present=1
+if [ "${SKIP_DOWNLOAD:-0}" = "1" ] || [ "${_data_present}" = "1" ]; then
+    echo "[Step 3/4] Skipping dataset download (train.jsonl already present in ${DATA_DIR})"
+else
+    echo "[Step 3/4] Downloading C4 pretraining dataset ..."
+    DOWNLOAD_ARGS="--output_dir ${DATA_DIR}/c4_raw"
+    [ "${MAX_TRAIN_SAMPLES}" -gt 0 ] 2>/dev/null && DOWNLOAD_ARGS+=" --max_train_samples ${MAX_TRAIN_SAMPLES}"
+    [ "${MAX_VAL_SAMPLES}" -gt 0 ] 2>/dev/null && DOWNLOAD_ARGS+=" --max_val_samples ${MAX_VAL_SAMPLES}"
+    python "${SCRIPT_DIR}/download_dataset.py" ${DOWNLOAD_ARGS}
+fi
 
 # --------------------------------------------------------------------------
-# Step 4: Convert / validate dataset to jsonl format
+# Step 4: Convert / validate dataset to jsonl format (skipped when already done)
 # --------------------------------------------------------------------------
 echo ""
-echo "[Step 4/4] Converting dataset to pretraining jsonl format ..."
-
-CONVERT_ARGS="--input_dir ${DATA_DIR}/c4_raw --output_dir ${DATA_DIR} --input_format jsonl"
-[ "${MAX_TRAIN_SAMPLES}" -gt 0 ] 2>/dev/null && CONVERT_ARGS+=" --max_train_samples ${MAX_TRAIN_SAMPLES}"
-[ "${MAX_VAL_SAMPLES}" -gt 0 ] 2>/dev/null && CONVERT_ARGS+=" --max_val_samples ${MAX_VAL_SAMPLES}"
-
-python "${SCRIPT_DIR}/convert_dataset.py" ${CONVERT_ARGS}
+if [ "${_data_present}" = "1" ]; then
+    echo "[Step 4/4] Skipping dataset conversion (train.jsonl already present)"
+else
+    echo "[Step 4/4] Converting dataset to pretraining jsonl format ..."
+    CONVERT_ARGS="--input_dir ${DATA_DIR}/c4_raw --output_dir ${DATA_DIR} --input_format jsonl"
+    [ "${MAX_TRAIN_SAMPLES}" -gt 0 ] 2>/dev/null && CONVERT_ARGS+=" --max_train_samples ${MAX_TRAIN_SAMPLES}"
+    [ "${MAX_VAL_SAMPLES}" -gt 0 ] 2>/dev/null && CONVERT_ARGS+=" --max_val_samples ${MAX_VAL_SAMPLES}"
+    python "${SCRIPT_DIR}/convert_dataset.py" ${CONVERT_ARGS}
+fi
 
 echo ""
 echo "============================================================"

@@ -39,7 +39,7 @@ export SEED=${SEED:-1234}
 # ---- Data / tokenizer --------------------------------------------------------
 export TRAIN_DATA=${TRAIN_DATA:-"/data/train.jsonl"}
 export VALID_DATA=${VALID_DATA:-""}
-export TOKENIZER=${TOKENIZER:-"meta-llama/Llama-3.1-8B"}
+export TOKENIZER=${TOKENIZER:-"/model"}
 
 # ---- LoRA --------------------------------------------------------------------
 export LORA_RANK=${LORA_RANK:-0}
@@ -74,7 +74,7 @@ export MXFP8_QUANT_BLOCK_SIZE=${MXFP8_QUANT_BLOCK_SIZE:-128}
 export USE_CKPT=${USE_CKPT:-0}
 export FROM_HF=${FROM_HF:-1}
 export SAVE_CKPT=${SAVE_CKPT:-0}
-export CONTINUAL_CKPT=${CONTINUAL_CKPT:-"/data/model/saved_ckpts"}
+export CONTINUAL_CKPT=${CONTINUAL_CKPT:-"/results/saved_ckpts"}
 export CKPT_START_STEP=${CKPT_START_STEP:-0}
 export FP8_PARAMS=${FP8_PARAMS:-1}
 

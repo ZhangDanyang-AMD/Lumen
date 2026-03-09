@@ -14,7 +14,7 @@ RUN /usr/bin/python3 -m pip install pyYAML
 WORKDIR /workspace/deps
 
 # Megatron-LM-AMD (for Megatron backend)
-ARG MEGATRON_COMMIT=5c34c4cfe41dc304ff51c686358cf039621c7cb1
+ARG MEGATRON_COMMIT=8dd45f5a51378ec1ee7937dee3c20d8626df4763
 RUN git clone --recursive https://github.com/ROCm/Megatron-LM.git megatron_lm
 RUN pip uninstall -y megatron-core
 RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
