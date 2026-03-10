@@ -188,7 +188,7 @@ Uses PyTorch FSDP + HuggingFace Transformers. No Megatron dependency. Lumen prov
 ```python
 # Megatron backend — full Megatron parallelism
 from lumen.models.llama2.megatron import (
-    tl_gpt_builder, forward_step, apply_fp8_training,
+    lumen_gpt_builder, forward_step, apply_fp8_training,
     apply_lora, add_finetune_args, train_valid_test_datasets_provider,
 )
 
@@ -267,7 +267,7 @@ The training script (`examples/llama2/finetune_llama2.py`) selects the backend v
 | Feature | CLI Flag |
 |---------|----------|
 | Attention backend | `--tl-attn-backend {aiter_csrc,aiter_triton,aiter_triton_fp8,aiter_csrc_fp8}` |
-| FP8 quantised training | `--fp8-training --fp8-format fp8_e4m3` |
+| FP8 quantised training | `--linear-fp8 --fp8-format e4m3` |
 | MXFP8 block sizes | `--mxfp8-block-m-fwd 128 ...` (6 independent dims) |
 | LoRA | `--lora-rank 16 --lora-alpha 32` |
 | LoRA A2A comm opt | `--lora-a2a` |
@@ -298,9 +298,9 @@ The entry point (`examples/llama31/pretrain_llama31.py`) selects the backend via
 |---------|----------|---------|
 | Model size | `SIZE=8b` (env var) | 8b |
 | MXFP8 attention | `--tl-fp8-quant-type mxfp8` | mxfp8 |
-| FP8 training | `--fp8-training` | enabled |
-| Amax algorithm | `--fp8-amax-algo most_recent` | most_recent |
-| Amax history | `--fp8-amax-history 4` | 4 |
+| FP8 training | `--linear-fp8` | enabled |
+| Amax algorithm | `--linear-fp8-amax-algo most_recent` | most_recent |
+| Amax history | `--linear-fp8-amax-history 4` | 4 |
 | Learning rate | `MAX_LR=8e-4` (env var) | 8e-4 |
 | Cosine LR warmup | `LR_WARMUP_STEPS=128` | 128 |
 | GQA (8 KV heads) | auto from SIZE | 32 heads / 8 KV groups |

@@ -27,7 +27,7 @@ Example::
     from lumen.models.llama31.megatron import (
         add_pretrain_args,
         forward_step,
-        tl_gpt_builder,
+        lumen_gpt_builder,
         train_valid_test_datasets_provider,
     )
 """
@@ -49,10 +49,12 @@ from lumen.models.megatron import (  # noqa: F401
     apply_fp8_training,
     apply_lora,
     loss_func,
+)
+from lumen.models.megatron import lumen_gpt_builder as _lumen_gpt_builder_generic
+from lumen.models.megatron import (  # noqa: F401
     make_forward_step,
     reset_fp8_state,
 )
-from lumen.models.megatron import tl_gpt_builder as _tl_gpt_builder_generic
 from lumen.models.utils import safe_add_argument
 
 __all__ = [
@@ -64,7 +66,7 @@ __all__ = [
     "get_batch",
     "loss_func",
     "reset_fp8_state",
-    "tl_gpt_builder",
+    "lumen_gpt_builder",
     "train_valid_test_datasets_provider",
 ]
 
@@ -93,8 +95,8 @@ LLAMA31_CONFIGS = {
 # ---------------------------------------------------------------------------
 
 
-def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
-    return _tl_gpt_builder_generic(
+def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
+    return _lumen_gpt_builder_generic(
         args,
         pre_process,
         post_process,
@@ -222,8 +224,8 @@ def add_pretrain_args(parser):
         choices=["fp8_blockwise", "mxfp8"],
         help="FP8 quantisation type for triton_fp8 backend.",
     )
-    safe_add_argument(parser, "--fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
-    safe_add_argument(parser, "--fp8-amax-history", type=int, default=4)
+    safe_add_argument(parser, "--linear-fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
+    safe_add_argument(parser, "--linear-fp8-amax-history", type=int, default=4)
 
     add_common_megatron_args(parser)
 

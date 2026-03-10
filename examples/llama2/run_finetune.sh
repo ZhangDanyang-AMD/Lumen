@@ -97,10 +97,10 @@ run_megatron() {
 
     FP8_ARGS=""
     if [ "${FP8_TRAINING}" -eq 1 ]; then
-        FP8_ARGS="--fp8-training --tl-fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING} --fp8-block-size ${FP8_BLOCK_SIZE}"
-        FP8_ARGS+=" --fp8-amax-algo ${FP8_AMAX_ALGO} --fp8-amax-history ${FP8_AMAX_HISTORY}"
-        [ "${FP8_REDUCE_AMAX}" = "1" ] && FP8_ARGS+=" --fp8-reduce-amax"
-        [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-fp8-activation"
+        FP8_ARGS="--linear-fp8 --fp8-format ${FP8_FORMAT} --linear-fp8-scaling ${FP8_SCALING} --linear-fp8-block-size ${FP8_BLOCK_SIZE}"
+        FP8_ARGS+=" --linear-fp8-amax-algo ${FP8_AMAX_ALGO} --linear-fp8-amax-history ${FP8_AMAX_HISTORY}"
+        [ "${FP8_REDUCE_AMAX}" = "1" ] && FP8_ARGS+=" --linear-fp8-reduce-amax"
+        [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-linear-fp8-activation"
         [ -n "${GRAD_QUANT_TYPE}" ] && FP8_ARGS+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
     fi
 
@@ -225,12 +225,12 @@ run_fsdp() {
     fi
 
     if [ "${FP8_TRAINING}" = "1" ]; then
-        CMD+=" --fp8-training"
-        CMD+=" --fp8-format ${FP8_FORMAT} --fp8-scaling ${FP8_SCALING}"
-        CMD+=" --fp8-block-size ${FP8_BLOCK_SIZE} --fp8-amax-algo ${FP8_AMAX_ALGO}"
-        CMD+=" --fp8-amax-history ${FP8_AMAX_HISTORY}"
-        [ "${FP8_REDUCE_AMAX}" = "1" ] && CMD+=" --fp8-reduce-amax"
-        [ "${FP8_ACTIVATION}" = "0" ] && CMD+=" --no-fp8-activation"
+        CMD+=" --linear-fp8"
+        CMD+=" --linear-fp8-format ${FP8_FORMAT} --linear-fp8-scaling ${FP8_SCALING}"
+        CMD+=" --linear-fp8-block-size ${FP8_BLOCK_SIZE} --linear-fp8-amax-algo ${FP8_AMAX_ALGO}"
+        CMD+=" --linear-fp8-amax-history ${FP8_AMAX_HISTORY}"
+        [ "${FP8_REDUCE_AMAX}" = "1" ] && CMD+=" --linear-fp8-reduce-amax"
+        [ "${FP8_ACTIVATION}" = "0" ] && CMD+=" --no-linear-fp8-activation"
         [ -n "${GRAD_QUANT_TYPE}" ] && CMD+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
     fi
 

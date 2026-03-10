@@ -179,11 +179,50 @@ def _patch_rmsnorm(model, grad_quant_type=None):
 
 
 # ---------------------------------------------------------------------------
+# Override Transformer-Engine defaults
+# ---------------------------------------------------------------------------
+
+_TE_FORCE_OVERRIDES = {
+    "transformer_impl": "local",
+    "fp8_param_gather": False,
+    "keep_fp8_weight_transpose_cache": False,
+    "deprecated_keep_fp8_weight_transpose_cache": False,
+    "fp4": None,
+    "fp4_param": False,
+    "te_rng_tracker": False,
+    "inference_rng_tracker": False,
+}
+
+_FP8_FORMAT_MAP = {"e4m3": "fp8_e4m3", "hybrid": "hybrid"}
+
+
+def _override_te_args_for_lumen(args):
+    """Disable Transformer-Engine while preserving user-provided parameter values.
+
+    The TE ``--fp8-format`` value (``args.fp8``) is mapped to the Lumen
+    :class:`QuantFormat` string and stored as ``args.tl_fp8_format`` for
+    :func:`apply_fp8_training`.  ``args.fp8`` is then set to ``None`` so
+    that ``TransformerConfig`` does not activate TE's own FP8 code-paths.
+
+    All other shared parameters (``fp8_margin``, ``fp8_recipe``,
+    ``fp8_amax_history_len``, ``fp8_amax_compute_algo``, ``fp8_wgrad``,
+    ``first_last_layers_bf16``, etc.) are kept as-is.
+    """
+    te_fp8 = getattr(args, "fp8", None)
+    if te_fp8 is not None:
+        args.lumen_fp8_format = _FP8_FORMAT_MAP.get(te_fp8, te_fp8)
+    args.fp8 = None
+
+    for attr, value in _TE_FORCE_OVERRIDES.items():
+        setattr(args, attr, value)
+
+
+# ---------------------------------------------------------------------------
 # Custom GPT builder that injects Lumen attention
 # ---------------------------------------------------------------------------
 
 
-def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, model_name="GPT"):
+def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, model_name="GPT"):
     """Build a GPTModel with Lumen attention replacing the default
     DotProductAttention in every layer.
 
@@ -196,6 +235,8 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, 
         model_name: Label used in the startup log message (e.g. ``"LLaMA 3.1"``).
     """
     print_rank_0(f"building {model_name} model with Lumen attention ...")
+
+    _override_te_args_for_lumen(args)
 
     if config is None:
         args.apply_rope_fusion = False
@@ -293,14 +334,25 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     )
 
     fmt = getattr(args, "tl_fp8_format", "fp8_e4m3")
-    scaling = getattr(args, "fp8_scaling", "delayed")
-    block_size = getattr(args, "fp8_block_size", 128)
-    amax_algo = getattr(args, "fp8_amax_algo", "max")
-    reduce_amax = getattr(args, "fp8_reduce_amax", False)
-    history_len = getattr(args, "fp8_amax_history", 16)
-    margin = getattr(args, "fp8_margin", 0)
-    quant_act = getattr(args, "fp8_activation", True)
+    scaling = getattr(args, "linear_fp8_scaling", "delayed")
+    block_size = getattr(args, "linear_fp8_block_size", 128)
+    amax_algo = getattr(args, "linear_fp8_amax_algo", "max")
+    reduce_amax = getattr(args, "linear_fp8_reduce_amax", False)
+    history_len = getattr(args, "linear_fp8_amax_history", 16)
+    margin = getattr(args, "linear_fp8_margin", 0)
+    quant_act = getattr(args, "linear_fp8_activation", True)
     grad_quant_type = getattr(args, "grad_quant_type", None)
+
+    print_rank_0(
+        f"> transformer_impl='Aiter Backend', fp8_format='{fmt}', \
+        fp8_scaling='{scaling}', \
+        fp8_block_size='{block_size}', \
+        fp8_amax_algo='{amax_algo}', \
+        fp8_reduce_amax='{reduce_amax}', \
+        fp8_amax_history='{history_len}', \
+        fp8_activation='{quant_act}', \
+        grad_quant='{grad_quant_type}')"
+    )
 
     config = QuantConfig(
         format=QuantFormat(fmt),
@@ -450,7 +502,7 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
                         except StopIteration:
                             pass
                 else:
-                    if getattr(args, "fp8_training", False):
+                    if getattr(args, "linear_fp8", False):
                         reset_fp8_state(model)
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()
@@ -490,9 +542,9 @@ def add_common_megatron_args(parser):
         parser, "--backend", type=str, default="megatron", choices=["megatron", "fsdp"], help="Training backend."
     )
 
-    tl = parser.add_argument_group(title="transformer-light")
+    lumen = parser.add_argument_group(title="Lumen")
     safe_add_argument(
-        tl,
+        lumen,
         "--tl-attn-backend",
         type=str,
         default="aiter_csrc",
@@ -500,7 +552,7 @@ def add_common_megatron_args(parser):
         help="Lumen attention backend.",
     )
     safe_add_argument(
-        tl,
+        lumen,
         "--tl-fp8-quant-type",
         type=str,
         default="fp8_blockwise",
@@ -508,7 +560,7 @@ def add_common_megatron_args(parser):
         help="FP8 quantisation type for aiter_triton_fp8 backend.",
     )
     safe_add_argument(
-        tl,
+        lumen,
         "--tl-rmsnorm",
         action="store_true",
         default=False,
@@ -536,32 +588,39 @@ def add_common_megatron_args(parser):
         help="Enable LoRA all-to-all communication optimisation.",
     )
 
-    fp8 = parser.add_argument_group(title="fp8-training")
-    safe_add_argument(fp8, "--fp8-training", action="store_true", default=False)
+    lfp8 = parser.add_argument_group(title="linear-fp8")
     safe_add_argument(
-        fp8, "--tl-fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"]
+        lfp8,
+        "--linear-fp8",
+        action="store_true",
+        default=False,
+        help="Enable FP8 quantised training for Linear layers.",
     )
-    safe_add_argument(fp8, "--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"])
-    safe_add_argument(fp8, "--fp8-block-size", type=int, default=128)
-    safe_add_argument(fp8, "--fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
-    safe_add_argument(fp8, "--fp8-reduce-amax", action="store_true", default=False)
-    safe_add_argument(fp8, "--fp8-amax-history", type=int, default=16)
     safe_add_argument(
-        fp8, "--fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation (TE-compatible)."
+        lfp8, "--linear-fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"]
     )
-    safe_add_argument(fp8, "--fp8-activation", action="store_true", default=True)
-    safe_add_argument(fp8, "--no-fp8-activation", dest="fp8_activation", action="store_false")
+    safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
+    safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
+    safe_add_argument(lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False)
+    safe_add_argument(lfp8, "--linear-fp8-amax-history", type=int, default=16)
     safe_add_argument(
-        fp8,
+        lfp8, "--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation."
+    )
+    safe_add_argument(lfp8, "--linear-fp8-activation", action="store_true", default=True)
+    safe_add_argument(lfp8, "--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
+    safe_add_argument(
+        lfp8,
         "--grad-quant-type",
         type=str,
         default=None,
         choices=["fp8", "mxfp8", "fp4"],
-        help="Gradient quantization type (None=disabled).",
+        help="Gradient quantization type (None=disabled). Applies to Linear, Attention, and RMSNorm.",
     )
 
     wes = parser.add_argument_group(title="warmup-early-stop")
     safe_add_argument(wes, "--warmup-steps", type=int, default=0)
     safe_add_argument(wes, "--val-loss-target", type=float, default=None)
+
+    parser.set_defaults(**_TE_FORCE_OVERRIDES)
 
     return parser

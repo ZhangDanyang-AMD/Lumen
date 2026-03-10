@@ -26,7 +26,7 @@ Example::
     from lumen.models.llama2.megatron import (
         add_finetune_args,
         forward_step,
-        tl_gpt_builder,
+        lumen_gpt_builder,
         train_valid_test_datasets_provider,
     )
 """
@@ -48,9 +48,9 @@ from lumen.models.megatron import (  # noqa: F401
     apply_fp8_training,
     apply_lora,
     loss_func,
+    lumen_gpt_builder,
     make_forward_step,
     reset_fp8_state,
-    tl_gpt_builder,
 )
 from lumen.models.utils import safe_add_argument
 
@@ -63,7 +63,7 @@ __all__ = [
     "get_batch",
     "loss_func",
     "reset_fp8_state",
-    "tl_gpt_builder",
+    "lumen_gpt_builder",
     "train_valid_test_datasets_provider",
 ]
 

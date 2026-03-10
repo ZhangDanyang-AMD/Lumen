@@ -13,8 +13,8 @@ from lumen.models.llama31.megatron.pretrain import (
     forward_step,
     get_batch,
     loss_func,
+    lumen_gpt_builder,
     reset_fp8_state,
-    tl_gpt_builder,
     train_valid_test_datasets_provider,
 )
 
@@ -26,6 +26,6 @@ __all__ = [
     "get_batch",
     "loss_func",
     "reset_fp8_state",
-    "tl_gpt_builder",
+    "lumen_gpt_builder",
     "train_valid_test_datasets_provider",
 ]

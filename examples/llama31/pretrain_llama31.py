@@ -37,13 +37,13 @@ def _run_megatron():
         apply_fp8_training,
         apply_lora,
         forward_step,
-        tl_gpt_builder,
+        lumen_gpt_builder,
         train_valid_test_datasets_provider,
     )
 
     def model_provider(pre_process=True, post_process=True, vp_stage=None):
         args = get_args()
-        model = tl_gpt_builder(args, pre_process, post_process, vp_stage)
+        model = lumen_gpt_builder(args, pre_process, post_process, vp_stage)
 
         if getattr(args, "lora_rank", 0) > 0:
             apply_lora(model, args)
@@ -51,7 +51,7 @@ def _run_megatron():
                 os.environ["LORA_A2A"] = "1"
                 print_rank_0("> LoRA A2A communication optimisation enabled")
 
-        if getattr(args, "fp8_training", False):
+        if getattr(args, "linear_fp8", False):
             apply_fp8_training(model, args)
 
         return model

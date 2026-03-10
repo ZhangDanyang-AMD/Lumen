@@ -20,7 +20,7 @@ Both backends share the same :class:`PretrainTextDataset`.
 
 For backward compatibility, the Megatron APIs are re-exported at this level::
 
-    from lumen.models.llama31 import tl_gpt_builder  # Megatron
+    from lumen.models.llama31 import lumen_gpt_builder  # Megatron
 """
 
 from lumen.models.llama31.dataset import PretrainTextDataset
@@ -31,8 +31,8 @@ from lumen.models.llama31.megatron import (
     forward_step,
     get_batch,
     loss_func,
+    lumen_gpt_builder,
     reset_fp8_state,
-    tl_gpt_builder,
     train_valid_test_datasets_provider,
 )
 
@@ -47,6 +47,6 @@ __all__ = [
     "get_batch",
     "loss_func",
     "reset_fp8_state",
-    "tl_gpt_builder",
+    "lumen_gpt_builder",
     "train_valid_test_datasets_provider",
 ]
