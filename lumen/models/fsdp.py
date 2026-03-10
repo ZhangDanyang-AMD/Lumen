@@ -114,6 +114,14 @@ def add_common_fsdp_args(parser):
         choices=["fp8", "mxfp8", "fp4"],
         help="Gradient quantization type (None=disabled). " "Applies to Linear, Attention, and RMSNorm.",
     )
+    lfp8.add_argument(
+        "--first-last-layers-bf16",
+        action="store_true",
+        default=False,
+        help="Keep first and last N transformer layers in BF16 during FP8 training.",
+    )
+    lfp8.add_argument("--num-layers-at-start-in-bf16", type=int, default=1)
+    lfp8.add_argument("--num-layers-at-end-in-bf16", type=int, default=1)
 
     # -- Warmup + Early stopping --
     wes = parser.add_argument_group("warmup-early-stop")
@@ -154,6 +162,9 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     quant_act = getattr(args, "linear_fp8_activation", True)
     fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
     grad_quant_type = getattr(args, "grad_quant_type", None)
+    first_last_bf16 = getattr(args, "first_last_layers_bf16", False)
+    bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
+    bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
 
     config = QuantConfig(
         format=QuantFormat(fmt),
@@ -166,6 +177,9 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         quantize_activation=quant_act,
         fp8_wgrad=fp8_wgrad,
         quantize_grad=grad_quant_type,
+        first_last_layers_bf16=first_last_bf16,
+        num_layers_at_start_in_bf16=bf16_start,
+        num_layers_at_end_in_bf16=bf16_end,
     )
 
     if dp_group is None and config.reduce_amax and dist.is_initialized():
@@ -176,10 +190,11 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         config=config,
         dp_group=dp_group if config.reduce_amax else None,
     )
+    bf16_str = f", first_last_bf16=start:{bf16_start}/end:{bf16_end}" if first_last_bf16 else ""
     _rank0_print(
         f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
         f"amax_algo={amax_algo}, activation={quant_act}, "
-        f"fp8_wgrad={fp8_wgrad}, grad_quant={grad_quant_type})"
+        f"fp8_wgrad={fp8_wgrad}, grad_quant={grad_quant_type}{bf16_str})"
     )
 
 

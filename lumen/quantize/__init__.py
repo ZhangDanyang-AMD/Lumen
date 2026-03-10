@@ -30,7 +30,8 @@ Usage::
 
 import functools
 import logging
-from typing import Optional
+import re
+from typing import Optional, Set
 
 import torch
 import torch.nn as nn
@@ -193,6 +194,74 @@ def _get_megatron_linear_types():
         return ()
 
 
+_LAYER_INDEX_RE = re.compile(r"layers\.(\d+)\b")
+
+
+def _build_bf16_skip_prefixes(
+    model: nn.Module,
+    config: QuantConfig,
+) -> Set[str]:
+    """Return a set of module-name prefixes whose transformer layers should
+    stay in BF16 (not be FP8-patched).
+
+    Strategy:
+    1. Walk the model looking for modules that expose a ``layer_number``
+       attribute (Megatron ``TransformerLayer`` — 1-indexed global, correct
+       even under pipeline parallelism).
+    2. If none are found (HuggingFace / FSDP models), fall back to extracting
+       the layer index from the module path (``layers.<N>``).
+    """
+    if not config.first_last_layers_bf16:
+        return set()
+
+    bf16_start = config.num_layers_at_start_in_bf16
+    bf16_end = config.num_layers_at_end_in_bf16
+    total = config.num_layers
+
+    def _should_skip(global_idx: int) -> bool:
+        return global_idx < bf16_start or global_idx >= total - bf16_end
+
+    prefixes: Set[str] = set()
+
+    # --- Strategy 1: Megatron layer_number (global, 1-indexed) ---
+    for name, module in model.named_modules():
+        layer_num = getattr(module, "layer_number", None)
+        if layer_num is not None and isinstance(layer_num, int):
+            global_idx = layer_num - 1
+            if _should_skip(global_idx):
+                prefixes.add(name)
+
+    if prefixes:
+        return prefixes
+
+    # --- Strategy 2: path-based detection (HF / FSDP) ---
+    layer_prefixes: dict[str, int] = {}
+    for name, _ in model.named_modules():
+        m = _LAYER_INDEX_RE.search(name)
+        if m:
+            prefix = name[: m.end()]
+            idx = int(m.group(1))
+            if prefix not in layer_prefixes or idx < layer_prefixes[prefix]:
+                layer_prefixes[prefix] = idx
+
+    if not layer_prefixes:
+        return set()
+
+    detected_max = max(
+        int(m.group(1)) for name, _ in model.named_modules() for m in [_LAYER_INDEX_RE.search(name)] if m
+    )
+    effective_total = total if total > 0 else detected_max + 1
+
+    for name, _ in model.named_modules():
+        m = _LAYER_INDEX_RE.search(name)
+        if m:
+            idx = int(m.group(1))
+            if idx < bf16_start or idx >= effective_total - bf16_end:
+                prefixes.add(name[: m.end()])
+
+    return prefixes
+
+
 def _patch_linear_layers(
     model: nn.Module,
     manager: ScalingManager,
@@ -219,9 +288,16 @@ def _patch_linear_layers(
     megatron_types = _get_megatron_linear_types()
     quantizable_types = (nn.Linear,) + megatron_types
 
+    bf16_prefixes = _build_bf16_skip_prefixes(model, config)
+
     count = 0
+    skipped = 0
     for name, module in model.named_modules():
         if isinstance(module, quantizable_types):
+            if bf16_prefixes and any(name.startswith(p) for p in bf16_prefixes):
+                skipped += 1
+                continue
+
             tensor_id = f"{name}.weight" if name else "weight"
             module._quant_manager = manager
             module._quant_backend = backend
@@ -237,8 +313,9 @@ def _patch_linear_layers(
     act_str = "weight+activation" if quant_act else "weight-only"
     grad_quant_type = config.quantize_grad
     grad_str = f"+grad({grad_quant_type})" if grad_quant_type else ""
+    bf16_str = f", bf16_layers_skipped={skipped}" if skipped else ""
     logger.info(
-        "Quantization enabled on %d nn.Linear layers " "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s%s)",
+        "Quantization enabled on %d nn.Linear layers " "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s%s%s)",
         count,
         backend,
         config.format.value,
@@ -246,6 +323,7 @@ def _patch_linear_layers(
         config.amax_algo.value,
         act_str,
         grad_str,
+        bf16_str,
     )
 
 

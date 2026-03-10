@@ -47,6 +47,9 @@ export FP8_AMAX_HISTORY=16
 export FP8_ACTIVATION=1
 export FP8_WGRAD=1
 export GRAD_QUANT_TYPE=""
+export FIRST_LAST_BF16=0
+export BF16_LAYERS_START=1
+export BF16_LAYERS_END=1
 
 # ---- Warmup / early stopping -------------------------------------------------
 export WARMUP_STEPS=0

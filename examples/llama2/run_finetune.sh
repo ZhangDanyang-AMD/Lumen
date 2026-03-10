@@ -103,6 +103,11 @@ run_megatron() {
         [ "${FP8_ACTIVATION}" = "0" ] && FP8_ARGS+=" --no-linear-fp8-activation"
         [ "${FP8_WGRAD:-1}" = "0" ] && FP8_ARGS+=" --no-linear-fp8-wgrad"
         [ -n "${GRAD_QUANT_TYPE}" ] && FP8_ARGS+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
+        if [ "${FIRST_LAST_BF16:-0}" = "1" ]; then
+            FP8_ARGS+=" --first-last-layers-bf16"
+            FP8_ARGS+=" --num-layers-at-start-in-bf16 ${BF16_LAYERS_START:-1}"
+            FP8_ARGS+=" --num-layers-at-end-in-bf16 ${BF16_LAYERS_END:-1}"
+        fi
     fi
 
     TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
@@ -234,6 +239,11 @@ run_fsdp() {
         [ "${FP8_ACTIVATION}" = "0" ] && CMD+=" --no-linear-fp8-activation"
         [ "${FP8_WGRAD:-1}" = "0" ] && CMD+=" --no-linear-fp8-wgrad"
         [ -n "${GRAD_QUANT_TYPE}" ] && CMD+=" --grad-quant-type ${GRAD_QUANT_TYPE}"
+        if [ "${FIRST_LAST_BF16:-0}" = "1" ]; then
+            CMD+=" --first-last-layers-bf16"
+            CMD+=" --num-layers-at-start-in-bf16 ${BF16_LAYERS_START:-1}"
+            CMD+=" --num-layers-at-end-in-bf16 ${BF16_LAYERS_END:-1}"
+        fi
     fi
 
     [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"

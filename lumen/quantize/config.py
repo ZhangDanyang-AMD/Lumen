@@ -183,6 +183,17 @@ class QuantConfig:
     # Mirrors TE's ``override_linear_precision=(False, False, not fp8_wgrad)``.
     fp8_wgrad: bool = True
 
+    # Keep the first and last N transformer layers in BF16 (unpatched) even
+    # during FP8 training.  Mirrors Megatron/TE's ``--first-last-layers-bf16``.
+    first_last_layers_bf16: bool = False
+    num_layers_at_start_in_bf16: int = 1
+    num_layers_at_end_in_bf16: int = 1
+    # Total number of transformer layers in the model (global, across all PP
+    # ranks).  Required when ``first_last_layers_bf16=True`` so that the
+    # patching logic can identify which layers are "last".  Set to 0 to
+    # auto-detect from the model structure.
+    num_layers: int = 0
+
     # Gradient quantization type for the backward pass.  When set, gradients
     # are rounded to the specified low-precision format (quant → dequant)
     # before being returned from autograd backward.  This reduces gradient

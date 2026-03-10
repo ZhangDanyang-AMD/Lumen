@@ -343,6 +343,10 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     quant_act = getattr(args, "linear_fp8_activation", True)
     fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
     grad_quant_type = getattr(args, "grad_quant_type", None)
+    first_last_bf16 = getattr(args, "first_last_layers_bf16", False)
+    bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
+    bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
+    num_layers = getattr(args, "num_layers", 0)
 
     print_rank_0(
         f"> transformer_impl='Aiter Backend', fp8_format='{fmt}', \
@@ -353,7 +357,8 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         fp8_amax_history='{history_len}', \
         fp8_activation='{quant_act}', \
         fp8_wgrad='{fp8_wgrad}', \
-        grad_quant='{grad_quant_type}')"
+        grad_quant='{grad_quant_type}', \
+        first_last_bf16='{first_last_bf16}' (start={bf16_start}, end={bf16_end})"
     )
 
     config = QuantConfig(
@@ -367,6 +372,10 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         quantize_activation=quant_act,
         fp8_wgrad=fp8_wgrad,
         quantize_grad=grad_quant_type,
+        first_last_layers_bf16=first_last_bf16,
+        num_layers_at_start_in_bf16=bf16_start,
+        num_layers_at_end_in_bf16=bf16_end,
+        num_layers=num_layers,
     )
 
     dp_group = None
