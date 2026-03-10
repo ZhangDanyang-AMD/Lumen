@@ -17,7 +17,7 @@ framework — only PyTorch and the Python standard library.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import torch
 from torch.utils.data import Dataset
@@ -76,9 +76,11 @@ class PretrainTextDataset(Dataset):
             self._chunks.append(all_ids[i * chunk_len : (i + 1) * chunk_len])
 
         logger.info(
-            "Built %d pretraining samples (seq_length=%d) from %s "
-            "(%d tokens total)",
-            len(self._chunks), seq_length, data_path, len(all_ids),
+            "Built %d pretraining samples (seq_length=%d) from %s " "(%d tokens total)",
+            len(self._chunks),
+            seq_length,
+            data_path,
+            len(all_ids),
         )
 
         self._max_samples = max_samples

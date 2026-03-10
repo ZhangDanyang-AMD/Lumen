@@ -25,7 +25,7 @@ RUN git clone --recursive https://github.com/ROCm/aiter.git aiter
 RUN cd aiter && pip install -e . --force-reinstall
 
 ENV PYTHONPATH="/workspace/deps/megatron_lm:/workspace/deps/aiter:${PYTHONPATH:-}"
-    
+
 # ---------------------------------------------------------------------------
 # Python dependencies
 # ---------------------------------------------------------------------------

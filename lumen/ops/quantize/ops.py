@@ -16,9 +16,7 @@ from typing import Optional, Tuple
 
 import torch
 import triton
-from torch.library import triton_op, wrap_triton
-
-from aiter.ops.quant import static_per_tensor_quant, dynamic_per_tensor_quant
+from aiter.ops.quant import static_per_tensor_quant
 from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
     quant_fp8_blockwise_kernel,
     quant_fp8_blockwise_segment_m_kernel,
@@ -27,6 +25,7 @@ from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
     _convert_from_mxfp8_kernel,
     _convert_to_mxfp8_kernel,
 )
+from torch.library import triton_op, wrap_triton
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +42,9 @@ def is_cdna4():
 
 def quant_fp8_tensorwise_impl(x, scale, dtype):
     out = torch.empty(x.shape, dtype=dtype, device=x.device)
-    static_per_tensor_quant(out, x, scale)   
+    static_per_tensor_quant(out, x, scale)
     return out
+
 
 def dequant_fp8_tensorwise_impl(x, scale_inv, dtype):
     return x.to(dtype) * scale_inv
@@ -77,7 +77,14 @@ def quant_fp8_blockwise_impl(
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
     wrap_triton(quant_fp8_blockwise_kernel)[grid](
-        x, x_fp8, x_scales, M, N, block_size, torch.finfo(dtype).max, axis,
+        x,
+        x_fp8,
+        x_scales,
+        M,
+        N,
+        block_size,
+        torch.finfo(dtype).max,
+        axis,
     )
     return x_fp8, x_scales
 
@@ -116,8 +123,15 @@ def quant_fp8_blockwise_segment_m_impl(
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
     grid = (triton.cdiv(M, block_size) + seg_lens.shape[0], triton.cdiv(N, block_size))
     quant_fp8_blockwise_segment_m_kernel[grid](
-        x, x_fp8, x_scales, N, batch_size, seg_indptr, scales_seg_indptr,
-        block_size, torch.finfo(dtype).max,
+        x,
+        x_fp8,
+        x_scales,
+        N,
+        batch_size,
+        seg_indptr,
+        scales_seg_indptr,
+        block_size,
+        torch.finfo(dtype).max,
     )
     return x_fp8, x_scales
 
@@ -154,9 +168,7 @@ def convert_to_mxfp8(
     data_hp = data_hp.transpose(axis, -1)
     data_shape = data_hp.shape
     data_hp = data_hp.reshape(-1, data_shape[-1])
-    data_lp = torch.empty(data_shape, dtype=float8_dtype_pt, device=data_hp.device).reshape(
-        -1, data_shape[-1]
-    )
+    data_lp = torch.empty(data_shape, dtype=float8_dtype_pt, device=data_hp.device).reshape(-1, data_shape[-1])
 
     if is_2d_block:
         scales_shape = (*data_shape[:-2], data_shape[-2] // block_size, data_shape[-1] // block_size)
@@ -167,7 +179,10 @@ def convert_to_mxfp8(
     stride_ym, stride_yn = data_lp.stride()
     stride_sm, stride_sn = scales.stride()
     M, N = data_hp.shape
-    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+
+    def grid(META):
+        return (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+
     assert M % block_size == 0, "tensor M shape must align to block size"
     assert N % block_size == 0, "tensor N shape must align to block size"
 
@@ -181,12 +196,23 @@ def convert_to_mxfp8(
     if philox_offset is None:
         philox_offset = torch.randint(0, 2**31 - 1, (1,)).item()
     wrap_triton(_convert_to_mxfp8_kernel)[grid](
-        data_hp, data_lp, scales,
-        stride_xm, stride_xn, stride_ym, stride_yn, stride_sm, stride_sn,
-        philox_seed, philox_offset,
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
+        data_hp,
+        data_lp,
+        scales,
+        stride_xm,
+        stride_xn,
+        stride_ym,
+        stride_yn,
+        stride_sm,
+        stride_sn,
+        philox_seed,
+        philox_offset,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
         QUANT_BLOCK_SIZE=block_size,
-        IS_2D_BLOCK=is_2d_block, USE_SR=use_sr, USE_ASM=use_asm,
+        IS_2D_BLOCK=is_2d_block,
+        USE_SR=use_sr,
+        USE_ASM=use_asm,
     )
 
     return data_lp.reshape(data_shape).transpose(axis, -1), scales.reshape(scales_shape).transpose(axis, -1)
@@ -221,15 +247,27 @@ def convert_from_mxfp8(
     stride_ym, stride_yn = data_hp.stride()
     stride_sm, stride_sn = scales.stride()
     M, N = data_hp.shape
-    grid = lambda META: (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+
+    def grid(META):
+        return (triton.cdiv(M, META["BLOCK_M"]), triton.cdiv(N, META["BLOCK_N"]))
+
     BLOCK_M = 64 if M >= 64 else M
     BLOCK_N = 64 if N >= 64 else N
     wrap_triton(_convert_from_mxfp8_kernel)[grid](
-        data_lp, data_hp, scales,
-        stride_xm, stride_xn, stride_ym, stride_yn, stride_sm, stride_sn,
-        BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
+        data_lp,
+        data_hp,
+        scales,
+        stride_xm,
+        stride_xn,
+        stride_ym,
+        stride_yn,
+        stride_sm,
+        stride_sn,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
         QUANT_BLOCK_SIZE=block_size,
-        IS_2D_BLOCK=is_2d_block, USE_ASM=use_asm,
+        IS_2D_BLOCK=is_2d_block,
+        USE_ASM=use_asm,
     )
     return data_hp.reshape(orig_shape).transpose(axis, -1)
 

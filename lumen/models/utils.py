@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # CLI helpers
 # ---------------------------------------------------------------------------
 
+
 def safe_add_argument(parser_or_group, *args, **kwargs):
     """Add an argument only when none of its option strings are already registered.
 
@@ -77,6 +78,7 @@ def peek_backend(default: str = "megatron") -> str:
 # File integrity
 # ---------------------------------------------------------------------------
 
+
 def sha256_file(path: str) -> str:
     """Compute the SHA-256 hex digest of a file.
 
@@ -99,6 +101,7 @@ def sha256_file(path: str) -> str:
 # ---------------------------------------------------------------------------
 # HuggingFace download helpers
 # ---------------------------------------------------------------------------
+
 
 def download_hf_model(
     model_name: str,
@@ -160,16 +163,14 @@ def download_hf_dataset(
     from datasets import load_dataset
 
     os.makedirs(output_dir, exist_ok=True)
-    logger.info("Downloading %s%s ...", dataset_name,
-                f"/{subset}" if subset else "")
+    logger.info("Downloading %s%s ...", dataset_name, f"/{subset}" if subset else "")
 
     dataset = load_dataset(dataset_name, subset)
 
     for split_name, split_data in dataset.items():
         output_path = os.path.join(output_dir, f"{split_name}.jsonl")
         split_data.to_json(output_path)
-        logger.info("  Saved %s: %d samples -> %s",
-                     split_name, len(split_data), output_path)
+        logger.info("  Saved %s: %d samples -> %s", split_name, len(split_data), output_path)
         if verify:
             digest = sha256_file(output_path)
             print(f"    SHA-256: {digest}")

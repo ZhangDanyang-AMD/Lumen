@@ -73,7 +73,7 @@ using torch.bfloat16 for parameters ...
   classes_fraction ................................ 1.0
   clip_grad ....................................... 0.3
   clone_scatter_output_in_embedding ............... True
-  config_logger_dir ............................... 
+  config_logger_dir ...............................
   consumed_train_samples .......................... 0
   consumed_valid_samples .......................... 0
   context_parallel_size ........................... 1
@@ -605,10 +605,10 @@ using torch.bfloat16 for parameters ...
   vocab_extra_ids ................................. 0
   vocab_file ...................................... None
   vocab_size ...................................... None
-  wandb_entity .................................... 
-  wandb_exp_name .................................. 
-  wandb_project ................................... 
-  wandb_save_dir .................................. 
+  wandb_entity ....................................
+  wandb_exp_name ..................................
+  wandb_project ...................................
+  wandb_save_dir ..................................
   warmup_steps .................................... 0
   weight_decay .................................... 0.0001
   weight_decay_incr_style ......................... constant
@@ -1113,7 +1113,7 @@ WARNING: one_logger package is required to enable e2e metrics tracking. please g
 [2026-03-09 09:07:37] mia1-p02-g49:1827:2323 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
 >>> done with compiling and loading fused kernels. Compilation time: 4.728 seconds
 time to initialize megatron (seconds): 5.971
-[after megatron is initialized] datetime: 2026-03-09 09:07:39 
+[after megatron is initialized] datetime: 2026-03-09 09:07:39
 building GPT model with Lumen attention ...
 INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
  > number of parameters on (tensor, pipeline) model parallel rank (1, 0): 8625463296
@@ -1704,7 +1704,7 @@ WARNING: could not find the metadata file /model/latest_checkpointed_iteration.t
     will not load any checkpoints and will start from random
 (min, max) time across ranks (ms):
     load-checkpoint ................................: (0.87, 0.90)
-[after model, optimizer, and learning rate scheduler are built] datetime: 2026-03-09 09:07:39 
+[after model, optimizer, and learning rate scheduler are built] datetime: 2026-03-09 09:07:39
 > building train, validation, and test datasets ...
  > datasets target sizes (minimum size):
     train:      6400
@@ -1728,14 +1728,14 @@ INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
 > finished creating SFT datasets ...
 INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
 INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-[after dataloaders are built] datetime: 2026-03-09 09:07:42 
+[after dataloaders are built] datetime: 2026-03-09 09:07:42
 done with setup ...
 (min, max) time across ranks (ms):
     model-and-optimizer-setup ......................: (545.17, 577.09)
     train/valid/test-data-iterators-setup ..........: (2499.31, 2798.00)
 training ...
 Overwriting rerun_state_machine.current_iteration from -1 to 0...
-[before the start of training step] datetime: 2026-03-09 09:07:42 
+[before the start of training step] datetime: 2026-03-09 09:07:42
 
 [2026-03-09 09:07:42] mia1-p02-g49:1827:2646 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
 
@@ -2738,7 +2738,7 @@ WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode disable
 (min, max) time across ranks (ms):
     evaluate .......................................: (24841.78, 24842.05)
 ----------------------------------------------------------------------------------------------
- validation loss at iteration 50 | lm loss value: 9.022517E+00 | lm loss PPL: 8.287612E+03 | 
+ validation loss at iteration 50 | lm loss value: 9.022517E+00 | lm loss PPL: 8.287612E+03 |
 ----------------------------------------------------------------------------------------------
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
@@ -2796,7 +2796,7 @@ WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode disable
 (min, max) time across ranks (ms):
     evaluate .......................................: (24682.54, 24683.05)
 -----------------------------------------------------------------------------------------------
- validation loss at iteration 100 | lm loss value: 7.417140E+00 | lm loss PPL: 1.664268E+03 | 
+ validation loss at iteration 100 | lm loss value: 7.417140E+00 | lm loss PPL: 1.664268E+03 |
 -----------------------------------------------------------------------------------------------
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
@@ -2854,7 +2854,7 @@ WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode disable
 (min, max) time across ranks (ms):
     evaluate .......................................: (24807.17, 24808.12)
 -----------------------------------------------------------------------------------------------
- validation loss at iteration 150 | lm loss value: 7.185059E+00 | lm loss PPL: 1.319567E+03 | 
+ validation loss at iteration 150 | lm loss value: 7.185059E+00 | lm loss PPL: 1.319567E+03 |
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
 -----------------------------------------------------------------------------------------------
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
@@ -2912,7 +2912,7 @@ WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode disable
 (min, max) time across ranks (ms):
     evaluate .......................................: (24842.13, 24842.25)
 -----------------------------------------------------------------------------------------------
- validation loss at iteration 200 | lm loss value: 7.182498E+00 | lm loss PPL: 1.316191E+03 | 
+ validation loss at iteration 200 | lm loss value: 7.182498E+00 | lm loss PPL: 1.316191E+03 |
 -----------------------------------------------------------------------------------------------
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode validate_results

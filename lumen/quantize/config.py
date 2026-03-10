@@ -17,10 +17,10 @@ from typing import Optional
 
 import torch
 
-
 # ---------------------------------------------------------------------------
 # FNUZ / OCP detection (matches TE's ``is_fp8_fnuz``)
 # ---------------------------------------------------------------------------
+
 
 @functools.lru_cache(maxsize=1)
 def _is_fp8_fnuz() -> bool:
@@ -44,7 +44,7 @@ def _get_float8_e5m2() -> torch.dtype:
 # FP8 representable-max values  (OCP, FNUZ) — mirrors TE _FormatMaxVals
 # ---------------------------------------------------------------------------
 
-_E4M3_MAX = (448.0, 240.0)   # (OCP, FNUZ)
+_E4M3_MAX = (448.0, 240.0)  # (OCP, FNUZ)
 _E5M2_MAX = (57344.0, 57344.0)
 
 
@@ -70,12 +70,13 @@ def get_fp8_max_bwd(fmt: "QuantFormat") -> float:
 # Enumerations
 # ---------------------------------------------------------------------------
 
+
 class QuantFormat(Enum):
     """Supported low-precision number formats."""
 
     FP8_E4M3 = "fp8_e4m3"
     FP8_E5M2 = "fp8_e5m2"
-    HYBRID = "hybrid"       # E4M3 forward, E5M2 backward (TE-style)
+    HYBRID = "hybrid"  # E4M3 forward, E5M2 backward (TE-style)
     MXFP8 = "mxfp8"
     FP4 = "fp4"
 
@@ -83,21 +84,22 @@ class QuantFormat(Enum):
 class ScalingType(Enum):
     """How scaling factors are computed."""
 
-    DYNAMIC = "dynamic"      # Scale from current tensor amax
-    DELAYED = "delayed"      # Scale from amax history (TE-style)
+    DYNAMIC = "dynamic"  # Scale from current tensor amax
+    DELAYED = "delayed"  # Scale from amax history (TE-style)
     BLOCKWISE = "blockwise"  # Per-block scaling (e.g. per-128 elements)
 
 
 class AmaxAlgo(Enum):
     """How delayed-scaling amax is derived from the history window."""
 
-    MAX = "max"                    # max over the entire history window (TE default)
-    MOST_RECENT = "most_recent"    # use only the latest recorded amax
+    MAX = "max"  # max over the entire history window (TE default)
+    MOST_RECENT = "most_recent"  # use only the latest recorded amax
 
 
 # ---------------------------------------------------------------------------
 # Format → dtype mapping (auto-detects FNUZ)
 # ---------------------------------------------------------------------------
+
 
 def _build_format_to_dtype():
     e4m3 = _get_float8_e4m3()
@@ -105,7 +107,7 @@ def _build_format_to_dtype():
     return {
         QuantFormat.FP8_E4M3: e4m3,
         QuantFormat.FP8_E5M2: e5m2,
-        QuantFormat.HYBRID: e4m3,   # forward dtype
+        QuantFormat.HYBRID: e4m3,  # forward dtype
         QuantFormat.MXFP8: e4m3,
         QuantFormat.FP4: None,
     }
@@ -117,7 +119,7 @@ def _format_to_dtype_bwd():
     return {
         QuantFormat.FP8_E4M3: e4m3,
         QuantFormat.FP8_E5M2: e5m2,
-        QuantFormat.HYBRID: e5m2,   # backward dtype differs
+        QuantFormat.HYBRID: e5m2,  # backward dtype differs
         QuantFormat.MXFP8: e4m3,
         QuantFormat.FP4: None,
     }
@@ -126,6 +128,7 @@ def _format_to_dtype_bwd():
 # ---------------------------------------------------------------------------
 # QuantConfig
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class QuantConfig:
@@ -183,8 +186,7 @@ class QuantConfig:
     quantize_grad: Optional[str] = None
 
     @classmethod
-    def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed",
-                 **kwargs) -> "QuantConfig":
+    def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed", **kwargs) -> "QuantConfig":
         """Construct a QuantConfig from plain strings.
 
         Args:

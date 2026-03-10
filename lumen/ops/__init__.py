@@ -7,6 +7,7 @@ _SUBMODULES = ("attention", "normalization", "quantize")
 
 def __getattr__(name):
     import importlib
+
     for sub in _SUBMODULES:
         mod = importlib.import_module(f".{sub}", __name__)
         if hasattr(mod, name):

@@ -14,6 +14,7 @@ from lumen.core.grad_quant import quantize_grad_tensor
 def _is_aiter_available() -> bool:
     try:
         import aiter  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -22,12 +23,10 @@ def _is_aiter_available() -> bool:
 if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
-from lumen.kernels.attention.attention_impl import (
-    attention_forward as triton_fp8_forward,
-    attention_backward as triton_fp8_backward,
-    attention_mxfp8_forward as triton_mxfp8_forward,
-    attention_mxfp8_backward as triton_mxfp8_backward,
-)
+from lumen.kernels.attention.attention_impl import attention_backward as triton_fp8_backward
+from lumen.kernels.attention.attention_impl import attention_forward as triton_fp8_forward
+from lumen.kernels.attention.attention_impl import attention_mxfp8_backward as triton_mxfp8_backward
+from lumen.kernels.attention.attention_impl import attention_mxfp8_forward as triton_mxfp8_forward
 
 __all__ = ["attention", "attention_fp8_quant"]
 
@@ -38,6 +37,7 @@ __all__ = ["attention", "attention_fp8_quant"]
 def _mark_allow_in_graph(*classes):
     try:
         from torch._dynamo import allow_in_graph
+
         for cls in classes:
             allow_in_graph(cls)
     except Exception:
@@ -52,24 +52,53 @@ def _mark_allow_in_graph(*classes):
 class AttentionTritonFunction(torch.autograd.Function):
     @staticmethod
     def forward(
-        ctx, q, k, v, dropout_p, softmax_scale, causal, window_size,
-        bias, alibi_slopes, return_lse, return_softmax, is_grad_enabled, use_fp8,
+        ctx,
+        q,
+        k,
+        v,
+        dropout_p,
+        softmax_scale,
+        causal,
+        window_size,
+        bias,
+        alibi_slopes,
+        return_lse,
+        return_softmax,
+        is_grad_enabled,
+        use_fp8,
         grad_quant_type=None,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
 
-        (output, softmax_lse, exp_scores,
-         q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state) = triton_fp8_forward(
-            q, k, v, use_fp8, dropout_p, softmax_scale, causal,
-            window_size, bias, alibi_slopes, return_softmax,
+        (output, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state) = triton_fp8_forward(
+            q,
+            k,
+            v,
+            use_fp8,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size,
+            bias,
+            alibi_slopes,
+            return_softmax,
         )
 
         if is_grad:
             ctx.save_for_backward(
-                q, k, v, output, softmax_lse, alibi_slopes, bias,
-                q_scale, k_scale, v_scale, rng_state,
+                q,
+                k,
+                v,
+                output,
+                softmax_lse,
+                alibi_slopes,
+                bias,
+                q_scale,
+                k_scale,
+                v_scale,
+                rng_state,
             )
             ctx.sm_scale = softmax_scale
             ctx.p_scale = p_scale
@@ -92,15 +121,30 @@ class AttentionTritonFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do, *args):
-        (q, k, v, o, softmax_lse, alibi_slopes, bias,
-         q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
+        (q, k, v, o, softmax_lse, alibi_slopes, bias, q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
 
         dq, dk, dv = triton_fp8_backward(
-            do, q, k, v, o, q_scale, k_scale, v_scale, ctx.p_scale,
-            softmax_lse, ctx.cu_seqlens_q, ctx.cu_seqlens_k,
-            ctx.max_seqlens_q, ctx.max_seqlens_k,
-            ctx.sm_scale, ctx.causal, alibi_slopes, ctx.use_fp8,
-            rng_state=rng_state, dropout_p=ctx.dropout_p, bias=bias,
+            do,
+            q,
+            k,
+            v,
+            o,
+            q_scale,
+            k_scale,
+            v_scale,
+            ctx.p_scale,
+            softmax_lse,
+            ctx.cu_seqlens_q,
+            ctx.cu_seqlens_k,
+            ctx.max_seqlens_q,
+            ctx.max_seqlens_k,
+            ctx.sm_scale,
+            ctx.causal,
+            alibi_slopes,
+            ctx.use_fp8,
+            rng_state=rng_state,
+            dropout_p=ctx.dropout_p,
+            bias=bias,
             window_size=ctx.window_size,
         )
         gqt = ctx.grad_quant_type
@@ -113,28 +157,65 @@ class AttentionTritonFunction(torch.autograd.Function):
 class AttentionTritonMXFP8Function(torch.autograd.Function):
     @staticmethod
     def forward(
-        ctx, q, k, v, dropout_p, softmax_scale, causal, window_size,
-        bias, alibi_slopes, return_lse, return_softmax, is_grad_enabled,
-        use_mxfp8, block_m_fwd=64, block_n_fwd=64,
-        block_m_dq_bwd=64, block_n_dq_bwd=64,
-        block_m_dkv_bwd=64, block_n_dkv_bwd=64, quant_block_size=32,
+        ctx,
+        q,
+        k,
+        v,
+        dropout_p,
+        softmax_scale,
+        causal,
+        window_size,
+        bias,
+        alibi_slopes,
+        return_lse,
+        return_softmax,
+        is_grad_enabled,
+        use_mxfp8,
+        block_m_fwd=64,
+        block_n_fwd=64,
+        block_m_dq_bwd=64,
+        block_n_dq_bwd=64,
+        block_m_dkv_bwd=64,
+        block_n_dkv_bwd=64,
+        quant_block_size=32,
         grad_quant_type=None,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
 
-        (output, softmax_lse, exp_scores,
-         q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state) = triton_mxfp8_forward(
-            q, k, v, use_mxfp8, dropout_p, softmax_scale, causal,
-            window_size, bias, alibi_slopes, return_softmax,
-            block_m_fwd, block_n_fwd, quant_block_size,
+        (output, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state) = (
+            triton_mxfp8_forward(
+                q,
+                k,
+                v,
+                use_mxfp8,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_softmax,
+                block_m_fwd,
+                block_n_fwd,
+                quant_block_size,
+            )
         )
 
         if is_grad:
             ctx.save_for_backward(
-                q, k, v, output, softmax_lse, alibi_slopes, bias,
-                q_scale, k_scale, v_scale, rng_state,
+                q,
+                k,
+                v,
+                output,
+                softmax_lse,
+                alibi_slopes,
+                bias,
+                q_scale,
+                k_scale,
+                v_scale,
+                rng_state,
             )
             ctx.use_mxfp8 = use_mxfp8
             ctx.p_scale = p_scale
@@ -163,24 +244,46 @@ class AttentionTritonMXFP8Function(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do, *args):
-        (q, k, v, o, softmax_lse, alibi_slopes, bias,
-         q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
+        (q, k, v, o, softmax_lse, alibi_slopes, bias, q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
 
         dq, dk, dv = triton_mxfp8_backward(
-            do, q, k, v, o, softmax_lse, q_scale, k_scale, v_scale,
-            ctx.sm_scale, ctx.p_scale, alibi_slopes, ctx.causal,
-            ctx.cu_seqlens_q, ctx.cu_seqlens_k,
-            ctx.max_seqlens_q, ctx.max_seqlens_k,
-            ctx.use_mxfp8, ctx.block_m_dq_bwd, ctx.block_n_dq_bwd,
-            ctx.block_m_dkv_bwd, ctx.block_n_dkv_bwd, ctx.quant_block_size,
-            rng_state=rng_state, dropout_p=ctx.dropout_p, bias=bias,
+            do,
+            q,
+            k,
+            v,
+            o,
+            softmax_lse,
+            q_scale,
+            k_scale,
+            v_scale,
+            ctx.sm_scale,
+            ctx.p_scale,
+            alibi_slopes,
+            ctx.causal,
+            ctx.cu_seqlens_q,
+            ctx.cu_seqlens_k,
+            ctx.max_seqlens_q,
+            ctx.max_seqlens_k,
+            ctx.use_mxfp8,
+            ctx.block_m_dq_bwd,
+            ctx.block_n_dq_bwd,
+            ctx.block_m_dkv_bwd,
+            ctx.block_n_dkv_bwd,
+            ctx.quant_block_size,
+            rng_state=rng_state,
+            dropout_p=ctx.dropout_p,
+            bias=bias,
             window_size=ctx.window_size,
         )
         gqt = ctx.grad_quant_type
         dq = quantize_grad_tensor(dq, gqt)
         dk = quantize_grad_tensor(dk, gqt)
         dv = quantize_grad_tensor(dv, gqt)
-        return (dq, dk, dv,) + (None,) * 18
+        return (
+            dq,
+            dk,
+            dv,
+        ) + (None,) * 18
 
 
 _mark_allow_in_graph(AttentionTritonFunction, AttentionTritonMXFP8Function)
@@ -192,7 +295,9 @@ _mark_allow_in_graph(AttentionTritonFunction, AttentionTritonMXFP8Function)
 
 
 def attention(
-    q, k, v,
+    q,
+    k,
+    v,
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
@@ -221,25 +326,46 @@ def attention(
             AttentionAiterFunctionCPA2A,
             AttentionTritonFunctionCPA2A,
         )
+
         cp_group = cp_param_bundle["cp_group"]
         cp_comm_type = cp_param_bundle["cp_comm_type"]
         if backend_type == "aiter_csrc" and cp_comm_type == "a2a":
             return AttentionAiterFunctionCPA2A.apply(
-                q, k, v, dropout_p, softmax_scale, causal, window_size,
-                bias, alibi_slopes, deterministic, return_lse,
-                return_attn_probs, torch.is_grad_enabled(), cp_group,
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                deterministic,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                cp_group,
             )
         elif backend_type == "aiter_triton" and cp_comm_type == "a2a":
             return AttentionTritonFunctionCPA2A.apply(
-                q, k, v, dropout_p, softmax_scale, causal, window_size,
-                bias, alibi_slopes, return_lse, return_attn_probs,
-                torch.is_grad_enabled(), False, cp_group,
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                False,
+                cp_group,
                 grad_quant_type,
             )
         else:
-            raise NotImplementedError(
-                f"not supported backend_type {backend_type} cp_comm_type {cp_comm_type} yet"
-            )
+            raise NotImplementedError(f"not supported backend_type {backend_type} cp_comm_type {cp_comm_type} yet")
 
     # Single-GPU path: prefer CK csrc, fall back to Triton.
     if backend_type == "aiter_csrc":
@@ -251,7 +377,9 @@ def attention(
         _return_softmax = return_attn_probs and dropout_p > 0
         try:
             return flash_attn_func(
-                q, k, v,
+                q,
+                k,
+                v,
                 dropout_p=dropout_p,
                 softmax_scale=softmax_scale,
                 causal=causal,
@@ -268,6 +396,7 @@ def attention(
             # mha_fwd returns -1 ("invalid argument for fmha_fwd"), fall back to
             # the Triton implementation which handles all configurations.
             import warnings
+
             warnings.warn(
                 f"AITER flash-attention kernel unavailable for this configuration "
                 f"(q={tuple(q.shape)}, k={tuple(k.shape)}, causal={causal}): "
@@ -276,22 +405,46 @@ def attention(
                 stacklevel=2,
             )
             return AttentionTritonFunction.apply(
-                q, k, v, dropout_p, softmax_scale, causal, window_size,
-                bias, alibi_slopes, return_lse, return_attn_probs,
-                torch.is_grad_enabled(), False, grad_quant_type,
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                False,
+                grad_quant_type,
             )
     elif backend_type == "aiter_triton":
         return AttentionTritonFunction.apply(
-            q, k, v, dropout_p, softmax_scale, causal, window_size,
-            bias, alibi_slopes, return_lse, return_attn_probs,
-            torch.is_grad_enabled(), False, grad_quant_type,
+            q,
+            k,
+            v,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size,
+            bias,
+            alibi_slopes,
+            return_lse,
+            return_attn_probs,
+            torch.is_grad_enabled(),
+            False,
+            grad_quant_type,
         )
     else:
         raise NotImplementedError(f"backend_type {backend_type} not supported")
 
 
 def attention_fp8_quant(
-    q, k, v,
+    q,
+    k,
+    v,
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
@@ -313,8 +466,10 @@ def attention_fp8_quant(
     quant_block_size: int = 32,
     grad_quant_type: Optional[str] = None,
 ):
-    assert backend_type in ("aiter_triton", "aiter_csrc_fp8"), \
-        f"attention_fp8_quant only supports aiter_triton / aiter_csrc_fp8 backends, got {backend_type}"
+    assert backend_type in (
+        "aiter_triton",
+        "aiter_csrc_fp8",
+    ), f"attention_fp8_quant only supports aiter_triton / aiter_csrc_fp8 backends, got {backend_type}"
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
 
@@ -326,26 +481,52 @@ def attention_fp8_quant(
             AttentionTritonFunctionCPA2A,
             AttentionTritonMXFP8FunctionCPA2A,
         )
+
         cp_group = cp_param_bundle["cp_group"]
         cp_comm_type = cp_param_bundle["cp_comm_type"]
         if cp_comm_type != "a2a":
-            raise NotImplementedError(
-                f"not supported backend_type {backend_type} cp_comm_type {cp_comm_type} yet"
-            )
+            raise NotImplementedError(f"not supported backend_type {backend_type} cp_comm_type {cp_comm_type} yet")
         if quant_type == "fp8_blockwise" or quant_type is None:
             return AttentionTritonFunctionCPA2A.apply(
-                q, k, v, dropout_p, softmax_scale, causal, window_size,
-                bias, alibi_slopes, return_lse, return_attn_probs,
-                torch.is_grad_enabled(), True if quant_type == "fp8" else False,
-                cp_group, grad_quant_type,
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                True if quant_type == "fp8" else False,
+                cp_group,
+                grad_quant_type,
             )
         elif quant_type == "mxfp8":
             return AttentionTritonMXFP8FunctionCPA2A.apply(
-                q, k, v, dropout_p, softmax_scale, causal, window_size,
-                bias, alibi_slopes, return_lse, return_attn_probs,
-                torch.is_grad_enabled(), True, cp_group,
-                block_m_fwd, block_n_fwd, block_m_dq_bwd, block_n_dq_bwd,
-                block_m_dkv_bwd, block_n_dkv_bwd, quant_block_size,
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                True,
+                cp_group,
+                block_m_fwd,
+                block_n_fwd,
+                block_m_dq_bwd,
+                block_n_dq_bwd,
+                block_m_dkv_bwd,
+                block_n_dkv_bwd,
+                quant_block_size,
                 grad_quant_type,
             )
         else:
@@ -354,18 +535,44 @@ def attention_fp8_quant(
     # Single-GPU path
     if quant_type == "mxfp8":
         return AttentionTritonMXFP8Function.apply(
-            q, k, v, dropout_p, softmax_scale, causal, window_size,
-            bias, alibi_slopes, return_lse, return_attn_probs,
-            torch.is_grad_enabled(), True,
-            block_m_fwd, block_n_fwd, block_m_dq_bwd, block_n_dq_bwd,
-            block_m_dkv_bwd, block_n_dkv_bwd, quant_block_size,
+            q,
+            k,
+            v,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size,
+            bias,
+            alibi_slopes,
+            return_lse,
+            return_attn_probs,
+            torch.is_grad_enabled(),
+            True,
+            block_m_fwd,
+            block_n_fwd,
+            block_m_dq_bwd,
+            block_n_dq_bwd,
+            block_m_dkv_bwd,
+            block_n_dkv_bwd,
+            quant_block_size,
             grad_quant_type,
         )
     elif quant_type == "fp8_blockwise":
         return AttentionTritonFunction.apply(
-            q, k, v, dropout_p, softmax_scale, causal, window_size,
-            bias, alibi_slopes, return_lse, return_attn_probs,
-            torch.is_grad_enabled(), True, grad_quant_type,
+            q,
+            k,
+            v,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size,
+            bias,
+            alibi_slopes,
+            return_lse,
+            return_attn_probs,
+            torch.is_grad_enabled(),
+            True,
+            grad_quant_type,
         )
     else:
         raise NotImplementedError(f"not supported quant_type {quant_type} backend_type {backend_type} yet")

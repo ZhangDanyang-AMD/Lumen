@@ -18,20 +18,23 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Download LLaMA 3.1 model from HuggingFace"
+    parser = argparse.ArgumentParser(description="Download LLaMA 3.1 model from HuggingFace")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="meta-llama/Llama-3.1-8B",
+        help="HuggingFace model name (e.g. meta-llama/Llama-3.1-8B, " "meta-llama/Llama-3.1-8B-Instruct)",
     )
     parser.add_argument(
-        "--model_name", type=str, default="meta-llama/Llama-3.1-8B",
-        help="HuggingFace model name (e.g. meta-llama/Llama-3.1-8B, "
-             "meta-llama/Llama-3.1-8B-Instruct)",
-    )
-    parser.add_argument(
-        "--output_dir", type=str, default="/data/model",
+        "--output_dir",
+        type=str,
+        default="/data/model",
         help="Directory to save the downloaded model",
     )
     parser.add_argument(
-        "--verify", action="store_true", default=False,
+        "--verify",
+        action="store_true",
+        default=False,
         help="Compute and print SHA-256 hashes of downloaded weight files.",
     )
     args = parser.parse_args()

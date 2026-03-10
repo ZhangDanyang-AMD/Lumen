@@ -31,30 +31,28 @@ Example::
 
 import argparse
 import logging
-import math
 import os
 from typing import Optional
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
     MixedPrecision,
     ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-
-from lumen.models.llama2.dataset import LLaMA2SFTDataset
+from torch.utils.data import DataLoader, DistributedSampler
 
 # Re-export shared FSDP helpers so existing callers are not broken.
 from lumen.models.fsdp import (  # noqa: F401
+    _rank0_print,
     apply_fp8_training,
     apply_lora,
     reset_fp8_state,
 )
-from lumen.models.fsdp import _rank0_print
+from lumen.models.llama2.dataset import LLaMA2SFTDataset
 
 __all__ = [
     "FSDPTrainer",
@@ -72,12 +70,13 @@ logger = logging.getLogger(__name__)
 # Model builder
 # ---------------------------------------------------------------------------
 
+
 def build_model(args) -> nn.Module:
     """Load a HuggingFace LlamaForCausalLM and return it (unwrapped).
 
     FSDP wrapping is done separately by :class:`FSDPTrainer`.
     """
-    from transformers import LlamaForCausalLM, LlamaConfig
+    from transformers import LlamaConfig, LlamaForCausalLM
 
     if args.model_name_or_path:
         _rank0_print(f"> Loading LLaMA2 from {args.model_name_or_path} ...")
@@ -105,6 +104,7 @@ def build_model(args) -> nn.Module:
 # ---------------------------------------------------------------------------
 # FSDP Trainer
 # ---------------------------------------------------------------------------
+
 
 class FSDPTrainer:
     """Self-contained FSDP training loop for LLaMA2 SFT.
@@ -138,8 +138,6 @@ class FSDPTrainer:
         model = build_model(args)
 
         if getattr(args, "gradient_checkpointing", True):
-            from torch.utils.checkpoint import checkpoint
-            from transformers.models.llama.modeling_llama import LlamaDecoderLayer
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False},
             )
@@ -152,7 +150,9 @@ class FSDPTrainer:
             apply_fp8_training(model, args)
 
         from functools import partial
+
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
         auto_wrap_policy = partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={LlamaDecoderLayer},
@@ -179,8 +179,7 @@ class FSDPTrainer:
             limit_all_gathers=True,
         )
 
-        _rank0_print(f"> FSDP model ready (sharding={args.sharding_strategy}, "
-                      f"world_size={self.world_size})")
+        _rank0_print(f"> FSDP model ready (sharding={args.sharding_strategy}, " f"world_size={self.world_size})")
         return model
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
@@ -203,6 +202,7 @@ class FSDPTrainer:
     def _build_dataloader(self, data_path: Optional[str], num_samples: int) -> DataLoader:
         args = self.args
         from transformers import AutoTokenizer
+
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path)
 
         dataset = LLaMA2SFTDataset(
@@ -213,12 +213,16 @@ class FSDPTrainer:
             is_hf_tokenizer=True,
         )
 
-        sampler = DistributedSampler(
-            dataset,
-            num_replicas=self.world_size,
-            rank=self.global_rank,
-            shuffle=True,
-        ) if self.world_size > 1 else None
+        sampler = (
+            DistributedSampler(
+                dataset,
+                num_replicas=self.world_size,
+                rank=self.global_rank,
+                shuffle=True,
+            )
+            if self.world_size > 1
+            else None
+        )
 
         return DataLoader(
             dataset,
@@ -242,7 +246,9 @@ class FSDPTrainer:
         shift_logits = logits.view(-1, logits.size(-1))
         shift_labels = labels.reshape(-1)
         per_token_loss = nn.functional.cross_entropy(
-            shift_logits, shift_labels, reduction="none",
+            shift_logits,
+            shift_labels,
+            reduction="none",
         )
         masked_loss = (per_token_loss * loss_mask.reshape(-1)).sum()
         num_tokens = loss_mask.sum()
@@ -272,8 +278,7 @@ class FSDPTrainer:
             self._val_loss_ema = 0.9 * self._val_loss_ema + 0.1 * loss_val
         if self._val_loss_ema < args.val_loss_target:
             _rank0_print(
-                f"> [Early Stop] Loss EMA ({self._val_loss_ema:.4f}) < "
-                f"target ({args.val_loss_target:.4f})"
+                f"> [Early Stop] Loss EMA ({self._val_loss_ema:.4f}) < " f"target ({args.val_loss_target:.4f})"
             )
             return True
         return False
@@ -321,16 +326,12 @@ class FSDPTrainer:
             avg_loss = accum_loss / grad_accum
             if global_step % args.log_interval == 0:
                 lr = self.scheduler.get_last_lr()[0]
-                _rank0_print(
-                    f"  step {global_step}/{args.max_steps} | "
-                    f"loss {avg_loss:.4f} | lr {lr:.2e}"
-                )
+                _rank0_print(f"  step {global_step}/{args.max_steps} | " f"loss {avg_loss:.4f} | lr {lr:.2e}")
 
             if self._check_early_stop(avg_loss):
                 break
 
-            if (args.save_interval > 0 and global_step % args.save_interval == 0
-                    and self.global_rank == 0):
+            if args.save_interval > 0 and global_step % args.save_interval == 0 and self.global_rank == 0:
                 save_path = os.path.join(args.save_dir, f"step_{global_step}")
                 self._save_checkpoint(save_path)
 
@@ -352,17 +353,21 @@ class FSDPTrainer:
 # CLI argument parser
 # ---------------------------------------------------------------------------
 
+
 def get_args() -> argparse.Namespace:
     """Parse command-line arguments for FSDP-based LLaMA2 SFT."""
     parser = argparse.ArgumentParser(description="LLaMA2 SFT with FSDP + Lumen")
 
-    parser.add_argument("--backend", type=str, default="fsdp",
-                        choices=["megatron", "fsdp"], help="Training backend.")
+    parser.add_argument("--backend", type=str, default="fsdp", choices=["megatron", "fsdp"], help="Training backend.")
 
     # -- Model --
     m = parser.add_argument_group("model")
-    m.add_argument("--model-name-or-path", type=str, default=None,
-                    help="HuggingFace model name or local path (e.g. meta-llama/Llama-2-7b-hf).")
+    m.add_argument(
+        "--model-name-or-path",
+        type=str,
+        default=None,
+        help="HuggingFace model name or local path (e.g. meta-llama/Llama-2-7b-hf).",
+    )
     m.add_argument("--hidden-size", type=int, default=4096)
     m.add_argument("--intermediate-size", type=int, default=11008)
     m.add_argument("--num-layers", type=int, default=32)
@@ -382,14 +387,16 @@ def get_args() -> argparse.Namespace:
     t.add_argument("--weight-decay", type=float, default=0.01)
     t.add_argument("--max-grad-norm", type=float, default=1.0)
     t.add_argument("--log-interval", type=int, default=10)
-    t.add_argument("--save-interval", type=int, default=0,
-                    help="Save checkpoint every N steps. 0 = disabled.")
+    t.add_argument("--save-interval", type=int, default=0, help="Save checkpoint every N steps. 0 = disabled.")
     t.add_argument("--save-dir", type=str, default="./checkpoints")
     t.add_argument("--num-workers", type=int, default=4)
-    t.add_argument("--gradient-checkpointing", action="store_true", default=True,
-                    help="Enable gradient/activation checkpointing (default: on).")
-    t.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing",
-                    action="store_false")
+    t.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        default=True,
+        help="Enable gradient/activation checkpointing (default: on).",
+    )
+    t.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
 
     # -- Data --
     d = parser.add_argument_group("data")
@@ -400,36 +407,37 @@ def get_args() -> argparse.Namespace:
 
     # -- FSDP --
     f = parser.add_argument_group("fsdp")
-    f.add_argument("--sharding-strategy", type=str, default="full_shard",
-                    choices=["full_shard", "shard_grad_op", "no_shard"])
+    f.add_argument(
+        "--sharding-strategy", type=str, default="full_shard", choices=["full_shard", "shard_grad_op", "no_shard"]
+    )
 
     # -- LoRA --
     lora = parser.add_argument_group("lora")
-    lora.add_argument("--lora-rank", type=int, default=0,
-                       help="LoRA rank. 0 = disabled (full fine-tuning).")
+    lora.add_argument("--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled (full fine-tuning).")
     lora.add_argument("--lora-alpha", type=float, default=32.0)
     lora.add_argument("--lora-dropout", type=float, default=0.1)
 
     # -- FP8 training --
     fp8 = parser.add_argument_group("fp8-training")
     fp8.add_argument("--fp8-training", action="store_true", default=False)
-    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3",
-                      choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
-    fp8.add_argument("--fp8-scaling", type=str, default="delayed",
-                      choices=["dynamic", "delayed", "blockwise"])
+    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
+    fp8.add_argument("--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"])
     fp8.add_argument("--fp8-block-size", type=int, default=128)
-    fp8.add_argument("--fp8-amax-algo", type=str, default="max",
-                      choices=["max", "most_recent"])
+    fp8.add_argument("--fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
     fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
     fp8.add_argument("--fp8-amax-history", type=int, default=16)
-    fp8.add_argument("--fp8-margin", type=int, default=0,
-                      help="Margin for FP8 scaling factor computation (TE-compatible).")
+    fp8.add_argument(
+        "--fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation (TE-compatible)."
+    )
     fp8.add_argument("--fp8-activation", action="store_true", default=True)
-    fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
-                      action="store_false")
-    fp8.add_argument("--grad-quant-type", type=str, default=None,
-                      choices=["fp8", "mxfp8", "fp4"],
-                      help="Gradient quantization type (None=disabled).")
+    fp8.add_argument("--no-fp8-activation", dest="fp8_activation", action="store_false")
+    fp8.add_argument(
+        "--grad-quant-type",
+        type=str,
+        default=None,
+        choices=["fp8", "mxfp8", "fp4"],
+        help="Gradient quantization type (None=disabled).",
+    )
 
     # -- Warmup + Early stopping --
     sft = parser.add_argument_group("sft")

@@ -44,7 +44,8 @@ def download_c4(
         logger.info("Downloading C4 %s split ...", split_name)
 
         ds = load_dataset(
-            "allenai/c4", "en",
+            "allenai/c4",
+            "en",
             split=hf_split,
             streaming=True,
             trust_remote_code=True,
@@ -67,6 +68,7 @@ def download_c4(
 
         if verify:
             from lumen.models.utils import sha256_file
+
             digest = sha256_file(output_path)
             print(f"    SHA-256: {digest}")
 
@@ -74,23 +76,29 @@ def download_c4(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Download C4 pretraining dataset from HuggingFace"
-    )
+    parser = argparse.ArgumentParser(description="Download C4 pretraining dataset from HuggingFace")
     parser.add_argument(
-        "--output_dir", type=str, default="/data/c4",
+        "--output_dir",
+        type=str,
+        default="/data/c4",
         help="Directory to save the dataset",
     )
     parser.add_argument(
-        "--max_train_samples", type=int, default=0,
+        "--max_train_samples",
+        type=int,
+        default=0,
         help="Max number of training samples to download (0 = all)",
     )
     parser.add_argument(
-        "--max_val_samples", type=int, default=0,
+        "--max_val_samples",
+        type=int,
+        default=0,
         help="Max number of validation samples to download (0 = all)",
     )
     parser.add_argument(
-        "--verify", action="store_true", default=False,
+        "--verify",
+        action="store_true",
+        default=False,
         help="Compute and print SHA-256 hashes of output files.",
     )
     args = parser.parse_args()

@@ -29,6 +29,7 @@ def _rank0_print(msg: str) -> None:
 # FP8 quantised training
 # ---------------------------------------------------------------------------
 
+
 def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     """Enable FP8 quantised training via Lumen.
 
@@ -39,7 +40,10 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     """
     import lumen.quantize as quant
     from lumen.quantize import (
-        AmaxAlgo, QuantConfig, QuantFormat, ScalingType,
+        AmaxAlgo,
+        QuantConfig,
+        QuantFormat,
+        ScalingType,
     )
 
     config = QuantConfig(
@@ -58,7 +62,8 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         dp_group = dist.group.WORLD
 
     quant.enable(
-        model, config=config,
+        model,
+        config=config,
         dp_group=dp_group if config.reduce_amax else None,
     )
     _rank0_print(
@@ -94,17 +99,17 @@ def reset_fp8_state(model: nn.Module) -> None:
 # LoRA (via HuggingFace PEFT)
 # ---------------------------------------------------------------------------
 
+
 def apply_lora(model: nn.Module, args) -> nn.Module:
     """Apply LoRA adapters via HuggingFace PEFT and freeze the base model."""
-    from peft import LoraConfig, get_peft_model, TaskType
+    from peft import LoraConfig, TaskType, get_peft_model
 
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         r=args.lora_rank,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                         "gate_proj", "up_proj", "down_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     )
     model = get_peft_model(model, peft_config)
 

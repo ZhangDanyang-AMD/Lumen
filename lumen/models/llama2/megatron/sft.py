@@ -32,7 +32,6 @@ Example::
 """
 
 import torch
-
 from megatron.core import tensor_parallel
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.utils import (
@@ -40,19 +39,20 @@ from megatron.training.utils import (
     get_ltor_masks_and_position_ids,
     is_first_or_last_pipeline_stage,
 )
+
 from lumen.models.llama2.dataset import LLaMA2SFTDataset
-from lumen.models.utils import safe_add_argument
 
 # Re-export shared symbols so existing callers are not broken.
 from lumen.models.megatron import (  # noqa: F401
+    add_common_megatron_args,
     apply_fp8_training,
     apply_lora,
     loss_func,
     make_forward_step,
     reset_fp8_state,
     tl_gpt_builder,
-    add_common_megatron_args,
 )
+from lumen.models.utils import safe_add_argument
 
 __all__ = [
     "LLaMA2SFTDataset",
@@ -72,14 +72,13 @@ __all__ = [
 # Dataset provider
 # ---------------------------------------------------------------------------
 
+
 def train_valid_test_datasets_provider(train_val_test_num_samples):
     """Build train, validation, and test SFT datasets."""
     args = get_args()
 
     tokenizer_obj = get_tokenizer()
-    is_hf = hasattr(tokenizer_obj, "_tokenizer") and hasattr(
-        tokenizer_obj._tokenizer, "encode"
-    )
+    is_hf = hasattr(tokenizer_obj, "_tokenizer") and hasattr(tokenizer_obj._tokenizer, "encode")
     raw_tokenizer = tokenizer_obj._tokenizer if is_hf else tokenizer_obj
 
     train_path = args.train_data_path[0] if args.train_data_path else None
@@ -89,16 +88,25 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     print_rank_0("> building train, validation, and test SFT datasets ...")
 
     train_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[0], train_path, args.seq_length,
-        raw_tokenizer, is_hf,
+        train_val_test_num_samples[0],
+        train_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
     )
     valid_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[1], valid_path, args.seq_length,
-        raw_tokenizer, is_hf,
+        train_val_test_num_samples[1],
+        valid_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
     )
     test_ds = LLaMA2SFTDataset(
-        train_val_test_num_samples[2], test_path, args.seq_length,
-        raw_tokenizer, is_hf,
+        train_val_test_num_samples[2],
+        test_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
     )
 
     print_rank_0("> finished creating SFT datasets ...")
@@ -108,6 +116,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 # ---------------------------------------------------------------------------
 # Batch construction (SFT-specific: answer-only loss masking)
 # ---------------------------------------------------------------------------
+
 
 def get_batch(data_iterator, vp_stage=None):
     """Generate a batch with answer-only loss masking and packed sequence params."""
@@ -121,9 +130,7 @@ def get_batch(data_iterator, vp_stage=None):
     else:
         data = None
 
-    data_b = tensor_parallel.broadcast_data(
-        ["input_ids", "loss_mask"], data, torch.int64
-    )
+    data_b = tensor_parallel.broadcast_data(["input_ids", "loss_mask"], data, torch.int64)
 
     tokens_ = data_b["input_ids"]
     tokens = tokens_[:, : args.seq_length].contiguous()
@@ -137,9 +144,13 @@ def get_batch(data_iterator, vp_stage=None):
         eod_token = tokenizer.eod
 
     attention_mask, loss_mask, position_ids = get_ltor_masks_and_position_ids(
-        tokens, eod_token, eod_token,
-        args.reset_position_ids, args.reset_attention_mask,
-        args.eod_mask_loss, False,
+        tokens,
+        eod_token,
+        eod_token,
+        args.reset_position_ids,
+        args.reset_attention_mask,
+        args.eod_mask_loss,
+        False,
     )
     loss_mask = loss_mask * answer_loss_mask.to(dtype=loss_mask.dtype)
 
@@ -164,6 +175,7 @@ forward_step = make_forward_step(get_batch, loss_func, zero_last_loss_mask=True)
 # ---------------------------------------------------------------------------
 # Extra CLI arguments
 # ---------------------------------------------------------------------------
+
 
 def add_finetune_args(parser):
     """Add finetune-specific arguments."""

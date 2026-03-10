@@ -27,6 +27,11 @@ from lumen.models.utils import peek_backend
 def _run_megatron():
     # Import TL megatron FIRST so _install_fused_layer_norm_patch() runs before
     # megatron.training loads TransformerBlock/FusedLayerNorm.
+    import os
+
+    from megatron.core.enums import ModelType
+    from megatron.training import get_args, pretrain, print_rank_0
+
     from lumen.models.llama31.megatron import (
         add_pretrain_args,
         apply_fp8_training,
@@ -35,9 +40,6 @@ def _run_megatron():
         tl_gpt_builder,
         train_valid_test_datasets_provider,
     )
-    import os
-    from megatron.core.enums import ModelType
-    from megatron.training import get_args, pretrain, print_rank_0
 
     def model_provider(pre_process=True, post_process=True, vp_stage=None):
         args = get_args()

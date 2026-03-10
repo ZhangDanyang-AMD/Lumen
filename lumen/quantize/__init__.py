@@ -35,6 +35,16 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from lumen.ops.quantize import (
+    QuantizedLinearFunction,
+    convert_from_mxfp8,
+    convert_to_mxfp8,
+    dequant_fp8_tensorwise_impl,
+    quant_fp8_blockwise_impl,
+    quant_fp8_blockwise_segment_m_impl,
+    quant_fp8_tensorwise_impl,
+    quantized_linear,
+)
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -46,16 +56,6 @@ from lumen.quantize.config import (
 from lumen.quantize.scaling_manager import (
     GRAD_QUANT_TYPES,
     ScalingManager,
-)
-from lumen.ops.quantize import (
-    convert_to_mxfp8,
-    convert_from_mxfp8,
-    quant_fp8_blockwise_impl,
-    quant_fp8_tensorwise_impl,
-    dequant_fp8_tensorwise_impl,
-    quant_fp8_blockwise_segment_m_impl,
-    QuantizedLinearFunction,
-    quantized_linear,
 )
 
 # Backward-compat aliases (autograd.py and communication.py removed)
@@ -69,11 +69,13 @@ logger = logging.getLogger(__name__)
 # Backend detection
 # ---------------------------------------------------------------------------
 
+
 @functools.lru_cache(maxsize=1)
 def is_aiter_available() -> bool:
     """Return True if the AITER package (CK attention backend) is importable."""
     try:
         import aiter  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -120,9 +122,7 @@ def get_quant_backend(prefer: str = "auto") -> str:
         return "triton"
     if prefer == "aiter":
         if not is_aiter_available():
-            raise RuntimeError(
-                "AITER is not installed. Install it or use backend='triton'."
-            )
+            raise RuntimeError("AITER is not installed. Install it or use backend='triton'.")
         return "aiter"
     return "aiter" if is_aiter_available() else "triton"
 
@@ -130,6 +130,7 @@ def get_quant_backend(prefer: str = "auto") -> str:
 # ---------------------------------------------------------------------------
 # Quantization enablement
 # ---------------------------------------------------------------------------
+
 
 def enable(
     model,
@@ -186,6 +187,7 @@ def _get_megatron_linear_types():
             ColumnParallelLinear,
             RowParallelLinear,
         )
+
         return ColumnParallelLinear, RowParallelLinear
     except ImportError:
         return ()
@@ -226,23 +228,25 @@ def _patch_linear_layers(
             module._quant_tensor_id = tensor_id
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
-            _replace_forward(module, manager, backend, fp8_dtype, block_size,
-                             tensor_id, quant_act, is_megatron)
+            _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id, quant_act, is_megatron)
             count += 1
 
     act_str = "weight+activation" if quant_act else "weight-only"
     grad_quant_type = config.quantize_grad
     grad_str = f"+grad({grad_quant_type})" if grad_quant_type else ""
     logger.info(
-        "Quantization enabled on %d nn.Linear layers "
-        "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s%s)",
-        count, backend, config.format.value, config.scaling.value,
-        config.amax_algo.value, act_str, grad_str,
+        "Quantization enabled on %d nn.Linear layers " "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s%s)",
+        count,
+        backend,
+        config.format.value,
+        config.scaling.value,
+        config.amax_algo.value,
+        act_str,
+        grad_str,
     )
 
 
-def _replace_forward(module, manager, backend, fp8_dtype, block_size,
-                     tensor_id, quantize_activation, is_megatron):
+def _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id, quantize_activation, is_megatron):
     """Replace the module's forward method with an FP8-quantized version.
 
     Unlike ``register_forward_hook``, this prevents the original (BF16) linear
@@ -252,6 +256,7 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
     original_forward = module.forward
 
     if not is_megatron:
+
         def quant_forward(input_tensor, *args, **kwargs):
             return quantized_linear(
                 input_tensor,
@@ -264,7 +269,9 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
             )
+
     else:
+
         def quant_forward(input_tensor, *args, **kwargs):
             skip_bias_add = getattr(module, "skip_bias_add", False)
             bias = getattr(module, "bias", None)
@@ -281,8 +288,10 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                 from megatron.core.tensor_parallel.mappings import (
                     gather_from_sequence_parallel_region,
                 )
+
                 input_tensor = gather_from_sequence_parallel_region(
-                    input_tensor, tensor_parallel_output_grad=True,
+                    input_tensor,
+                    tensor_parallel_output_grad=True,
                     group=tp_group,
                 )
 
@@ -305,14 +314,17 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                 from megatron.core.tensor_parallel.mappings import (
                     reduce_scatter_to_sequence_parallel_region,
                 )
+
                 result = reduce_scatter_to_sequence_parallel_region(
-                    result, group=tp_group,
+                    result,
+                    group=tp_group,
                 )
             elif is_row_parallel:
                 try:
                     from megatron.core.tensor_parallel.mappings import (
                         reduce_from_tensor_model_parallel_region,
                     )
+
                     result = reduce_from_tensor_model_parallel_region(result)
                 except ImportError:
                     pass
@@ -321,6 +333,7 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size,
                     from megatron.core.tensor_parallel.mappings import (
                         gather_from_tensor_model_parallel_region,
                     )
+
                     result = gather_from_tensor_model_parallel_region(result)
                 except ImportError:
                     pass

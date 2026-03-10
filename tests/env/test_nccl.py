@@ -45,10 +45,10 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _rank() -> int:
     return dist.get_rank() if dist.is_initialized() else 0
@@ -96,11 +96,11 @@ def record(name: str, ok: bool, detail: str = "") -> None:
 # Network interface helpers
 # ---------------------------------------------------------------------------
 
+
 def _list_interfaces() -> list[tuple[str, str]]:
     """Return [(ifname, ip_addr)] for UP interfaces with an IPv4 address."""
     results = []
     try:
-        import ipaddress
         # /proc/net/fib_trie approach — works inside containers without tools
         with open("/proc/net/if_inet6") as _:
             pass  # just a probe; we use a different file below
@@ -133,6 +133,7 @@ def _list_interfaces() -> list[tuple[str, str]]:
 def _probe_loopback() -> bool:
     """Check whether a TCP loopback connection on 127.0.0.1 works."""
     import threading
+
     success = [False]
 
     def _server():
@@ -153,7 +154,7 @@ def _probe_loopback() -> bool:
 
     t = threading.Thread(target=_server, daemon=True)
     t.start()
-    t.join(0.2)   # wait until port is known
+    t.join(0.2)  # wait until port is known
     if len(success) < 2:
         return False
     port = success[1]
@@ -193,6 +194,7 @@ def _suggest_ifname(interfaces: list[tuple[str, str]]) -> str:
 # ---------------------------------------------------------------------------
 # 1. Environment checks (no distributed required)
 # ---------------------------------------------------------------------------
+
 
 def check_environment() -> None:
     separator("1. Environment / ROCm stack")
@@ -236,10 +238,18 @@ def check_environment() -> None:
 
     log("  Key env vars:")
     for var in [
-        "LOCAL_RANK", "RANK", "WORLD_SIZE",
-        "MASTER_ADDR", "MASTER_PORT",
-        "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES",
-        "NCCL_DEBUG", "NCCL_SOCKET_IFNAME", "NCCL_IB_DISABLE", "HSA_ENABLE_SDMA",
+        "LOCAL_RANK",
+        "RANK",
+        "WORLD_SIZE",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+        "HIP_VISIBLE_DEVICES",
+        "ROCR_VISIBLE_DEVICES",
+        "CUDA_VISIBLE_DEVICES",
+        "NCCL_DEBUG",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_DISABLE",
+        "HSA_ENABLE_SDMA",
     ]:
         log(f"    {var}={os.environ.get(var, '<unset>')}")
 
@@ -247,6 +257,7 @@ def check_environment() -> None:
 # ---------------------------------------------------------------------------
 # 2. Distributed init
 # ---------------------------------------------------------------------------
+
 
 def init_distributed() -> bool:
     separator("2. Distributed init (NCCL/RCCL backend)")
@@ -304,13 +315,13 @@ def _print_socket_hint() -> None:
         log(f"    python tests/env/test_nccl.py --ifname {name}  # ip={ip}", error=True)
     log("", error=True)
     log("  Or get detailed RCCL logs:", error=True)
-    log("    NCCL_DEBUG=INFO python tests/env/test_nccl.py 2>&1 | grep -E 'NET|socket|IFNAME'",
-        error=True)
+    log("    NCCL_DEBUG=INFO python tests/env/test_nccl.py 2>&1 | grep -E 'NET|socket|IFNAME'", error=True)
 
 
 # ---------------------------------------------------------------------------
 # 3. Collective operations
 # ---------------------------------------------------------------------------
+
 
 def _alloc(shape, dtype=torch.float32) -> torch.Tensor:
     return torch.ones(shape, dtype=dtype, device=f"cuda:{torch.cuda.current_device()}")
@@ -332,8 +343,7 @@ def test_allreduce(sizes=(1, 1024, 1024 * 1024)) -> None:
             dist.barrier()
             expected = float(_world())
             ok = torch.allclose(t, torch.full_like(t, expected))
-            record(f"all_reduce_{numel}", ok,
-                   "sum check failed" if not ok else f"{numel} floats")
+            record(f"all_reduce_{numel}", ok, "sum check failed" if not ok else f"{numel} floats")
         except Exception as exc:
             record(f"all_reduce_{numel}", False, str(exc))
 
@@ -356,10 +366,7 @@ def test_allgather() -> None:
         t = _alloc(numel).fill_(float(_rank()))
         out = [torch.zeros(numel, device=t.device) for _ in range(_world())]
         dist.all_gather(out, t)
-        ok = all(
-            torch.allclose(out[r], torch.full_like(out[r], float(r)))
-            for r in range(_world())
-        )
+        ok = all(torch.allclose(out[r], torch.full_like(out[r], float(r))) for r in range(_world()))
         record("all_gather", ok)
     except Exception as exc:
         record("all_gather", False, str(exc))
@@ -387,7 +394,7 @@ def test_allgather_into_tensor() -> None:
         ok = True
         for r in range(_world()):
             expected = torch.full((chunk,), float(r), device=t.device)
-            if not torch.allclose(out[r * chunk:(r + 1) * chunk], expected):
+            if not torch.allclose(out[r * chunk : (r + 1) * chunk], expected):
                 ok = False
                 break
         record("all_gather_into_tensor", ok)
@@ -425,6 +432,7 @@ def test_p2p() -> None:
 # 4. Bandwidth benchmark (all-reduce)
 # ---------------------------------------------------------------------------
 
+
 def bench_allreduce_bandwidth() -> None:
     separator("4. All-reduce bandwidth (256 MiB tensor)")
     if _world() < 2:
@@ -458,12 +466,12 @@ def bench_allreduce_bandwidth() -> None:
 # 5. Mixed-precision collectives (bf16 / fp16)
 # ---------------------------------------------------------------------------
 
+
 def test_dtype_collectives() -> None:
     separator("5. Mixed-precision collectives")
     for dtype, name in [(torch.bfloat16, "bf16"), (torch.float16, "fp16")]:
         try:
-            t = torch.ones(1024, dtype=dtype,
-                           device=f"cuda:{torch.cuda.current_device()}")
+            t = torch.ones(1024, dtype=dtype, device=f"cuda:{torch.cuda.current_device()}")
             dist.all_reduce(t, op=dist.ReduceOp.SUM)
             # torch.full() defaults to CPU; pass device=t.device so both
             # sides of allclose are on the same GPU.
@@ -477,6 +485,7 @@ def test_dtype_collectives() -> None:
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
+
 
 def _print_summary() -> None:
     if not _is_rank0():
@@ -496,6 +505,7 @@ def _print_summary() -> None:
 # ---------------------------------------------------------------------------
 # Worker entry-point (used by both torchrun and mp.spawn)
 # ---------------------------------------------------------------------------
+
 
 def _worker(
     rank: int,
@@ -552,22 +562,28 @@ def _worker(
 # Main — detect launch mode and dispatch
 # ---------------------------------------------------------------------------
 
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="RCCL/NCCL health-check")
     p.add_argument(
-        "--nproc", type=int, default=None,
+        "--nproc",
+        type=int,
+        default=None,
         help="Number of GPUs to use in standalone mode (default: all visible GPUs)",
     )
     p.add_argument(
-        "--master-addr", default="127.0.0.1",
+        "--master-addr",
+        default="127.0.0.1",
         help="Master address for standalone mode (default: 127.0.0.1)",
     )
     p.add_argument(
-        "--master-port", default="29500",
+        "--master-port",
+        default="29500",
         help="Master port for standalone mode (default: 29500)",
     )
     p.add_argument(
-        "--ifname", default=None,
+        "--ifname",
+        default=None,
         help=(
             "Network interface for NCCL bootstrap sockets "
             "(sets NCCL_SOCKET_IFNAME).  Auto-detected when not specified."
@@ -629,8 +645,10 @@ def main() -> int:
     print(f"[launcher] Standalone mode: spawning {world_size} worker process(es)")
     print(f"[launcher] master={args.master_addr}:{args.master_port}")
     print(f"[launcher] NCCL_SOCKET_IFNAME={ifname}  NCCL_IB_DISABLE={ib_disable}")
-    print(f"[launcher] tip: if init fails, retry with --ifname <interface>  "
-          f"(e.g. eth0, ens3, eno1) or NCCL_DEBUG=INFO\n")
+    print(
+        "[launcher] tip: if init fails, retry with --ifname <interface>  "
+        "(e.g. eth0, ens3, eno1) or NCCL_DEBUG=INFO\n"
+    )
 
     mp.start_processes(
         _worker,

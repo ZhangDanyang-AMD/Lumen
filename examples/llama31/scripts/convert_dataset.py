@@ -38,8 +38,7 @@ def convert_jsonl(input_path: str, output_path: str, max_samples: int = 0) -> in
     count = 0
     skipped = 0
 
-    with open(input_path, "r", encoding="utf-8") as fin, \
-         open(output_path, "w", encoding="utf-8") as fout:
+    with open(input_path, "r", encoding="utf-8") as fin, open(output_path, "w", encoding="utf-8") as fout:
         for line in fin:
             line = line.strip()
             if not line:
@@ -91,20 +90,18 @@ def convert_txt_dir(input_dir: str, output_path: str, max_samples: int = 0) -> i
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert pretraining data to PretrainTextDataset format"
+    parser = argparse.ArgumentParser(description="Convert pretraining data to PretrainTextDataset format")
+    parser.add_argument("--input_dir", type=str, required=True, help="Directory containing source data")
+    parser.add_argument("--output_dir", type=str, default="/data", help="Directory to write output jsonl files")
+    parser.add_argument(
+        "--input_format",
+        type=str,
+        default="jsonl",
+        choices=["jsonl", "txt"],
+        help="Input format: 'jsonl' (C4-style) or 'txt' (raw text dir)",
     )
-    parser.add_argument("--input_dir", type=str, required=True,
-                        help="Directory containing source data")
-    parser.add_argument("--output_dir", type=str, default="/data",
-                        help="Directory to write output jsonl files")
-    parser.add_argument("--input_format", type=str, default="jsonl",
-                        choices=["jsonl", "txt"],
-                        help="Input format: 'jsonl' (C4-style) or 'txt' (raw text dir)")
-    parser.add_argument("--max_train_samples", type=int, default=0,
-                        help="Max training samples (0 = all)")
-    parser.add_argument("--max_val_samples", type=int, default=0,
-                        help="Max validation samples (0 = all)")
+    parser.add_argument("--max_train_samples", type=int, default=0, help="Max training samples (0 = all)")
+    parser.add_argument("--max_val_samples", type=int, default=0, help="Max validation samples (0 = all)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)

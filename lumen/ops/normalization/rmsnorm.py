@@ -36,6 +36,7 @@ _aiter_rms_norm = None
 
 try:
     from aiter.ops.triton.normalization.rmsnorm import rms_norm as _aiter_rms_norm
+
     _USE_AITER = True
     logger.info("RMSNorm: using AITER backend")
 except ImportError:
@@ -99,6 +100,7 @@ class _RMSNormGradQuant(torch.autograd.Function):
 # Public functional API
 # ---------------------------------------------------------------------------
 
+
 def rmsnorm(
     x: torch.Tensor,
     weight: torch.Tensor,
@@ -134,6 +136,7 @@ def rmsnorm(
 # ---------------------------------------------------------------------------
 # nn.Module API
 # ---------------------------------------------------------------------------
+
 
 class LumenRMSNorm(nn.Module):
     """RMSNorm backed by AITER (preferred) or PyTorch native.

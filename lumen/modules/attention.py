@@ -8,10 +8,11 @@ from typing import Literal, Optional
 
 import torch
 
-from lumen.quantize import is_aiter_available
 from lumen.ops.attention import attention, attention_fp8_quant
+from lumen.quantize import is_aiter_available
 
 __all__ = ["LumenAttention"]
+
 
 class LumenAttention(torch.nn.Module):
     def __init__(

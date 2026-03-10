@@ -88,16 +88,13 @@ class LLaMA2SFTDataset(Dataset):
                 # Object array of dicts: {"input_ids": [...], "loss_mask": [...], ...}
                 # Produced by convert_dataset.py (MLPerf NeMo style).
                 self._raw_samples = [
-                    {"input_ids": list(item["input_ids"]),
-                     "loss_mask": list(item["loss_mask"])}
-                    for item in arr
+                    {"input_ids": list(item["input_ids"]), "loss_mask": list(item["loss_mask"])} for item in arr
                 ]
             elif arr.ndim == 2:
                 # Pre-split integer array: (N, seq_len)
                 arr = arr.astype(np.int64)
                 self._raw_samples = [
-                    {"input_ids": arr[i].tolist(), "loss_mask": [1] * arr.shape[1]}
-                    for i in range(len(arr))
+                    {"input_ids": arr[i].tolist(), "loss_mask": [1] * arr.shape[1]} for i in range(len(arr))
                 ]
             else:
                 raise ValueError(
@@ -113,8 +110,7 @@ class LLaMA2SFTDataset(Dataset):
             else:
                 mask_arr = mask_arr.astype(np.int64)
             self._raw_samples = [
-                {"input_ids": ids_arr[i].tolist(), "loss_mask": mask_arr[i].tolist()}
-                for i in range(len(ids_arr))
+                {"input_ids": ids_arr[i].tolist(), "loss_mask": mask_arr[i].tolist()} for i in range(len(ids_arr))
             ]
         else:
             raise ValueError(f"Unsupported data format: {data_path} (use .jsonl, .json, .npy, or .npz)")

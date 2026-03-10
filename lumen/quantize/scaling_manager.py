@@ -15,16 +15,17 @@ from lumen.quantize.config import (
     QuantFormat,
     ScalingType,
     _get_float8_e4m3,
-    get_fp8_max,
-    get_fp8_max_bwd,
 )
+
+
 def _get_quant_ops():
     """Lazy import to avoid circular dependency with lumen.ops."""
     from lumen.ops.quantize import (
-        convert_to_mxfp8,
         convert_from_mxfp8,
+        convert_to_mxfp8,
         quant_fp8_blockwise_impl,
     )
+
     return convert_to_mxfp8, convert_from_mxfp8, quant_fp8_blockwise_impl
 
 
@@ -60,8 +61,11 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
     convert_to_mxfp8, convert_from_mxfp8, _ = _get_quant_ops()
     data_lp, scales = convert_to_mxfp8(data_bf16, block_size=block_size, axis=-1)
     data_hp = convert_from_mxfp8(
-        data_lp, scales, output_dtype=torch.bfloat16,
-        block_size=block_size, axis=-1,
+        data_lp,
+        scales,
+        output_dtype=torch.bfloat16,
+        block_size=block_size,
+        axis=-1,
     )
 
     if pad_n > 0:
@@ -111,9 +115,7 @@ class ScalingManager:
             self.config = QuantConfig(block_size=block_size, history_len=history_len)
 
         self.fp8_dtype = config.torch_dtype or fp8_dtype if config else fp8_dtype
-        self.fp8_dtype_bwd = (
-            config.torch_dtype_bwd or self.fp8_dtype if config else self.fp8_dtype
-        )
+        self.fp8_dtype_bwd = config.torch_dtype_bwd or self.fp8_dtype if config else self.fp8_dtype
         self._fp8_max = self.config.fp8_max
         self._fp8_max_bwd = self.config.fp8_max_bwd
         self._margin = self.config.margin
@@ -138,13 +140,12 @@ class ScalingManager:
         Always returns fp32 to satisfy hipb_mm's scale dtype requirement.
         """
         amax = amax.float()
-        effective_max = fp8_max / (2 ** self._margin)
+        effective_max = fp8_max / (2**self._margin)
         scale = amax / effective_max
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))
         return scale
 
-    def get_scale(self, tensor_id: str, tensor: torch.Tensor,
-                  *, backward: bool = False):
+    def get_scale(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Return the scale factor for this tensor (None for block/mxfp8)."""
         recipe = self.recipe
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
@@ -160,7 +161,8 @@ class ScalingManager:
 
             if self.config.reduce_amax and self._dp_group is not None:
                 torch.distributed.all_reduce(
-                    amax, op=torch.distributed.ReduceOp.MAX,
+                    amax,
+                    op=torch.distributed.ReduceOp.MAX,
                     group=self._dp_group,
                 )
 
@@ -169,7 +171,8 @@ class ScalingManager:
             amax = tensor.abs().amax()
             if self.config.reduce_amax and self._dp_group is not None:
                 torch.distributed.all_reduce(
-                    amax, op=torch.distributed.ReduceOp.MAX,
+                    amax,
+                    op=torch.distributed.ReduceOp.MAX,
                     group=self._dp_group,
                 )
             return self._compute_scale(amax, fp8_max)
@@ -180,8 +183,7 @@ class ScalingManager:
         """Record amax for delayed scaling (tensor-based, no .item() sync)."""
         self.amax_history[tensor_id].append(tensor.detach().abs().amax())
 
-    def quantize(self, tensor_id: str, tensor: torch.Tensor,
-                 *, backward: bool = False):
+    def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Quantize tensor. Returns (quantized_tensor, scale).
 
         When *backward* is True and the format is HYBRID, E5M2 dtype and its
@@ -212,9 +214,7 @@ class ScalingManager:
             )
             return fp8_tensor.view(orig_shape), fp8_scales
 
-        fp8_tensor = (tensor * (1.0 / scale)).clamp(
-            -fp8_max, fp8_max
-        ).to(dtype)
+        fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
         self.update_amax(tensor_id, tensor)
         return fp8_tensor, scale
 
@@ -276,14 +276,10 @@ class ScalingManager:
 
         if grad_quant_type == "fp4":
             raise NotImplementedError(
-                "FP4 gradient quantization is not yet implemented. "
-                "Use 'fp8' or 'mxfp8' for now."
+                "FP4 gradient quantization is not yet implemented. " "Use 'fp8' or 'mxfp8' for now."
             )
 
-        raise ValueError(
-            f"Unknown grad_quant_type={grad_quant_type!r}. "
-            f"Valid options: {GRAD_QUANT_TYPES}"
-        )
+        raise ValueError(f"Unknown grad_quant_type={grad_quant_type!r}. " f"Valid options: {GRAD_QUANT_TYPES}")
 
     # ------------------------------------------------------------------
     # Attention quantization primitives
@@ -334,7 +330,10 @@ class ScalingManager:
         B, H, L, D = tensor.shape
         MAX_FP8 = torch.finfo(float8_dtype).max
         tensor = tensor.reshape(B, H, L // block_m, block_m, D).reshape(
-            B, H, L // block_m, block_m * D,
+            B,
+            H,
+            L // block_m,
+            block_m * D,
         )
         tensor_max = tensor.abs().max(dim=-1)[0]
         tensor_max = torch.where(tensor_max == 0, MAX_FP8, tensor_max)
@@ -392,27 +391,24 @@ class ScalingManager:
             B, H, S, D = tensor_bhsd.shape
         elif layout == "thd":
             assert cu_seqlens is not None, "thd layout requires cu_seqlens"
-            assert tensor.dim() == 3, (
-                f"expected thd tensor shape [T,H,D], got {tensor.shape}"
-            )
+            assert tensor.dim() == 3, f"expected thd tensor shape [T,H,D], got {tensor.shape}"
             T, H, D = tensor.shape
             B = int(cu_seqlens.numel() - 1)
             assert max_seqlens is not None, "thd layout requires max_seqlens"
-            max_seqlen = (
-                int(max_seqlens) if isinstance(max_seqlens, int)
-                else int(max(max_seqlens))
-            )
+            max_seqlen = int(max_seqlens) if isinstance(max_seqlens, int) else int(max(max_seqlens))
             if is_2d_block:
                 padded = ((max_seqlen + block_size - 1) // block_size) * block_size
             else:
                 padded = max_seqlen
             tensor_bhsd = torch.zeros(
-                (B, H, padded, D), device=tensor.device, dtype=tensor.dtype,
+                (B, H, padded, D),
+                device=tensor.device,
+                dtype=tensor.dtype,
             )
             for b in range(B):
                 s = int(cu_seqlens[b].item())
                 e = int(cu_seqlens[b + 1].item())
-                tensor_bhsd[b, :, :e - s, :] = tensor[s:e].transpose(0, 1)
+                tensor_bhsd[b, :, : e - s, :] = tensor[s:e].transpose(0, 1)
         else:
             raise ValueError(f"Unsupported layout: {layout}")
 
@@ -440,13 +436,9 @@ class ScalingManager:
                 qs.append(quanted_bhsd[b, :, :L, :].transpose(0, 1).contiguous())
                 if is_2d_block:
                     m_blocks = (L + block_size - 1) // block_size
-                    ss.append(
-                        scale_bhsd[b, :, :m_blocks, :].transpose(0, 1).contiguous()
-                    )
+                    ss.append(scale_bhsd[b, :, :m_blocks, :].transpose(0, 1).contiguous())
                 else:
-                    ss.append(
-                        scale_bhsd[b, :, :L, :].transpose(0, 1).contiguous()
-                    )
+                    ss.append(scale_bhsd[b, :, :L, :].transpose(0, 1).contiguous())
             return torch.cat(qs, dim=0), torch.cat(ss, dim=0)
 
         return quanted_bhsd, scale_bhsd
@@ -469,9 +461,13 @@ class ScalingManager:
         else:
             mask_s, mbits, s_bias = 0b11111, 2, 15
         hp_ebias = 127
-        raw = torch.bitwise_right_shift(
-            torch.tensor(p_scale_f).to(float8_dtype).view(torch.uint8), mbits,
-        ) & mask_s
+        raw = (
+            torch.bitwise_right_shift(
+                torch.tensor(p_scale_f).to(float8_dtype).view(torch.uint8),
+                mbits,
+            )
+            & mask_s
+        )
         return (raw - s_bias + hp_ebias).to(torch.uint32).item()
 
 

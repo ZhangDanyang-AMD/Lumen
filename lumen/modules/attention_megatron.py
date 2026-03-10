@@ -31,7 +31,6 @@ import math
 from typing import Optional
 
 import torch
-
 from megatron.core import parallel_state
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.module import MegatronModule
@@ -103,46 +102,28 @@ class LumenDotProductAttention(MegatronModule):
         self.attn_mask_type = attn_mask_type
 
         projection_size = config.kv_channels * config.num_attention_heads
-        world_size = (
-            config.tensor_model_parallel_size
-            if hasattr(config, "tensor_model_parallel_size")
-            else 1
-        )
+        world_size = config.tensor_model_parallel_size if hasattr(config, "tensor_model_parallel_size") else 1
         self.hidden_size_per_partition = divide(projection_size, world_size)
-        self.hidden_size_per_attention_head = divide(
-            projection_size, config.num_attention_heads
-        )
-        self.num_attention_heads_per_partition = divide(
-            config.num_attention_heads, world_size
-        )
-        self.num_query_groups_per_partition = divide(
-            config.num_query_groups, world_size
-        )
+        self.hidden_size_per_attention_head = divide(projection_size, config.num_attention_heads)
+        self.num_attention_heads_per_partition = divide(config.num_attention_heads, world_size)
+        self.num_query_groups_per_partition = divide(config.num_query_groups, world_size)
 
         if softmax_scale is None:
-            self.softmax_scale = 1.0 / math.sqrt(
-                self.hidden_size_per_attention_head
-            )
+            self.softmax_scale = 1.0 / math.sqrt(self.hidden_size_per_attention_head)
         else:
             self.softmax_scale = softmax_scale
 
         if config.apply_query_key_layer_scaling:
             self.softmax_scale /= self.layer_number
 
-        self.dropout_p = (
-            config.attention_dropout
-            if attention_dropout is None
-            else attention_dropout
-        )
+        self.dropout_p = config.attention_dropout if attention_dropout is None else attention_dropout
 
         self.cp_size = config.context_parallel_size
         self.cp_comm_type = cp_comm_type
 
         args = get_args()
         self.backend = getattr(args, "tl_attn_backend", "aiter_csrc")
-        self.fp8_quant_type = getattr(
-            args, "tl_fp8_quant_type", "fp8_blockwise"
-        )
+        self.fp8_quant_type = getattr(args, "tl_fp8_quant_type", "fp8_blockwise")
 
         # Fine-grained MXFP8 block configuration (per-dimension)
         self.block_m_fwd = getattr(args, "mxfp8_block_m_fwd", 128)
@@ -151,9 +132,7 @@ class LumenDotProductAttention(MegatronModule):
         self.block_n_dq_bwd = getattr(args, "mxfp8_block_n_dq_bwd", 128)
         self.block_m_dkv_bwd = getattr(args, "mxfp8_block_m_dkv_bwd", 128)
         self.block_n_dkv_bwd = getattr(args, "mxfp8_block_n_dkv_bwd", 128)
-        self.mxfp8_quant_block_size = getattr(
-            args, "mxfp8_quant_block_size", 128
-        )
+        self.mxfp8_quant_block_size = getattr(args, "mxfp8_quant_block_size", 128)
         self.grad_quant_type = getattr(args, "grad_quant_type", None)
 
     def forward(
@@ -192,7 +171,9 @@ class LumenDotProductAttention(MegatronModule):
 
         if self.backend in ("aiter_triton_fp8", "aiter_csrc_fp8"):
             out = attention_fp8_quant(
-                q, k, v,
+                q,
+                k,
+                v,
                 dropout_p=dropout_p,
                 softmax_scale=self.softmax_scale,
                 causal=causal,
@@ -215,7 +196,9 @@ class LumenDotProductAttention(MegatronModule):
                     "--tl-attn-backend aiter_triton."
                 )
             out = attention(
-                q, k, v,
+                q,
+                k,
+                v,
                 dropout_p=dropout_p,
                 softmax_scale=self.softmax_scale,
                 causal=causal,

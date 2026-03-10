@@ -17,12 +17,7 @@ import argparse
 import json
 import os
 
-
-SUMMARIZE_PROMPT = (
-    "Below is a government report. Write a concise summary.\n\n"
-    "Report:\n{document}\n\n"
-    "Summary:"
-)
+SUMMARIZE_PROMPT = "Below is a government report. Write a concise summary.\n\n" "Report:\n{document}\n\n" "Summary:"
 
 
 def convert_split(input_path: str, output_path: str, max_input_len: int, max_output_len: int):
@@ -53,10 +48,12 @@ def convert_split(input_path: str, output_path: str, max_input_len: int, max_out
                 if len(words) > max_output_len:
                     summary = " ".join(words[:max_output_len])
 
-            samples.append({
-                "input": SUMMARIZE_PROMPT.format(document=document),
-                "output": summary,
-            })
+            samples.append(
+                {
+                    "input": SUMMARIZE_PROMPT.format(document=document),
+                    "output": summary,
+                }
+            )
 
     with open(output_path, "w", encoding="utf-8") as f:
         for s in samples:
@@ -71,11 +68,15 @@ def main():
     parser.add_argument("--input_dir", type=str, default="/data/gov_report")
     parser.add_argument("--output_dir", type=str, default="/data")
     parser.add_argument(
-        "--max_input_length", type=int, default=7168,
+        "--max_input_length",
+        type=int,
+        default=7168,
         help="Max number of words in the input document (truncated if longer)",
     )
     parser.add_argument(
-        "--max_output_length", type=int, default=1024,
+        "--max_output_length",
+        type=int,
+        default=1024,
         help="Max number of words in the output summary",
     )
     args = parser.parse_args()

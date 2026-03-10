@@ -32,7 +32,10 @@ def quantize_grad_tensor(
     if grad_quant_type is None:
         return tensor
     from lumen.quantize.scaling_manager import ScalingManager
+
     return ScalingManager.quantize_grad_tensor(
-        tensor, grad_quant_type,
-        fp8_dtype=fp8_dtype, block_size=block_size,
+        tensor,
+        grad_quant_type,
+        fp8_dtype=fp8_dtype,
+        block_size=block_size,
     )

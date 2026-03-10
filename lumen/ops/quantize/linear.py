@@ -21,16 +21,12 @@ The nn.Module wrapper lives in
 :class:`lumen.modules.quantize.LumenLinear`.
 """
 
-from typing import Literal, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 
-from lumen.ops.quantize.ops import (
-    quant_fp8_blockwise_impl,
-    convert_to_mxfp8,
-    convert_from_mxfp8,
-)
+from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
 
 __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
@@ -43,6 +39,7 @@ __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 def _mark_allow_in_graph(cls):
     try:
         from torch._dynamo import allow_in_graph
+
         allow_in_graph(cls)
     except Exception:
         pass
@@ -52,8 +49,10 @@ def _mark_allow_in_graph(cls):
 # AITER backend helpers
 # ---------------------------------------------------------------------------
 
+
 def _aiter_quant(x: torch.Tensor, dtype: torch.dtype):
     from aiter.ops.quant import per_tensor_quant_hip
+
     # Use per-tensor quantization so that scale_a is always a scalar (1,).
     # hipb_mm TensorWise mode requires both scales to be shape (1, 1); per-token
     # scales [M, 1] would require scale_b=(1, N) RowWise which is incompatible
@@ -68,12 +67,14 @@ def _ensure_hipblas():
     global _hipblas_initialized
     if not _hipblas_initialized:
         from aiter.ops.gradlib import hipb_create_extension
+
         hipb_create_extension()
         _hipblas_initialized = True
 
 
 def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
     from aiter.ops.gradlib import hipb_mm
+
     _ensure_hipblas()
     if isinstance(scale_a, (int, float)):
         scale_a = torch.tensor(scale_a, dtype=torch.float32, device=a.device)
@@ -87,6 +88,7 @@ def _aiter_mm(a: torch.Tensor, b: torch.Tensor, scale_a, scale_b):
 # ---------------------------------------------------------------------------
 # Triton backend helpers
 # ---------------------------------------------------------------------------
+
 
 def _triton_quant(x: torch.Tensor, dtype: torch.dtype, block_size: int = 128):
     """Blockwise FP8 quantization via Triton kernel."""
@@ -114,6 +116,7 @@ def _triton_mm(a_fp8: torch.Tensor, b_fp8: torch.Tensor, scale_a, scale_b):
 # ---------------------------------------------------------------------------
 # Autograd Function
 # ---------------------------------------------------------------------------
+
 
 class QuantizedLinearFunction(torch.autograd.Function):
     """FP8 quantized linear: quant -> GEMM -> dequant, for both fwd and bwd.
@@ -159,7 +162,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             output = _triton_mm(
                 input_fp8.reshape(-1, input_fp8.shape[-1]),
                 weight_fp8.t(),
-                input_scale, weight_scale,
+                input_scale,
+                weight_scale,
             )
             output = output.view(*input.shape[:-1], weight.shape[0])
 
@@ -182,7 +186,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
             input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
             weight_dequant = weight_fp8.to(grad_output.dtype) * weight_scale
             grad_input = grad_output @ weight_dequant
-            grad_weight = grad_output.reshape(-1, grad_output.shape[-1]).t() @ input_tensor.reshape(-1, input_tensor.shape[-1])
+            grad_weight = grad_output.reshape(-1, grad_output.shape[-1]).t() @ input_tensor.reshape(
+                -1, input_tensor.shape[-1]
+            )
             grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
@@ -206,7 +212,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_weight = _aiter_mm(
                 grad_fp8.t().contiguous(),
                 input_fp8,
-                grad_scale, input_scale,
+                grad_scale,
+                input_scale,
             )
         else:
             grad_fp8, grad_scale = _triton_quant(grad_output, bwd_dtype, block_size)
@@ -229,6 +236,7 @@ _mark_allow_in_graph(QuantizedLinearFunction)
 # ---------------------------------------------------------------------------
 # Functional API
 # ---------------------------------------------------------------------------
+
 
 def quantized_linear(
     input: torch.Tensor,
@@ -267,16 +275,23 @@ def quantized_linear(
         Output tensor ``[*, out_features]``.
     """
     from lumen.quantize import is_aiter_available
+
     if quantize_activation and backend == "aiter" and not is_aiter_available():
-        raise RuntimeError(
-            "AITER is not installed. Install it or use backend='triton'."
-        )
+        raise RuntimeError("AITER is not installed. Install it or use backend='triton'.")
 
     if scaling_manager is None:
         from lumen.quantize import ScalingManager
+
         scaling_manager = ScalingManager()
 
     return QuantizedLinearFunction.apply(
-        input, weight, bias, scaling_manager, backend, fp8_dtype, block_size,
-        tensor_id, quantize_activation,
+        input,
+        weight,
+        bias,
+        scaling_manager,
+        backend,
+        fp8_dtype,
+        block_size,
+        tensor_id,
+        quantize_activation,
     )

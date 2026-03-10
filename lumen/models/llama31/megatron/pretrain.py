@@ -33,7 +33,6 @@ Example::
 """
 
 import torch
-
 from megatron.core import tensor_parallel
 from megatron.training import get_args, get_tokenizer, print_rank_0
 from megatron.training.utils import (
@@ -41,19 +40,20 @@ from megatron.training.utils import (
     get_ltor_masks_and_position_ids,
     is_first_or_last_pipeline_stage,
 )
+
 from lumen.models.llama31.dataset import PretrainTextDataset
-from lumen.models.utils import safe_add_argument
 
 # Re-export shared symbols so existing callers are not broken.
 from lumen.models.megatron import (  # noqa: F401
+    add_common_megatron_args,
     apply_fp8_training,
     apply_lora,
     loss_func,
     make_forward_step,
     reset_fp8_state,
-    add_common_megatron_args,
 )
 from lumen.models.megatron import tl_gpt_builder as _tl_gpt_builder_generic
+from lumen.models.utils import safe_add_argument
 
 __all__ = [
     "PretrainTextDataset",
@@ -92,10 +92,15 @@ LLAMA31_CONFIGS = {
 # Custom GPT builder (thin wrapper with model-specific log message)
 # ---------------------------------------------------------------------------
 
+
 def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
     return _tl_gpt_builder_generic(
-        args, pre_process, post_process,
-        vp_stage=vp_stage, config=config, model_name="LLaMA 3.1",
+        args,
+        pre_process,
+        post_process,
+        vp_stage=vp_stage,
+        config=config,
+        model_name="LLaMA 3.1",
     )
 
 
@@ -103,14 +108,13 @@ def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None):
 # Dataset provider
 # ---------------------------------------------------------------------------
 
+
 def train_valid_test_datasets_provider(train_val_test_num_samples):
     """Build train, validation, and test pretraining datasets."""
     args = get_args()
 
     tokenizer_obj = get_tokenizer()
-    is_hf = hasattr(tokenizer_obj, "_tokenizer") and hasattr(
-        tokenizer_obj._tokenizer, "encode"
-    )
+    is_hf = hasattr(tokenizer_obj, "_tokenizer") and hasattr(tokenizer_obj._tokenizer, "encode")
     raw_tokenizer = tokenizer_obj._tokenizer if is_hf else tokenizer_obj
 
     train_path = args.train_data_path[0] if args.train_data_path else None
@@ -120,15 +124,24 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
     print_rank_0("> building train, validation, and test pretraining datasets ...")
 
     train_ds = PretrainTextDataset(
-        train_path, args.seq_length, raw_tokenizer, is_hf,
+        train_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
         max_samples=train_val_test_num_samples[0],
     )
     valid_ds = PretrainTextDataset(
-        valid_path, args.seq_length, raw_tokenizer, is_hf,
+        valid_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
         max_samples=train_val_test_num_samples[1],
     )
     test_ds = PretrainTextDataset(
-        test_path, args.seq_length, raw_tokenizer, is_hf,
+        test_path,
+        args.seq_length,
+        raw_tokenizer,
+        is_hf,
         max_samples=train_val_test_num_samples[2],
     )
 
@@ -139,6 +152,7 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 # ---------------------------------------------------------------------------
 # Batch construction (standard LM — all tokens contribute)
 # ---------------------------------------------------------------------------
+
 
 def get_batch(data_iterator, vp_stage=None):
     """Generate a batch for pretraining (standard LM, all tokens contribute)."""
@@ -152,25 +166,25 @@ def get_batch(data_iterator, vp_stage=None):
     else:
         data = None
 
-    data_b = tensor_parallel.broadcast_data(
-        ["input_ids", "labels"], data, torch.int64
-    )
+    data_b = tensor_parallel.broadcast_data(["input_ids", "labels"], data, torch.int64)
 
     tokens = data_b["input_ids"].contiguous()
     labels = data_b["labels"].contiguous()
 
     tokenizer = get_tokenizer()
-    if hasattr(tokenizer, "_tokenizer") and hasattr(
-        tokenizer._tokenizer, "eos_token_id"
-    ):
+    if hasattr(tokenizer, "_tokenizer") and hasattr(tokenizer._tokenizer, "eos_token_id"):
         eod_token = tokenizer._tokenizer.eos_token_id
     else:
         eod_token = tokenizer.eod
 
     attention_mask, loss_mask, position_ids = get_ltor_masks_and_position_ids(
-        tokens, eod_token, eod_token,
-        args.reset_position_ids, args.reset_attention_mask,
-        args.eod_mask_loss, False,
+        tokens,
+        eod_token,
+        eod_token,
+        args.reset_position_ids,
+        args.reset_attention_mask,
+        args.eod_mask_loss,
+        False,
     )
 
     batch = {
@@ -195,52 +209,47 @@ forward_step = make_forward_step(get_batch, loss_func)
 # Extra CLI arguments
 # ---------------------------------------------------------------------------
 
+
 def add_pretrain_args(parser):
     """Add pretrain-specific arguments."""
     # Pre-register args whose defaults differ from the shared module before
     # calling add_common_megatron_args (safe_add_argument skips duplicates).
-    safe_add_argument(parser, "--tl-fp8-quant-type", type=str, default="mxfp8",
-                       choices=["fp8_blockwise", "mxfp8"],
-                       help="FP8 quantisation type for triton_fp8 backend.")
-    safe_add_argument(parser, "--fp8-amax-algo", type=str, default="most_recent",
-                       choices=["max", "most_recent"])
+    safe_add_argument(
+        parser,
+        "--tl-fp8-quant-type",
+        type=str,
+        default="mxfp8",
+        choices=["fp8_blockwise", "mxfp8"],
+        help="FP8 quantisation type for triton_fp8 backend.",
+    )
+    safe_add_argument(parser, "--fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
     safe_add_argument(parser, "--fp8-amax-history", type=int, default=4)
 
     add_common_megatron_args(parser)
 
     ckpt = parser.add_argument_group(title="checkpoint-management")
-    ckpt.add_argument("--use-ckpt", action="store_true", default=False,
-                       help="Resume from checkpoint.")
-    ckpt.add_argument("--save-ckpt", action="store_true", default=False,
-                       help="Save checkpoint at end of training.")
-    ckpt.add_argument("--resume-from-hf", action="store_true", default=False,
-                       help="Checkpoint is a weight-only HuggingFace format.")
-    ckpt.add_argument("--continual-ckpt-path", type=str, default=None,
-                       help="Path for saving/loading continual checkpoints.")
-    ckpt.add_argument("--ckpt-start-step", type=int, default=0,
-                       help="Steps already trained in the resumed checkpoint.")
-    ckpt.add_argument("--fp8-params", action="store_true", default=False,
-                       help="Load model parameters in FP8.")
-    ckpt.add_argument("--initial-ckpt-path", type=str, default=None,
-                       help="Path to initial checkpoint for resume.")
+    ckpt.add_argument("--use-ckpt", action="store_true", default=False, help="Resume from checkpoint.")
+    ckpt.add_argument("--save-ckpt", action="store_true", default=False, help="Save checkpoint at end of training.")
+    ckpt.add_argument(
+        "--resume-from-hf", action="store_true", default=False, help="Checkpoint is a weight-only HuggingFace format."
+    )
+    ckpt.add_argument(
+        "--continual-ckpt-path", type=str, default=None, help="Path for saving/loading continual checkpoints."
+    )
+    ckpt.add_argument("--ckpt-start-step", type=int, default=0, help="Steps already trained in the resumed checkpoint.")
+    ckpt.add_argument("--fp8-params", action="store_true", default=False, help="Load model parameters in FP8.")
+    ckpt.add_argument("--initial-ckpt-path", type=str, default=None, help="Path to initial checkpoint for resume.")
 
     mlperf = parser.add_argument_group(title="mlperf")
-    mlperf.add_argument("--tag", type=str, default="",
-                         help="Optional experiment tag.")
-    mlperf.add_argument("--target-log-ppl", type=float, default=3.3,
-                         help="Target log perplexity for convergence.")
-    mlperf.add_argument("--step-time-atol", type=int, default=18000,
-                         help="Maximum tolerable step time (ms).")
-    mlperf.add_argument("--eval-every", type=int, default=0,
-                         help="Evaluate every N training sequences.")
-    mlperf.add_argument("--start-eval-at", type=int, default=0,
-                         help="Start evaluation at N training sequences.")
-    mlperf.add_argument("--size", type=str, default="8b",
-                         choices=["8b"],
-                         help="Model size (for Docker compatibility).")
-    mlperf.add_argument("--nodes", type=int, default=None,
-                         help="Number of nodes (Docker compat, unused by Megatron).")
-    mlperf.add_argument("--gpus-per-node", type=int, default=None,
-                         help="GPUs per node (Docker compat, unused by Megatron).")
+    mlperf.add_argument("--tag", type=str, default="", help="Optional experiment tag.")
+    mlperf.add_argument("--target-log-ppl", type=float, default=3.3, help="Target log perplexity for convergence.")
+    mlperf.add_argument("--step-time-atol", type=int, default=18000, help="Maximum tolerable step time (ms).")
+    mlperf.add_argument("--eval-every", type=int, default=0, help="Evaluate every N training sequences.")
+    mlperf.add_argument("--start-eval-at", type=int, default=0, help="Start evaluation at N training sequences.")
+    mlperf.add_argument("--size", type=str, default="8b", choices=["8b"], help="Model size (for Docker compatibility).")
+    mlperf.add_argument("--nodes", type=int, default=None, help="Number of nodes (Docker compat, unused by Megatron).")
+    mlperf.add_argument(
+        "--gpus-per-node", type=int, default=None, help="GPUs per node (Docker compat, unused by Megatron)."
+    )
 
     return parser

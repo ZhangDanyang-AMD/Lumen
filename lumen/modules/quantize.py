@@ -19,13 +19,13 @@ Usage::
     output = linear(x)               # FP8 quant/dequant handled internally
 """
 
-from typing import Literal, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from lumen.quantize import ScalingManager, QuantConfig, is_aiter_available
 from lumen.ops.quantize import quantized_linear
+from lumen.quantize import QuantConfig, ScalingManager, is_aiter_available
 
 __all__ = ["LumenLinear"]
 

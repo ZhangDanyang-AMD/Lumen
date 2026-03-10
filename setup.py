@@ -1,6 +1,6 @@
 import os
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -26,6 +26,9 @@ setup(
             "amd-aiter",
             "pytest",
             "flake8",
+            "pre-commit",
+            "black",
+            "isort",
         ],
     },
     classifiers=[

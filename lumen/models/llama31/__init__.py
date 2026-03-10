@@ -24,7 +24,6 @@ For backward compatibility, the Megatron APIs are re-exported at this level::
 """
 
 from lumen.models.llama31.dataset import PretrainTextDataset
-
 from lumen.models.llama31.megatron import (
     add_pretrain_args,
     apply_fp8_training,

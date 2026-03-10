@@ -33,20 +33,17 @@ import argparse
 import logging
 import math
 import os
-from typing import Optional
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
     MixedPrecision,
     ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-
-from lumen.models.llama31.dataset import PretrainTextDataset
+from torch.utils.data import DataLoader, DistributedSampler
 
 # Re-export shared FSDP helpers so existing callers are not broken.
 from lumen.models.fsdp import (  # noqa: F401
@@ -54,6 +51,7 @@ from lumen.models.fsdp import (  # noqa: F401
     apply_lora,
     reset_fp8_state,
 )
+from lumen.models.llama31.dataset import PretrainTextDataset
 
 __all__ = [
     "FSDPTrainer",
@@ -71,9 +69,10 @@ logger = logging.getLogger(__name__)
 # Model builder
 # ---------------------------------------------------------------------------
 
+
 def build_model(args) -> nn.Module:
     """Build LLaMA 3.1 model from HuggingFace."""
-    from transformers import LlamaForCausalLM, LlamaConfig
+    from transformers import LlamaConfig, LlamaForCausalLM
 
     if args.model_name_or_path:
         logger.info("Loading model from %s", args.model_name_or_path)
@@ -141,11 +140,7 @@ class FSDPTrainer:
         self.scheduler = self._build_scheduler()
 
         self.train_loader = self._build_dataloader(args.train_data_path, args.train_samples)
-        self.val_loader = (
-            self._build_dataloader(args.val_data_path, args.val_samples)
-            if args.val_data_path
-            else None
-        )
+        self.val_loader = self._build_dataloader(args.val_data_path, args.val_samples) if args.val_data_path else None
 
     # ------------------------------------------------------------------
 
@@ -168,9 +163,7 @@ class FSDPTrainer:
             reduce_dtype=torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         )
-        sharding = _SHARDING_MAP.get(
-            self.args.sharding_strategy, ShardingStrategy.FULL_SHARD
-        )
+        sharding = _SHARDING_MAP.get(self.args.sharding_strategy, ShardingStrategy.FULL_SHARD)
         return FSDP(
             model,
             sharding_strategy=sharding,
@@ -196,9 +189,7 @@ class FSDPTrainer:
     def _build_dataloader(self, data_path, max_samples):
         from transformers import AutoTokenizer
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.args.tokenizer_name_or_path or self.args.model_name_or_path
-        )
+        tokenizer = AutoTokenizer.from_pretrained(self.args.tokenizer_name_or_path or self.args.model_name_or_path)
 
         ds = PretrainTextDataset(
             data_path=data_path,
@@ -208,9 +199,7 @@ class FSDPTrainer:
             max_samples=max_samples,
         )
 
-        sampler = DistributedSampler(
-            ds, num_replicas=self.world_size, rank=self.rank, shuffle=True
-        )
+        sampler = DistributedSampler(ds, num_replicas=self.world_size, rank=self.rank, shuffle=True)
         return DataLoader(
             ds,
             batch_size=self.args.micro_batch_size,
@@ -262,11 +251,7 @@ class FSDPTrainer:
             global_step += 1
 
             # FP8 state reset after warmup
-            if (
-                args.warmup_steps > 0
-                and global_step == args.warmup_steps
-                and not warmup_done
-            ):
+            if args.warmup_steps > 0 and global_step == args.warmup_steps and not warmup_done:
                 if args.fp8_training:
                     reset_fp8_state(self.model)
                 warmup_done = True
@@ -280,24 +265,19 @@ class FSDPTrainer:
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     "step %d/%d | loss %.4f | lr %.2e",
-                    global_step, args.max_steps, accum_loss, lr,
+                    global_step,
+                    args.max_steps,
+                    accum_loss,
+                    lr,
                 )
 
-            if (
-                args.save_interval > 0
-                and global_step % args.save_interval == 0
-                and self.rank == 0
-            ):
+            if args.save_interval > 0 and global_step % args.save_interval == 0 and self.rank == 0:
                 save_path = os.path.join(args.save_dir, f"step_{global_step}")
                 self.model.module.save_pretrained(save_path)
                 logger.info("Checkpoint saved to %s", save_path)
 
             # Validation + early stopping
-            if (
-                self.val_loader
-                and args.eval_interval > 0
-                and global_step % args.eval_interval == 0
-            ):
+            if self.val_loader and args.eval_interval > 0 and global_step % args.eval_interval == 0:
                 val_loss = self._validate()
                 if self.rank == 0:
                     logger.info("step %d | val_loss %.4f", global_step, val_loss)
@@ -305,7 +285,8 @@ class FSDPTrainer:
                     if self.rank == 0:
                         logger.info(
                             "Val loss %.4f < target %.4f. Stopping.",
-                            val_loss, args.val_loss_target,
+                            val_loss,
+                            args.val_loss_target,
                         )
                     break
 
@@ -338,19 +319,16 @@ class FSDPTrainer:
 # CLI arguments
 # ---------------------------------------------------------------------------
 
+
 def get_args() -> argparse.Namespace:
     """Parse command-line arguments for FSDP-based LLaMA 3.1 pretraining."""
-    parser = argparse.ArgumentParser(
-        description="LLaMA 3.1 Pretraining with FSDP + Lumen"
-    )
+    parser = argparse.ArgumentParser(description="LLaMA 3.1 Pretraining with FSDP + Lumen")
 
-    parser.add_argument("--backend", type=str, default="fsdp",
-                        choices=["megatron", "fsdp"], help="Training backend.")
+    parser.add_argument("--backend", type=str, default="fsdp", choices=["megatron", "fsdp"], help="Training backend.")
 
     # -- Model --
     m = parser.add_argument_group("model")
-    m.add_argument("--model-name-or-path", type=str, default=None,
-                    help="HuggingFace model name or local path.")
+    m.add_argument("--model-name-or-path", type=str, default=None, help="HuggingFace model name or local path.")
     m.add_argument("--hidden-size", type=int, default=4096)
     m.add_argument("--intermediate-size", type=int, default=14336)
     m.add_argument("--num-layers", type=int, default=32)
@@ -387,8 +365,9 @@ def get_args() -> argparse.Namespace:
 
     # -- FSDP --
     f = parser.add_argument_group("fsdp")
-    f.add_argument("--sharding-strategy", type=str, default="full_shard",
-                    choices=["full_shard", "shard_grad_op", "no_shard"])
+    f.add_argument(
+        "--sharding-strategy", type=str, default="full_shard", choices=["full_shard", "shard_grad_op", "no_shard"]
+    )
 
     # -- LoRA --
     lora = parser.add_argument_group("lora")
@@ -399,23 +378,24 @@ def get_args() -> argparse.Namespace:
     # -- FP8 training --
     fp8 = parser.add_argument_group("fp8-training")
     fp8.add_argument("--fp8-training", action="store_true", default=False)
-    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3",
-                      choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
-    fp8.add_argument("--fp8-scaling", type=str, default="delayed",
-                      choices=["dynamic", "delayed", "blockwise"])
+    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
+    fp8.add_argument("--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"])
     fp8.add_argument("--fp8-block-size", type=int, default=128)
-    fp8.add_argument("--fp8-amax-algo", type=str, default="most_recent",
-                      choices=["max", "most_recent"])
+    fp8.add_argument("--fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
     fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
     fp8.add_argument("--fp8-amax-history", type=int, default=4)
-    fp8.add_argument("--fp8-margin", type=int, default=0,
-                      help="Margin for FP8 scaling factor computation (TE-compatible).")
+    fp8.add_argument(
+        "--fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation (TE-compatible)."
+    )
     fp8.add_argument("--fp8-activation", action="store_true", default=True)
-    fp8.add_argument("--no-fp8-activation", dest="fp8_activation",
-                      action="store_false")
-    fp8.add_argument("--grad-quant-type", type=str, default=None,
-                      choices=["fp8", "mxfp8", "fp4"],
-                      help="Gradient quantization type (None=disabled).")
+    fp8.add_argument("--no-fp8-activation", dest="fp8_activation", action="store_false")
+    fp8.add_argument(
+        "--grad-quant-type",
+        type=str,
+        default=None,
+        choices=["fp8", "mxfp8", "fp4"],
+        help="Gradient quantization type (None=disabled).",
+    )
 
     # -- Warmup + Early stopping --
     sft = parser.add_argument_group("pretrain")
@@ -424,35 +404,25 @@ def get_args() -> argparse.Namespace:
 
     # -- Checkpoint management (Docker compat) --
     ckpt = parser.add_argument_group("checkpoint")
-    ckpt.add_argument("--use-ckpt", action="store_true", default=False,
-                       help="Resume from checkpoint.")
-    ckpt.add_argument("--save-ckpt", action="store_true", default=False,
-                       help="Save checkpoint at end of training.")
-    ckpt.add_argument("--resume-from-hf", action="store_true", default=False,
-                       help="Checkpoint is a weight-only HuggingFace format.")
-    ckpt.add_argument("--continual-ckpt-path", type=str, default=None,
-                       help="Path for saving/loading continual checkpoints.")
-    ckpt.add_argument("--ckpt-start-step", type=int, default=0,
-                       help="Steps already trained in the resumed checkpoint.")
-    ckpt.add_argument("--fp8-params", action="store_true", default=False,
-                       help="Load model parameters in FP8.")
-    ckpt.add_argument("--initial-ckpt-path", type=str, default=None,
-                       help="Path to initial checkpoint for resume.")
+    ckpt.add_argument("--use-ckpt", action="store_true", default=False, help="Resume from checkpoint.")
+    ckpt.add_argument("--save-ckpt", action="store_true", default=False, help="Save checkpoint at end of training.")
+    ckpt.add_argument(
+        "--resume-from-hf", action="store_true", default=False, help="Checkpoint is a weight-only HuggingFace format."
+    )
+    ckpt.add_argument(
+        "--continual-ckpt-path", type=str, default=None, help="Path for saving/loading continual checkpoints."
+    )
+    ckpt.add_argument("--ckpt-start-step", type=int, default=0, help="Steps already trained in the resumed checkpoint.")
+    ckpt.add_argument("--fp8-params", action="store_true", default=False, help="Load model parameters in FP8.")
+    ckpt.add_argument("--initial-ckpt-path", type=str, default=None, help="Path to initial checkpoint for resume.")
 
     # -- MLPerf / experiment management --
     mlp = parser.add_argument_group("mlperf")
-    mlp.add_argument("--tag", type=str, default="",
-                      help="Optional experiment tag.")
-    mlp.add_argument("--target-log-ppl", type=float, default=3.3,
-                      help="Target log perplexity for convergence.")
-    mlp.add_argument("--step-time-atol", type=int, default=18000,
-                      help="Maximum tolerable step time (ms).")
-    mlp.add_argument("--eval-every", type=int, default=0,
-                      help="Evaluate every N training sequences.")
-    mlp.add_argument("--start-eval-at", type=int, default=0,
-                      help="Start evaluation at N training sequences.")
-    mlp.add_argument("--size", type=str, default="8b",
-                      choices=["8b"],
-                      help="Model size (for Docker compatibility).")
+    mlp.add_argument("--tag", type=str, default="", help="Optional experiment tag.")
+    mlp.add_argument("--target-log-ppl", type=float, default=3.3, help="Target log perplexity for convergence.")
+    mlp.add_argument("--step-time-atol", type=int, default=18000, help="Maximum tolerable step time (ms).")
+    mlp.add_argument("--eval-every", type=int, default=0, help="Evaluate every N training sequences.")
+    mlp.add_argument("--start-eval-at", type=int, default=0, help="Start evaluation at N training sequences.")
+    mlp.add_argument("--size", type=str, default="8b", choices=["8b"], help="Model size (for Docker compatibility).")
 
     return parser.parse_args()

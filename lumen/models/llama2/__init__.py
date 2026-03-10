@@ -25,7 +25,6 @@ For backward compatibility, the Megatron APIs are re-exported at this level::
 """
 
 from lumen.models.llama2.dataset import LLaMA2SFTDataset
-
 from lumen.models.llama2.megatron import (
     add_finetune_args,
     apply_fp8_training,
