@@ -33,13 +33,13 @@ COPY examples/llama2/requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt
 
 # ---------------------------------------------------------------------------
-# Install Transformer Light
+# Install Lumen
 # ---------------------------------------------------------------------------
 WORKDIR /workspace
-COPY . /workspace/Transformer_Light
-RUN cd /workspace/Transformer_Light && pip install -e ".[all]"
+COPY . /workspace/Lumen
+RUN cd /workspace/Lumen && pip install -e ".[all]"
 
-ENV PYTHONPATH="/workspace/Transformer_Light:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/Lumen:${PYTHONPATH:-}"
 
 # ---------------------------------------------------------------------------
 # AMD MI GPU performance tuning (from perf_env.sh)
@@ -59,4 +59,4 @@ ENV OMP_NUM_THREADS=1
 ENV TRANSFORMERS_OFFLINE=0
 ENV TOKENIZERS_PARALLELISM=false
 
-WORKDIR /workspace/Transformer_Light/examples/llama2
+WORKDIR /workspace/Lumen/examples/llama2

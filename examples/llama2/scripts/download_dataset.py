@@ -2,7 +2,7 @@
 
 """Download a HuggingFace dataset and save splits as jsonl.
 
-Thin CLI wrapper around :func:`transformer_light.models.utils.download_hf_dataset`.
+Thin CLI wrapper around :func:`lumen.models.utils.download_hf_dataset`.
 
 Usage:
     python download_dataset.py --output_dir /data/gov_report
@@ -12,7 +12,7 @@ Usage:
 import argparse
 import logging
 
-from transformer_light.models.utils import download_hf_dataset
+from lumen.models.utils import download_hf_dataset
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 

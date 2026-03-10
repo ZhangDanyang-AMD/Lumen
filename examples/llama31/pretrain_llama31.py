@@ -21,13 +21,13 @@ See run_pretrain.sh for a complete launch example.
 
 import sys
 
-from transformer_light.models.utils import peek_backend
+from lumen.models.utils import peek_backend
 
 
 def _run_megatron():
     # Import TL megatron FIRST so _install_fused_layer_norm_patch() runs before
     # megatron.training loads TransformerBlock/FusedLayerNorm.
-    from transformer_light.models.llama31.megatron import (
+    from lumen.models.llama31.megatron import (
         add_pretrain_args,
         apply_fp8_training,
         apply_lora,
@@ -67,7 +67,7 @@ def _run_megatron():
 
 
 def _run_fsdp():
-    from transformer_light.models.llama31.fsdp import FSDPTrainer, get_args
+    from lumen.models.llama31.fsdp import FSDPTrainer, get_args
 
     args = get_args()
     trainer = FSDPTrainer(args)

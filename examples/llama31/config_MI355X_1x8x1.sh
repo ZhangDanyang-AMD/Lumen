@@ -83,14 +83,14 @@ export STEP_TIME_ATOL=18000
 export EVAL_EVERY=12288
 export START_EVAL_AT=0
 
-# ---- Transformer Light -------------------------------------------------------
-# Attention backend: "aiter" (AMD AITER flash-attn), "triton", "triton_fp8"
-export TL_ATTN_BACKEND="triton_fp8"
-# FP8 attention quantization type (only used when TL_ATTN_BACKEND="triton_fp8"):
+# ---- Lumen -------------------------------------------------------
+# Attention backend: "aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8"
+export TL_ATTN_BACKEND="aiter_triton_fp8"
+# FP8 attention quantization type (only used when TL_ATTN_BACKEND="aiter_triton_fp8" or "aiter_csrc_fp8"):
 #   "fp8_blockwise" — per-block FP8 scaling (standard blockwise)
 #   "mxfp8"         — AMD Microscaling FP8 (wider hardware support on MI3xx)
 export TL_FP8_QUANT="mxfp8"
-# Use Transformer Light Triton-accelerated RMSNorm (0 = native Megatron norm)
+# Use Lumen Triton-accelerated RMSNorm (0 = native Megatron norm)
 export TL_RMSNORM=0
 
 # ---- Megatron backend --------------------------------------------------------

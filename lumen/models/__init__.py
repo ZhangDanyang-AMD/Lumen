@@ -1,0 +1,24 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+"""Reusable model definitions and training utilities.
+
+Common, model-agnostic helpers are available from ``lumen.models.utils``.
+Shared backend-specific helpers live in :mod:`~lumen.models.megatron`
+and :mod:`~lumen.models.fsdp`.
+Model-specific implementations live in subpackages (e.g. ``llama2``).
+"""
+
+from lumen.models.utils import (  # noqa: F401
+    download_hf_dataset,
+    download_hf_model,
+    peek_backend,
+    safe_add_argument,
+    sha256_file,
+)
+
+from lumen.models import fsdp as fsdp  # noqa: F401
+from lumen.models import megatron as megatron  # noqa: F401

@@ -1,0 +1,681 @@
+STARTING LLAMA2 FINETUNE AT 2026-03-09 02:09:11 PM (backend=fsdp)
+================================================================
+LLaMA2 SFT — FSDP backend
+  Config:     /Lumen/examples/llama2/config_MI355X_1x8x1.sh
+  Model:      /model-hf
+  GPUs:       8
+  Batch:      MBS=1 x accum=8 | seq_len=8192
+  Sharding:   full_shard
+  LoRA:       rank=0
+  FP8:        training=1 format=fp8_e4m3
+================================================================
+INFO:lumen.models.llama2.fsdp.sft:> Loading LLaMA2 from /model-hf ...
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.models.llama2.fsdp.sft:> Gradient checkpointing enabled
+INFO:lumen.quantize:Quantization enabled on 561 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.models.llama2.fsdp.sft:> FP8 training enabled (format=fp8_e4m3, scaling=delayed, amax_algo=max, activation=True, grad_quant=None)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.fsdp.sft:> FSDP model ready (sharding=full_shard, world_size=8)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+RCCL version : 2.26.6-HEAD:17055da
+HIP version  : 7.0.51831-a3e329ad8
+ROCm version : 7.0.0.0-82-9428210
+Hostname     : mia1-p02-g21
+Librccl path : /opt/rocm/lib/librccl.so.1
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32543:32880 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32540:32879 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32544:32886 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:38] mia1-p02-g21:32546:32878 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32539:32876 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32545:32900 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32541:32924 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-03-09 14:10:39] mia1-p02-g21:32542:32877 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_quant] under /workspace/deps/aiter/aiter/jit/module_quant.so
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:aiter:import [module_hipbsolgemm] under /workspace/deps/aiter/aiter/jit/module_hipbsolgemm.so
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:lumen.models.llama2.fsdp.sft:  step 1/800 | loss 4.2928 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 2/800 | loss 11.3615 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 3/800 | loss 19.8795 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 4/800 | loss 9.5627 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 5/800 | loss 56.5612 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 6/800 | loss 14.5583 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 7/800 | loss 9.2508 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 8/800 | loss 21.3859 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 9/800 | loss 9.2630 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 10/800 | loss 12.3207 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 11/800 | loss 16.9460 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 12/800 | loss 13.8452 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 13/800 | loss 25.5908 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 14/800 | loss 19.9015 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 15/800 | loss 12.0381 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 16/800 | loss 15.7496 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 17/800 | loss 13.0658 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 18/800 | loss 19.2012 | lr 4.00e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 19/800 | loss 20.8096 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 20/800 | loss 19.4853 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 21/800 | loss 16.1168 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 22/800 | loss 13.3511 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 23/800 | loss 12.3398 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 24/800 | loss 11.5523 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 25/800 | loss 11.0017 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 26/800 | loss 10.4207 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 27/800 | loss 10.3341 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 28/800 | loss 9.9654 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 29/800 | loss 10.1141 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 30/800 | loss 9.7962 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 31/800 | loss 9.6510 | lr 3.99e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 32/800 | loss 9.1453 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 33/800 | loss 8.7309 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 34/800 | loss 8.7782 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 35/800 | loss 8.7829 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 36/800 | loss 8.6312 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 37/800 | loss 8.3367 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 38/800 | loss 8.1934 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 39/800 | loss 8.1114 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 40/800 | loss 7.8225 | lr 3.98e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 41/800 | loss 7.8260 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 42/800 | loss 7.7831 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 43/800 | loss 7.6263 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 44/800 | loss 7.6894 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 45/800 | loss 7.5157 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 46/800 | loss 7.4806 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 47/800 | loss 7.2980 | lr 3.97e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 48/800 | loss 7.4580 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 49/800 | loss 7.2696 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 50/800 | loss 7.3174 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 51/800 | loss 7.2734 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 52/800 | loss 7.2783 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 53/800 | loss 7.2466 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 54/800 | loss 7.3230 | lr 3.96e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 55/800 | loss 7.3713 | lr 3.95e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 56/800 | loss 7.2026 | lr 3.95e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 57/800 | loss 7.2694 | lr 3.95e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 58/800 | loss 7.1523 | lr 3.95e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 59/800 | loss 7.1595 | lr 3.95e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 60/800 | loss 7.0887 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 61/800 | loss 7.0855 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 62/800 | loss 7.1563 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 63/800 | loss 7.0984 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 64/800 | loss 7.1271 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 65/800 | loss 7.1714 | lr 3.94e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 66/800 | loss 7.2065 | lr 3.93e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 67/800 | loss 7.1852 | lr 3.93e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 68/800 | loss 7.1479 | lr 3.93e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 69/800 | loss 7.0935 | lr 3.93e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 70/800 | loss 7.1171 | lr 3.92e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 71/800 | loss 7.1374 | lr 3.92e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 72/800 | loss 7.0794 | lr 3.92e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 73/800 | loss 7.1647 | lr 3.92e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 74/800 | loss 7.2983 | lr 3.92e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 75/800 | loss 7.1179 | lr 3.91e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 76/800 | loss 7.1355 | lr 3.91e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 77/800 | loss 7.0716 | lr 3.91e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 78/800 | loss 7.1812 | lr 3.91e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 79/800 | loss 7.2057 | lr 3.90e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 80/800 | loss 7.3779 | lr 3.90e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 81/800 | loss 7.3807 | lr 3.90e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 82/800 | loss 7.2675 | lr 3.90e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 83/800 | loss 7.4071 | lr 3.89e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 84/800 | loss 7.3660 | lr 3.89e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 85/800 | loss 7.3063 | lr 3.89e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 86/800 | loss 7.1014 | lr 3.89e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 87/800 | loss 7.1590 | lr 3.88e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 88/800 | loss 7.1264 | lr 3.88e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 89/800 | loss 7.2322 | lr 3.88e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 90/800 | loss 7.1951 | lr 3.88e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 91/800 | loss 7.1803 | lr 3.87e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 92/800 | loss 7.0209 | lr 3.87e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 93/800 | loss 7.1372 | lr 3.87e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 94/800 | loss 7.0329 | lr 3.87e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 95/800 | loss 7.1411 | lr 3.86e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 96/800 | loss 7.1021 | lr 3.86e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 97/800 | loss 7.0175 | lr 3.86e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 98/800 | loss 7.1286 | lr 3.85e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 99/800 | loss 7.0800 | lr 3.85e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 100/800 | loss 7.2097 | lr 3.85e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 101/800 | loss 7.1192 | lr 3.84e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 102/800 | loss 7.1441 | lr 3.84e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 103/800 | loss 7.1609 | lr 3.84e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 104/800 | loss 7.0537 | lr 3.84e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 105/800 | loss 7.1606 | lr 3.83e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 106/800 | loss 7.0605 | lr 3.83e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 107/800 | loss 7.1205 | lr 3.83e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 108/800 | loss 7.1105 | lr 3.82e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 109/800 | loss 7.0987 | lr 3.82e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 110/800 | loss 7.0954 | lr 3.82e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 111/800 | loss 7.0493 | lr 3.81e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 112/800 | loss 7.2234 | lr 3.81e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 113/800 | loss 7.1312 | lr 3.81e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 114/800 | loss 7.1961 | lr 3.80e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 115/800 | loss 7.2081 | lr 3.80e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 116/800 | loss 7.1539 | lr 3.80e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 117/800 | loss 7.0992 | lr 3.79e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 118/800 | loss 7.0523 | lr 3.79e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 119/800 | loss 7.0560 | lr 3.79e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 120/800 | loss 7.1155 | lr 3.78e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 121/800 | loss 7.0567 | lr 3.78e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 122/800 | loss 7.0323 | lr 3.77e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 123/800 | loss 7.1074 | lr 3.77e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 124/800 | loss 7.0087 | lr 3.77e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 125/800 | loss 7.0483 | lr 3.76e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 126/800 | loss 7.0901 | lr 3.76e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 127/800 | loss 7.0914 | lr 3.76e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 128/800 | loss 7.0454 | lr 3.75e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 129/800 | loss 6.9794 | lr 3.75e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 130/800 | loss 7.1969 | lr 3.74e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 131/800 | loss 7.0695 | lr 3.74e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 132/800 | loss 7.0262 | lr 3.74e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 133/800 | loss 7.2451 | lr 3.73e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 134/800 | loss 7.1084 | lr 3.73e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 135/800 | loss 7.0567 | lr 3.73e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 136/800 | loss 7.1386 | lr 3.72e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 137/800 | loss 7.0490 | lr 3.72e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 138/800 | loss 7.1265 | lr 3.71e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 139/800 | loss 7.0318 | lr 3.71e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 140/800 | loss 7.1011 | lr 3.71e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 141/800 | loss 7.0474 | lr 3.70e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 142/800 | loss 7.0144 | lr 3.70e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 143/800 | loss 7.0536 | lr 3.69e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 144/800 | loss 7.0093 | lr 3.69e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 145/800 | loss 7.0383 | lr 3.68e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 146/800 | loss 7.0031 | lr 3.68e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 147/800 | loss 7.0913 | lr 3.68e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 148/800 | loss 7.0509 | lr 3.67e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 149/800 | loss 7.0540 | lr 3.67e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 150/800 | loss 7.0181 | lr 3.66e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 151/800 | loss 7.1705 | lr 3.66e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 152/800 | loss 7.1029 | lr 3.65e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 153/800 | loss 7.0885 | lr 3.65e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 154/800 | loss 7.1225 | lr 3.65e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 155/800 | loss 7.1196 | lr 3.64e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 156/800 | loss 6.9619 | lr 3.64e-04
+INFO:lumen.models.llama2.fsdp.sft:  step 157/800 | loss 7.0838 | lr 3.63e-04

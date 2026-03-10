@@ -2,7 +2,7 @@
 
 """Download LLaMA 3.1 model checkpoint from HuggingFace.
 
-Thin CLI wrapper around :func:`transformer_light.models.utils.download_hf_model`.
+Thin CLI wrapper around :func:`lumen.models.utils.download_hf_model`.
 
 Usage:
     python download_model.py --model_name meta-llama/Llama-3.1-8B --output_dir /data/model
@@ -12,7 +12,7 @@ Usage:
 import argparse
 import logging
 
-from transformer_light.models.utils import download_hf_model
+from lumen.models.utils import download_hf_model
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 

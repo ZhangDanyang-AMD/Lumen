@@ -22,7 +22,7 @@ CONFIG=${CONFIG:-"${SCRIPT_DIR}/config_MI355X_1x8x1.sh"}
 source "${CONFIG}"
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
-source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
+source "${REPO_ROOT}/lumen/models/perf_env.sh"
 
 # ---- Compute EVAL_INTERVAL from EVAL_EVERY if not explicitly set -------------
 if [ "${EVAL_EVERY}" -gt 0 ] && [ "${EVAL_INTERVAL}" -eq 0 ]; then
@@ -63,7 +63,7 @@ run_megatron() {
         exit 1
     }
 
-    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter"}
+    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter_csrc"}
     TL_FP8_QUANT=${TL_FP8_QUANT:-"mxfp8"}
 
     # LLaMA 3.1 architecture

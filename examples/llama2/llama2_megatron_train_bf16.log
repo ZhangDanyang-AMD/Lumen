@@ -1,7 +1,7 @@
 STARTING LLAMA2 FINETUNE AT 2026-03-09 09:07:28 AM (backend=megatron)
 ================================================================
 LLaMA2 SFT — MEGATRON backend
-  Config:   /workspace/Transformer_Light/examples/llama2/config_MI355X_1x8x1.sh
+  Config:   /workspace/Lumen/examples/llama2/config_MI355X_1x8x1.sh
   Model:    llama2-70B | TP=8 PP=1 CP=1 VP=0 SP=1
   GPUs:     8x1
   Batch:    MBS=1 GBS=8 | seq_len=8192
@@ -549,7 +549,7 @@ using torch.bfloat16 for parameters ...
   tl_fp8_quant_type ............................... fp8_blockwise
   tl_rmsnorm ...................................... False
   tokenizer_metadata .............................. None
-  tokenizer_model ................................. /workspace/Transformer_Light/examples/llama2/tokenizer
+  tokenizer_model ................................. /workspace/Lumen/examples/llama2/tokenizer
   tokenizer_type .................................. HuggingFaceTokenizer
   torch_fsdp2_reshard_after_forward ............... True
   tp_comm_bootstrap_backend ....................... nccl
@@ -1114,21 +1114,21 @@ WARNING: one_logger package is required to enable e2e metrics tracking. please g
 >>> done with compiling and loading fused kernels. Compilation time: 4.728 seconds
 time to initialize megatron (seconds): 5.971
 [after megatron is initialized] datetime: 2026-03-09 09:07:39 
-building GPT model with Transformer Light attention ...
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+building GPT model with Lumen attention ...
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
  > number of parameters on (tensor, pipeline) model parallel rank (1, 0): 8625463296
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
  > number of parameters on (tensor, pipeline) model parallel rank (7, 0): 8625463296
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
  > number of parameters on (tensor, pipeline) model parallel rank (4, 0): 8625463296
  > number of parameters on (tensor, pipeline) model parallel rank (3, 0): 8625463296
  > number of parameters on (tensor, pipeline) model parallel rank (6, 0): 8625463296
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
 > FP8 training enabled (format=fp8_e4m3, scaling=delayed, block_size=128, amax_algo=max, reduce_amax=False, history=16, activation=True, grad_quant=None)
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
-INFO:transformer_light.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 0 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
  > number of parameters on (tensor, pipeline) model parallel rank (0, 0): 8625463296
  > number of parameters on (tensor, pipeline) model parallel rank (2, 0): 8625463296
  > number of parameters on (tensor, pipeline) model parallel rank (5, 0): 8625463296
@@ -1711,23 +1711,23 @@ WARNING: could not find the metadata file /model/latest_checkpointed_iteration.t
     validation: 1360
     test:       80
 > building train, validation, and test SFT datasets ...
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
 > finished creating SFT datasets ...
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
-INFO:transformer_light.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
 [after dataloaders are built] datetime: 2026-03-09 09:07:42 
 done with setup ...
 (min, max) time across ranks (ms):

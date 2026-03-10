@@ -49,7 +49,7 @@ if [ ! -d "${TOKENIZER:-}" ]; then
 fi
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
-source "${REPO_ROOT}/transformer_light/models/perf_env.sh"
+source "${REPO_ROOT}/lumen/models/perf_env.sh"
 
 
 ###############################################################################
@@ -105,7 +105,7 @@ run_megatron() {
     fi
 
     TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
-    if [ "${TL_ATTN_BACKEND}" = "triton_fp8" ]; then
+    if [ "${TL_ATTN_BACKEND}" = "aiter_triton_fp8" ] || [ "${TL_ATTN_BACKEND}" = "aiter_csrc_fp8" ]; then
         TL_ATTN_ARGS+=" --tl-fp8-quant-type ${TL_FP8_QUANT}"
         if [ "${TL_FP8_QUANT}" = "mxfp8" ]; then
             TL_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
@@ -130,7 +130,7 @@ run_megatron() {
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "triton_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})") rmsnorm=${TL_RMSNORM}"
+    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "aiter_triton_fp8" ] || [ "${TL_ATTN_BACKEND}" = "aiter_csrc_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})") rmsnorm=${TL_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"

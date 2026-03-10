@@ -66,7 +66,7 @@ def download_c4(
         logger.info("  %s: %d samples -> %s", split_name, count, output_path)
 
         if verify:
-            from transformer_light.models.utils import sha256_file
+            from lumen.models.utils import sha256_file
             digest = sha256_file(output_path)
             print(f"    SHA-256: {digest}")
 

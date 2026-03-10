@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 setup(
-    name="transformer_light",
+    name="lumen",
     version="0.3.0",
     description="Lightweight AMD-native quantized training framework (FP8/MXFP8/FP4) with integrated attention kernels",
     long_description=open(os.path.join(this_dir, "README.md")).read(),

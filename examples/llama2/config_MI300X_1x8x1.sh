@@ -4,7 +4,7 @@
 # MI300X 1-node 8-GPU configuration for LLaMA2-70B LoRA fine-tuning.
 #
 # Ported from Docker-src-mxfp8/llama2-lora-70b/config_MI300X_1x8x1.sh
-# with NVTE/NeMo variables mapped to Transformer Light equivalents.
+# with NVTE/NeMo variables mapped to Lumen equivalents.
 #
 # Usage:
 #   CONFIG=config_MI300X_1x8x1.sh bash run_finetune.sh

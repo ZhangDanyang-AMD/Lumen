@@ -1,0 +1,565 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+"""Shared Megatron-LM training components for Lumen models.
+
+This module consolidates the building blocks that are common to all
+Megatron-LM-based training scripts (LLaMA2 SFT, LLaMA 3.1 pretraining, etc.).
+
+Model-specific code (batch construction, dataset providers, model-specific CLI
+arguments) remains in the per-model subpackages.
+"""
+
+import logging
+from functools import partial
+from typing import Callable, Optional
+
+import torch
+
+
+# ---------------------------------------------------------------------------
+# FusedLayerNorm patch (must run before any Megatron module imports)
+# ---------------------------------------------------------------------------
+
+def _install_fused_layer_norm_patch():
+    """Patch FusedLayerNorm to support RMSNorm before any Megatron module
+    imports it.  Must run before GPTModel/TransformerBlock import."""
+    from megatron.core.fusions import fused_layer_norm as _fln_mod
+    from lumen.ops.normalization import LumenRMSNorm
+    _OriginalFusedLayerNorm = _fln_mod.FusedLayerNorm
+
+    class _FusedLayerNormRMSNormCompat(torch.nn.Module):
+        """Dispatches to our RMSNorm impl when config.normalization=='RMSNorm'."""
+
+        def __new__(cls, config, hidden_size, eps=1e-6, **kwargs):
+            if getattr(config, "normalization", "") == "RMSNorm":
+                return object.__new__(cls)
+            return _OriginalFusedLayerNorm(config, hidden_size, eps, **kwargs)
+
+        def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
+            if getattr(config, "normalization", "") != "RMSNorm":
+                return
+            super().__init__()
+            self._norm = LumenRMSNorm(hidden_size, eps=eps)
+            self.weight = self._norm.weight
+
+        def forward(self, x):
+            return self._norm(x)
+
+    _FusedLayerNormRMSNormCompat.__name__ = "FusedLayerNorm"
+    _fln_mod.FusedLayerNorm = _FusedLayerNormRMSNormCompat
+
+
+_install_fused_layer_norm_patch()
+
+from megatron.core.models.gpt import GPTModel
+from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
+from megatron.core.utils import get_attr_wrapped_model, StragglerDetector
+from megatron.training import get_args, get_timers, print_rank_0
+from megatron.training.arguments import core_transformer_config_from_args
+from lumen.modules.attention_megatron import (
+    LumenDotProductAttention,
+)
+from lumen.models.utils import safe_add_argument
+
+logger = logging.getLogger(__name__)
+
+stimer = StragglerDetector()
+
+
+# ---------------------------------------------------------------------------
+# Layer-spec patching helpers
+# ---------------------------------------------------------------------------
+
+def _patch_core_attention(spec):
+    """Recursively walk a ModuleSpec tree and replace every ``core_attention``
+    submodule with ``LumenDotProductAttention``."""
+    from megatron.core.transformer.spec_utils import ModuleSpec
+
+    if hasattr(spec, "submodules") and spec.submodules is not None:
+        subs = spec.submodules
+        if hasattr(subs, "self_attention") and subs.self_attention is not None:
+            sa = subs.self_attention
+            if hasattr(sa, "submodules") and sa.submodules is not None:
+                sa_subs = sa.submodules
+                if hasattr(sa_subs, "core_attention"):
+                    sa_subs.core_attention = ModuleSpec(
+                        module=LumenDotProductAttention
+                    )
+        if hasattr(subs, "layer_specs"):
+            for layer_spec in subs.layer_specs:
+                _patch_core_attention(layer_spec)
+
+
+class _MegatronCompatibleTLRMSNorm(torch.nn.Module):
+    """Wrapper that adapts :class:`LumenRMSNorm` to the Megatron-Core
+    norm construction signature ``(config, hidden_size, eps=...)``.
+
+    Unlike ``WrappedTorchNorm``, this does **not** assert on
+    ``persist_layer_norm`` or ``sequence_parallel`` — RMSNorm normalises
+    over the hidden dimension only, so each position is independent and
+    works correctly with SP-scattered inputs.
+    """
+
+    def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
+        super().__init__()
+        from lumen.ops.normalization import LumenRMSNorm
+        self._norm = LumenRMSNorm(hidden_size, eps=eps)
+        self.weight = self._norm.weight
+
+    def forward(self, x):
+        return self._norm(x)
+
+
+_NORM_ATTRS = (
+    "input_layernorm", "pre_mlp_layernorm",
+    "pre_cross_attn_layernorm", "post_cross_attn_layernorm",
+    "final_layernorm",
+)
+
+
+def _patch_norms_in_spec(spec):
+    """Replace **all** norm classes in a spec tree with
+    :class:`_MegatronCompatibleTLRMSNorm` so that ``WrappedTorchNorm``
+    and ``FusedLayerNorm`` (which reject SP / persist_layer_norm /
+    RMSNorm) are never instantiated.
+
+    Handles both:
+    - Block-level specs (``TransformerBlockSubmodules`` with
+      ``layer_specs`` and ``final_layernorm``)
+    - Layer-level specs (``ModuleSpec`` with ``submodules``)
+    """
+    for attr in _NORM_ATTRS:
+        if getattr(spec, attr, None) is not None:
+            setattr(spec, attr, _MegatronCompatibleTLRMSNorm)
+
+    if hasattr(spec, "submodules") and spec.submodules is not None:
+        for attr in _NORM_ATTRS:
+            if getattr(spec.submodules, attr, None) is not None:
+                setattr(spec.submodules, attr, _MegatronCompatibleTLRMSNorm)
+
+    layer_specs = getattr(spec, "layer_specs", None)
+    if layer_specs is None and hasattr(spec, "submodules"):
+        layer_specs = getattr(spec.submodules, "layer_specs", None)
+    if layer_specs:
+        for layer_spec in layer_specs:
+            _patch_norms_in_spec(layer_spec)
+
+
+def _patch_rmsnorm(model, grad_quant_type=None):
+    """Replace all Megatron-Core RMSNorm modules with Lumen's
+    Triton-accelerated :class:`LumenRMSNorm`."""
+    from lumen.ops.normalization import LumenRMSNorm
+
+    count = 0
+    for name, module in model.named_modules():
+        for attr_name, child in list(module.named_children()):
+            cls_name = type(child).__name__
+            if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm",
+                            "_MegatronCompatibleTLRMSNorm"):
+                hidden_size = child.weight.shape[0]
+                eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
+                replacement = LumenRMSNorm(
+                    hidden_size, eps=eps, grad_quant_type=grad_quant_type,
+                )
+                replacement.weight.data.copy_(child.weight.data)
+                setattr(module, attr_name, replacement)
+                count += 1
+
+    print_rank_0(f"> Replaced {count} RMSNorm modules with LumenRMSNorm")
+
+
+# ---------------------------------------------------------------------------
+# Custom GPT builder that injects Lumen attention
+# ---------------------------------------------------------------------------
+
+def tl_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None,
+                   model_name="GPT"):
+    """Build a GPTModel with Lumen attention replacing the default
+    DotProductAttention in every layer.
+
+    Always uses the Megatron-Core local spec (no Transformer Engine dependency).
+    The core_attention submodule is patched to LumenDotProductAttention.
+    When ``--tl-rmsnorm`` is set, RMSNorm modules are also replaced with the
+    Triton-accelerated :class:`LumenRMSNorm`.
+
+    Args:
+        model_name: Label used in the startup log message (e.g. ``"LLaMA 3.1"``).
+    """
+    print_rank_0(f"building {model_name} model with Lumen attention ...")
+
+    if config is None:
+        args.apply_rope_fusion = False
+        config = core_transformer_config_from_args(args)
+        config.persist_layer_norm = False
+        config.bias_swiglu_fusion = False
+
+    transformer_layer_spec = get_gpt_layer_local_spec(
+        args.num_experts,
+        args.moe_grouped_gemm,
+        args.qk_layernorm,
+        args.multi_latent_attention,
+        moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
+        normalization=args.normalization,
+        use_kitchen=config.use_kitchen,
+    )
+
+    _patch_core_attention(transformer_layer_spec)
+    _patch_norms_in_spec(transformer_layer_spec)
+
+    model = GPTModel(
+        config=config,
+        transformer_layer_spec=transformer_layer_spec,
+        vocab_size=args.padded_vocab_size,
+        max_sequence_length=args.max_position_embeddings,
+        pre_process=pre_process,
+        post_process=post_process,
+        fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+        parallel_output=True,
+        share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+        position_embedding_type=args.position_embedding_type,
+        rotary_percent=args.rotary_percent,
+        rotary_base=args.rotary_base,
+        rope_scaling=args.use_rope_scaling,
+        vp_stage=vp_stage,
+    )
+
+    if getattr(args, "tl_rmsnorm", False):
+        _patch_rmsnorm(model, getattr(args, "grad_quant_type", None))
+
+    return model
+
+
+# ---------------------------------------------------------------------------
+# LoRA (Parameter-Efficient Fine-Tuning)
+# ---------------------------------------------------------------------------
+
+def apply_lora(model: GPTModel, args) -> None:
+    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning."""
+    from megatron.core.transformer.lora_adapter import LoraAdapter
+
+    common = {
+        "config": model.config,
+        "rank": args.lora_rank,
+        "alpha": args.lora_alpha,
+        "dropout": args.lora_dropout,
+    }
+
+    if hasattr(model, "embedding") and model.embedding is not None:
+        model.embedding.word_embeddings = LoraAdapter(
+            model.embedding.word_embeddings, **common
+        )
+
+    if hasattr(model, "decoder") and model.decoder is not None:
+        for layer in model.decoder.layers:
+            layer.self_attention.linear_qkv = LoraAdapter(
+                layer.self_attention.linear_qkv, **common
+            )
+            layer.self_attention.linear_proj = LoraAdapter(
+                layer.self_attention.linear_proj, **common
+            )
+            if hasattr(layer, "mlp") and layer.mlp is not None:
+                layer.mlp.linear_fc1 = LoraAdapter(
+                    layer.mlp.linear_fc1, **common
+                )
+                layer.mlp.linear_fc2 = LoraAdapter(
+                    layer.mlp.linear_fc2, **common
+                )
+
+    if hasattr(model, "output_layer") and model.output_layer is not None:
+        model.output_layer = LoraAdapter(model.output_layer, **common)
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    print_rank_0(
+        f"> LoRA applied (rank={args.lora_rank}, alpha={args.lora_alpha}) — "
+        f"trainable: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# FP8 quantised training
+# ---------------------------------------------------------------------------
+
+def apply_fp8_training(model: GPTModel, args) -> None:
+    """Enable FP8 quantised training via Lumen's non-invasive patching."""
+    import lumen.quantize as quant
+    from lumen.quantize import (
+        AmaxAlgo, QuantConfig, QuantFormat, ScalingType,
+    )
+
+    fmt = getattr(args, "tl_fp8_format", "fp8_e4m3")
+    scaling = getattr(args, "fp8_scaling", "delayed")
+    block_size = getattr(args, "fp8_block_size", 128)
+    amax_algo = getattr(args, "fp8_amax_algo", "max")
+    reduce_amax = getattr(args, "fp8_reduce_amax", False)
+    history_len = getattr(args, "fp8_amax_history", 16)
+    margin = getattr(args, "fp8_margin", 0)
+    quant_act = getattr(args, "fp8_activation", True)
+    grad_quant_type = getattr(args, "grad_quant_type", None)
+
+    config = QuantConfig(
+        format=QuantFormat(fmt),
+        scaling=ScalingType(scaling),
+        block_size=block_size,
+        amax_algo=AmaxAlgo(amax_algo),
+        margin=margin,
+        reduce_amax=reduce_amax,
+        history_len=history_len,
+        quantize_activation=quant_act,
+        quantize_grad=grad_quant_type,
+    )
+
+    dp_group = None
+    if reduce_amax:
+        import torch.distributed as dist
+        from megatron.core import parallel_state
+        if dist.is_initialized():
+            dp_group = parallel_state.get_data_parallel_group()
+
+    quant.enable(model, config=config, dp_group=dp_group)
+    print_rank_0(
+        f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
+        f"block_size={block_size}, amax_algo={amax_algo}, "
+        f"reduce_amax={reduce_amax}, history={history_len}, "
+        f"activation={quant_act}, grad_quant={grad_quant_type})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Synthetic warmup + FP8 state reset
+# ---------------------------------------------------------------------------
+
+_warmup_step_counter = 0
+_warmup_completed = False
+
+
+def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
+    """Generate a synthetic batch for GPU kernel warmup.
+
+    Args:
+        zero_last_loss_mask: If ``True``, set ``loss_mask[:, -1] = 0``
+            (used by SFT to match real-data masking behaviour).
+    """
+    seq_length = args.seq_length
+    mbs = args.micro_batch_size
+
+    tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
+    tokens[:, -1] = 2
+    labels = tokens.clone()
+    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
+    if zero_last_loss_mask:
+        loss_mask[:, -1] = 0
+    attention_mask = torch.ones(
+        mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda"
+    )
+    position_ids = (
+        torch.arange(seq_length, dtype=torch.long, device="cuda")
+        .unsqueeze(0)
+        .expand(mbs, -1)
+    )
+
+    return tokens, labels, loss_mask, attention_mask, position_ids
+
+
+def reset_fp8_state(model):
+    """Reset FP8 scaling state in all Lumen quantised layers."""
+
+    def _reset(m):
+        if hasattr(m, "fp8_initialized"):
+            m.fp8_initialized = False
+        if hasattr(m, "_quant_manager"):
+            m._quant_manager.reset()
+        if hasattr(m, "_tl_scaling_manager"):
+            m._tl_scaling_manager.reset()
+
+    unwrapped = model
+    while hasattr(unwrapped, "module"):
+        unwrapped = unwrapped.module
+    unwrapped.apply(_reset)
+    print_rank_0("> FP8 state reset after warmup")
+
+
+# ---------------------------------------------------------------------------
+# Loss function + early stopping
+# ---------------------------------------------------------------------------
+
+_val_loss_ema: Optional[float] = None
+_early_stop_logged = False
+
+
+def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
+    """LM loss with optional early stopping based on a validation-loss EMA."""
+    global _val_loss_ema, _early_stop_logged
+
+    losses = output_tensor.view(-1).float()
+    loss_mask = loss_mask.view(-1).float()
+    loss = torch.sum(losses * loss_mask)
+    num_tokens = loss_mask.sum().clone().detach().to(torch.int)
+    reporting = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
+
+    args = get_args()
+    val_target = getattr(args, "val_loss_target", None)
+    if val_target is not None and not _early_stop_logged:
+        avg_loss = (loss.clone().detach() / max(num_tokens.item(), 1)).item()
+        if _val_loss_ema is None:
+            _val_loss_ema = avg_loss
+        else:
+            _val_loss_ema = 0.9 * _val_loss_ema + 0.1 * avg_loss
+        if _val_loss_ema < val_target:
+            print_rank_0(
+                f"> [Early Stop] Loss EMA ({_val_loss_ema:.4f}) < "
+                f"target ({val_target:.4f}). Stopping."
+            )
+            if hasattr(args, "iteration"):
+                args.train_iters = args.iteration
+            _early_stop_logged = True
+
+    return loss, num_tokens, {"lm loss": reporting}
+
+
+# ---------------------------------------------------------------------------
+# Forward step factory
+# ---------------------------------------------------------------------------
+
+def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func,
+                      zero_last_loss_mask: bool = False):
+    """Return a ``forward_step`` function suitable for :func:`megatron.training.pretrain`.
+
+    Args:
+        get_batch_fn: Model-specific batch constructor
+            ``(data_iterator, vp_stage) -> (tokens, labels, loss_mask, attention_mask, position_ids)``.
+        loss_fn: Loss function (defaults to :func:`loss_func`).
+        zero_last_loss_mask: Forwarded to :func:`_get_synthetic_batch`.
+    """
+
+    def forward_step(data_iterator, model: GPTModel):
+        global _warmup_step_counter, _warmup_completed
+
+        args = get_args()
+        timers = get_timers()
+        warmup_steps = getattr(args, "warmup_steps", 0)
+
+        timers("batch-generator", log_level=2).start()
+        global stimer
+        with stimer(bdata=True):
+            if warmup_steps > 0 and not _warmup_completed:
+                _warmup_step_counter += 1
+                if _warmup_step_counter <= warmup_steps:
+                    tokens, labels, loss_mask, attention_mask, position_ids = (
+                        _get_synthetic_batch(args, zero_last_loss_mask=zero_last_loss_mask)
+                    )
+                    if data_iterator is not None:
+                        try:
+                            next(data_iterator)
+                        except StopIteration:
+                            pass
+                else:
+                    if getattr(args, "fp8_training", False):
+                        reset_fp8_state(model)
+                    if torch.distributed.is_initialized():
+                        torch.distributed.barrier()
+                    _warmup_completed = True
+                    print_rank_0(
+                        f"> Synthetic warmup complete ({warmup_steps} steps). "
+                        f"Resuming with real data."
+                    )
+                    vp_stage = get_attr_wrapped_model(model, "vp_stage")
+                    tokens, labels, loss_mask, attention_mask, position_ids = (
+                        get_batch_fn(data_iterator, vp_stage)
+                    )
+            else:
+                vp_stage = get_attr_wrapped_model(model, "vp_stage")
+                tokens, labels, loss_mask, attention_mask, position_ids = (
+                    get_batch_fn(data_iterator, vp_stage)
+                )
+        timers("batch-generator").stop()
+
+        with stimer:
+            output_tensor = model(
+                tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask
+            )
+
+        return output_tensor, partial(loss_fn, loss_mask, model=model)
+
+    return forward_step
+
+
+# ---------------------------------------------------------------------------
+# Common CLI argument groups
+# ---------------------------------------------------------------------------
+
+def add_common_megatron_args(parser):
+    """Register CLI argument groups shared by all Megatron model scripts.
+
+    Registers: ``--backend``, transformer-light, mxfp8-block-config, lora,
+    fp8-training, and warmup/early-stop groups.
+
+    Uses :func:`safe_add_argument` so that model-specific scripts can
+    pre-register any of these flags with different defaults **before**
+    calling this function.
+    """
+    safe_add_argument(parser, "--backend", type=str, default="megatron",
+                       choices=["megatron", "fsdp"], help="Training backend.")
+
+    tl = parser.add_argument_group(title="transformer-light")
+    safe_add_argument(
+        tl, "--tl-attn-backend", type=str, default="aiter_csrc",
+        choices=["aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8"],
+        help="Lumen attention backend.",
+    )
+    safe_add_argument(
+        tl, "--tl-fp8-quant-type", type=str, default="fp8_blockwise",
+        choices=["fp8_blockwise", "mxfp8"],
+        help="FP8 quantisation type for aiter_triton_fp8 backend.",
+    )
+    safe_add_argument(
+        tl, "--tl-rmsnorm", action="store_true", default=False,
+        help="Replace RMSNorm with Lumen Triton-accelerated RMSNorm.",
+    )
+
+    mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
+    safe_add_argument(mxfp8, "--mxfp8-block-m-fwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-fwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-m-dq-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-dq-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-m-dkv-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-block-n-dkv-bwd", type=int, default=128)
+    safe_add_argument(mxfp8, "--mxfp8-quant-block-size", type=int, default=128)
+
+    lora = parser.add_argument_group(title="lora")
+    safe_add_argument(lora, "--lora-rank", type=int, default=0,
+                       help="LoRA rank. 0 = disabled.")
+    safe_add_argument(lora, "--lora-alpha", type=float, default=32.0)
+    safe_add_argument(lora, "--lora-dropout", type=float, default=0.1)
+    safe_add_argument(lora, "--lora-a2a", action="store_true", default=False,
+                       help="Enable LoRA all-to-all communication optimisation.")
+
+    fp8 = parser.add_argument_group(title="fp8-training")
+    safe_add_argument(fp8, "--fp8-training", action="store_true", default=False)
+    safe_add_argument(fp8, "--tl-fp8-format", type=str, default="fp8_e4m3",
+                       choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
+    safe_add_argument(fp8, "--fp8-scaling", type=str, default="delayed",
+                       choices=["dynamic", "delayed", "blockwise"])
+    safe_add_argument(fp8, "--fp8-block-size", type=int, default=128)
+    safe_add_argument(fp8, "--fp8-amax-algo", type=str, default="max",
+                       choices=["max", "most_recent"])
+    safe_add_argument(fp8, "--fp8-reduce-amax", action="store_true", default=False)
+    safe_add_argument(fp8, "--fp8-amax-history", type=int, default=16)
+    safe_add_argument(fp8, "--fp8-margin", type=int, default=0,
+                       help="Margin for FP8 scaling factor computation (TE-compatible).")
+    safe_add_argument(fp8, "--fp8-activation", action="store_true", default=True)
+    safe_add_argument(fp8, "--no-fp8-activation", dest="fp8_activation",
+                       action="store_false")
+    safe_add_argument(fp8, "--grad-quant-type", type=str, default=None,
+                       choices=["fp8", "mxfp8", "fp4"],
+                       help="Gradient quantization type (None=disabled).")
+
+    wes = parser.add_argument_group(title="warmup-early-stop")
+    safe_add_argument(wes, "--warmup-steps", type=int, default=0)
+    safe_add_argument(wes, "--val-loss-target", type=float, default=None)
+
+    return parser
