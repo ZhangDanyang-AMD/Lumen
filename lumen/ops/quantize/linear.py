@@ -138,6 +138,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
         block_size: int,
         tensor_id: str = "weight",
         quantize_activation: bool = True,
+        fp8_wgrad: bool = True,
     ) -> torch.Tensor:
         if not quantize_activation:
             weight_fp8, weight_scale = scaling_manager.quantize(tensor_id, weight)
@@ -147,6 +148,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.scaling_manager = scaling_manager
             ctx.has_bias = bias is not None
             ctx.quantize_activation = False
+            ctx.fp8_wgrad = True
             ctx.tensor_id = tensor_id
             return output
 
@@ -178,6 +180,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
         ctx.has_bias = bias is not None
         ctx.tensor_id = tensor_id
         ctx.quantize_activation = True
+        ctx.fp8_wgrad = fp8_wgrad
         return output
 
     @staticmethod
@@ -191,43 +194,51 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
             grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         backend = ctx.backend
         block_size = ctx.block_size
 
-        # For HYBRID format the backward pass uses E5M2 dtype; the
-        # ScalingManager stores the backward dtype separately.
         mgr = ctx.scaling_manager
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", ctx.fp8_dtype)
 
         if backend == "aiter":
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
             grad_fp8, grad_scale = _aiter_quant(grad_flat, bwd_dtype)
-            # grad_input = grad[M,N] @ W[N,K] = [M,K]
             grad_input = _aiter_mm(grad_fp8, weight_fp8, grad_scale, weight_scale)
             grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
-            # grad_weight = grad^T[N,M] @ X[M,K] = [N,K]
-            grad_weight = _aiter_mm(
-                grad_fp8.t().contiguous(),
-                input_fp8,
-                grad_scale,
-                input_scale,
-            )
+
+            if ctx.fp8_wgrad:
+                grad_weight = _aiter_mm(
+                    grad_fp8.t().contiguous(),
+                    input_fp8,
+                    grad_scale,
+                    input_scale,
+                )
+            else:
+                grad_bf16 = grad_fp8.to(torch.bfloat16) * grad_scale
+                input_bf16 = input_fp8.to(torch.bfloat16) * input_scale
+                grad_weight = grad_bf16.t() @ input_bf16
         else:
             grad_fp8, grad_scale = _triton_quant(grad_output, bwd_dtype, block_size)
             grad_flat = grad_fp8.reshape(-1, grad_output.shape[-1])
             input_flat = input_fp8.reshape(-1, input_fp8.shape[-1])
             grad_input = _triton_mm(grad_flat, weight_fp8, grad_scale, weight_scale)
             grad_input = grad_input.view_as(grad_output).view(*grad_output.shape[:-1], weight_fp8.shape[-1])
-            grad_weight = _triton_mm(grad_flat.t(), input_flat, grad_scale, input_scale)
+
+            if ctx.fp8_wgrad:
+                grad_weight = _triton_mm(grad_flat.t(), input_flat, grad_scale, input_scale)
+            else:
+                grad_bf16 = grad_flat.to(torch.bfloat16) * grad_scale
+                input_bf16 = input_flat.to(torch.bfloat16) * input_scale
+                grad_weight = grad_bf16.t() @ input_bf16
 
         grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
 
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
@@ -249,6 +260,7 @@ def quantized_linear(
     block_size: int = 128,
     tensor_id: str = "weight",
     quantize_activation: bool = True,
+    fp8_wgrad: bool = True,
 ) -> torch.Tensor:
     """Functional quantized linear — mirrors ``attention()`` in the attention module.
 
@@ -270,6 +282,9 @@ def quantized_linear(
             (e.g. ``"decoder.layers.0.mlp.linear_fc1.weight"``).
         quantize_activation: If ``True`` (default), quantize both input and
             weight.  If ``False``, only quantize the weight (weight-only FP8).
+        fp8_wgrad: If ``True`` (default), compute weight gradient in FP8.
+            If ``False``, fall back to BF16 for the wgrad GEMM while keeping
+            dgrad in FP8.
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -294,4 +309,5 @@ def quantized_linear(
         block_size,
         tensor_id,
         quantize_activation,
+        fp8_wgrad,
     )

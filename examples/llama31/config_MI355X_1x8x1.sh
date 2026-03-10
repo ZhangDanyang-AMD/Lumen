@@ -51,6 +51,7 @@ export FP8_AMAX_ALGO="most_recent"
 export FP8_REDUCE_AMAX=0
 export FP8_AMAX_HISTORY=4
 export FP8_ACTIVATION=1
+export FP8_WGRAD=1
 export GRAD_QUANT_TYPE=""
 
 # ---- Warmup / early stopping -------------------------------------------------

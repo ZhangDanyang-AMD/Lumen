@@ -214,6 +214,7 @@ def _patch_linear_layers(
     fp8_dtype = config.torch_dtype or torch.float8_e4m3fn
     block_size = config.block_size
     quant_act = config.quantize_activation
+    fp8_wgrad = config.fp8_wgrad
 
     megatron_types = _get_megatron_linear_types()
     quantizable_types = (nn.Linear,) + megatron_types
@@ -228,7 +229,9 @@ def _patch_linear_layers(
             module._quant_tensor_id = tensor_id
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
-            _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id, quant_act, is_megatron)
+            _replace_forward(
+                module, manager, backend, fp8_dtype, block_size, tensor_id, quant_act, fp8_wgrad, is_megatron
+            )
             count += 1
 
     act_str = "weight+activation" if quant_act else "weight-only"
@@ -246,7 +249,9 @@ def _patch_linear_layers(
     )
 
 
-def _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id, quantize_activation, is_megatron):
+def _replace_forward(
+    module, manager, backend, fp8_dtype, block_size, tensor_id, quantize_activation, fp8_wgrad, is_megatron
+):
     """Replace the module's forward method with an FP8-quantized version.
 
     Unlike ``register_forward_hook``, this prevents the original (BF16) linear
@@ -268,6 +273,7 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id,
                 block_size=block_size,
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
+                fp8_wgrad=fp8_wgrad,
             )
 
     else:
@@ -305,6 +311,7 @@ def _replace_forward(module, manager, backend, fp8_dtype, block_size, tensor_id,
                 block_size=block_size,
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
+                fp8_wgrad=fp8_wgrad,
             )
 
             # RowParallelLinear: reduce across TP ranks.  With sequence

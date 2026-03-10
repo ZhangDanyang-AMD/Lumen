@@ -178,6 +178,11 @@ class QuantConfig:
     # the original precision (BF16/FP16).
     quantize_activation: bool = True
 
+    # When False, compute the weight gradient (dW = grad^T @ X) in higher
+    # precision (BF16) instead of FP8.  dgrad (dX = grad @ W) stays in FP8.
+    # Mirrors TE's ``override_linear_precision=(False, False, not fp8_wgrad)``.
+    fp8_wgrad: bool = True
+
     # Gradient quantization type for the backward pass.  When set, gradients
     # are rounded to the specified low-precision format (quant → dequant)
     # before being returned from autograd backward.  This reduces gradient

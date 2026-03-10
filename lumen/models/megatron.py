@@ -341,6 +341,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     history_len = getattr(args, "linear_fp8_amax_history", 16)
     margin = getattr(args, "linear_fp8_margin", 0)
     quant_act = getattr(args, "linear_fp8_activation", True)
+    fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
     grad_quant_type = getattr(args, "grad_quant_type", None)
 
     print_rank_0(
@@ -351,6 +352,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         fp8_reduce_amax='{reduce_amax}', \
         fp8_amax_history='{history_len}', \
         fp8_activation='{quant_act}', \
+        fp8_wgrad='{fp8_wgrad}', \
         grad_quant='{grad_quant_type}')"
     )
 
@@ -363,6 +365,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         reduce_amax=reduce_amax,
         history_len=history_len,
         quantize_activation=quant_act,
+        fp8_wgrad=fp8_wgrad,
         quantize_grad=grad_quant_type,
     )
 
@@ -608,6 +611,14 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(lfp8, "--linear-fp8-activation", action="store_true", default=True)
     safe_add_argument(lfp8, "--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
+    safe_add_argument(lfp8, "--linear-fp8-wgrad", action="store_true", default=True)
+    safe_add_argument(
+        lfp8,
+        "--no-linear-fp8-wgrad",
+        dest="linear_fp8_wgrad",
+        action="store_false",
+        help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
+    )
     safe_add_argument(
         lfp8,
         "--grad-quant-type",

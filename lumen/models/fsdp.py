@@ -100,6 +100,13 @@ def add_common_fsdp_args(parser):
     lfp8.add_argument("--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation.")
     lfp8.add_argument("--linear-fp8-activation", action="store_true", default=True)
     lfp8.add_argument("--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
+    lfp8.add_argument("--linear-fp8-wgrad", action="store_true", default=True)
+    lfp8.add_argument(
+        "--no-linear-fp8-wgrad",
+        dest="linear_fp8_wgrad",
+        action="store_false",
+        help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
+    )
     lfp8.add_argument(
         "--grad-quant-type",
         type=str,
@@ -145,6 +152,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     history_len = getattr(args, "linear_fp8_amax_history", 16)
     margin = getattr(args, "linear_fp8_margin", 0)
     quant_act = getattr(args, "linear_fp8_activation", True)
+    fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
     grad_quant_type = getattr(args, "grad_quant_type", None)
 
     config = QuantConfig(
@@ -156,6 +164,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         reduce_amax=reduce_amax,
         history_len=history_len,
         quantize_activation=quant_act,
+        fp8_wgrad=fp8_wgrad,
         quantize_grad=grad_quant_type,
     )
 
@@ -170,7 +179,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     _rank0_print(
         f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
         f"amax_algo={amax_algo}, activation={quant_act}, "
-        f"grad_quant={grad_quant_type})"
+        f"fp8_wgrad={fp8_wgrad}, grad_quant={grad_quant_type})"
     )
 
 
