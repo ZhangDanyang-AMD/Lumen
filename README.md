@@ -29,27 +29,36 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
 │     Patches nn.Linear in-place (no module swap)  │
 │     FP8 E4M3 / E5M2 / MXFP8 / FP4 formats      │
 │     QuantConfig — one object for all settings    │
-├──────────────────────────────────────────────────┤
-│  SCALING MANAGER                                 │
-│     Per-tensor / per-block / MXFP8 scaling       │
-│     Amax history with delayed scaling            │
-│     AMD FNUZ format auto-detection               │
-├──────────────────────────────────────────────────┤
-│  ATTENTION KERNELS                               │
-│     aiter_csrc     — CK flash-attention (C++/ASM)│
-│     aiter_triton   — Triton flash-attention      │
-│     aiter_triton_fp8 — FP8 blockwise / MXFP8    │
-│     aiter_csrc_fp8 — CK FP8 (inference)         │
-│     Context Parallelism (All-to-All)             │
-├──────────────────────────────────────────────────┤
-│  QUANTIZED LINEAR                                │
-│     Fused: quant → GEMM → dequant (one op)      │
-│     AITER hipBLASLt or Triton backend            │
-│     torch.compile compatible                     │
-├──────────────────────────────────────────────────┤
-│  AITER  (third_party, kernel provider)           │
-│     CK asm kernels, hipBLASLt, Triton kernels    │
-└──────────────────────────────────────────────────┘
+├────────────────────────┬─────────────────────────┤
+│  SCALING MANAGER       │  DISTRIBUTED MANAGEMENT  │
+│  Per-tensor / block /  │  Param & grad buffer     │
+│    MXFP8 scaling       │    (FP8/BF16 contiguous) │
+│  Amax history with     │  Distributed optimizer   │
+│    delayed scaling     │    (shard + all-gather)   │
+│  AMD FNUZ auto-detect  │  FP8 param-gather        │
+│  FP8 param lifecycle:  │    (uint8 comm, 2× save) │
+│    quantize / dequant  │  Overlap: AG ↔ fwd,      │
+│    scale & amax sync   │    RS ↔ bwd              │
+├────────────────────────┼─────────────────────────┤
+│  ATTENTION KERNELS     │  QUANTIZED LINEAR        │
+│  aiter_csrc — CK FA   │  Fused: quant → GEMM     │
+│  aiter_triton — Triton │    → dequant (one op)    │
+│  aiter_triton_fp8 —   │  AITER hipBLASLt or      │
+│    FP8 block / MXFP8  │    Triton backend         │
+│  aiter_csrc_fp8 — CK  │  torch.compile compatible│
+│  Context Parallelism   │                          │
+├────────────────────────┬─────────────────────────┤
+│  AITER                 │  MORI                    │
+│  (kernel provider)     │  (communication provider)│
+│  CK asm kernels        │  MORI-CCL (AG, RS, AR)   │
+│  hipBLASLt, Triton     │  MORI-EP  (MoE dispatch) │
+│       ▲                │  Device-side RDMA / FP8  │
+│       │                │  AINIC / CX-7 / Thor2    │
+│  serves: QUANTIZED     │       ▲                  │
+│  LINEAR + ATTENTION    │       │                  │
+│                        │  serves: DISTRIBUTED     │
+│                        │  MANAGEMENT              │
+└────────────────────────┴─────────────────────────┘
 ```
 
 ## Quick Start
@@ -136,7 +145,7 @@ Every model in Lumen supports **two independent training stacks**, selected via 
                          └────────┬─────────────────────┬──────────┘
                                   │                     │
               ┌───────────────────▼────────┐ ┌──────────▼──────────────────┐
-              │   Megatron-LM-AMD stack    │ │     PyTorch FSDP stack      │
+              │   Megatron-LM stack    │ │     PyTorch FSDP stack      │
               │                            │ │                             │
               │  • TP / PP / CP / VP / SP  │ │  • FSDP sharding            │
               │  • Megatron pretrain()     │ │  • HuggingFace Transformers │
@@ -150,28 +159,34 @@ Every model in Lumen supports **two independent training stacks**, selected via 
               ┌───────────▼────────────────────────────────▼───────────────┐
               │              Lumen (shared across both stacks)             │
               │                                                           │
-              │  quant.enable(model)  — non-invasive FP8 patching         │
-              │  LumenAttention       — FP8 / MXFP8 / BF16 attention     │
-              │  ScalingManager       — per-layer amax tracking           │
-              │  reset_fp8_state()    — post-warmup scale reset           │
-              └───────────────────────────┬─────────────────────────────┘
-                                          │
-              ┌───────────────────────────▼─────────────────────────────┐
-              │              AITER  (kernel backend)                     │
-              │                                                         │
-              │  CK flash-attention    — C++/asm MHA forward & backward │
-              │  hipBLASLt GEMM        — FP8 matmul (hipb_mm)           │
-              │  Triton kernels        — FP8 blockwise / MXFP8 quant   │
-              │  RMSNorm               — Triton-accelerated norm kernel │
-              └─────────────────────────────────────────────────────────┘
+              │  quant.enable(model)    — non-invasive FP8 patching       │
+              │  LumenAttention         — FP8 / MXFP8 / BF16 attention   │
+              │  ScalingManager         — per-layer amax / scale / quant  │
+              │  DistributedManager     — param & grad buffer, dist-opt   │
+              │    FP8 param-gather     — uint8 all-gather, 2× BW saving │
+              │    overlap AG ↔ fwd     — bucket-wise async pipeline     │
+              │    overlap RS ↔ bwd     — grad reduce with backward      │
+              │  reset_fp8_state()      — post-warmup scale reset        │
+              └──────────────┬──────────────────────────┬──────────────┘
+                             │                          │
+              ┌──────────────▼──────────┐ ┌─────────────▼──────────────┐
+              │  AITER (kernel backend) │ │  MORI (comm backend)       │
+              │                         │ │                            │
+              │  CK flash-attention     │ │  MORI-CCL — AG, RS, AR    │
+              │  hipBLASLt FP8 GEMM     │ │  MORI-EP  — MoE dispatch  │
+              │  Triton FP8 / MXFP8     │ │  Device-side RDMA / FP8   │
+              │  Triton RMSNorm         │ │  AINIC / CX-7 / Thor2     │
+              └─────────────────────────┘ └────────────────────────────┘
 ```
 
 ### Megatron stack (`lumen.models.megatron`)
 
-Uses [Megatron-LM-AMD](https://github.com/ROCm/Megatron-LM) as the training backbone. Lumen injects itself at three points:
+Uses [Megatron-LM](https://github.com/ROCm/Megatron-LM) as the training backbone. Lumen injects itself at four points:
 
 1. **Aiter Attention** — `LumenDotProductAttention` for Megatron (the same as `DotProductAttention`) in every transformer layer via spec patching. Supports AITER backends.
 2. **FP8 quantized linear** — `quant.enable(model)` patches all `ColumnParallelLinear` / `RowParallelLinear` layers with FP8 forward/backward, preserving Megatron's sequence-parallel all-gather / reduce-scatter communication.
+3. **Distributed management** — FP8/BF16 contiguous param & grad buffers, distributed optimizer with shard + all-gather, FP8 param-gather (uint8 communication, 2x memory saving), and communication-computation overlap (all-gather ↔ forward, reduce-scatter ↔ backward).
+4. **MORI communication** — Native RDMA + GPU communication via MORI-CCL (all-gather, reduce-scatter, all-reduce) and MORI-EP (MoE expert dispatch), with device-side RDMA for FP8 payloads.
 
 Supports full parallelism: TP, PP, CP (All-to-All), VP, SP, distributed optimizer.
 
@@ -199,16 +214,23 @@ trainer = FSDPTrainer(args)
 trainer.train()
 ```
 
-## What It Does NOT Do
+## What the Framework Does NOT Do
+
+Staying lightweight means explicitly excluding:
 
 | Feature | Why Excluded | Use Instead |
 |---------|-------------|-------------|
-| Fused norms | Liger Kernel has AMD-tuned Triton versions | Liger Kernel |
-| Fused activations | Liger Kernel (SwiGLU, GeLU) | Liger Kernel |
-| RL losses | Liger Kernel (GRPO, DPO, 80% mem savings) | Liger Kernel |
+| Attention kernels | FlashAttention-CK is better than anything we'd write | FlashAttention |
+| Fused norms (RMSNorm, LayerNorm) | Liger Kernel already has AMD-tuned Triton versions | Liger Kernel |
+| Fused activations (SwiGLU, GeLU) | Liger Kernel | Liger Kernel |
+| RL loss kernels (GRPO, DPO) | Liger Kernel has these with 80% mem savings | Liger Kernel |
 | MoE dispatch | AITER has 3x faster fused MoE | AITER |
-| Distributed orchestration | FSDP2/DeepSpeed handle this | FSDP2/DeepSpeed |
+| MLA/MHA kernels | AITER has 17x/14x faster versions | AITER |
+| Distributed training orchestration | FSDP2/DeepSpeed already handle this | FSDP2/DeepSpeed |
+| RL training loop | veRL/OpenRLHF/TRL own this | veRL |
 | Model definitions | HuggingFace Transformers | HuggingFace |
+
+**The framework is ~1000-2000 lines of Python.** It owns FP8 lifecycle. Everything else is delegated.
 
 ## Installation
 
@@ -243,11 +265,12 @@ pip install -e ".[dev]"
 |---------|-------------|---------|
 | [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised kernels: FP8 quantization, hipBLASLt GEMM, CK attention (MHA) |
 | [Composable Kernel (CK)](https://github.com/ROCm/composable_kernel) | *(bundled in aiter)* | High-performance GPU kernel primitives used by AITER |
+| [MORI](https://github.com/ROCm/mori) | `mori` | Native RDMA + GPU communication: MORI-CCL (collective ops), MORI-EP (MoE dispatch) |
 
 
 ## Examples
 
-### LLaMA2 SFT with Megatron-LM-AMD
+### LLaMA2 SFT with Megatron-LM
 
 Full fine-tuning or LoRA on LLaMA2 (7B / 13B / 70B) with FP8 attention, packed sequences, and early stopping.
 
@@ -320,25 +343,36 @@ pytest tests/module/test_fp8_attention.py -v -s
 ## Software Stack
 
 ```
-┌─────────────────────────────────────────────┐
-│  Training Script (train.py)                 │
-├─────────────────────────────────────────────┤
-│  Lumen                          │
-│    quant.enable(model, config=QuantConfig)  │
-│    ├─ ScalingManager (per-layer amax)       │
-│    ├─ QuantizedLinearFunction (autograd)    │
-│    ├─ Attention Kernels                     │
-│    │   ├─ Triton FP8 blockwise             │
-│    │   ├─ Triton MXFP8 (gfx950)           │
-│    │   └─ AITER           │
-│    └─ Models                               │
-│        ├─ LLaMA2 SFT (LoRA, FP8, CP)      │
-│        └─ LLaMA 3.1 Pretrain (FP8, MXFP8) │
-├─────────────────────────────────────────────┤
-│  AITER          ← quant kernels            │
-├─────────────────────────────────────────────┤
-│  PyTorch + ROCm + RCCL + Triton             │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Training Script (train.py)                          │
+├──────────────────────────────────────────────────────┤
+│  Lumen                                               │
+│    quant.enable(model, config=QuantConfig)           │
+│    ├─ ScalingManager                                 │
+│    │   ├─ Per-tensor / block / MXFP8 scaling         │
+│    │   ├─ Amax history & delayed scaling             │
+│    │   └─ FP8 param lifecycle (quant/dequant/sync)   │
+│    ├─ DistributedManager                             │
+│    │   ├─ Param & grad buffer (FP8/BF16 contiguous)  │
+│    │   ├─ Distributed optimizer (shard + all-gather) │
+│    │   ├─ FP8 param-gather (uint8 comm, 2× save)    │
+│    │   └─ Overlap: AG ↔ fwd, RS ↔ bwd               │
+│    ├─ QuantizedLinearFunction (autograd)             │
+│    ├─ Attention Kernels                              │
+│    │   ├─ Triton FP8 blockwise                      │
+│    │   ├─ Triton MXFP8 (gfx950)                    │
+│    │   └─ AITER CK attention                        │
+│    └─ Models                                        │
+│        ├─ LLaMA2 SFT (LoRA, FP8, CP)               │
+│        └─ LLaMA 3.1 Pretrain (FP8, MXFP8)          │
+├──────────────────────────┬───────────────────────────┤
+│  AITER ← quant kernels  │  MORI ← comm backend      │
+│  CK flash-attention      │  MORI-CCL (AG, RS, AR)    │
+│  hipBLASLt FP8 GEMM     │  MORI-EP (MoE dispatch)   │
+│  Triton FP8 / MXFP8     │  Device-side RDMA / FP8   │
+├──────────────────────────┴───────────────────────────┤
+│  PyTorch + ROCm + RCCL + Triton                      │
+└──────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
