@@ -2,28 +2,23 @@
 
 A lightweight, AMD-native quantized training framework for large language models.
 
-Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication. It supports **FP8 (E4M3/E5M2)**, **MXFP8**, and **FP4** formats with a unified `QuantConfig` interface. It also integrates high-performance **FP8/MXFP8 attention kernels** (Triton + CK backends) directly, eliminating the dependency on Transformer Engine for end-to-end finetuning. Lumen leverages **[MORI](https://github.com/ROCm/mori)** for distributed communication management, including collective operations (all-gather, reduce-scatter, all-reduce) and MoE expert dispatch.
+Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication.
 
-## Why Lumen?
-
-| | TransformerEngine | Lumen |
-|---|---|---|
-| Codebase | ~200K lines C++/CUDA/Python | Lightweight Python + Triton |
-| Scope | Monolith (attention, norms, GEMM, FP8, comm) | Quantized lifecycle + attention |
-| AMD support | Hipified fork | AMD-native (AITER kernels) |
-| Install time | Hours (C++ compilation) | Seconds (pure Python + AITER) |
-| Integration | Requires module replacement | Non-invasive `quant.enable(model)` |
+- **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and FP4 with a unified `QuantConfig` interface
+- **Attention Kernels** — high-performance FP8 / MXFP8 flash-attention (Triton + CK backends), eliminating the dependency on Transformer Engine
+- **[MORI](https://github.com/ROCm/mori)** — high-performance RDMA + GPU communication library for distributed training (MORI-CCL: all-gather, reduce-scatter, all-reduce; MORI-EP: MoE expert dispatch)
 
 ## Architecture
 
 Lumen owns the quantized training lifecycle and delegates everything else (optimizer, data loading, distributed orchestration) to the training backend:
 
+<div align="center">
 <table>
   <tr>
     <th colspan="2" align="center">MODEL LIBRARY</th>
   </tr>
   <tr>
-    <td colspan="2">
+    <td colspan="2" align="center">
       <b>LLaMA2 SFT / LLaMA 3.1 Pretrain</b><br>
       Megatron-LM or FSDP backend<br>
       LoRA, early stopping, synthetic warmup
@@ -33,24 +28,24 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
     <th colspan="2" align="center">NON-INVASIVE QUANTIZATION &mdash; <code>quant.enable(model)</code></th>
   </tr>
   <tr>
-    <td colspan="2">
+    <td colspan="2" align="center">
       Patches <code>nn.Linear</code> in-place (no module swap)<br>
       FP8 E4M3 / E5M2 / MXFP8 / FP4 formats<br>
       <code>QuantConfig</code> &mdash; one object for all settings
     </td>
   </tr>
   <tr>
-    <th>SCALING MANAGER</th>
-    <th>DISTRIBUTED MANAGEMENT</th>
+    <th align="center">SCALING MANAGER</th>
+    <th align="center">DISTRIBUTED MANAGEMENT</th>
   </tr>
   <tr>
-    <td valign="top">
+    <td align="center" valign="top">
       Per-tensor / block / MXFP8 scaling<br>
       Amax history with delayed scaling<br>
       AMD FNUZ auto-detect<br>
       FP8 param lifecycle: quantize / dequant / scale &amp; amax sync
     </td>
-    <td valign="top">
+    <td align="center" valign="top">
       Param &amp; grad buffer (FP8/BF16 contiguous)<br>
       Distributed optimizer (shard + all-gather)<br>
       FP8 param-gather (uint8 comm, 2&times; BW saving)<br>
@@ -58,35 +53,35 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
     </td>
   </tr>
   <tr>
-    <th>ATTENTION KERNELS</th>
-    <th>QUANTIZED LINEAR</th>
+    <th align="center">ATTENTION KERNELS</th>
+    <th align="center">QUANTIZED LINEAR</th>
   </tr>
   <tr>
-    <td valign="top">
+    <td align="center" valign="top">
       <code>aiter_csrc</code> &mdash; CK flash-attention<br>
       <code>aiter_triton</code> &mdash; Triton<br>
       <code>aiter_triton_fp8</code> &mdash; FP8 block / MXFP8<br>
       <code>aiter_csrc_fp8</code> &mdash; CK<br>
       Context Parallelism
     </td>
-    <td valign="top">
+    <td align="center" valign="top">
       Fused: quant &rarr; GEMM &rarr; dequant (one op)<br>
       AITER hipBLASLt or Triton backend<br>
       <code>torch.compile</code> compatible
     </td>
   </tr>
   <tr>
-    <th><a href="https://github.com/ROCm/aiter">AITER</a> <em>(kernel provider)</em></th>
-    <th><a href="https://github.com/ROCm/mori">MORI</a> <em>(communication provider)</em></th>
+    <th align="center"><a href="https://github.com/ROCm/aiter">AITER</a> <em>(kernel provider)</em></th>
+    <th align="center"><a href="https://github.com/ROCm/mori">MORI</a> <em>(communication provider)</em></th>
   </tr>
   <tr>
-    <td valign="top">
+    <td align="center" valign="top">
       CK asm kernels<br>
       hipBLASLt, Triton<br>
       <br>
       &uarr; serves: <b>QUANTIZED LINEAR + ATTENTION</b>
     </td>
-    <td valign="top">
+    <td align="center" valign="top">
       MORI-CCL (AG, RS, AR)<br>
       MORI-EP (MoE dispatch)<br>
       Device-side RDMA / FP8<br>
@@ -96,88 +91,7 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
     </td>
   </tr>
 </table>
-
-## Software Stack
-
-<table>
-  <tr>
-    <th colspan="2" align="center">
-      Training Script<br>
-      <code>--backend megatron</code> &nbsp;|&nbsp; <code>--backend fsdp</code>
-    </th>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">&darr;</td>
-  </tr>
-  <tr>
-    <th>Megatron-LM Stack</th>
-    <th>PyTorch FSDP Stack</th>
-  </tr>
-  <tr>
-    <td valign="top">
-      TP / PP / CP / VP / SP<br>
-      Megatron <code>pretrain()</code><br>
-      <code>LumenDotProductAttention</code> (replaces core_attn)<br>
-      <code>LumenRMSNorm</code> (Triton-accelerated)<br>
-      Megatron LoRA adapters
-    </td>
-    <td valign="top">
-      FSDP sharding<br>
-      HuggingFace Transformers<br>
-      HuggingFace PEFT (LoRA)<br>
-      Gradient checkpointing
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">&darr;</td>
-  </tr>
-  <tr>
-    <th colspan="2" align="center">Lumen <em>(shared across both stacks)</em></th>
-  </tr>
-  <tr>
-    <td colspan="2">
-      <code>quant.enable(model)</code> &mdash; non-invasive FP8 patching<br>
-      <code>LumenAttention</code> &mdash; FP8 / MXFP8 / BF16 attention<br>
-      <code>ScalingManager</code> &mdash; per-layer amax / scale / quant<br>
-      <code>DistributedManager</code> &mdash; param &amp; grad buffer, dist-opt<br>
-      &nbsp;&nbsp;&bull; FP8 param-gather &mdash; uint8 all-gather, 2&times; BW saving<br>
-      &nbsp;&nbsp;&bull; overlap AG &harr; fwd &mdash; bucket-wise async pipeline<br>
-      &nbsp;&nbsp;&bull; overlap RS &harr; bwd &mdash; grad reduce with backward<br>
-      <code>reset_fp8_state()</code> &mdash; post-warmup scale reset
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">&darr;</td>
-  </tr>
-  <tr>
-    <th><a href="https://github.com/ROCm/aiter">AITER</a> <em>(kernel backend)</em></th>
-    <th><a href="https://github.com/ROCm/mori">MORI</a> <em>(comm backend)</em></th>
-  </tr>
-  <tr>
-    <td valign="top">
-      CK flash-attention<br>
-      hipBLASLt FP8 GEMM<br>
-      Triton FP8 / MXFP8<br>
-      Triton RMSNorm
-    </td>
-    <td valign="top">
-      MORI-CCL &mdash; AG, RS, AR<br>
-      MORI-EP &mdash; MoE dispatch<br>
-      Device-side RDMA / FP8<br>
-      AINIC / CX-7 / Thor2
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">&darr;</td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><b>PyTorch</b> + <b>ROCm</b> + <b>RCCL</b> + <b>Triton</b></td>
-  </tr>
-</table>
-
-## Training Backends: Megatron vs FSDP
-
-Every model in Lumen supports **two independent training stacks**, selected via `--backend megatron|fsdp`. See [`lumen/models/`](lumen/models/) for detailed documentation on both stacks.
+</div>
 
 ## Quick Start
 
@@ -219,10 +133,6 @@ See [`lumen/ops/`](lumen/ops/) for the stateless functional API with usage examp
 
 See [`lumen/models/`](lumen/models/) for Megatron and FSDP stack documentation and usage examples.
 
-
-## Installation
-
-**Requirements**: PyTorch 2.x, ROCm, Triton.
 
 ### User Install (recommended)
 
