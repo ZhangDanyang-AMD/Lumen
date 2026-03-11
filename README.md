@@ -56,15 +56,15 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
   </tr>
   <tr>
     <td align="center" valign="top">
-      <code>aiter_csrc</code> &mdash; CK flash-attention<br>
-      <code>aiter_triton</code> &mdash; Triton<br>
-      <code>aiter_triton_fp8</code> &mdash; FP8 block / MXFP8<br>
-      <code>aiter_csrc_fp8</code> &mdash; CK<br>
+      <code>aiter_csrc</code> <br>
+      <code>aiter_triton</code> <br>
+      <code>aiter_triton_fp8</code> <br>
+      <code>aiter_csrc_fp8</code> <br>
       Context Parallelism
     </td>
     <td align="center" valign="top">
       Fused: quant &rarr; GEMM &rarr; dequant (one op)<br>
-      AITER hipBLASLt or Triton backend<br>
+      AITER C++, ASM or Triton backend<br>
       <code>torch.compile</code> compatible
     </td>
   </tr>
@@ -74,7 +74,7 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
   </tr>
   <tr>
     <td align="center" valign="top">
-      CK asm kernels<br>
+      Asm kernels<br>
       hipBLASLt, Triton<br>
       <br>
       &uarr; serves: <b>QUANTIZED LINEAR + ATTENTION</b>
@@ -135,12 +135,6 @@ See [`lumen/models/`](lumen/models/) for Megatron and FSDP stack documentation a
 ### User Install (recommended)
 
 ```bash
-# Core (Triton-only attention backends)
-pip install lumen
-
-# With AITER CK attention backend
-pip install lumen[aiter]
-
 # All optional dependencies
 pip install lumen[all]
 ```
@@ -159,8 +153,7 @@ pip install -e ".[dev]"
 
 | Library | PyPI Package | Purpose |
 |---------|-------------|---------|
-| [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised kernels: FP8 quantization, hipBLASLt GEMM, CK attention (MHA) |
-| [Composable Kernel (CK)](https://github.com/ROCm/composable_kernel) | *(bundled in aiter)* | High-performance GPU kernel primitives used by AITER |
+| [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised kernels: high-performance quantized MHA, Linear, MLA, MoE kernels |
 | [MORI](https://github.com/ROCm/mori) | `mori` | Native RDMA + GPU communication: MORI-CCL (collective ops), MORI-EP (MoE dispatch) |
 
 
@@ -191,7 +184,7 @@ Lumen/
 │       ├── llama2/            #     LLaMA2 SFT (dataset, megatron/, fsdp/)
 │       └── llama31/           #     LLaMA 3.1 Pretrain (dataset, megatron/, fsdp/)
 ├── third_party/               # Git submodules
-│   └── aiter/                 #   AMD AITER — CK attention, FP8 quant, hipBLASLt kernels
+│   └── aiter/                 #   AMD AITER — High-performance quantized MHA, Linear, MLA, MoE kernels
 ├── examples/                  # End-to-end training examples (Dockerfile, launcher, scripts)
 │   ├── llama2/                #   LLaMA2 SFT
 │   └── llama31/               #   LLaMA 3.1 Pretrain
