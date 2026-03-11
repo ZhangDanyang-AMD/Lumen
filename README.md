@@ -15,6 +15,9 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
 <div align="center">
 <table>
   <tr>
+    <th colspan="2" align="center">SFT / Pretrain / RL </th>
+  </tr>
+  <tr>
     <td colspan="2" align="center">
       <b>SFT / Pretrain / RL</b><br>
       Megatron-LM or FSDP backend<br>
