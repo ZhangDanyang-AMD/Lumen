@@ -15,11 +15,8 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
 <div align="center">
 <table>
   <tr>
-    <th colspan="2" align="center">MODEL LIBRARY</th>
-  </tr>
-  <tr>
     <td colspan="2" align="center">
-      <b>LLaMA2 SFT / LLaMA 3.1 Pretrain</b><br>
+      <b>SFT / Pretrain / RL</b><br>
       Megatron-LM or FSDP backend<br>
       LoRA, early stopping, synthetic warmup
     </td>
@@ -29,7 +26,6 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
   </tr>
   <tr>
     <td colspan="2" align="center">
-      Patches <code>nn.Linear</code> in-place (no module swap)<br>
       FP8 E4M3 / E5M2 / MXFP8 / FP4 formats<br>
       <code>QuantConfig</code> &mdash; one object for all settings
     </td>
