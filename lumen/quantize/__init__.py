@@ -54,14 +54,14 @@ from lumen.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
+from lumen.quantize.optimizer_manager import (
+    FP32MasterWeightOptimizer,
+    get_scaling_manager,
+)
 from lumen.quantize.scaling_manager import (
     GRAD_QUANT_TYPES,
     ScalingManager,
 )
-
-# Backward-compat aliases (autograd.py and communication.py removed)
-FP8ScalingManager = ScalingManager
-FP8Linear = QuantizedLinearFunction
 
 logger = logging.getLogger(__name__)
 

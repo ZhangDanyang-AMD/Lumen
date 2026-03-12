@@ -2,7 +2,7 @@
 # Avoids eagerly importing GPU kernel code when only a single subpackage
 # (e.g. ops.quantize) is needed.
 
-_SUBMODULES = ("attention", "normalization", "quantize")
+_SUBMODULES = ("attention", "normalization", "quantize", "sdma")
 
 
 def __getattr__(name):

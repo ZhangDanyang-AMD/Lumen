@@ -4,10 +4,12 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
+import logging
 from collections import defaultdict, deque
-from typing import Optional
+from typing import Dict, Optional, Set
 
 import torch
+import torch.nn as nn
 
 from lumen.quantize.config import (
     AmaxAlgo,
@@ -16,6 +18,8 @@ from lumen.quantize.config import (
     ScalingType,
     _get_float8_e4m3,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _get_quant_ops():
@@ -123,6 +127,14 @@ class ScalingManager:
         self.scale_cache = {}
         self._dp_group = None
 
+        # FP8 param lifecycle state
+        self._fp8_param_ids: Set[str] = set()
+        self._fp8_params: Dict[str, nn.Parameter] = {}
+        self._fp8_param_cache: Dict[str, tuple] = {}
+        self._fp8_param_stale: Set[str] = set()
+        self._fp8_step_counter: int = -1
+        self._sdma_allgather = None
+
     @property
     def recipe(self) -> str:
         return self.config.recipe
@@ -186,9 +198,173 @@ class ScalingManager:
     def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Quantize tensor. Returns (quantized_tensor, scale).
 
+        When FP8 param mode is active for *tensor_id*, this method
+        returns the cached (and possibly lazily re-quantized) FP8 weight
+        instead of quantizing on-the-fly.
+
         When *backward* is True and the format is HYBRID, E5M2 dtype and its
         corresponding FP8_MAX are used instead of the forward-pass values.
         """
+        if not backward:
+            cached = self.get_fp8_param_cached(tensor_id, tensor)
+            if cached is not None:
+                return cached
+
+        return self._quantize_core(tensor_id, tensor, backward=backward)
+
+    # ------------------------------------------------------------------
+    # FP8 parameter lifecycle (replaces standalone FP8ParamManager)
+    # ------------------------------------------------------------------
+
+    @property
+    def num_fp8_params(self) -> int:
+        return len(self._fp8_params)
+
+    def register_fp8_param(self, tensor_id: str, param: nn.Parameter) -> None:
+        """Register a parameter for FP8 lifecycle management."""
+        self._fp8_param_ids.add(tensor_id)
+        self._fp8_params[tensor_id] = param
+
+    def mark_fp8_params_stale(self) -> None:
+        """Mark all cached FP8 params as stale.
+
+        Call after ``optimizer.step()`` so that the next forward pass
+        re-quantizes from the updated master weights.
+        """
+        self._fp8_param_stale.update(self._fp8_param_ids)
+
+    def check_and_mark_fp8_stale(self, current_step: int) -> None:
+        """Mark stale only when the training step counter advances.
+
+        Safe to call on every micro-batch; actual staleness is flagged
+        only once per optimizer step.
+        """
+        if current_step > self._fp8_step_counter:
+            self._fp8_step_counter = current_step
+            self.mark_fp8_params_stale()
+
+    def quantize_fp8_params(self) -> None:
+        """Eagerly re-quantize all registered master params to FP8.
+
+        Populates the internal FP8 param cache.  Equivalent to
+        Megatron's ``cast_master_weights_to_fp8``.
+
+        For FSDP workloads prefer :meth:`mark_fp8_params_stale` (lazy)
+        because the full unsharded param is only available during
+        FSDP's forward pass.
+        """
+        if not self._fp8_params:
+            return
+
+        with torch.no_grad():
+            for tid, param in self._fp8_params.items():
+                self._fp8_param_stale.discard(tid)
+                fp8_data, scale = self._quantize_core(tid, param.data)
+                self._fp8_param_cache[tid] = (
+                    fp8_data.detach() if isinstance(fp8_data, torch.Tensor) else fp8_data,
+                    scale.detach() if isinstance(scale, torch.Tensor) else scale,
+                )
+
+        if self._dp_group is not None:
+            self._reduce_fp8_amax()
+
+    def get_fp8_param_cached(self, tensor_id: str, tensor: torch.Tensor):
+        """Return cached FP8 weight, re-quantizing lazily if stale.
+
+        Called from the forward path instead of :meth:`quantize` when
+        FP8 param mode is active for *tensor_id*.
+        """
+        if tensor_id not in self._fp8_param_ids:
+            return None
+
+        cached = self._fp8_param_cache.get(tensor_id)
+        if cached is not None and tensor_id not in self._fp8_param_stale:
+            return cached
+
+        self._fp8_param_stale.discard(tensor_id)
+        fp8_data, scale = self._quantize_core(tensor_id, tensor)
+        entry = (
+            fp8_data.detach() if isinstance(fp8_data, torch.Tensor) else fp8_data,
+            scale.detach() if isinstance(scale, torch.Tensor) else scale,
+        )
+        self._fp8_param_cache[tensor_id] = entry
+        return entry
+
+    def _reduce_fp8_amax(self) -> None:
+        """All-reduce (MAX) per-param amax across DP ranks via mori SDMA."""
+        from lumen.ops.sdma import SdmaAllgather, sdma_allgather_max
+
+        amaxes = []
+        tensor_ids = []
+        for tid in self._fp8_params:
+            history = self.amax_history.get(tid)
+            if history and len(history) > 0:
+                amaxes.append(history[-1])
+                tensor_ids.append(tid)
+
+        if not amaxes:
+            return
+
+        device = amaxes[0].device
+        packed = torch.stack([a.to(device) for a in amaxes]).contiguous()
+
+        if self._sdma_allgather is None:
+            self._sdma_allgather = SdmaAllgather()
+            logger.info(
+                "ScalingManager: created SdmaAllgather handle " "(%d amax elements)",
+                packed.numel(),
+            )
+
+        max_amaxes = sdma_allgather_max(packed, self._sdma_allgather)
+        for i, tid in enumerate(tensor_ids):
+            history = self.amax_history[tid]
+            if len(history) > 0:
+                history[-1] = max_amaxes[i]
+
+    def register_fp8_optimizer_hook(
+        self,
+        optimizer: torch.optim.Optimizer,
+    ) -> "ScalingManager":
+        """Register a post-step hook that marks FP8 params stale.
+
+        The next forward pass will lazily re-quantize from the updated
+        master weights — no explicit call needed in the training loop.
+        """
+
+        def _post_step(_opt, _args, _kwargs):
+            self.mark_fp8_params_stale()
+
+        optimizer.register_step_post_hook(_post_step)
+        logger.info("ScalingManager: registered FP8 optimizer post-step hook")
+        return self
+
+    def enable_fp8_params(self, model: nn.Module) -> "ScalingManager":
+        """Scan *model* for quantized layers and register their weights.
+
+        Looks for modules with ``_quant_tensor_id`` (set during
+        ``quant.enable()`` patching) and registers their ``.weight``
+        parameters for FP8 lifecycle management.
+        """
+        count = 0
+        for _name, module in model.named_modules():
+            tensor_id = getattr(module, "_quant_tensor_id", None)
+            if tensor_id is not None and hasattr(module, "weight"):
+                self.register_fp8_param(tensor_id, module.weight)
+                count += 1
+        if count > 0:
+            self.quantize_fp8_params()
+            logger.info(
+                "ScalingManager: FP8 param mode enabled (%d params)",
+                count,
+            )
+        return self
+
+    # ------------------------------------------------------------------
+    # Quantize core (shared by both on-the-fly and FP8 param paths)
+    # ------------------------------------------------------------------
+
+    def _quantize_core(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
+        """Core quantization logic (delegates to format-specific paths)."""
         scale = self.get_scale(tensor_id, tensor, backward=backward)
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
@@ -218,10 +394,17 @@ class ScalingManager:
         self.update_amax(tensor_id, tensor)
         return fp8_tensor, scale
 
+    # ------------------------------------------------------------------
+    # Reset
+    # ------------------------------------------------------------------
+
     def reset(self):
         """Clear all tracked state (e.g. after warmup)."""
         self.amax_history.clear()
         self.scale_cache.clear()
+        self._fp8_param_cache.clear()
+        self._fp8_param_stale.clear()
+        self._fp8_step_counter = -1
 
     # ------------------------------------------------------------------
     # Gradient quantization
@@ -469,7 +652,3 @@ class ScalingManager:
             & mask_s
         )
         return (raw - s_bias + hp_ebias).to(torch.uint32).item()
-
-
-# Backward-compat alias
-FP8ScalingManager = ScalingManager
