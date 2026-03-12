@@ -4,7 +4,7 @@ A lightweight, AMD-native quantized training framework for large language models
 
 Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication.
 
-- **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and FP4 with a unified `QuantConfig` interface
+- **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and FP4 (Not supported yet) with a unified `QuantConfig` interface
 - **[Aiter Kernels](https://github.com/ROCm/aiter)** — high-performance quantized MHA, Linear, MLA, MoE kernels
 - **[MORI](https://github.com/ROCm/mori)** — high-performance RDMA + GPU communication library for distributed training (MORI-CCL: all-gather, reduce-scatter, all-reduce; MORI-EP: MoE expert dispatch)
 
@@ -28,7 +28,7 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
   </tr>
   <tr>
     <td colspan="2" align="center">
-      FP8 E4M3 / E5M2 / MXFP8 / FP4 formats<br>
+      FP8 E4M3 / E5M2 / MXFP8 / FP4 (Not supported yet) formats<br>
       <code>QuantConfig</code> &mdash; one object for all settings
     </td>
   </tr>
