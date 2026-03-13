@@ -347,6 +347,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
     bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
     num_layers = getattr(args, "num_layers", 0)
+    use_sdma = getattr(args, "use_sdma", False)
 
     print_rank_0(
         f"> transformer_impl='Aiter Backend', fp8_format='{fmt}', \
@@ -358,7 +359,8 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         fp8_activation='{quant_act}', \
         fp8_wgrad='{fp8_wgrad}', \
         grad_quant='{grad_quant_type}', \
-        first_last_bf16='{first_last_bf16}' (start={bf16_start}, end={bf16_end})"
+        first_last_bf16='{first_last_bf16}' (start={bf16_start}, end={bf16_end}), \
+        use_sdma='{use_sdma}'"
     )
 
     config = QuantConfig(
@@ -376,6 +378,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         num_layers_at_start_in_bf16=bf16_start,
         num_layers_at_end_in_bf16=bf16_end,
         num_layers=num_layers,
+        use_sdma=use_sdma,
     )
 
     dp_group = None
@@ -614,6 +617,13 @@ def add_common_megatron_args(parser):
     safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
     safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
     safe_add_argument(lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False)
+    safe_add_argument(
+        lfp8,
+        "--use-sdma",
+        action="store_true",
+        default=False,
+        help="Use mori SDMA for amax all-reduce instead of torch.distributed.",
+    )
     safe_add_argument(lfp8, "--linear-fp8-amax-history", type=int, default=16)
     safe_add_argument(
         lfp8, "--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation."

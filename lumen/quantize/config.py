@@ -173,6 +173,10 @@ class QuantConfig:
     # the scale.  Useful for large-scale runs where per-rank amax can diverge.
     reduce_amax: bool = False
 
+    # Use mori SDMA for the amax all-reduce.  When False, falls back to
+    # ``torch.distributed.all_reduce``.
+    use_sdma: bool = False
+
     # Whether to quantize activations (input to linear layers) in addition to
     # weights.  When False, only weights are quantized — activations stay in
     # the original precision (BF16/FP16).

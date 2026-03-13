@@ -165,6 +165,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     first_last_bf16 = getattr(args, "first_last_layers_bf16", False)
     bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
     bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
+    use_sdma = getattr(args, "use_sdma", False)
 
     config = QuantConfig(
         format=QuantFormat(fmt),
@@ -180,6 +181,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         first_last_layers_bf16=first_last_bf16,
         num_layers_at_start_in_bf16=bf16_start,
         num_layers_at_end_in_bf16=bf16_end,
+        use_sdma=use_sdma,
     )
 
     if dp_group is None and config.reduce_amax and dist.is_initialized():

@@ -126,6 +126,7 @@ class ScalingManager:
         self.amax_history = defaultdict(lambda: deque(maxlen=self.config.history_len))
         self.scale_cache = {}
         self._dp_group = None
+        self._use_sdma = config.use_sdma if config else False
 
         # FP8 param lifecycle state
         self._fp8_param_ids: Set[str] = set()
@@ -266,7 +267,10 @@ class ScalingManager:
                 )
 
         if self._dp_group is not None:
-            self._reduce_fp8_amax()
+            if self._use_sdma:
+                self._reduce_fp8_amax_sdma()
+            else:
+                self._reduce_fp8_amax_dist()
 
     def get_fp8_param_cached(self, tensor_id: str, tensor: torch.Tensor):
         """Return cached FP8 weight, re-quantizing lazily if stale.
@@ -290,10 +294,8 @@ class ScalingManager:
         self._fp8_param_cache[tensor_id] = entry
         return entry
 
-    def _reduce_fp8_amax(self) -> None:
-        """All-reduce (MAX) per-param amax across DP ranks via mori SDMA."""
-        from lumen.ops.sdma import SdmaAllgather, sdma_allgather_max
-
+    def _collect_amaxes(self):
+        """Gather the latest amax values from all registered FP8 params."""
         amaxes = []
         tensor_ids = []
         for tid in self._fp8_params:
@@ -301,7 +303,20 @@ class ScalingManager:
             if history and len(history) > 0:
                 amaxes.append(history[-1])
                 tensor_ids.append(tid)
+        return amaxes, tensor_ids
 
+    def _scatter_amaxes(self, max_amaxes, tensor_ids) -> None:
+        """Write reduced amax values back into the history deques."""
+        for i, tid in enumerate(tensor_ids):
+            history = self.amax_history[tid]
+            if len(history) > 0:
+                history[-1] = max_amaxes[i]
+
+    def _reduce_fp8_amax_sdma(self) -> None:
+        """All-reduce (MAX) per-param amax across DP ranks via mori SDMA."""
+        from lumen.ops.sdma import SdmaAllgather, sdma_allgather_max
+
+        amaxes, tensor_ids = self._collect_amaxes()
         if not amaxes:
             return
 
@@ -311,15 +326,23 @@ class ScalingManager:
         if self._sdma_allgather is None:
             self._sdma_allgather = SdmaAllgather()
             logger.info(
-                "ScalingManager: created SdmaAllgather handle " "(%d amax elements)",
+                "ScalingManager: created SdmaAllgather handle (%d amax elements)",
                 packed.numel(),
             )
 
         max_amaxes = sdma_allgather_max(packed, self._sdma_allgather)
-        for i, tid in enumerate(tensor_ids):
-            history = self.amax_history[tid]
-            if len(history) > 0:
-                history[-1] = max_amaxes[i]
+        self._scatter_amaxes(max_amaxes, tensor_ids)
+
+    def _reduce_fp8_amax_dist(self) -> None:
+        """All-reduce (MAX) per-param amax across DP ranks via torch.distributed."""
+        amaxes, tensor_ids = self._collect_amaxes()
+        if not amaxes:
+            return
+
+        device = amaxes[0].device
+        packed = torch.stack([a.to(device) for a in amaxes]).contiguous()
+        torch.distributed.all_reduce(packed, op=torch.distributed.ReduceOp.MAX, group=self._dp_group)
+        self._scatter_amaxes(packed, tensor_ids)
 
     def register_fp8_optimizer_hook(
         self,
