@@ -22,12 +22,6 @@ RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
 
 ENV PYTHONPATH="/workspace/deps/megatron_lm:${PYTHONPATH:-}"
 
-# AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
-RUN git clone --recursive https://github.com/ROCm/aiter.git aiter
-RUN cd aiter && pip install -e . --force-reinstall
-
-ENV PYTHONPATH="/workspace/deps/megatron_lm:/workspace/deps/aiter:${PYTHONPATH:-}"
-
 # ---------------------------------------------------------------------------
 # Python dependencies
 # ---------------------------------------------------------------------------
@@ -35,13 +29,17 @@ COPY examples/llama31/requirements.txt /tmp/requirements.txt
 RUN pip3 install -r /tmp/requirements.txt
 
 # ---------------------------------------------------------------------------
-# Install Lumen
+# Install Lumen (includes aiter submodule)
 # ---------------------------------------------------------------------------
 WORKDIR /workspace
 COPY . /workspace/Lumen
+
+# AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
+RUN cd /workspace/Lumen/third_party/aiter && pip install -e . --force-reinstall
+
 RUN cd /workspace/Lumen && pip install -e ".[all]"
 
-ENV PYTHONPATH="/workspace/Lumen:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/Lumen:/workspace/Lumen/third_party/aiter:${PYTHONPATH:-}"
 
 # ---------------------------------------------------------------------------
 # AMD MI GPU performance tuning (from perf_env.sh)
