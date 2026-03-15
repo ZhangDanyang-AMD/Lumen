@@ -1,18 +1,18 @@
 ###############################################################################
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #
-# See LICENSE for license information.
+# Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""RMSNorm with multi-backend (ASM → CK → Triton) auto-fallback
+"""LayerNorm with multi-backend (ASM → CK → Triton) auto-fallback
 and fused quantization for all 6 scaling modes.
 
 All backends are AITER implementations — no torch.nn.functional fallbacks.
 
 Supported quantization modes (fused into norm forward where possible):
-    - ``delayed``    — fused per-tensor static quant (Triton)
+    - ``delayed``    — norm then per-tensor static quant (unfused)
     - ``dynamic``    — fused per-token dynamic quant (CK / Triton)
-    - ``blockwise``  — fused per-block group quant (Triton)
+    - ``blockwise``  — norm then blockwise quant (unfused)
     - ``per_token``  — fused per-token dynamic quant (CK / Triton)
     - ``mxfp8``      — norm then standalone MXFP8 conversion (unfused)
     - ``none``       — no quantization
@@ -20,9 +20,9 @@ Supported quantization modes (fused into norm forward where possible):
 Backward is always unquantized and handled by autograd.
 
 Provides:
-    - :func:`rmsnorm` — functional API  (autograd-aware, no quant fusion)
-    - :func:`rmsnorm_with_quant` — functional API with fused quantization
-    - :class:`LumenRMSNorm` — ``nn.Module`` API
+    - :func:`layernorm` — functional API  (autograd-aware, no quant fusion)
+    - :func:`layernorm_with_quant` — functional API with fused quantization
+    - :class:`LumenLayerNorm` — ``nn.Module`` API
 """
 
 import logging
@@ -34,54 +34,36 @@ import torch.nn as nn
 from lumen.core.grad_quant import quantize_grad_tensor
 from lumen.ops.dispatch import (
     Backend,
-    _probe_aiter_ck_rmsnorm,
-    _probe_aiter_fused_quant,
-    _probe_aiter_triton_rmsnorm,
+    _probe_aiter_ck_norm,
+    _probe_aiter_triton_norm,
     build_fallback_chain,
     try_backends,
 )
 
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------------
-# Lazy imports — each backend guarded by availability
+# Lazy imports
 # ---------------------------------------------------------------------------
 
 
-def _get_triton_rms_norm():
-    from aiter.ops.triton.normalization.rmsnorm import rms_norm
+def _get_ck_layer_norm():
+    from aiter.ops.norm import layer_norm
 
-    return rms_norm
-
-
-def _get_ck_rms_norm():
-    from aiter.ops.rmsnorm import rms_norm
-
-    return rms_norm
+    return layer_norm
 
 
-def _get_ck_rmsnorm2d_fwd_with_dynamicquant():
-    from aiter.ops.rmsnorm import rmsnorm2d_fwd_with_dynamicquant
+def _get_triton_layer_norm():
+    from aiter.ops.triton.normalization.norm import layer_norm
 
-    return rmsnorm2d_fwd_with_dynamicquant
-
-
-def _get_triton_rmsnorm2d_fwd_with_dynamicquant():
-    from aiter.ops.triton.normalization.rmsnorm import rmsnorm2d_fwd_with_dynamicquant
-
-    return rmsnorm2d_fwd_with_dynamicquant
+    return layer_norm
 
 
-def _get_fused_rms_fp8_per_tensor_static_quant():
-    from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_per_tensor_static_quant
+def _get_triton_layernorm2d_fwd_with_dynamicquant():
+    from aiter.ops.triton.normalization.norm import layernorm2d_fwd_with_dynamicquant
 
-    return fused_rms_fp8_per_tensor_static_quant
-
-
-def _get_fused_rms_fp8_group_quant():
-    from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_group_quant
-
-    return fused_rms_fp8_group_quant
+    return layernorm2d_fwd_with_dynamicquant
 
 
 def _get_triton_per_tensor_quant():
@@ -97,37 +79,33 @@ def _get_triton_per_token_quant():
 
 
 # ---------------------------------------------------------------------------
-# Unquantized RMSNorm with fallback (CK → Triton, all via AITER)
+# Unquantized LayerNorm with fallback (CK → Triton, all via AITER)
 # ---------------------------------------------------------------------------
 
 
-def _rmsnorm_ck(x_2d, weight, eps):
-    fn = _get_ck_rms_norm()
-    return fn(x_2d, weight, eps)
+def _layernorm_ck(x_2d, weight, bias, eps):
+    fn = _get_ck_layer_norm()
+    return fn(x_2d, weight, bias, eps)
 
 
-def _rmsnorm_triton(x_2d, weight, eps):
-    fn = _get_triton_rms_norm()
-    return fn(x_2d, weight, eps)
+def _layernorm_triton(x_2d, weight, bias, eps):
+    fn = _get_triton_layer_norm()
+    return fn(x_2d, weight, bias, eps)
 
 
-def _build_rmsnorm_chain():
-    candidates = {}
-    if _probe_aiter_ck_rmsnorm():
-        candidates[Backend.CK] = _rmsnorm_ck
-    if _probe_aiter_triton_rmsnorm():
-        candidates[Backend.TRITON] = _rmsnorm_triton
-    return build_fallback_chain(candidates)
+_layernorm_chain = None
 
 
-_rmsnorm_chain = None
-
-
-def _get_rmsnorm_chain():
-    global _rmsnorm_chain
-    if _rmsnorm_chain is None:
-        _rmsnorm_chain = _build_rmsnorm_chain()
-    return _rmsnorm_chain
+def _get_layernorm_chain():
+    global _layernorm_chain
+    if _layernorm_chain is None:
+        candidates = {}
+        if _probe_aiter_ck_norm():
+            candidates[Backend.CK] = _layernorm_ck
+        if _probe_aiter_triton_norm():
+            candidates[Backend.TRITON] = _layernorm_triton
+        _layernorm_chain = build_fallback_chain(candidates)
+    return _layernorm_chain
 
 
 # ---------------------------------------------------------------------------
@@ -135,34 +113,36 @@ def _get_rmsnorm_chain():
 # ---------------------------------------------------------------------------
 
 
-class _RMSNormGradQuant(torch.autograd.Function):
+class _LayerNormGradQuant(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, weight, eps, grad_quant_type):
+    def forward(ctx, x, weight, bias, eps, grad_quant_type):
         ctx.grad_quant_type = grad_quant_type
         ctx.eps = eps
-        ctx.save_for_backward(x, weight)
+        ctx.save_for_backward(x, weight, bias)
         orig_shape = x.shape
         x_2d = x.reshape(-1, x.shape[-1])
-        y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")
+        y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
         return y.reshape(orig_shape)
 
     @staticmethod
     def backward(ctx, grad_output):
-        x, weight = ctx.saved_tensors
+        x, weight, bias = ctx.saved_tensors
         gqt = ctx.grad_quant_type
 
         with torch.enable_grad():
-            x_detached = x.detach().requires_grad_(True)
-            w_detached = weight.detach().requires_grad_(True)
-            orig_shape = x_detached.shape
-            x_2d = x_detached.reshape(-1, x_detached.shape[-1])
-            y = try_backends(_get_rmsnorm_chain(), x_2d, w_detached, ctx.eps, op_name="rmsnorm")
+            x_d = x.detach().requires_grad_(True)
+            w_d = weight.detach().requires_grad_(True)
+            b_d = bias.detach().requires_grad_(True) if bias is not None else None
+            orig_shape = x_d.shape
+            x_2d = x_d.reshape(-1, x_d.shape[-1])
+            y = try_backends(_get_layernorm_chain(), x_2d, w_d, b_d, ctx.eps, op_name="layernorm")
             y = y.reshape(orig_shape)
             torch.autograd.backward(y, grad_output)
 
-        dx = quantize_grad_tensor(x_detached.grad, gqt)
-        dw = quantize_grad_tensor(w_detached.grad, gqt)
-        return dx, dw, None, None
+        dx = quantize_grad_tensor(x_d.grad, gqt)
+        dw = quantize_grad_tensor(w_d.grad, gqt)
+        db = quantize_grad_tensor(b_d.grad, gqt) if b_d is not None and b_d.grad is not None else None
+        return dx, dw, db, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -170,87 +150,83 @@ class _RMSNormGradQuant(torch.autograd.Function):
 # ---------------------------------------------------------------------------
 
 
-def rmsnorm(
+def layernorm(
     x: torch.Tensor,
     weight: torch.Tensor,
-    eps: float = 1e-6,
+    bias: Optional[torch.Tensor] = None,
+    eps: float = 1e-5,
     grad_quant_type: Optional[str] = None,
 ) -> torch.Tensor:
-    """Apply RMSNorm with automatic backend fallback (CK → Triton via AITER).
+    """Apply LayerNorm with automatic backend fallback (CK → Triton via AITER).
 
     Args:
         x: Input tensor ``(*, hidden_size)``.
         weight: Learnable scale ``(hidden_size,)``.
+        bias: Learnable bias ``(hidden_size,)`` or ``None``.
         eps: Epsilon for numerical stability.
         grad_quant_type: Gradient quantization format.
 
     Returns:
         Normalised tensor with same shape as *x*.
     """
+    if bias is None:
+        bias = torch.zeros_like(weight)
+
     if grad_quant_type is not None:
-        return _RMSNormGradQuant.apply(x, weight, eps, grad_quant_type)
+        return _LayerNormGradQuant.apply(x, weight, bias, eps, grad_quant_type)
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1])
-    y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")
+    y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
     return y.reshape(orig_shape)
 
 
 # ---------------------------------------------------------------------------
-# Fused RMSNorm + Quantization for each scaling mode
+# Fused LayerNorm + Quantization for each scaling mode
 # ---------------------------------------------------------------------------
 
 
-def rmsnorm_delayed_per_tensor(
+def layernorm_delayed_per_tensor(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     scale: torch.Tensor,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + delayed per-tensor FP8 quant (fused Triton kernel).
+    """LayerNorm + delayed per-tensor FP8 quant (unfused: norm then quant).
 
-    Uses ``fused_rms_fp8_per_tensor_static_quant`` which applies a
-    pre-computed scale (from amax history).
+    AITER has no fused LayerNorm + static per-tensor quant kernel,
+    so we run AITER norm then apply AITER per-tensor quant.
 
     Returns:
-        ``(x_fp8, scale)`` — quantized output and the scale used.
+        ``(x_fp8, scale)``
     """
-    orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-
-    if _probe_aiter_fused_quant():
-        fn = _get_fused_rms_fp8_per_tensor_static_quant()
-        out_fp8, out_bf16, _, _ = fn(
-            x_2d,
-            weight,
-            eps,
-            scale,
-            dtype_quant=fp8_dtype,
-        )
-        return out_fp8.reshape(orig_shape), scale
-    # Unfused: AITER norm then AITER per-tensor quant
-    normed = rmsnorm(x, weight, eps)
+    normed = layernorm(x, weight, bias, eps)
     normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
     fn = _get_triton_per_tensor_quant()
     out_fp8, _ = fn(normed_2d, scale=scale, quant_dtype=fp8_dtype)
-    return out_fp8.reshape(orig_shape), scale
+    return out_fp8.reshape(normed.shape), scale
 
 
-def rmsnorm_current_per_tensor(
+def layernorm_current_per_tensor(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + current per-tensor FP8 quant.
+    """LayerNorm + current per-tensor FP8 quant.
 
-    Uses per-token dynamic quant kernel, then derives per-tensor scale
-    from the per-token scales (takes max).
+    Uses per-token dynamic quant kernel and derives per-tensor scale
+    from max of per-token scales.
 
     Returns:
         ``(x_fp8, tensor_scale)``
     """
+    if bias is None:
+        bias = torch.zeros_like(weight)
+
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1]).contiguous()
     M, N = x_2d.shape
@@ -259,17 +235,10 @@ def rmsnorm_current_per_tensor(
     yscale = torch.empty(M, 1, dtype=torch.float32, device=x.device)
 
     fused = False
-    if _probe_aiter_ck_rmsnorm():
+    if _probe_aiter_triton_norm():
         try:
-            fn = _get_ck_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out_fp8, x_2d, yscale, weight, eps)
-            fused = True
-        except (RuntimeError, NotImplementedError):
-            pass
-    if not fused and _probe_aiter_triton_rmsnorm():
-        try:
-            fn = _get_triton_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out_fp8, x_2d, yscale, weight, eps)
+            fn = _get_triton_layernorm2d_fwd_with_dynamicquant()
+            fn(out_fp8, x_2d, yscale, weight, bias, eps)
             fused = True
         except (RuntimeError, NotImplementedError):
             pass
@@ -279,24 +248,28 @@ def rmsnorm_current_per_tensor(
         return out_fp8.reshape(orig_shape), tensor_scale.reshape(1)
 
     # Unfused: AITER norm then AITER per-tensor quant
-    normed = rmsnorm(x, weight, eps)
+    normed = layernorm(x, weight, bias, eps)
     normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
     fn = _get_triton_per_tensor_quant()
     out_fp8, scale = fn(normed_2d, quant_dtype=fp8_dtype)
     return out_fp8.reshape(orig_shape), scale
 
 
-def rmsnorm_per_token(
+def layernorm_per_token(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + per-token (per-row) FP8 dynamic quant (fused CK / Triton).
+    """LayerNorm + per-token (per-row) FP8 dynamic quant (fused Triton).
 
     Returns:
         ``(x_fp8, yscale)`` where yscale is ``[M, 1]``.
     """
+    if bias is None:
+        bias = torch.zeros_like(weight)
+
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1]).contiguous()
     M, N = x_2d.shape
@@ -305,85 +278,61 @@ def rmsnorm_per_token(
     yscale = torch.empty(M, 1, dtype=torch.float32, device=x.device)
 
     backends = []
-    if _probe_aiter_ck_rmsnorm():
+    if _probe_aiter_triton_norm():
 
-        def _ck(out, inp, ys, w, e):
-            fn = _get_ck_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out, inp, ys, w, e)
+        def _tri(out, inp, ys, w, b, e):
+            fn = _get_triton_layernorm2d_fwd_with_dynamicquant()
+            fn(out, inp, ys, w, b, e)
             return out, ys
 
-        backends.append((Backend.CK, lambda: _ck(out_fp8, x_2d, yscale, weight, eps)))
-    if _probe_aiter_triton_rmsnorm():
-
-        def _tri(out, inp, ys, w, e):
-            fn = _get_triton_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out, inp, ys, w, e)
-            return out, ys
-
-        backends.append((Backend.TRITON, lambda: _tri(out_fp8, x_2d, yscale, weight, eps)))
+        backends.append((Backend.TRITON, lambda: _tri(out_fp8, x_2d, yscale, weight, bias, eps)))
 
     if not backends:
         # Unfused: AITER norm then AITER per-token quant
-        normed = rmsnorm(x, weight, eps).reshape(-1, x.shape[-1]).contiguous()
+        normed = layernorm(x, weight, bias, eps).reshape(-1, x.shape[-1]).contiguous()
         fn = _get_triton_per_token_quant()
         _out, _scale = fn(normed, quant_dtype=fp8_dtype)
         return _out.reshape(orig_shape), _scale
 
-    result_fp8, result_scale = try_backends(backends, op_name="rmsnorm_per_token")
+    result_fp8, result_scale = try_backends(backends, op_name="layernorm_per_token")
     return result_fp8.reshape(orig_shape), result_scale
 
 
-def rmsnorm_blockwise(
+def layernorm_blockwise(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     block_size: int = 128,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + blockwise FP8 group quant (fused Triton kernel).
+    """LayerNorm + blockwise FP8 quant (unfused: AITER norm then blockwise quant).
 
     Returns:
         ``(x_fp8, block_scales)``
     """
-    orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-
-    if _probe_aiter_fused_quant():
-        try:
-            fn = _get_fused_rms_fp8_group_quant()
-            (out_fp8, out_scales), _, _, _ = fn(
-                x_2d,
-                weight,
-                eps,
-                group_size=block_size,
-                dtype_quant=fp8_dtype,
-            )
-            return out_fp8.reshape(orig_shape), out_scales
-        except (RuntimeError, NotImplementedError):
-            pass
-
-    # Unfused: AITER norm then AITER Triton blockwise quant
-    normed = rmsnorm(x, weight, eps)
+    normed = layernorm(x, weight, bias, eps)
     from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
 
     normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
     out_fp8, out_scales = quant_fp8_blockwise_impl(normed_2d, dtype=fp8_dtype, axis=1, block_size=block_size)
-    return out_fp8.reshape(orig_shape), out_scales
+    return out_fp8.reshape(normed.shape), out_scales
 
 
-def rmsnorm_mxfp8(
+def layernorm_mxfp8(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     block_size: int = 32,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + MXFP8 conversion (unfused: AITER norm then AITER MXFP8 quant).
+    """LayerNorm + MXFP8 conversion (unfused: AITER norm then AITER MXFP8 quant).
 
     Returns:
         ``(x_mxfp8, scales)``
     """
-    normed = rmsnorm(x, weight, eps)
+    normed = layernorm(x, weight, bias, eps)
     from lumen.ops.quantize.ops import convert_to_mxfp8
 
     return convert_to_mxfp8(
@@ -395,20 +344,21 @@ def rmsnorm_mxfp8(
 
 
 # ---------------------------------------------------------------------------
-# Unified dispatch: rmsnorm_with_quant
+# Unified dispatch: layernorm_with_quant
 # ---------------------------------------------------------------------------
 
 
-def rmsnorm_with_quant(
+def layernorm_with_quant(
     x: torch.Tensor,
     weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     eps: float,
     scaling_type: str = "none",
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
     scale: Optional[torch.Tensor] = None,
     block_size: int = 128,
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-    """Unified RMSNorm + quantization dispatch.
+    """Unified LayerNorm + quantization dispatch.
 
     Args:
         scaling_type: One of ``"delayed"``, ``"dynamic"``, ``"per_token"``,
@@ -421,19 +371,19 @@ def rmsnorm_with_quant(
         For all others: ``(quantized_tensor, scale_or_scales)``.
     """
     if scaling_type == "none":
-        return rmsnorm(x, weight, eps)
+        return layernorm(x, weight, bias, eps)
     elif scaling_type == "delayed":
         assert scale is not None, "delayed scaling requires a pre-computed scale"
-        return rmsnorm_delayed_per_tensor(x, weight, eps, scale, fp8_dtype)
+        return layernorm_delayed_per_tensor(x, weight, bias, eps, scale, fp8_dtype)
     elif scaling_type == "dynamic":
-        return rmsnorm_current_per_tensor(x, weight, eps, fp8_dtype)
+        return layernorm_current_per_tensor(x, weight, bias, eps, fp8_dtype)
     elif scaling_type == "per_token":
-        return rmsnorm_per_token(x, weight, eps, fp8_dtype)
+        return layernorm_per_token(x, weight, bias, eps, fp8_dtype)
     elif scaling_type == "blockwise":
-        return rmsnorm_blockwise(x, weight, eps, block_size, fp8_dtype)
+        return layernorm_blockwise(x, weight, bias, eps, block_size, fp8_dtype)
     elif scaling_type == "mxfp8":
         mxfp8_block = 32 if block_size > 64 else block_size
-        return rmsnorm_mxfp8(x, weight, eps, mxfp8_block, fp8_dtype)
+        return layernorm_mxfp8(x, weight, bias, eps, mxfp8_block, fp8_dtype)
     else:
         raise ValueError(f"Unknown scaling_type={scaling_type!r}")
 
@@ -443,37 +393,42 @@ def rmsnorm_with_quant(
 # ---------------------------------------------------------------------------
 
 
-class LumenRMSNorm(nn.Module):
-    """RMSNorm backed by AITER (CK → Triton).
+class LumenLayerNorm(nn.Module):
+    """LayerNorm backed by AITER (CK → Triton).
 
-    Drop-in replacement for ``torch.nn.RMSNorm``, TE ``RMSNorm``, or
-    Megatron-Core ``RMSNorm``.
+    Drop-in replacement for ``torch.nn.LayerNorm``, TE ``LayerNorm``, or
+    Megatron-Core ``FusedLayerNorm``.
 
     Args:
         hidden_size: Last dimension of the input.
         eps: Epsilon for numerical stability.
+        elementwise_affine: Whether to learn scale/bias.
         grad_quant_type: Gradient quantization format.
-
-    Example::
-
-        norm = LumenRMSNorm(4096)
-        y = norm(x)  # x: (batch, seq, 4096)
     """
 
     def __init__(
         self,
         hidden_size: int,
-        eps: float = 1e-6,
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
         grad_quant_type: Optional[str] = None,
     ):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(hidden_size))
         self.grad_quant_type = grad_quant_type
+        if elementwise_affine:
+            self.weight = nn.Parameter(torch.ones(hidden_size))
+            self.bias = nn.Parameter(torch.zeros(hidden_size))
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return rmsnorm(x, self.weight, self.eps, self.grad_quant_type)
+        w = self.weight if self.weight is not None else torch.ones(x.shape[-1], device=x.device, dtype=x.dtype)
+        b = self.bias
+        return layernorm(x, w, b, self.eps, self.grad_quant_type)
 
     def extra_repr(self) -> str:
+        sz = self.weight.shape[0] if self.weight is not None else "?"
         gq = f", grad_quant={self.grad_quant_type}" if self.grad_quant_type else ""
-        return f"{self.weight.shape[0]}, eps={self.eps}{gq}"
+        return f"{sz}, eps={self.eps}{gq}"

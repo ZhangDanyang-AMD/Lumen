@@ -92,7 +92,12 @@ def add_common_fsdp_args(parser):
     lfp8.add_argument(
         "--linear-fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"]
     )
-    lfp8.add_argument("--linear-fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"])
+    lfp8.add_argument(
+        "--linear-fp8-scaling",
+        type=str,
+        default="delayed",
+        choices=["dynamic", "delayed", "blockwise", "per_token", "none"],
+    )
     lfp8.add_argument("--linear-fp8-block-size", type=int, default=128)
     lfp8.add_argument("--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
     lfp8.add_argument("--linear-fp8-reduce-amax", action="store_true", default=False)
@@ -123,6 +128,15 @@ def add_common_fsdp_args(parser):
     lfp8.add_argument("--num-layers-at-start-in-bf16", type=int, default=1)
     lfp8.add_argument("--num-layers-at-end-in-bf16", type=int, default=1)
 
+    # -- Norm replacement --
+    norm = parser.add_argument_group("norm")
+    norm.add_argument(
+        "--tl-norm",
+        action="store_true",
+        default=False,
+        help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
+    )
+
     # -- Warmup + Early stopping --
     wes = parser.add_argument_group("warmup-early-stop")
     wes.add_argument("--warmup-steps", type=int, default=0)
@@ -134,6 +148,42 @@ def add_common_fsdp_args(parser):
 # ---------------------------------------------------------------------------
 # FP8 quantised training
 # ---------------------------------------------------------------------------
+
+
+def patch_norms(model: nn.Module, args) -> None:
+    """Replace norm modules in the model with Lumen implementations.
+
+    Works for both HuggingFace and other FSDP-compatible models.
+    """
+    if not getattr(args, "tl_norm", False):
+        return
+
+    from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
+
+    grad_quant_type = getattr(args, "grad_quant_type", None)
+    count = 0
+    for name, module in model.named_modules():
+        for attr_name, child in list(module.named_children()):
+            cls_name = type(child).__name__
+            if cls_name in ("RMSNorm", "LlamaRMSNorm", "MistralRMSNorm", "Qwen2RMSNorm"):
+                hidden_size = child.weight.shape[0]
+                eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
+                replacement = LumenRMSNorm(hidden_size, eps=eps, grad_quant_type=grad_quant_type)
+                replacement.weight.data.copy_(child.weight.data)
+                setattr(module, attr_name, replacement)
+                count += 1
+            elif cls_name in ("LayerNorm",):
+                hidden_size = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
+                eps = getattr(child, "eps", 1e-5)
+                replacement = LumenLayerNorm(hidden_size, eps=eps, grad_quant_type=grad_quant_type)
+                if child.weight is not None:
+                    replacement.weight.data.copy_(child.weight.data)
+                if hasattr(child, "bias") and child.bias is not None and replacement.bias is not None:
+                    replacement.bias.data.copy_(child.bias.data)
+                setattr(module, attr_name, replacement)
+                count += 1
+
+    _rank0_print(f"> Replaced {count} norm modules with Lumen implementations")
 
 
 def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
@@ -186,6 +236,9 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
 
     if dp_group is None and config.reduce_amax and dist.is_initialized():
         dp_group = dist.group.WORLD
+
+    # Patch norms before enabling quant
+    patch_norms(model, args)
 
     quant.enable(
         model,

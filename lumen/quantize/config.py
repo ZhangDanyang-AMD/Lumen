@@ -84,9 +84,11 @@ class QuantFormat(Enum):
 class ScalingType(Enum):
     """How scaling factors are computed."""
 
-    DYNAMIC = "dynamic"  # Scale from current tensor amax
-    DELAYED = "delayed"  # Scale from amax history (TE-style)
+    DYNAMIC = "dynamic"  # Scale from current tensor amax (= current per-tensor)
+    DELAYED = "delayed"  # Scale from amax history (TE-style delayed per-tensor)
     BLOCKWISE = "blockwise"  # Per-block scaling (e.g. per-128 elements)
+    PER_TOKEN = "per_token"  # Per-row (per-token) dynamic scaling
+    NONE = "none"  # No quantization (BF16 passthrough)
 
 
 class AmaxAlgo(Enum):
@@ -212,10 +214,19 @@ class QuantConfig:
         Args:
             format: One of ``"fp8_e4m3"``, ``"fp8_e5m2"``, ``"hybrid"``,
                 ``"mxfp8"``, ``"fp4"``.
-            scaling: One of ``"dynamic"``, ``"delayed"``, ``"blockwise"``.
+            scaling: One of ``"dynamic"``, ``"delayed"``, ``"blockwise"``,
+                ``"per_token"``, ``"none"``.
             **kwargs: Forwarded to :class:`QuantConfig`.  String values for
                 enum fields (``amax_algo``) are auto-converted.
         """
+        # Aliases for user convenience
+        _scaling_aliases = {
+            "current": "dynamic",
+            "current_per_tensor": "dynamic",
+            "delayed_per_tensor": "delayed",
+            "no_quant": "none",
+        }
+        scaling = _scaling_aliases.get(scaling, scaling)
         if "amax_algo" in kwargs and isinstance(kwargs["amax_algo"], str):
             kwargs["amax_algo"] = AmaxAlgo(kwargs["amax_algo"])
         return cls(
@@ -245,8 +256,15 @@ class QuantConfig:
         return get_fp8_max_bwd(self.format)
 
     @property
+    def is_quantized(self) -> bool:
+        """Return True if this config actually applies quantization."""
+        return self.scaling != ScalingType.NONE
+
+    @property
     def recipe(self) -> str:
         """Legacy recipe string expected by ScalingManager."""
+        if self.scaling == ScalingType.NONE:
+            return "none"
         if self.format == QuantFormat.MXFP8:
             return "mxfp8"
         return self.scaling.value

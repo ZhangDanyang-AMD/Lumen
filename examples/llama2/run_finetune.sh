@@ -126,6 +126,7 @@ run_megatron() {
 
     TL_RMSNORM_ARGS=""
     [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
+    [ "${TL_NORM:-0}" -eq 1 ] && TL_RMSNORM_ARGS="${TL_RMSNORM_ARGS} --tl-norm"
 
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
@@ -245,6 +246,8 @@ run_fsdp() {
             CMD+=" --num-layers-at-end-in-bf16 ${BF16_LAYERS_END:-1}"
         fi
     fi
+
+    [ "${TL_NORM:-0}" -eq 1 ] && CMD+=" --tl-norm"
 
     [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"
     [ -n "${VAL_LOSS_TARGET}" ] && CMD+=" --val-loss-target ${VAL_LOSS_TARGET}"

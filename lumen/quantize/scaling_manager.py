@@ -159,9 +159,12 @@ class ScalingManager:
         return scale
 
     def get_scale(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
-        """Return the scale factor for this tensor (None for block/mxfp8)."""
+        """Return the scale factor for this tensor (None for block/mxfp8/per_token/none)."""
         recipe = self.recipe
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
+
+        if recipe == "none":
+            return None
 
         if recipe == "delayed":
             history = self.amax_history[tensor_id]
@@ -189,7 +192,7 @@ class ScalingManager:
                     group=self._dp_group,
                 )
             return self._compute_scale(amax, fp8_max)
-        elif recipe in ("blockwise", "mxfp8"):
+        elif recipe in ("blockwise", "mxfp8", "per_token"):
             return None
 
     def update_amax(self, tensor_id: str, tensor: torch.Tensor):
@@ -388,6 +391,9 @@ class ScalingManager:
 
     def _quantize_core(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Core quantization logic (delegates to format-specific paths)."""
+        if self.config.scaling == ScalingType.NONE:
+            return tensor, None
+
         scale = self.get_scale(tensor_id, tensor, backward=backward)
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
@@ -412,6 +418,14 @@ class ScalingManager:
                 block_size=self.config.block_size,
             )
             return fp8_tensor.view(orig_shape), fp8_scales
+
+        if scale is None and self.config.scaling == ScalingType.PER_TOKEN:
+            orig_shape = tensor.shape
+            flat = tensor.reshape(-1, orig_shape[-1])
+            row_max = flat.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+            row_scale = row_max / fp8_max
+            fp8_tensor = (flat / row_scale).clamp(-fp8_max, fp8_max).to(dtype)
+            return fp8_tensor.view(orig_shape), row_scale
 
         fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
         self.update_amax(tensor_id, tensor)

@@ -25,34 +25,36 @@ import torch
 
 
 def _install_fused_layer_norm_patch():
-    """Patch FusedLayerNorm to support RMSNorm before any Megatron module
-    imports it.  Must run before GPTModel/TransformerBlock import."""
+    """Patch FusedLayerNorm to support both RMSNorm and LayerNorm before
+    any Megatron module imports it.  Must run before GPTModel/TransformerBlock import."""
     from megatron.core.fusions import fused_layer_norm as _fln_mod
 
-    from lumen.ops.normalization import LumenRMSNorm
+    from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
-    _OriginalFusedLayerNorm = _fln_mod.FusedLayerNorm
-
-    class _FusedLayerNormRMSNormCompat(torch.nn.Module):
-        """Dispatches to our RMSNorm impl when config.normalization=='RMSNorm'."""
+    class _FusedLayerNormCompat(torch.nn.Module):
+        """Dispatches to Lumen's RMSNorm or LayerNorm based on config."""
 
         def __new__(cls, config, hidden_size, eps=1e-6, **kwargs):
-            if getattr(config, "normalization", "") == "RMSNorm":
+            norm_type = getattr(config, "normalization", "LayerNorm")
+            if norm_type == "RMSNorm":
                 return object.__new__(cls)
-            return _OriginalFusedLayerNorm(config, hidden_size, eps, **kwargs)
+            # Use Lumen LayerNorm for standard LayerNorm too
+            return object.__new__(cls)
 
         def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
-            if getattr(config, "normalization", "") != "RMSNorm":
-                return
             super().__init__()
-            self._norm = LumenRMSNorm(hidden_size, eps=eps)
+            norm_type = getattr(config, "normalization", "LayerNorm")
+            if norm_type == "RMSNorm":
+                self._norm = LumenRMSNorm(hidden_size, eps=eps)
+            else:
+                self._norm = LumenLayerNorm(hidden_size, eps=eps)
             self.weight = self._norm.weight
 
         def forward(self, x):
             return self._norm(x)
 
-    _FusedLayerNormRMSNormCompat.__name__ = "FusedLayerNorm"
-    _fln_mod.FusedLayerNorm = _FusedLayerNormRMSNormCompat
+    _FusedLayerNormCompat.__name__ = "FusedLayerNorm"
+    _fln_mod.FusedLayerNorm = _FusedLayerNormCompat
 
 
 _install_fused_layer_norm_patch()
@@ -117,6 +119,41 @@ class _MegatronCompatibleTLRMSNorm(torch.nn.Module):
         return self._norm(x)
 
 
+class _MegatronCompatibleTLLayerNorm(torch.nn.Module):
+    """Wrapper that adapts :class:`LumenLayerNorm` to the Megatron-Core
+    norm construction signature ``(config, hidden_size, eps=...)``."""
+
+    def __init__(self, config, hidden_size, eps=1e-5, **kwargs):
+        super().__init__()
+        from lumen.ops.normalization import LumenLayerNorm
+
+        self._norm = LumenLayerNorm(hidden_size, eps=eps)
+        self.weight = self._norm.weight
+
+    def forward(self, x):
+        return self._norm(x)
+
+
+class _MegatronCompatibleTLNorm(torch.nn.Module):
+    """Auto-detect norm type from Megatron config and dispatch."""
+
+    def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
+        super().__init__()
+        norm_type = getattr(config, "normalization", "LayerNorm")
+        if norm_type == "RMSNorm":
+            from lumen.ops.normalization import LumenRMSNorm
+
+            self._norm = LumenRMSNorm(hidden_size, eps=eps)
+        else:
+            from lumen.ops.normalization import LumenLayerNorm
+
+            self._norm = LumenLayerNorm(hidden_size, eps=eps)
+        self.weight = self._norm.weight
+
+    def forward(self, x):
+        return self._norm(x)
+
+
 _NORM_ATTRS = (
     "input_layernorm",
     "pre_mlp_layernorm",
@@ -126,32 +163,35 @@ _NORM_ATTRS = (
 )
 
 
-def _patch_norms_in_spec(spec):
-    """Replace **all** norm classes in a spec tree with
-    :class:`_MegatronCompatibleTLRMSNorm` so that ``WrappedTorchNorm``
-    and ``FusedLayerNorm`` (which reject SP / persist_layer_norm /
-    RMSNorm) are never instantiated.
+def _patch_norms_in_spec(spec, norm_cls=None):
+    """Replace **all** norm classes in a spec tree with Lumen norm modules.
+
+    When *norm_cls* is ``None``, uses :class:`_MegatronCompatibleTLNorm`
+    which auto-detects RMSNorm vs LayerNorm from the Megatron config.
 
     Handles both:
     - Block-level specs (``TransformerBlockSubmodules`` with
       ``layer_specs`` and ``final_layernorm``)
     - Layer-level specs (``ModuleSpec`` with ``submodules``)
     """
+    if norm_cls is None:
+        norm_cls = _MegatronCompatibleTLNorm
+
     for attr in _NORM_ATTRS:
         if getattr(spec, attr, None) is not None:
-            setattr(spec, attr, _MegatronCompatibleTLRMSNorm)
+            setattr(spec, attr, norm_cls)
 
     if hasattr(spec, "submodules") and spec.submodules is not None:
         for attr in _NORM_ATTRS:
             if getattr(spec.submodules, attr, None) is not None:
-                setattr(spec.submodules, attr, _MegatronCompatibleTLRMSNorm)
+                setattr(spec.submodules, attr, norm_cls)
 
     layer_specs = getattr(spec, "layer_specs", None)
     if layer_specs is None and hasattr(spec, "submodules"):
         layer_specs = getattr(spec.submodules, "layer_specs", None)
     if layer_specs:
         for layer_spec in layer_specs:
-            _patch_norms_in_spec(layer_spec)
+            _patch_norms_in_spec(layer_spec, norm_cls)
 
 
 def _patch_rmsnorm(model, grad_quant_type=None):
@@ -163,7 +203,13 @@ def _patch_rmsnorm(model, grad_quant_type=None):
     for name, module in model.named_modules():
         for attr_name, child in list(module.named_children()):
             cls_name = type(child).__name__
-            if cls_name in ("RMSNorm", "MegatronRMSNorm", "TENorm", "_MegatronCompatibleTLRMSNorm"):
+            if cls_name in (
+                "RMSNorm",
+                "MegatronRMSNorm",
+                "TENorm",
+                "_MegatronCompatibleTLRMSNorm",
+                "_MegatronCompatibleTLNorm",
+            ):
                 hidden_size = child.weight.shape[0]
                 eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
                 replacement = LumenRMSNorm(
@@ -176,6 +222,46 @@ def _patch_rmsnorm(model, grad_quant_type=None):
                 count += 1
 
     print_rank_0(f"> Replaced {count} RMSNorm modules with LumenRMSNorm")
+
+
+def _patch_layernorm(model, grad_quant_type=None):
+    """Replace all Megatron-Core LayerNorm modules with Lumen's
+    :class:`LumenLayerNorm`."""
+    from lumen.ops.normalization import LumenLayerNorm
+
+    count = 0
+    for name, module in model.named_modules():
+        for attr_name, child in list(module.named_children()):
+            cls_name = type(child).__name__
+            if cls_name in (
+                "LayerNorm",
+                "FusedLayerNorm",
+                "WrappedTorchNorm",
+                "_MegatronCompatibleTLLayerNorm",
+                "_MegatronCompatibleTLNorm",
+            ):
+                hidden_size = child.weight.shape[0]
+                eps = getattr(child, "eps", getattr(child, "epsilon", 1e-5))
+                replacement = LumenLayerNorm(
+                    hidden_size,
+                    eps=eps,
+                    grad_quant_type=grad_quant_type,
+                )
+                replacement.weight.data.copy_(child.weight.data)
+                if hasattr(child, "bias") and child.bias is not None and replacement.bias is not None:
+                    replacement.bias.data.copy_(child.bias.data)
+                setattr(module, attr_name, replacement)
+                count += 1
+
+    print_rank_0(f"> Replaced {count} LayerNorm modules with LumenLayerNorm")
+
+
+def _patch_all_norms(model, normalization="RMSNorm", grad_quant_type=None):
+    """Replace all norm modules with the appropriate Lumen implementation."""
+    if normalization == "RMSNorm":
+        _patch_rmsnorm(model, grad_quant_type)
+    else:
+        _patch_layernorm(model, grad_quant_type)
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +360,11 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
         vp_stage=vp_stage,
     )
 
-    if getattr(args, "tl_rmsnorm", False):
-        _patch_rmsnorm(model, getattr(args, "grad_quant_type", None))
+    grad_quant_type = getattr(args, "grad_quant_type", None)
+    normalization = getattr(args, "normalization", "RMSNorm")
+
+    if getattr(args, "tl_rmsnorm", False) or getattr(args, "tl_norm", False):
+        _patch_all_norms(model, normalization, grad_quant_type)
 
     return model
 
@@ -581,6 +670,13 @@ def add_common_megatron_args(parser):
         default=False,
         help="Replace RMSNorm with Lumen Triton-accelerated RMSNorm.",
     )
+    safe_add_argument(
+        lumen,
+        "--tl-norm",
+        action="store_true",
+        default=False,
+        help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
+    )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
     safe_add_argument(mxfp8, "--mxfp8-block-m-fwd", type=int, default=128)
@@ -612,7 +708,11 @@ def add_common_megatron_args(parser):
         help="Enable FP8 quantised training for Linear layers.",
     )
     safe_add_argument(
-        lfp8, "--linear-fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"]
+        lfp8,
+        "--linear-fp8-scaling",
+        type=str,
+        default="delayed",
+        choices=["dynamic", "delayed", "blockwise", "per_token", "none"],
     )
     safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
     safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])

@@ -90,6 +90,7 @@ export TL_ATTN_BACKEND="aiter_triton_fp8"
 export TRANSFORMER_LIGHT_ATTN_BACKEND="triton"
 export TL_FP8_QUANT="mxfp8"
 export TL_RMSNORM=0
+export TL_NORM=0
 
 # MXFP8 attention block sizes
 export MXFP8_BLOCK_M_FWD=128

@@ -4,6 +4,14 @@
 # See LICENSE for license information.
 ###############################################################################
 
-from .rmsnorm import LumenRMSNorm, rmsnorm
+from .layernorm import LumenLayerNorm, layernorm, layernorm_with_quant
+from .rmsnorm import LumenRMSNorm, rmsnorm, rmsnorm_with_quant
 
-__all__ = ["LumenRMSNorm", "rmsnorm"]
+__all__ = [
+    "LumenRMSNorm",
+    "rmsnorm",
+    "rmsnorm_with_quant",
+    "LumenLayerNorm",
+    "layernorm",
+    "layernorm_with_quant",
+]

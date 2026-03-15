@@ -284,6 +284,7 @@ def _patch_linear_layers(
     block_size = config.block_size
     quant_act = config.quantize_activation
     fp8_wgrad = config.fp8_wgrad
+    scaling_type = config.scaling.value
 
     megatron_types = _get_megatron_linear_types()
     quantizable_types = (nn.Linear,) + megatron_types
@@ -303,10 +304,20 @@ def _patch_linear_layers(
             module._quant_backend = backend
             module._quant_enabled = True
             module._quant_tensor_id = tensor_id
+            module._quant_scaling_type = scaling_type
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
             _replace_forward(
-                module, manager, backend, fp8_dtype, block_size, tensor_id, quant_act, fp8_wgrad, is_megatron
+                module,
+                manager,
+                backend,
+                fp8_dtype,
+                block_size,
+                tensor_id,
+                quant_act,
+                fp8_wgrad,
+                is_megatron,
+                scaling_type,
             )
             count += 1
 
@@ -328,7 +339,16 @@ def _patch_linear_layers(
 
 
 def _replace_forward(
-    module, manager, backend, fp8_dtype, block_size, tensor_id, quantize_activation, fp8_wgrad, is_megatron
+    module,
+    manager,
+    backend,
+    fp8_dtype,
+    block_size,
+    tensor_id,
+    quantize_activation,
+    fp8_wgrad,
+    is_megatron,
+    scaling_type="delayed",
 ):
     """Replace the module's forward method with an FP8-quantized version.
 
@@ -347,6 +367,7 @@ def _replace_forward(
                 module.bias,
                 scaling_manager=manager,
                 backend=backend,
+                scaling_type=scaling_type,
                 fp8_dtype=fp8_dtype,
                 block_size=block_size,
                 tensor_id=tensor_id,
@@ -361,9 +382,6 @@ def _replace_forward(
             bias = getattr(module, "bias", None)
             bias_for_gemm = None if skip_bias_add else bias
 
-            # ColumnParallelLinear with sequence parallelism: all-gather
-            # the input along the sequence dimension before the GEMM so
-            # the output has full sequence length (required for RoPE, etc.).
             is_row_parallel = getattr(module, "input_is_parallel", False)
             seq_parallel = getattr(module, "sequence_parallel", False)
             tp_group = getattr(module, "tp_group", None)
@@ -385,6 +403,7 @@ def _replace_forward(
                 bias_for_gemm,
                 scaling_manager=manager,
                 backend=backend,
+                scaling_type=scaling_type,
                 fp8_dtype=fp8_dtype,
                 block_size=block_size,
                 tensor_id=tensor_id,
@@ -392,9 +411,6 @@ def _replace_forward(
                 fp8_wgrad=fp8_wgrad,
             )
 
-            # RowParallelLinear: reduce across TP ranks.  With sequence
-            # parallelism use reduce-scatter (output splits along seq dim);
-            # without SP use a plain all-reduce.
             if is_row_parallel and seq_parallel:
                 from megatron.core.tensor_parallel.mappings import (
                     reduce_scatter_to_sequence_parallel_region,
@@ -423,8 +439,6 @@ def _replace_forward(
                 except ImportError:
                     pass
 
-            # Megatron's ColumnParallelLinear/RowParallelLinear always return
-            # a (output, output_bias) tuple regardless of skip_bias_add.
             output_bias = bias if skip_bias_add else None
             return result, output_bias
 

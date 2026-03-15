@@ -96,6 +96,7 @@ export TL_ATTN_BACKEND="aiter_triton_fp8"
 export TL_FP8_QUANT="mxfp8"
 # Use Lumen Triton-accelerated RMSNorm (0 = native Megatron norm)
 export TL_RMSNORM=0
+export TL_NORM=0
 
 # ---- Megatron backend --------------------------------------------------------
 export TP=1
