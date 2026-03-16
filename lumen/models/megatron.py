@@ -303,6 +303,61 @@ def _override_te_args_for_lumen(args):
     for attr, value in _TE_FORCE_OVERRIDES.items():
         setattr(args, attr, value)
 
+    if getattr(args, "tl_cross_entropy", False):
+        _patch_cross_entropy()
+
+
+_cross_entropy_patched = False
+
+
+def _patch_cross_entropy():
+    """Monkey-patch Megatron's cross-entropy so the GPTModel loss computation
+    goes through Lumen's Triton kernel.
+
+    ``LanguageModule.compute_language_model_loss`` dispatches through
+    ``te_parallel_cross_entropy`` when ``cross_entropy_loss_fusion`` is
+    enabled.  We replace that symbol with ``lumen_parallel_cross_entropy``
+    (same signature) and also wrap it as ``vocab_parallel_cross_entropy``
+    for the non-fusion fallback path.
+    """
+    global _cross_entropy_patched
+    if _cross_entropy_patched:
+        return
+
+    from lumen.modules.cross_entropy import lumen_parallel_cross_entropy
+
+    try:
+        import megatron.core.models.common.language_module.language_module as _lm_mod
+
+        _lm_mod.te_parallel_cross_entropy = lumen_parallel_cross_entropy
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import megatron.core.extensions.transformer_engine as _te_ext
+
+        _te_ext.te_parallel_cross_entropy = lumen_parallel_cross_entropy
+    except (ImportError, AttributeError):
+        pass
+
+    def _vocab_parallel_ce_adapter(logits, labels, label_smoothing=0.0):
+        from megatron.core import parallel_state
+
+        tp_group = parallel_state.get_tensor_model_parallel_group()
+        return lumen_parallel_cross_entropy(logits, labels, tp_group)
+
+    try:
+        import megatron.core.tensor_parallel as _tp_mod
+        import megatron.core.tensor_parallel.cross_entropy as _ce_mod
+
+        _tp_mod.vocab_parallel_cross_entropy = _vocab_parallel_ce_adapter
+        _ce_mod.vocab_parallel_cross_entropy = _vocab_parallel_ce_adapter
+    except (ImportError, AttributeError):
+        pass
+
+    _cross_entropy_patched = True
+    print_rank_0("> Patched cross-entropy with Lumen Triton kernel")
+
 
 # ---------------------------------------------------------------------------
 # Custom GPT builder that injects Lumen attention
@@ -811,7 +866,7 @@ def add_common_megatron_args(parser):
         "--tl-cross-entropy",
         action="store_true",
         default=False,
-        help="Use Lumen's Triton parallel cross-entropy.",
+        help="Compute loss using Lumen's Triton parallel cross-entropy kernel.",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
