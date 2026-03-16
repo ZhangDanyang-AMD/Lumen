@@ -44,6 +44,7 @@ from megatron.training.utils import (
 from lumen.models.llama31.dataset import PretrainTextDataset
 
 # Re-export shared symbols so existing callers are not broken.
+from lumen.models.megatron import enable_fp8_for_parallel_linear  # noqa: F401
 from lumen.models.megatron import (  # noqa: F401
     add_common_megatron_args,
     apply_fp8_training,
@@ -220,9 +221,9 @@ def add_pretrain_args(parser):
         parser,
         "--tl-fp8-quant-type",
         type=str,
-        default="mxfp8",
-        choices=["fp8_blockwise", "mxfp8"],
-        help="FP8 quantisation type for triton_fp8 backend.",
+        default="blockwise",
+        choices=["dynamic", "delayed", "blockwise", "per_token", "none", "mxfp8"],
+        help="FP8 quantisation type for FP8 attention backends.",
     )
     safe_add_argument(parser, "--linear-fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
     safe_add_argument(parser, "--linear-fp8-amax-history", type=int, default=4)

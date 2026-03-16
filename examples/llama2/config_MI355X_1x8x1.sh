@@ -71,24 +71,26 @@ export CKPT_DIR="/model"
 export LORA_A2A=0
 
 # Lumen
-# AITER's asm-v3 flash-attention kernel (fmha_v3_fwd) does not currently
-# contain compiled variants for every GQA configuration on gfx950 (MI355X).
-# For LLaMA2-70B with TP=8 the per-partition head ratio is 8Q:1KV, which
-# triggers "invalid argument for fmha_fwd" from aiter::mha_fwd returning -1.
-# Use the Triton FP8-blockwise backend; it supports all GQA ratios on gfx950.
 # TL_ATTN_BACKEND options:
 #   aiter_csrc          – CK/C++ flash-attention (fastest on MI300X)
 #   aiter_triton        – Triton flash-attention (no attention quantization)
-#   aiter_triton_fp8    – Triton FP8-quantized attention; quant type set by TL_FP8_QUANT:
-#                           fp8_blockwise  – per-block FP8 scaling (works on all MI-series)
-#                           mxfp8          – microscaling FP8 (gfx950 / MI355X only)
+#   aiter_triton_fp8    – Triton FP8-quantized attention
 #   aiter_csrc_fp8      – CK/C++ FP8 attention (forward-only, inference)
-export TL_ATTN_BACKEND="aiter_triton_fp8"
+#   aiter_asm_fp8       – ASM FP8 attention with fallback: asm -> csrc -> triton
+#
+# TL_FP8_QUANT options (used when backend is *_fp8):
+#   blockwise   – per-block FP8 scaling (works on all MI-series)
+#   dynamic     – per-tensor dynamic FP8 scaling
+#   delayed     – delayed FP8 scaling (uses amax history)
+#   per_token   – per-token FP8 quantization
+#   none        – no FP8 quantization (fall back to bf16 attention)
+#   mxfp8       – microscaling FP8 (legacy, gfx950 / MI355X only)
+export TL_ATTN_BACKEND="aiter_asm_fp8"
 # TRANSFORMER_LIGHT_ATTN_BACKEND controls attention_impl.py's module-load-time
 # csrc probe (_probe_aiter_csrc). Keep as "triton" whenever TL_ATTN_BACKEND is
 # any triton-family value to prevent aiter csrc kernels from being probed.
 export TRANSFORMER_LIGHT_ATTN_BACKEND="triton"
-export TL_FP8_QUANT="mxfp8"
+export TL_FP8_QUANT="blockwise"
 export TL_RMSNORM=0
 export TL_NORM=0
 

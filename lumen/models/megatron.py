@@ -69,6 +69,7 @@ from lumen.models.utils import safe_add_argument
 from lumen.modules.attention_megatron import (
     LumenDotProductAttention,
 )
+from lumen.modules.attention_mla import LumenDotProductAttentionMLA
 
 logger = logging.getLogger(__name__)
 
@@ -312,14 +313,23 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     """Build a GPTModel with Lumen attention replacing the default
     DotProductAttention in every layer.
 
-    Always uses the Megatron-Core local spec (no Transformer Engine dependency).
-    The core_attention submodule is patched to LumenDotProductAttention.
-    When ``--tl-rmsnorm`` is set, RMSNorm modules are also replaced with the
-    Triton-accelerated :class:`LumenRMSNorm`.
+    When ``--tl-linear`` is set, uses the Lumen spec provider for all
+    linear, norm, and attention modules.  Otherwise, uses the Megatron-Core
+    local spec and patches attention/norms post-hoc.
 
     Args:
         model_name: Label used in the startup log message (e.g. ``"LLaMA 3.1"``).
     """
+    if getattr(args, "tl_linear", False):
+        return lumen_gpt_builder_with_spec(
+            args,
+            pre_process,
+            post_process,
+            vp_stage=vp_stage,
+            config=config,
+            model_name=model_name,
+        )
+
     print_rank_0(f"building {model_name} model with Lumen attention ...")
 
     _override_te_args_for_lumen(args)
@@ -367,6 +377,117 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
         _patch_all_norms(model, normalization, grad_quant_type)
 
     return model
+
+
+def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, config=None, model_name="GPT"):
+    """Build a GPTModel using the Lumen spec provider.
+
+    Instead of patching individual modules post-hoc, this builder uses
+    :class:`~lumen.models.spec_provider.LumenSpecProvider` to produce a
+    layer spec where *all* linear, norm, and attention modules are Lumen
+    classes from the start.  This is the recommended path for full Lumen
+    integration including FP8 parallel linear layers.
+    """
+    from megatron.core.models.gpt.gpt_layer_specs import (
+        get_gpt_layer_with_transformer_engine_spec,
+    )
+
+    from lumen.models.spec_provider import LumenSpecProvider
+
+    print_rank_0(f"building {model_name} model with Lumen spec provider ...")
+
+    _override_te_args_for_lumen(args)
+
+    if config is None:
+        args.apply_rope_fusion = False
+        config = core_transformer_config_from_args(args)
+        config.persist_layer_norm = False
+        config.bias_swiglu_fusion = False
+
+    # Monkey-patch the TE spec provider lookup so get_gpt_layer_with_transformer_engine_spec
+    # picks up Lumen modules without modifying Megatron source.
+    import megatron.core.models.gpt.gpt_layer_specs as _gls
+
+    _orig_te_spec = getattr(_gls, "TESpecProvider", None)
+    _gls.TESpecProvider = LumenSpecProvider
+    _gls.HAVE_TE = True
+
+    try:
+        transformer_layer_spec = get_gpt_layer_with_transformer_engine_spec(
+            num_experts=getattr(args, "num_experts", None),
+            moe_grouped_gemm=getattr(args, "moe_grouped_gemm", False),
+            qk_layernorm=getattr(args, "qk_layernorm", False),
+            multi_latent_attention=getattr(args, "multi_latent_attention", False),
+            moe_use_legacy_grouped_gemm=getattr(args, "moe_use_legacy_grouped_gemm", False),
+            use_kitchen=getattr(config, "use_kitchen", False),
+        )
+    finally:
+        if _orig_te_spec is not None:
+            _gls.TESpecProvider = _orig_te_spec
+
+    # Patch MLA attention if needed
+    if getattr(args, "multi_latent_attention", False):
+        _patch_mla_attention(transformer_layer_spec)
+
+    model = GPTModel(
+        config=config,
+        transformer_layer_spec=transformer_layer_spec,
+        vocab_size=args.padded_vocab_size,
+        max_sequence_length=args.max_position_embeddings,
+        pre_process=pre_process,
+        post_process=post_process,
+        fp16_lm_cross_entropy=args.fp16_lm_cross_entropy,
+        parallel_output=True,
+        share_embeddings_and_output_weights=not args.untie_embeddings_and_output_weights,
+        position_embedding_type=args.position_embedding_type,
+        rotary_percent=args.rotary_percent,
+        rotary_base=args.rotary_base,
+        rope_scaling=args.use_rope_scaling,
+        vp_stage=vp_stage,
+    )
+
+    return model
+
+
+def _patch_mla_attention(spec):
+    """Replace core_attention with LumenDotProductAttentionMLA in MLA specs."""
+    from megatron.core.transformer.spec_utils import ModuleSpec
+
+    if hasattr(spec, "submodules") and spec.submodules is not None:
+        subs = spec.submodules
+        if hasattr(subs, "self_attention") and subs.self_attention is not None:
+            sa = subs.self_attention
+            if hasattr(sa, "submodules") and sa.submodules is not None:
+                sa_subs = sa.submodules
+                if hasattr(sa_subs, "core_attention"):
+                    sa_subs.core_attention = ModuleSpec(module=LumenDotProductAttentionMLA)
+        if hasattr(subs, "layer_specs"):
+            for layer_spec in subs.layer_specs:
+                _patch_mla_attention(layer_spec)
+
+
+def enable_fp8_for_parallel_linear(
+    model, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None
+):
+    """Enable FP8 GEMM on all Lumen parallel linear modules in the model."""
+    from lumen.modules.grouped_linear import LumenGroupedLinear
+    from lumen.modules.layernorm_linear import LumenLayerNormLinear
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+
+    count = 0
+    for module in model.modules():
+        if isinstance(
+            module, (LumenColumnParallelLinear, LumenRowParallelLinear, LumenLayerNormLinear, LumenGroupedLinear)
+        ):
+            module.enable_fp8(
+                scaling_manager=scaling_manager,
+                scaling_type=scaling_type,
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+            )
+            count += 1
+    if count > 0:
+        print_rank_0(f"> Enabled FP8 (scaling={scaling_type}) on {count} Lumen parallel linear modules")
 
 
 # ---------------------------------------------------------------------------
@@ -652,16 +773,16 @@ def add_common_megatron_args(parser):
         "--tl-attn-backend",
         type=str,
         default="aiter_csrc",
-        choices=["aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8"],
-        help="Lumen attention backend.",
+        choices=["aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8"],
+        help="Lumen attention backend. aiter_asm_fp8 uses ASM kernels with " "fallback chain: asm -> csrc -> triton.",
     )
     safe_add_argument(
         lumen,
         "--tl-fp8-quant-type",
         type=str,
-        default="fp8_blockwise",
-        choices=["fp8_blockwise", "mxfp8"],
-        help="FP8 quantisation type for aiter_triton_fp8 backend.",
+        default="blockwise",
+        choices=["dynamic", "delayed", "blockwise", "per_token", "none", "mxfp8"],
+        help="FP8 quantisation type for FP8 attention backends.",
     )
     safe_add_argument(
         lumen,
@@ -676,6 +797,21 @@ def add_common_megatron_args(parser):
         action="store_true",
         default=False,
         help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
+    )
+    safe_add_argument(
+        lumen,
+        "--tl-linear",
+        action="store_true",
+        default=False,
+        help="Use Lumen parallel linear modules (LumenColumnParallelLinear, "
+        "LumenRowParallelLinear, LumenLayerNormLinear) via the Lumen spec provider.",
+    )
+    safe_add_argument(
+        lumen,
+        "--tl-cross-entropy",
+        action="store_true",
+        default=False,
+        help="Use Lumen's Triton parallel cross-entropy instead of TE's.",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")

@@ -4,7 +4,7 @@
 # See LICENSE for license information.
 ###############################################################################
 
-from typing import Literal, Optional
+from typing import Optional
 
 import torch
 
@@ -29,6 +29,12 @@ from lumen.kernels.attention.attention_impl import attention_mxfp8_backward as t
 from lumen.kernels.attention.attention_impl import attention_mxfp8_forward as triton_mxfp8_forward
 
 __all__ = ["attention", "attention_fp8_quant"]
+
+_FP8_BACKENDS = ("aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8")
+
+_QUANT_TYPE_ALIAS = {
+    "fp8_blockwise": "blockwise",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +73,7 @@ class AttentionTritonFunction(torch.autograd.Function):
         is_grad_enabled,
         use_fp8,
         grad_quant_type=None,
+        prefer_asm=False,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -84,6 +91,7 @@ class AttentionTritonFunction(torch.autograd.Function):
             bias,
             alibi_slopes,
             return_softmax,
+            prefer_asm=prefer_asm,
         )
 
         if is_grad:
@@ -151,7 +159,7 @@ class AttentionTritonFunction(torch.autograd.Function):
         dq = quantize_grad_tensor(dq, gqt)
         dk = quantize_grad_tensor(dk, gqt)
         dv = quantize_grad_tensor(dv, gqt)
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 class AttentionTritonMXFP8Function(torch.autograd.Function):
@@ -391,10 +399,6 @@ def attention(
                 return_attn_probs=_return_softmax,
             )
         except RuntimeError as _aiter_err:
-            # AITER's asm-v3 dispatch table may not include compiled variants for
-            # every (dtype, head_dim, GQA-ratio, architecture) combination.  When
-            # mha_fwd returns -1 ("invalid argument for fmha_fwd"), fall back to
-            # the Triton implementation which handles all configurations.
             import warnings
 
             warnings.warn(
@@ -456,7 +460,7 @@ def attention_fp8_quant(
     return_attn_probs=False,
     backend_type: str = "aiter_triton",
     cp_param_bundle=None,
-    quant_type: Literal["fp8_blockwise", "mxfp8"] = "fp8_blockwise",
+    quant_type: str = "blockwise",
     block_m_fwd: int = 64,
     block_n_fwd: int = 64,
     block_m_dq_bwd: int = 64,
@@ -468,10 +472,42 @@ def attention_fp8_quant(
 ):
     assert backend_type in (
         "aiter_triton",
+        "aiter_triton_fp8",
         "aiter_csrc_fp8",
-    ), f"attention_fp8_quant only supports aiter_triton / aiter_csrc_fp8 backends, got {backend_type}"
+        "aiter_asm_fp8",
+    ), (
+        f"attention_fp8_quant only supports aiter_triton/aiter_triton_fp8/"
+        f"aiter_csrc_fp8/aiter_asm_fp8 backends, got {backend_type}"
+    )
+
+    # Normalise legacy quant_type names
+    quant_type = _QUANT_TYPE_ALIAS.get(quant_type, quant_type)
+
+    # "none" means no FP8 quantisation — delegate to bf16 attention
+    if quant_type == "none":
+        _effective_backend = "aiter_csrc" if _is_aiter_available() else "aiter_triton"
+        return attention(
+            q,
+            k,
+            v,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            window_size=window_size,
+            bias=bias,
+            alibi_slopes=alibi_slopes,
+            deterministic=deterministic,
+            return_lse=return_lse,
+            return_attn_probs=return_attn_probs,
+            backend_type=_effective_backend,
+            cp_param_bundle=cp_param_bundle,
+            grad_quant_type=grad_quant_type,
+        )
+
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
+
+    prefer_asm = backend_type == "aiter_asm_fp8"
 
     # Context-parallelism path
     if cp_param_bundle is not None:
@@ -486,25 +522,7 @@ def attention_fp8_quant(
         cp_comm_type = cp_param_bundle["cp_comm_type"]
         if cp_comm_type != "a2a":
             raise NotImplementedError(f"not supported backend_type {backend_type} cp_comm_type {cp_comm_type} yet")
-        if quant_type == "fp8_blockwise" or quant_type is None:
-            return AttentionTritonFunctionCPA2A.apply(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal,
-                window_size,
-                bias,
-                alibi_slopes,
-                return_lse,
-                return_attn_probs,
-                torch.is_grad_enabled(),
-                True if quant_type == "fp8" else False,
-                cp_group,
-                grad_quant_type,
-            )
-        elif quant_type == "mxfp8":
+        if quant_type == "mxfp8":
             return AttentionTritonMXFP8FunctionCPA2A.apply(
                 q,
                 k,
@@ -527,6 +545,24 @@ def attention_fp8_quant(
                 block_m_dkv_bwd,
                 block_n_dkv_bwd,
                 quant_block_size,
+                grad_quant_type,
+            )
+        elif quant_type in ("blockwise", "dynamic", "delayed", "per_token"):
+            return AttentionTritonFunctionCPA2A.apply(
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                True,
+                cp_group,
                 grad_quant_type,
             )
         else:
@@ -557,7 +593,7 @@ def attention_fp8_quant(
             quant_block_size,
             grad_quant_type,
         )
-    elif quant_type == "fp8_blockwise":
+    elif quant_type in ("blockwise", "dynamic", "delayed", "per_token"):
         return AttentionTritonFunction.apply(
             q,
             k,
@@ -573,6 +609,7 @@ def attention_fp8_quant(
             torch.is_grad_enabled(),
             True,
             grad_quant_type,
+            prefer_asm,
         )
     else:
         raise NotImplementedError(f"not supported quant_type {quant_type} backend_type {backend_type} yet")

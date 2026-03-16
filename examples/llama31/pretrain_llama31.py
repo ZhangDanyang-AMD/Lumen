@@ -36,6 +36,7 @@ def _run_megatron():
         add_pretrain_args,
         apply_fp8_training,
         apply_lora,
+        enable_fp8_for_parallel_linear,
         forward_step,
         lumen_gpt_builder,
         train_valid_test_datasets_provider,
@@ -53,6 +54,9 @@ def _run_megatron():
 
         if getattr(args, "linear_fp8", False):
             apply_fp8_training(model, args)
+            if getattr(args, "tl_linear", False):
+                scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
+                enable_fp8_for_parallel_linear(model, scaling_type=scaling_type)
 
         return model
 

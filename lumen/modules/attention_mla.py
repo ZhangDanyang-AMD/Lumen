@@ -1,36 +1,25 @@
 ###############################################################################
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #
-# See LICENSE for license information.
+# Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Megatron-compatible attention module using Lumen kernels.
+"""Multi-Latent Attention (MLA) module using Lumen kernels.
 
-This module provides :class:`LumenDotProductAttention`, a drop-in
-``nn.Module`` replacement for Megatron-Core's ``DotProductAttention``.
+Drop-in replacement for ``TEDotProductAttentionMLA``.
 
-It bridges the Megatron ``[s, b, h, d]`` tensor layout to the Transformer
-Light ``[b, s, h, d]`` layout and delegates the actual Q·K^T·V computation
-(both forward **and** backward) to the TL public API:
+MLA uses *different* head dimensions for K and V:
+  - K head dim = ``kv_channels + qk_rope_head_dim``
+  - V head dim = ``kv_channels``
 
-* :func:`~lumen.ops.attention.attention`
-  – dispatches to AITER or Triton backends
-* :func:`~lumen.ops.attention.attention_fp8_quant`
-  – dispatches to Triton FP8 (blockwise / MXFP8) backends
-
-Each of these functions internally uses a ``torch.autograd.Function`` with
-explicit ``forward()`` and ``backward()`` that call the optimised TL / AITER
-kernels, so **no** part of the attention forward or backward falls back to
-generic PyTorch ops.
-
-Prerequisites:
-    pip install megatron-lm   # or: pip install git+https://github.com/ROCm/Megatron-LM.git
+Delegates the actual QKV computation to Lumen's attention ops.
 """
 
 import math
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 from megatron.core import parallel_state
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.module import MegatronModule
@@ -38,51 +27,28 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import divide
 from megatron.training import get_args
 
-from lumen.ops.attention.attention import (
-    attention,
-    attention_fp8_quant,
-)
+from lumen.ops.attention.attention import attention, attention_fp8_quant
 from lumen.quantize import is_aiter_available
 
-__all__ = [
-    "LumenDotProductAttention",
-]
-
-# ---------------------------------------------------------------------------
-# Layout helpers
-# ---------------------------------------------------------------------------
+__all__ = ["LumenDotProductAttentionMLA"]
 
 
 def _sbhd_to_bshd(t: torch.Tensor) -> torch.Tensor:
-    """Megatron [s, b, h, d] -> TL [b, s, h, d]"""
     return t.permute(1, 0, 2, 3).contiguous()
 
 
 def _bshd_to_sbhd(t: torch.Tensor) -> torch.Tensor:
-    """TL [b, s, h, d] -> Megatron [s, b, h, d]"""
     return t.permute(1, 0, 2, 3).contiguous()
 
 
-# ---------------------------------------------------------------------------
-# nn.Module wrapper
-# ---------------------------------------------------------------------------
+class LumenDotProductAttentionMLA(MegatronModule):
+    """Dot-product attention with Multi-Latent Attention (MLA) support.
 
+    Handles the case where K and V have different head dimensions, as
+    required by DeepSeek-V2 / V3 style models.  When K and V head dims
+    are equal, this degenerates to standard MHA/GQA.
 
-class LumenDotProductAttention(MegatronModule):
-    """Drop-in replacement for Megatron-Core's ``DotProductAttention``.
-
-    Converts the Megatron ``[s, b, h, d]`` layout to ``[b, s, h, d]``,
-    calls the Lumen :func:`attention` /
-    :func:`attention_fp8_quant` API (which use ``torch.autograd.Function``
-    with explicit forward **and** backward kernels), and converts the
-    output back.
-
-    Backends (``--tl-attn-backend``):
-        * ``aiter_csrc``       – AITER CK flash-attention (default, fastest on MI300X)
-        * ``aiter_triton``     – AITER Triton flash-attention (always available)
-        * ``aiter_triton_fp8`` – AITER Triton FP8 quantised attention
-        * ``aiter_csrc_fp8``   – AITER CK FP8 attention (forward-only, inference)
-        * ``aiter_asm_fp8``    – ASM FP8 attention with fallback: asm → csrc → triton
+    Constructor signature matches ``TEDotProductAttentionMLA``.
     """
 
     def __init__(
@@ -92,41 +58,47 @@ class LumenDotProductAttention(MegatronModule):
         attn_mask_type: AttnMaskType,
         attention_type: str,
         attention_dropout: Optional[float] = None,
+        k_channels: Optional[int] = None,
+        v_channels: Optional[int] = None,
         softmax_scale: Optional[float] = None,
         cp_comm_type: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(config=config)
-
         self.config = config
         self.layer_number = max(1, layer_number)
         self.attn_mask_type = attn_mask_type
+        self.attention_type = attention_type
 
-        projection_size = config.kv_channels * config.num_attention_heads
-        world_size = config.tensor_model_parallel_size if hasattr(config, "tensor_model_parallel_size") else 1
-        self.hidden_size_per_partition = divide(projection_size, world_size)
-        self.hidden_size_per_attention_head = divide(projection_size, config.num_attention_heads)
+        world_size = getattr(config, "tensor_model_parallel_size", 1)
         self.num_attention_heads_per_partition = divide(config.num_attention_heads, world_size)
         self.num_query_groups_per_partition = divide(config.num_query_groups, world_size)
 
+        if k_channels is not None and v_channels is not None:
+            self.k_head_dim = k_channels
+            self.v_head_dim = v_channels
+        else:
+            qk_rope_head_dim = getattr(config, "qk_rope_head_dim", 0)
+            self.k_head_dim = config.kv_channels + qk_rope_head_dim
+            self.v_head_dim = config.kv_channels
+
         if softmax_scale is None:
-            self.softmax_scale = 1.0 / math.sqrt(self.hidden_size_per_attention_head)
+            self.softmax_scale = 1.0 / math.sqrt(self.k_head_dim)
         else:
             self.softmax_scale = softmax_scale
 
-        if config.apply_query_key_layer_scaling:
+        if getattr(config, "apply_query_key_layer_scaling", False):
             self.softmax_scale /= self.layer_number
 
         self.dropout_p = config.attention_dropout if attention_dropout is None else attention_dropout
 
-        self.cp_size = config.context_parallel_size
+        self.cp_size = getattr(config, "context_parallel_size", 1)
         self.cp_comm_type = cp_comm_type
 
         args = get_args()
         self.backend = getattr(args, "tl_attn_backend", "aiter_csrc")
         self.fp8_quant_type = getattr(args, "tl_fp8_quant_type", "blockwise")
 
-        # Fine-grained MXFP8 block configuration (per-dimension)
         self.block_m_fwd = getattr(args, "mxfp8_block_m_fwd", 128)
         self.block_n_fwd = getattr(args, "mxfp8_block_n_fwd", 128)
         self.block_m_dq_bwd = getattr(args, "mxfp8_block_m_dq_bwd", 128)
@@ -152,15 +124,19 @@ class LumenDotProductAttention(MegatronModule):
     ):
         """
         Args:
-            query:  [sq, b, np, hn]
-            key:    [sk, b, ng, hn]
-            value:  [sk, b, ng, hn]
+            query:  [sq, b, np, k_head_dim]
+            key:    [sk, b, ng, k_head_dim]
+            value:  [sk, b, ng, v_head_dim]
         Returns:
-            context: [sq, b, hp]   (hp = np * hn)
+            context: [sq, b, np * v_head_dim]
         """
         q = _sbhd_to_bshd(query)
         k = _sbhd_to_bshd(key)
         v = _sbhd_to_bshd(value)
+
+        if self.k_head_dim != self.v_head_dim:
+            pad_size = self.k_head_dim - self.v_head_dim
+            v = F.pad(v, (0, pad_size))
 
         causal = self.attn_mask_type == AttnMaskType.causal
         dropout_p = self.dropout_p if self.training else 0.0
@@ -196,11 +172,7 @@ class LumenDotProductAttention(MegatronModule):
             )
         else:
             if self.backend == "aiter_csrc" and not is_aiter_available():
-                raise RuntimeError(
-                    "AITER is not installed. The aiter_csrc backend "
-                    "requires 'aiter' — install it or use "
-                    "--tl-attn-backend aiter_triton."
-                )
+                raise RuntimeError("AITER not installed. Use --tl-attn-backend aiter_triton.")
             out = attention(
                 q,
                 k,
@@ -213,6 +185,8 @@ class LumenDotProductAttention(MegatronModule):
                 grad_quant_type=self.grad_quant_type,
             )
 
-        # out: [b, sq, np, hn] -> [sq, b, np*hn]
+        if self.k_head_dim != self.v_head_dim:
+            out = out[..., : self.v_head_dim]
+
         context = _bshd_to_sbhd(out)
         return context.reshape(context.shape[0], context.shape[1], -1)

@@ -11,7 +11,7 @@ from lumen.modules import LumenAttention
 attn = LumenAttention(causal=True, backend_type="aiter_csrc")
 
 # FP8 blockwise attention via AITER Triton
-attn = LumenAttention(causal=True, backend_type="aiter_triton", quant_type="fp8_blockwise")
+attn = LumenAttention(causal=True, backend_type="aiter_triton_fp8", quant_type="blockwise")
 
 # MXFP8 attention via Triton (gfx950, configurable block sizes)
 attn = LumenAttention(

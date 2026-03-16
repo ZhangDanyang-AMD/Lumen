@@ -50,6 +50,10 @@ export FP8_REDUCE_AMAX=0
 export FP8_AMAX_HISTORY=4
 export FP8_ACTIVATION=1
 
+# ---- Lumen attention (MI300X: prefer CK csrc, no FP8 attention) --------------
+export TL_ATTN_BACKEND="aiter_csrc"
+export TL_FP8_QUANT="blockwise"
+
 # ---- Warmup ------------------------------------------------------------------
 export WARMUP_STEPS=5
 

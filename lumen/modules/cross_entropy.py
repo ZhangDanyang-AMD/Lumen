@@ -1,0 +1,52 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
+
+"""Lumen parallel cross-entropy loss wrapper.
+
+``lumen_parallel_cross_entropy`` has the same calling convention as
+``te_parallel_cross_entropy`` in Megatron-Core so it can be used as a
+drop-in replacement.
+
+When ``--use-sdma`` is enabled the TP all-gather inside the cross-entropy
+forward is routed through mori SDMA.
+"""
+
+import torch
+
+from lumen.modules.parallel_linear import _use_sdma_from_args
+from lumen.ops.cross_entropy import parallel_cross_entropy as _parallel_ce
+
+__all__ = ["lumen_parallel_cross_entropy"]
+
+
+def lumen_parallel_cross_entropy(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    tp_group: torch.distributed.ProcessGroup,
+    is_cg_capturable: bool = False,
+) -> torch.Tensor:
+    """Vocab-parallel cross-entropy using Lumen Triton kernels.
+
+    Args:
+        logits: ``[B, SQ, V // tp_size]``
+        labels: ``[B, SQ]`` with values in ``[0, V)``
+        tp_group: tensor-parallel process group.
+        is_cg_capturable: if ``True``, skip a ``torch.equal`` check
+            that would break CUDA-graph capture.
+
+    Returns:
+        Per-token loss ``[B, SQ]``.
+    """
+    return _parallel_ce(
+        logits,
+        labels,
+        0.0,  # label_smoothing
+        False,  # reduce_loss
+        tp_group,
+        -100,  # ignore_idx
+        is_cg_capturable,
+        _use_sdma_from_args(),
+    )

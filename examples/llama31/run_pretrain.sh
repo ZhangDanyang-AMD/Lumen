@@ -64,7 +64,7 @@ run_megatron() {
     }
 
     TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter_csrc"}
-    TL_FP8_QUANT=${TL_FP8_QUANT:-"mxfp8"}
+    TL_FP8_QUANT=${TL_FP8_QUANT:-"blockwise"}
 
     # LLaMA 3.1 architecture
     case "${SIZE}" in
@@ -113,6 +113,14 @@ run_megatron() {
     TL_RMSNORM=${TL_RMSNORM:-0}
     TL_RMSNORM_ARGS=""
     [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
+
+    TL_LINEAR=${TL_LINEAR:-0}
+    TL_LINEAR_ARGS=""
+    [ "${TL_LINEAR}" -eq 1 ] && TL_LINEAR_ARGS="--tl-linear"
+
+    TL_CROSS_ENTROPY=${TL_CROSS_ENTROPY:-0}
+    TL_CE_ARGS=""
+    [ "${TL_CROSS_ENTROPY}" -eq 1 ] && TL_CE_ARGS="--tl-cross-entropy"
 
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
@@ -197,6 +205,7 @@ run_megatron() {
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${TL_RMSNORM_ARGS} \
+        ${TL_LINEAR_ARGS} ${TL_CE_ARGS} \
         ${CMD_SUFFIX}
 }
 

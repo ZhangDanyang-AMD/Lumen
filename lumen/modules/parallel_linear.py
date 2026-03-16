@@ -1,0 +1,537 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
+
+"""Tensor-parallel linear modules using Lumen FP8 GEMM kernels.
+
+Drop-in replacements for TE's ``TEColumnParallelLinear`` and
+``TERowParallelLinear`` in Megatron-Core layer specs.  These use
+Megatron's own TP communication primitives (autograd-aware all-gather,
+reduce-scatter, etc.) and route the GEMM through Lumen's
+:func:`~lumen.ops.quantize.linear.quantized_linear`.
+
+When ``scaling_type="none"`` (the default), plain BF16 ``F.linear`` is
+used.  To enable FP8, call :func:`enable_fp8` on the module or set
+``scaling_type`` to one of the supported quantization modes.
+"""
+
+import warnings
+from typing import Callable, Optional
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from megatron.core.tensor_parallel.layers import (
+    _initialize_affine_weight_cpu,
+    _initialize_affine_weight_gpu,
+    set_tensor_model_parallel_attributes,
+)
+from megatron.core.tensor_parallel.mappings import (
+    copy_to_tensor_model_parallel_region,
+    gather_from_sequence_parallel_region,
+    gather_from_tensor_model_parallel_region,
+    reduce_from_tensor_model_parallel_region,
+    reduce_scatter_to_sequence_parallel_region,
+)
+from megatron.core.tensor_parallel.utils import divide
+from megatron.core.utils import make_sharded_tensors_for_checkpoint
+from torch.nn.parameter import Parameter
+
+__all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear"]
+
+
+def _use_sdma_from_args() -> bool:
+    """Read ``--use-sdma`` from Megatron args (safe fallback to False)."""
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "use_sdma", False)
+    except Exception:
+        return False
+
+
+def _get_tp_group(tp_group, is_expert):
+    if tp_group is not None:
+        return tp_group
+    from megatron.core.tensor_parallel.layers import get_tensor_model_parallel_group_if_none
+
+    return get_tensor_model_parallel_group_if_none(tp_group, is_expert=is_expert)
+
+
+def _pg_size(group):
+    if group is None or not torch.distributed.is_initialized():
+        return 1
+    return torch.distributed.get_world_size(group=group)
+
+
+def _pg_rank(group):
+    if group is None or not torch.distributed.is_initialized():
+        return 0
+    return torch.distributed.get_rank(group=group)
+
+
+def _do_gemm(input_, weight, bias, scaling_manager, scaling_type, fp8_dtype, block_size):
+    """Route to Lumen FP8 GEMM or standard F.linear."""
+    if scaling_type != "none":
+        from lumen.ops.quantize.linear import quantized_linear
+
+        return quantized_linear(
+            input_,
+            weight,
+            bias,
+            scaling_manager=scaling_manager,
+            scaling_type=scaling_type,
+            fp8_dtype=fp8_dtype,
+            block_size=block_size,
+        )
+    return F.linear(input_, weight, bias)
+
+
+# ---------------------------------------------------------------------------
+# ColumnParallelLinear
+# ---------------------------------------------------------------------------
+
+
+class LumenColumnParallelLinear(nn.Module):
+    """Column-parallel linear using Lumen GEMM.
+
+    Weight is ``[output_size // tp_size, input_size]``.
+    Output is ``[*, output_size // tp_size]`` (each TP rank holds a shard).
+
+    Constructor signature matches ``TEColumnParallelLinear`` so it can be
+    used as a drop-in replacement in Megatron layer specs.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        *,
+        config,
+        init_method: Callable,
+        gather_output: bool = False,
+        bias: bool = True,
+        skip_bias_add: bool = False,
+        is_expert: bool = False,
+        skip_weight_param_allocation: bool = False,
+        tp_comm_buffer_name: Optional[str] = None,
+        tp_group: Optional[torch.distributed.ProcessGroup] = None,
+        use_fsdp2: bool = False,
+    ):
+        super().__init__()
+
+        self.config = config
+        self.input_size = input_size
+        self.output_size = output_size
+        self.gather_output = gather_output
+        self.skip_bias_add = skip_bias_add
+        self.is_expert = is_expert
+        self.use_fsdp2 = use_fsdp2
+
+        self.tp_group = _get_tp_group(tp_group, is_expert)
+        self.tp_size = _pg_size(self.tp_group)
+        tp_rank = _pg_rank(self.tp_group)
+
+        self.expert_parallel = getattr(config, "expert_model_parallel_size", 1) > 1
+        self.explicit_expert_comm = is_expert and (self.tp_size > 1 or self.expert_parallel)
+        self.output_size_per_partition = divide(output_size, self.tp_size)
+
+        self.sequence_parallel = getattr(config, "sequence_parallel", False)
+        if self.sequence_parallel and self.tp_size <= 1:
+            warnings.warn("sequence_parallel disabled: tp_size <= 1")
+            self.sequence_parallel = False
+
+        self.allreduce_dgrad = self.tp_size > 1 and not self.sequence_parallel and not self.explicit_expert_comm
+
+        self.use_sdma = _use_sdma_from_args()
+        self._sdma_comm = None
+
+        # FP8 config (disabled by default; enabled via enable_fp8())
+        self.scaling_type = "none"
+        self.scaling_manager = None
+        self.fp8_dtype = torch.float8_e4m3fn
+        self.block_size = 128
+
+        # Weight allocation
+        if not skip_weight_param_allocation:
+            if getattr(config, "use_cpu_initialization", False):
+                self.weight = Parameter(
+                    torch.empty(self.output_size_per_partition, input_size, dtype=config.params_dtype)
+                )
+                if getattr(config, "perform_initialization", True):
+                    from megatron.core.tensor_parallel.layers import condition_init_method
+
+                    _initialize_affine_weight_cpu(
+                        self.weight,
+                        output_size,
+                        input_size,
+                        self.output_size_per_partition,
+                        0,
+                        condition_init_method(config, init_method),
+                        stride=1,
+                        return_master_weight=False,
+                        rank=tp_rank,
+                        world_size=self.tp_size,
+                        skip_set_tensor_parallel_attributes=True,
+                    )
+            else:
+                self.weight = Parameter(
+                    torch.empty(
+                        self.output_size_per_partition,
+                        input_size,
+                        device=torch.cuda.current_device(),
+                        dtype=config.params_dtype,
+                    )
+                )
+                if getattr(config, "perform_initialization", True):
+                    _initialize_affine_weight_gpu(
+                        self.weight,
+                        init_method,
+                        partition_dim=0,
+                        stride=1,
+                        is_expert=is_expert,
+                    )
+            setattr(self.weight, "allreduce", not (is_expert and self.expert_parallel))
+        else:
+            self.weight = None
+
+        if bias:
+            if getattr(config, "use_cpu_initialization", False):
+                self.bias = Parameter(torch.empty(self.output_size_per_partition, dtype=config.params_dtype))
+            else:
+                self.bias = Parameter(
+                    torch.empty(
+                        self.output_size_per_partition,
+                        device=torch.cuda.current_device(),
+                        dtype=config.params_dtype,
+                    )
+                )
+            set_tensor_model_parallel_attributes(self.bias, True, 0, 1)
+            if getattr(config, "perform_initialization", True):
+                with torch.no_grad():
+                    self.bias.zero_()
+            setattr(self.bias, "allreduce", not (is_expert and self.expert_parallel))
+        else:
+            self.register_parameter("bias", None)
+
+        self._register_load_state_dict_pre_hook(
+            lambda state_dict, prefix, *args, **kwargs: state_dict.setdefault(f"{prefix}_extra_state")
+        )
+
+    def _get_sdma_comm(self):
+        if self._sdma_comm is None:
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            self._sdma_comm = SdmaTpComm.get(self.tp_group)
+        return self._sdma_comm
+
+    def forward(self, input_: torch.Tensor, weight=None, runtime_gather_output=None):
+        if weight is None:
+            weight = self.weight
+
+        if self.use_sdma and self.tp_size > 1:
+            input_parallel = self._forward_sdma_pre_gemm(input_)
+        else:
+            if self.allreduce_dgrad or self.sequence_parallel or self.explicit_expert_comm:
+                input_parallel = input_
+            else:
+                input_parallel = copy_to_tensor_model_parallel_region(input_, group=self.tp_group)
+
+            if self.sequence_parallel and not self.explicit_expert_comm:
+                input_parallel = gather_from_sequence_parallel_region(
+                    input_parallel,
+                    tensor_parallel_output_grad=True,
+                    group=self.tp_group,
+                )
+
+        gemm_bias = self.bias if not self.skip_bias_add else None
+        output_parallel = _do_gemm(
+            input_parallel,
+            weight,
+            gemm_bias,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
+        )
+
+        gather = self.gather_output
+        if runtime_gather_output is not None:
+            gather = runtime_gather_output
+
+        if self.use_sdma and self.tp_size > 1 and gather:
+            from lumen.modules.sdma_comm import sdma_gather_from_tensor_model_parallel_region
+
+            output = sdma_gather_from_tensor_model_parallel_region(
+                output_parallel,
+                self._get_sdma_comm(),
+            )
+        elif gather:
+            output = gather_from_tensor_model_parallel_region(output_parallel, group=self.tp_group)
+        else:
+            output = output_parallel
+
+        output_bias = self.bias if self.skip_bias_add else None
+        return output, output_bias
+
+    def _forward_sdma_pre_gemm(self, input_: torch.Tensor) -> torch.Tensor:
+        """SDMA-based input preparation for column-parallel GEMM."""
+        from lumen.modules.sdma_comm import (
+            sdma_copy_to_tensor_model_parallel_region,
+            sdma_gather_from_sequence_parallel_region,
+        )
+
+        comm = self._get_sdma_comm()
+        if self.allreduce_dgrad or self.sequence_parallel or self.explicit_expert_comm:
+            input_parallel = input_
+        else:
+            input_parallel = sdma_copy_to_tensor_model_parallel_region(input_, comm)
+
+        if self.sequence_parallel and not self.explicit_expert_comm:
+            input_parallel = sdma_gather_from_sequence_parallel_region(input_parallel, comm)
+
+        return input_parallel
+
+    def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
+        from lumen.quantize import QuantConfig, ScalingManager
+
+        self.scaling_type = scaling_type
+        self.scaling_manager = scaling_manager or ScalingManager(QuantConfig())
+        if fp8_dtype is not None:
+            self.fp8_dtype = fp8_dtype
+        if block_size is not None:
+            self.block_size = block_size
+
+    def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
+        state_dict = self.state_dict(prefix="", keep_vars=True)
+        return make_sharded_tensors_for_checkpoint(
+            state_dict,
+            prefix,
+            {"weight": 0, "bias": 0},
+            sharded_offsets,
+        )
+
+    def set_extra_state(self, state):
+        pass
+
+    def get_extra_state(self):
+        return None
+
+    def __repr__(self):
+        return (
+            f"{type(self).__name__}(in={self.input_size}, out={self.output_size}, "
+            f"bias={self.bias is not None}, TP={self.tp_size}, "
+            f"fp8={self.scaling_type})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# RowParallelLinear
+# ---------------------------------------------------------------------------
+
+
+class LumenRowParallelLinear(nn.Module):
+    """Row-parallel linear using Lumen GEMM.
+
+    Weight is ``[output_size, input_size // tp_size]``.
+    Input is already split across TP ranks; output is all-reduced.
+
+    Constructor signature matches ``TERowParallelLinear``.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        *,
+        config,
+        init_method: Callable,
+        bias: bool = True,
+        input_is_parallel: bool = True,
+        skip_bias_add: bool = False,
+        is_expert: bool = False,
+        tp_comm_buffer_name: Optional[str] = None,
+        tp_group: Optional[torch.distributed.ProcessGroup] = None,
+        use_fsdp2: bool = False,
+    ):
+        super().__init__()
+
+        self.config = config
+        self.input_size = input_size
+        self.output_size = output_size
+        self.input_is_parallel = input_is_parallel
+        self.skip_bias_add = skip_bias_add
+        self.is_expert = is_expert
+        self.use_fsdp2 = use_fsdp2
+
+        self.tp_group = _get_tp_group(tp_group, is_expert)
+        self.tp_size = _pg_size(self.tp_group)
+        tp_rank = _pg_rank(self.tp_group)
+
+        self.expert_parallel = getattr(config, "expert_model_parallel_size", 1) > 1
+        self.explicit_expert_comm = is_expert and (self.tp_size > 1 or self.expert_parallel)
+        self.input_size_per_partition = divide(input_size, self.tp_size)
+
+        self.sequence_parallel = getattr(config, "sequence_parallel", False)
+        if self.sequence_parallel and not input_is_parallel:
+            raise RuntimeError("sequence_parallel requires input_is_parallel=True")
+
+        self.use_sdma = _use_sdma_from_args()
+        self._sdma_comm = None
+
+        # FP8 config
+        self.scaling_type = "none"
+        self.scaling_manager = None
+        self.fp8_dtype = torch.float8_e4m3fn
+        self.block_size = 128
+
+        # Weight
+        if getattr(config, "use_cpu_initialization", False):
+            self.weight = Parameter(torch.empty(output_size, self.input_size_per_partition, dtype=config.params_dtype))
+            if getattr(config, "perform_initialization", True):
+                from megatron.core.tensor_parallel.layers import condition_init_method
+
+                _initialize_affine_weight_cpu(
+                    self.weight,
+                    output_size,
+                    input_size,
+                    self.input_size_per_partition,
+                    1,
+                    condition_init_method(config, init_method),
+                    stride=1,
+                    return_master_weight=False,
+                    params_dtype=config.params_dtype,
+                    rank=tp_rank,
+                    world_size=self.tp_size,
+                    skip_set_tensor_parallel_attributes=True,
+                )
+        else:
+            self.weight = Parameter(
+                torch.empty(
+                    output_size,
+                    self.input_size_per_partition,
+                    device=torch.cuda.current_device(),
+                    dtype=config.params_dtype,
+                )
+            )
+            if getattr(config, "perform_initialization", True):
+                _initialize_affine_weight_gpu(
+                    self.weight,
+                    init_method,
+                    partition_dim=1,
+                    stride=1,
+                    is_expert=is_expert,
+                )
+        setattr(self.weight, "allreduce", not (is_expert and self.expert_parallel))
+
+        if bias:
+            if getattr(config, "use_cpu_initialization", False):
+                self.bias = Parameter(torch.empty(output_size, dtype=config.params_dtype))
+            else:
+                self.bias = Parameter(
+                    torch.empty(
+                        output_size,
+                        device=torch.cuda.current_device(),
+                        dtype=config.params_dtype,
+                    )
+                )
+            if getattr(config, "perform_initialization", True):
+                with torch.no_grad():
+                    self.bias.zero_()
+            setattr(self.bias, "allreduce", not (is_expert and self.expert_parallel))
+            setattr(self.bias, "sequence_parallel", self.sequence_parallel)
+        else:
+            self.register_parameter("bias", None)
+
+        self._register_load_state_dict_pre_hook(
+            lambda state_dict, prefix, *args, **kwargs: state_dict.setdefault(f"{prefix}_extra_state")
+        )
+
+    def _get_sdma_comm(self):
+        if self._sdma_comm is None:
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            self._sdma_comm = SdmaTpComm.get(self.tp_group)
+        return self._sdma_comm
+
+    def forward(self, input_: torch.Tensor):
+        if self.input_is_parallel:
+            input_parallel = input_
+        else:
+            from megatron.core.tensor_parallel.mappings import scatter_to_tensor_model_parallel_region
+
+            input_parallel = scatter_to_tensor_model_parallel_region(input_, group=self.tp_group)
+
+        output_parallel = _do_gemm(
+            input_parallel,
+            self.weight,
+            None,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
+        )
+
+        if self.explicit_expert_comm:
+            output_ = output_parallel
+        elif self.use_sdma and self.tp_size > 1:
+            output_ = self._forward_sdma_post_gemm(output_parallel)
+        elif self.sequence_parallel:
+            output_ = reduce_scatter_to_sequence_parallel_region(output_parallel, group=self.tp_group)
+        else:
+            output_ = reduce_from_tensor_model_parallel_region(output_parallel, group=self.tp_group)
+
+        if not self.skip_bias_add:
+            output = (output_ + self.bias) if self.bias is not None else output_
+            output_bias = None
+        else:
+            output = output_
+            output_bias = self.bias
+        return output, output_bias
+
+    def _forward_sdma_post_gemm(self, output_parallel: torch.Tensor) -> torch.Tensor:
+        """SDMA-based output reduction for row-parallel GEMM."""
+        from lumen.modules.sdma_comm import (
+            sdma_reduce_from_tensor_model_parallel_region,
+            sdma_reduce_scatter_to_sequence_parallel_region,
+        )
+
+        comm = self._get_sdma_comm()
+        if self.sequence_parallel:
+            return sdma_reduce_scatter_to_sequence_parallel_region(output_parallel, comm)
+        else:
+            return sdma_reduce_from_tensor_model_parallel_region(output_parallel, comm)
+
+    def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
+        from lumen.quantize import QuantConfig, ScalingManager
+
+        self.scaling_type = scaling_type
+        self.scaling_manager = scaling_manager or ScalingManager(QuantConfig())
+        if fp8_dtype is not None:
+            self.fp8_dtype = fp8_dtype
+        if block_size is not None:
+            self.block_size = block_size
+
+    def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
+        state_dict = self.state_dict(prefix="", keep_vars=True)
+        return make_sharded_tensors_for_checkpoint(
+            state_dict,
+            prefix,
+            {"weight": 1},
+            sharded_offsets,
+        )
+
+    def set_extra_state(self, state):
+        pass
+
+    def get_extra_state(self):
+        return None
+
+    def __repr__(self):
+        return (
+            f"{type(self).__name__}(in={self.input_size}, out={self.output_size}, "
+            f"bias={self.bias is not None}, TP={self.tp_size}, "
+            f"fp8={self.scaling_type})"
+        )

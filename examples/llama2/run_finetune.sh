@@ -111,18 +111,20 @@ run_megatron() {
     fi
 
     TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
-    if [ "${TL_ATTN_BACKEND}" = "aiter_triton_fp8" ] || [ "${TL_ATTN_BACKEND}" = "aiter_csrc_fp8" ]; then
-        TL_ATTN_ARGS+=" --tl-fp8-quant-type ${TL_FP8_QUANT}"
-        if [ "${TL_FP8_QUANT}" = "mxfp8" ]; then
-            TL_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
-            TL_ATTN_ARGS+=" --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD}"
-            TL_ATTN_ARGS+=" --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD}"
-            TL_ATTN_ARGS+=" --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD}"
-            TL_ATTN_ARGS+=" --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD}"
-            TL_ATTN_ARGS+=" --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD}"
-            TL_ATTN_ARGS+=" --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE}"
-        fi
-    fi
+    case "${TL_ATTN_BACKEND}" in
+        aiter_triton_fp8|aiter_csrc_fp8|aiter_asm_fp8)
+            TL_ATTN_ARGS+=" --tl-fp8-quant-type ${TL_FP8_QUANT}"
+            if [ "${TL_FP8_QUANT}" = "mxfp8" ]; then
+                TL_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
+                TL_ATTN_ARGS+=" --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD}"
+                TL_ATTN_ARGS+=" --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD}"
+                TL_ATTN_ARGS+=" --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD}"
+                TL_ATTN_ARGS+=" --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD}"
+                TL_ATTN_ARGS+=" --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD}"
+                TL_ATTN_ARGS+=" --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE}"
+            fi
+            ;;
+    esac
 
     TL_RMSNORM_ARGS=""
     [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
@@ -137,7 +139,7 @@ run_megatron() {
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND}$([ "${TL_ATTN_BACKEND}" = "aiter_triton_fp8" ] || [ "${TL_ATTN_BACKEND}" = "aiter_csrc_fp8" ] && echo " (fp8_quant=${TL_FP8_QUANT})") rmsnorm=${TL_RMSNORM}"
+    echo "  TL attn:  ${TL_ATTN_BACKEND}$(case "${TL_ATTN_BACKEND}" in *fp8) echo " (fp8_quant=${TL_FP8_QUANT})";; esac) rmsnorm=${TL_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"

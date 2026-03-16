@@ -11,7 +11,7 @@ from lumen.ops.attention import attention, attention_fp8_quant
 output = attention(q, k, v, causal=True, backend_type="auto")
 
 # FP8 blockwise attention (Triton only)
-output = attention_fp8_quant(q, k, v, causal=True, quant_type="fp8_blockwise")
+output = attention_fp8_quant(q, k, v, causal=True, quant_type="blockwise")
 
 # MXFP8 attention (Triton only)
 output = attention_fp8_quant(q, k, v, causal=True, quant_type="mxfp8",
