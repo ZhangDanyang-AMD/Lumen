@@ -6,13 +6,12 @@
 
 """Fused LayerNorm/RMSNorm + column-parallel linear.
 
-Drop-in replacement for TE's ``TELayerNormColumnParallelLinear``.
 Applies normalization, optional FP8 quantization, then a column-parallel
 GEMM — all in one module with a single set of TP communication calls.
 
 The norm runs on the *local* (possibly sequence-parallel) input; the
 all-gather (if sequence_parallel) happens *after* the norm but *before*
-the GEMM, matching TE's fusion pattern.
+the GEMM.
 """
 
 import warnings
@@ -47,8 +46,7 @@ class LumenLayerNormLinear(nn.Module):
     """Fused Norm + ColumnParallelLinear using Lumen GEMM.
 
     Norm type is selected via ``config.normalization`` (``"LayerNorm"`` or
-    ``"RMSNorm"``).  Constructor signature matches
-    ``TELayerNormColumnParallelLinear``.
+    ``"RMSNorm"``).
     """
 
     def __init__(

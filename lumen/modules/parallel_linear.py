@@ -6,10 +6,8 @@
 
 """Tensor-parallel linear modules using Lumen FP8 GEMM kernels.
 
-Drop-in replacements for TE's ``TEColumnParallelLinear`` and
-``TERowParallelLinear`` in Megatron-Core layer specs.  These use
-Megatron's own TP communication primitives (autograd-aware all-gather,
-reduce-scatter, etc.) and route the GEMM through Lumen's
+These use Megatron's own TP communication primitives (autograd-aware
+all-gather, reduce-scatter, etc.) and route the GEMM through Lumen's
 :func:`~lumen.ops.quantize.linear.quantized_linear`.
 
 When ``scaling_type="none"`` (the default), plain BF16 ``F.linear`` is
@@ -100,8 +98,7 @@ class LumenColumnParallelLinear(nn.Module):
     Weight is ``[output_size // tp_size, input_size]``.
     Output is ``[*, output_size // tp_size]`` (each TP rank holds a shard).
 
-    Constructor signature matches ``TEColumnParallelLinear`` so it can be
-    used as a drop-in replacement in Megatron layer specs.
+    Can be used directly in Megatron layer specs.
     """
 
     def __init__(
@@ -338,7 +335,7 @@ class LumenRowParallelLinear(nn.Module):
     Weight is ``[output_size, input_size // tp_size]``.
     Input is already split across TP ranks; output is all-reduced.
 
-    Constructor signature matches ``TERowParallelLinear``.
+    Row-parallel linear using Lumen GEMM.
     """
 
     def __init__(

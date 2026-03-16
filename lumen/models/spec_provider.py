@@ -6,11 +6,10 @@
 
 """Lumen spec provider for Megatron-Core layer specs.
 
-Mirrors ``TESpecProvider`` — every ``BackendSpecProvider`` method returns
-a Lumen module class instead of a Transformer-Engine class.  Plug this
-into ``get_gpt_layer_with_transformer_engine_spec`` or compose your own
-``ModuleSpec`` tree to get Lumen-accelerated attention, norms, and
-(optionally FP8) linear layers.
+Every ``BackendSpecProvider`` method returns a Lumen module class.
+Plug this into ``get_gpt_layer_with_transformer_engine_spec`` or compose
+your own ``ModuleSpec`` tree to get Lumen-accelerated attention, norms,
+and (optionally FP8) linear layers.
 """
 
 from typing import Optional, Tuple

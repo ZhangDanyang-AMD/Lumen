@@ -13,8 +13,7 @@ When ``use_sdma=True`` the TP all-gather is routed through mori SDMA
 instead of ``torch.distributed.all_gather_into_tensor``.
 
 This module re-exports a single ``parallel_cross_entropy`` autograd
-function that can be used as a drop-in replacement for
-TransformerEngine's ``te_parallel_cross_entropy``.
+function for vocab-parallel cross-entropy computation.
 """
 
 from functools import reduce

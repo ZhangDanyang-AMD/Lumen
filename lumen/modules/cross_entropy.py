@@ -6,10 +6,6 @@
 
 """Lumen parallel cross-entropy loss wrapper.
 
-``lumen_parallel_cross_entropy`` has the same calling convention as
-``te_parallel_cross_entropy`` in Megatron-Core so it can be used as a
-drop-in replacement.
-
 When ``--use-sdma`` is enabled the TP all-gather inside the cross-entropy
 forward is routed through mori SDMA.
 """

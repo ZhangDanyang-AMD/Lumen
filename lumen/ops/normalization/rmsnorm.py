@@ -446,8 +446,7 @@ def rmsnorm_with_quant(
 class LumenRMSNorm(nn.Module):
     """RMSNorm backed by AITER (CK → Triton).
 
-    Drop-in replacement for ``torch.nn.RMSNorm``, TE ``RMSNorm``, or
-    Megatron-Core ``RMSNorm``.
+    RMSNorm implementation backed by AITER kernels.
 
     Args:
         hidden_size: Last dimension of the input.

@@ -396,8 +396,7 @@ def layernorm_with_quant(
 class LumenLayerNorm(nn.Module):
     """LayerNorm backed by AITER (CK → Triton).
 
-    Drop-in replacement for ``torch.nn.LayerNorm``, TE ``LayerNorm``, or
-    Megatron-Core ``FusedLayerNorm``.
+    LayerNorm implementation backed by AITER kernels.
 
     Args:
         hidden_size: Last dimension of the input.

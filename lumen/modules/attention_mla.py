@@ -6,8 +6,6 @@
 
 """Multi-Latent Attention (MLA) module using Lumen kernels.
 
-Drop-in replacement for ``TEDotProductAttentionMLA``.
-
 MLA uses *different* head dimensions for K and V:
   - K head dim = ``kv_channels + qk_rope_head_dim``
   - V head dim = ``kv_channels``
@@ -48,7 +46,7 @@ class LumenDotProductAttentionMLA(MegatronModule):
     required by DeepSeek-V2 / V3 style models.  When K and V head dims
     are equal, this degenerates to standard MHA/GQA.
 
-    Constructor signature matches ``TEDotProductAttentionMLA``.
+    Handles MLA-style attention for Megatron-Core layer specs.
     """
 
     def __init__(

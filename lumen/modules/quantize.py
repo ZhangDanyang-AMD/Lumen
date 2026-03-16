@@ -31,7 +31,7 @@ __all__ = ["LumenLinear"]
 
 
 class LumenLinear(nn.Module):
-    """Drop-in replacement for ``nn.Linear`` with FP8 quantized forward + backward.
+    """``nn.Linear`` with FP8 quantized forward + backward.
 
     Supports AITER (hipBLASLt) and Triton (blockwise) backends, mirroring
     :class:`~lumen.modules.attention.LumenAttention`.

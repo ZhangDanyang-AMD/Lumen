@@ -7,7 +7,7 @@
 """Quantization configuration for Lumen.
 
 Supports FP8 (E4M3 / E5M2 / HYBRID), MXFP8, and FP4 formats with multiple
-scaling strategies.  Matches TransformerEngine_AMD recipe semantics.
+scaling strategies.
 """
 
 import functools
@@ -18,7 +18,7 @@ from typing import Optional
 import torch
 
 # ---------------------------------------------------------------------------
-# FNUZ / OCP detection (matches TE's ``is_fp8_fnuz``)
+# FNUZ / OCP detection
 # ---------------------------------------------------------------------------
 
 
@@ -41,7 +41,7 @@ def _get_float8_e5m2() -> torch.dtype:
 
 
 # ---------------------------------------------------------------------------
-# FP8 representable-max values  (OCP, FNUZ) — mirrors TE _FormatMaxVals
+# FP8 representable-max values  (OCP, FNUZ)
 # ---------------------------------------------------------------------------
 
 _E4M3_MAX = (448.0, 240.0)  # (OCP, FNUZ)
@@ -186,11 +186,11 @@ class QuantConfig:
 
     # When False, compute the weight gradient (dW = grad^T @ X) in higher
     # precision (BF16) instead of FP8.  dgrad (dX = grad @ W) stays in FP8.
-    # Mirrors TE's ``override_linear_precision=(False, False, not fp8_wgrad)``.
+    # When False, compute wgrad in BF16 instead of FP8.
     fp8_wgrad: bool = True
 
     # Keep the first and last N transformer layers in BF16 (unpatched) even
-    # during FP8 training.  Mirrors Megatron/TE's ``--first-last-layers-bf16``.
+    # during FP8 training.
     first_last_layers_bf16: bool = False
     num_layers_at_start_in_bf16: int = 1
     num_layers_at_end_in_bf16: int = 1

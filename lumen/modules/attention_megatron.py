@@ -6,8 +6,8 @@
 
 """Megatron-compatible attention module using Lumen kernels.
 
-This module provides :class:`LumenDotProductAttention`, a drop-in
-``nn.Module`` replacement for Megatron-Core's ``DotProductAttention``.
+This module provides :class:`LumenDotProductAttention`, an ``nn.Module``
+for Megatron-Core compatible dot-product attention.
 
 It bridges the Megatron ``[s, b, h, d]`` tensor layout to the Transformer
 Light ``[b, s, h, d]`` layout and delegates the actual Q·K^T·V computation
@@ -69,7 +69,7 @@ def _bshd_to_sbhd(t: torch.Tensor) -> torch.Tensor:
 
 
 class LumenDotProductAttention(MegatronModule):
-    """Drop-in replacement for Megatron-Core's ``DotProductAttention``.
+    """Lumen dot-product attention for Megatron-Core.
 
     Converts the Megatron ``[s, b, h, d]`` layout to ``[b, s, h, d]``,
     calls the Lumen :func:`attention` /

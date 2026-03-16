@@ -339,7 +339,7 @@ class _SdmaCopyToTensorModelParallelRegion(torch.autograd.Function):
 
 
 # ---------------------------------------------------------------------------
-# Public API — drop-in replacements for Megatron mapping functions
+# Public API — SDMA-accelerated Megatron mapping functions
 # ---------------------------------------------------------------------------
 
 

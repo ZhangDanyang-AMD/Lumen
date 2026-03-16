@@ -147,7 +147,7 @@ class ScalingManager:
     def _compute_scale(self, amax: torch.Tensor, fp8_max: float) -> torch.Tensor:
         """Compute the quantization scale from *amax*, accounting for margin.
 
-        Matches TE convention: ``sf = (fp8_max / amax) / (2 ** margin)``,
+        Formula: ``sf = (fp8_max / amax) / (2 ** margin)``,
         returned as ``amax / (fp8_max / (2 ** margin))`` so that the caller
         can divide by the scale to quantize.
         Always returns fp32 to satisfy hipb_mm's scale dtype requirement.

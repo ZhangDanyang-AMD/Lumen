@@ -266,7 +266,7 @@ def _patch_all_norms(model, normalization="RMSNorm", grad_quant_type=None):
 
 
 # ---------------------------------------------------------------------------
-# Override Transformer-Engine defaults
+# Override defaults for Lumen
 # ---------------------------------------------------------------------------
 
 _TE_FORCE_OVERRIDES = {
@@ -284,12 +284,12 @@ _FP8_FORMAT_MAP = {"e4m3": "fp8_e4m3", "hybrid": "hybrid"}
 
 
 def _override_te_args_for_lumen(args):
-    """Disable Transformer-Engine while preserving user-provided parameter values.
+    """Configure Lumen FP8 settings from Megatron args.
 
-    The TE ``--fp8-format`` value (``args.fp8``) is mapped to the Lumen
+    The ``--fp8-format`` value (``args.fp8``) is mapped to the Lumen
     :class:`QuantFormat` string and stored as ``args.tl_fp8_format`` for
     :func:`apply_fp8_training`.  ``args.fp8`` is then set to ``None`` so
-    that ``TransformerConfig`` does not activate TE's own FP8 code-paths.
+    that ``TransformerConfig`` uses Lumen's own FP8 code-paths.
 
     All other shared parameters (``fp8_margin``, ``fp8_recipe``,
     ``fp8_amax_history_len``, ``fp8_amax_compute_algo``, ``fp8_wgrad``,
@@ -811,7 +811,7 @@ def add_common_megatron_args(parser):
         "--tl-cross-entropy",
         action="store_true",
         default=False,
-        help="Use Lumen's Triton parallel cross-entropy instead of TE's.",
+        help="Use Lumen's Triton parallel cross-entropy.",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")

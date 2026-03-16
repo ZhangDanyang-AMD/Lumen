@@ -6,14 +6,11 @@
 
 """Grouped-linear (MoE) modules with tensor-parallel support.
 
-Drop-in replacements for TE's ``TEGroupedLinear``,
-``TEColumnParallelGroupedLinear``, and ``TERowParallelGroupedLinear``.
-
 For MoE, TP communication is handled by the MoE token dispatcher — the
 grouped linear itself does **not** perform all-gather / reduce-scatter.
 When ``is_expert=True`` and TP > 1 (or EP > 1), the weight dimensions
-are sharded manually and ``parallel_mode`` is set to ``None`` so TE's
-internal communication is skipped.  Lumen mirrors this design.
+are sharded manually and ``parallel_mode`` is set to ``None`` so the
+module's internal communication is skipped.
 """
 
 from typing import Callable, Optional
