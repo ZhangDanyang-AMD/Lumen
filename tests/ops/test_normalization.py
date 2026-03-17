@@ -52,25 +52,43 @@ NORM_SHAPES = [
 
 NORM_IDS = [repr(c) for c in NORM_SHAPES]
 
-QUANT_SCALING_TYPES = ["dynamic", "per_token", "blockwise", "mxfp8"]
+QUANT_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "mxfp8"]
 
 
-def _dequant_output(x_fp8, scale, scaling_type, hidden_size, block_size=128):
+def _delayed_scale(norm_ref, fp8_dtype=torch.float8_e4m3fn):
+    """Pre-compute a delayed (per-tensor) scale from a reference norm output.
+
+    Simulates a ScalingManager that recorded the amax in a previous iteration.
+    """
+    fp8_max = torch.finfo(fp8_dtype).max
+    amax = norm_ref.abs().max().float().clamp(min=1e-12)
+    return (amax / fp8_max).unsqueeze(0)
+
+
+def _dequant_output(x_fp8, scale, scaling_type, block_size=128, norm_ref=None):
     """Dequantize fused norm+quant output using torchao reference primitives."""
     if scaling_type == "delayed":
-        # delayed: caller passes quant scale (fp8_max / amax), invert for dequant
-        return torchao_dequant_fp8(x_fp8, 1.0 / scale, output_dtype=torch.bfloat16)
+        # delayed: scale = amax / fp8_max (aiter convention); torchao dequant = x * scale
+        return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
     elif scaling_type == "dynamic":
-        # dynamic: fused kernel returns dequant multiplier (amax / fp8_max)
+        # dynamic: fused kernel does per-token quant internally, returns
+        # max(per_row_scales) as a single scalar.  For accurate dequant we
+        # need the actual per-row scales; derive them from the reference
+        # norm output when available.
+        # NOTE: The scalar fallback (when norm_ref is None) is approximate —
+        # rows whose actual per-row scale < max will be under-dequantized.
+        if norm_ref is not None:
+            fp8_max = torch.finfo(x_fp8.dtype).max
+            per_row = norm_ref.abs().amax(dim=-1, keepdim=True).float().clamp(min=1e-12) / fp8_max
+            return torchao_dequant_fp8(x_fp8, per_row, output_dtype=torch.bfloat16)
         return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
     elif scaling_type == "per_token":
-        # Lumen returns per-row dequant multiplier; _dequantize_affine_float8 broadcasts
         return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
     elif scaling_type == "blockwise":
-        # scale shape (M, N/block_size); torchao auto-expands via repeat_interleave
         return torchao_dequant_fp8(x_fp8, scale, output_dtype=torch.bfloat16)
     elif scaling_type == "mxfp8":
-        # torchao MX-format dequantization (CPU-based OCP spec reference)
+        # torchao MX-format dequantization (CPU-based OCP spec reference).
+        # Assumes Lumen's MXFP8 block layout matches torchao's OCP layout.
         x_deq = torchao_to_dtype(
             x_fp8.cpu().reshape(-1),
             scale.cpu().reshape(-1).to(torch.uint8),
@@ -107,13 +125,13 @@ def _quant_golden(x, scaling_type, block_size=128):
     fp8_dtype = torch.float8_e4m3fn
     fp8_max = torch.finfo(fp8_dtype).max
 
-    if scaling_type in ("delayed", "dynamic"):
+    if scaling_type == "delayed":
         amax = x.abs().max().float().clamp(min=1e-12)
         scale = (amax / fp8_max).unsqueeze(0)
         x_fp8 = torchao_quant_fp8(x, scale, fp8_dtype)
         return x_fp8, scale
 
-    elif scaling_type == "per_token":
+    elif scaling_type in ("dynamic", "per_token"):
         amax = x.abs().amax(dim=-1, keepdim=True).float().clamp(min=1e-12)
         scale = amax / fp8_max
         x_fp8 = torchao_quant_fp8(x, scale, fp8_dtype)
@@ -198,30 +216,23 @@ def test_rmsnorm_with_quant(config, scaling_type):
     norm_snr = compute_snr(out_ref, out_lumen)
     assert norm_snr > 20, f"RMSNorm Lumen vs ref SNR: {norm_snr:.1f} dB"
 
-    result = norm_ops.rmsnorm_with_quant(
+    delayed_scale = _delayed_scale(out_ref) if scaling_type == "delayed" else None
+    x_fp8, scale = norm_ops.rmsnorm_with_quant(
         x,
         weight,
         eps=1e-6,
         scaling_type=scaling_type,
+        scale=delayed_scale,
         block_size=block_size,
     )
 
-    if isinstance(result, tuple):
-        x_fp8, scale = result
-    else:
-        x_fp8, scale = result, None
-
-    out_dequant = _dequant_output(x_fp8, scale, scaling_type, config.N, block_size)
+    out_dequant = _dequant_output(x_fp8, scale, scaling_type, block_size, norm_ref=out_ref)
     snr = compute_snr(out_ref, out_dequant)
     assert snr > 8, f"RMSNorm+quant({scaling_type}) SNR: {snr:.1f} dB"
 
     golden_fp8, _ = _quant_golden(out_ref, scaling_type, block_size)
-    if scaling_type == "mxfp8":
-        lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
-        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
-    else:
-        lumen_bytes = x_fp8.reshape(-1).view(torch.uint8)
-        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
+    golden_bytes = golden_fp8.reshape(-1).cpu().view(torch.uint8)
     fp8_match = (lumen_bytes == golden_bytes).float().mean().item()
     assert fp8_match >= 0.75, f"RMSNorm fused FP8 vs torchao golden byte match: {fp8_match:.2%}"
 
@@ -234,11 +245,11 @@ def test_rmsnorm_with_quant(config, scaling_type):
 @pytest.mark.parametrize("config", NORM_SHAPES[:5], ids=NORM_IDS[:5])
 @pytest.mark.parametrize("scaling_type", QUANT_SCALING_TYPES)
 def test_rmsnorm_quant_bwd(config, scaling_type):
-    """Simulate FP8 training: norm → quant → dequant → linear → MSE loss → backward.
+    """Simulate FP8 training: norm -> quant -> dequant -> linear -> MSE loss -> backward.
 
-    Quantization noise propagates through the downstream matmul, producing
-    a non-trivial upstream gradient that exercises the norm backward under
-    realistic conditions.
+    The reference path has no quantization, so gradients only approximately
+    match due to quantization noise propagating through the matmul.  The SNR
+    threshold is a regression guard, not a strict correctness check.
     """
     dtype = torch.bfloat16
     block_size = 32 if scaling_type == "mxfp8" else 128
@@ -267,24 +278,24 @@ def test_rmsnorm_quant_bwd(config, scaling_type):
     w_lumen = weight.detach().clone().requires_grad_(True)
     out_norm = norm_ops.rmsnorm(x_lumen, w_lumen, eps=1e-6)
 
+    norm_ref_for_dequant = rmsnorm_ref(x, weight, eps=1e-6)
+    delayed_scale = _delayed_scale(norm_ref_for_dequant) if scaling_type == "delayed" else None
+
     with torch.no_grad():
-        result = norm_ops.rmsnorm_with_quant(
+        x_fp8, scale = norm_ops.rmsnorm_with_quant(
             x,
             weight,
             eps=1e-6,
             scaling_type=scaling_type,
+            scale=delayed_scale,
             block_size=block_size,
         )
-        if isinstance(result, tuple):
-            x_fp8, scale = result
-        else:
-            x_fp8, scale = result, None
         out_dequant = _dequant_output(
             x_fp8,
             scale,
             scaling_type,
-            config.N,
             block_size,
+            norm_ref=norm_ref_for_dequant,
         ).to(dtype)
 
     out_ste = out_norm + (out_dequant - out_norm).detach()
@@ -363,31 +374,24 @@ def test_layernorm_with_quant(config, scaling_type):
     norm_snr = compute_snr(out_ref, out_lumen)
     assert norm_snr > 20, f"LayerNorm Lumen vs ref SNR: {norm_snr:.1f} dB"
 
-    result = norm_ops.layernorm_with_quant(
+    delayed_scale = _delayed_scale(out_ref) if scaling_type == "delayed" else None
+    x_fp8, scale = norm_ops.layernorm_with_quant(
         x,
         weight,
         bias,
         eps=1e-5,
         scaling_type=scaling_type,
+        scale=delayed_scale,
         block_size=block_size,
     )
 
-    if isinstance(result, tuple):
-        x_fp8, scale = result
-    else:
-        x_fp8, scale = result, None
-
-    out_dequant = _dequant_output(x_fp8, scale, scaling_type, config.N, block_size)
+    out_dequant = _dequant_output(x_fp8, scale, scaling_type, block_size, norm_ref=out_ref)
     snr = compute_snr(out_ref, out_dequant)
     assert snr > 8, f"LayerNorm+quant({scaling_type}) SNR: {snr:.1f} dB"
 
     golden_fp8, _ = _quant_golden(out_ref, scaling_type, block_size)
-    if scaling_type == "mxfp8":
-        lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
-        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
-    else:
-        lumen_bytes = x_fp8.reshape(-1).view(torch.uint8)
-        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
+    golden_bytes = golden_fp8.reshape(-1).cpu().view(torch.uint8)
     fp8_match = (lumen_bytes == golden_bytes).float().mean().item()
     assert fp8_match >= 0.75, f"LayerNorm fused FP8 vs torchao golden byte match: {fp8_match:.2%}"
 
@@ -400,11 +404,11 @@ def test_layernorm_with_quant(config, scaling_type):
 @pytest.mark.parametrize("config", NORM_SHAPES[:5], ids=NORM_IDS[:5])
 @pytest.mark.parametrize("scaling_type", QUANT_SCALING_TYPES)
 def test_layernorm_quant_bwd(config, scaling_type):
-    """Simulate FP8 training: norm → quant → dequant → linear → MSE loss → backward.
+    """Simulate FP8 training: norm -> quant -> dequant -> linear -> MSE loss -> backward.
 
-    Quantization noise propagates through the downstream matmul, producing
-    a non-trivial upstream gradient that exercises the norm backward under
-    realistic conditions.
+    The reference path has no quantization, so gradients only approximately
+    match due to quantization noise propagating through the matmul.  The SNR
+    threshold is a regression guard, not a strict correctness check.
     """
     dtype = torch.bfloat16
     block_size = 32 if scaling_type == "mxfp8" else 128
@@ -435,26 +439,25 @@ def test_layernorm_quant_bwd(config, scaling_type):
     w_lumen = weight.detach().clone().requires_grad_(True)
     b_lumen = bias.detach().clone().requires_grad_(True)
     out_norm = norm_ops.layernorm(x_lumen, w_lumen, bias=b_lumen, eps=1e-5)
+    norm_ref_for_dequant = layernorm_ref(x, weight, bias, eps=1e-5)
+    delayed_scale = _delayed_scale(norm_ref_for_dequant) if scaling_type == "delayed" else None
 
     with torch.no_grad():
-        result = norm_ops.layernorm_with_quant(
+        x_fp8, scale = norm_ops.layernorm_with_quant(
             x,
             weight,
             bias,
             eps=1e-5,
             scaling_type=scaling_type,
+            scale=delayed_scale,
             block_size=block_size,
         )
-        if isinstance(result, tuple):
-            x_fp8, scale = result
-        else:
-            x_fp8, scale = result, None
         out_dequant = _dequant_output(
             x_fp8,
             scale,
             scaling_type,
-            config.N,
             block_size,
+            norm_ref=norm_ref_for_dequant,
         ).to(dtype)
 
     out_ste = out_norm + (out_dequant - out_norm).detach()
@@ -480,13 +483,18 @@ def test_lumen_rmsnorm_module(config):
     dtype = torch.bfloat16
     module = norm_ops.LumenRMSNorm(config.N, eps=1e-6).to("cuda", dtype)
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype, requires_grad=True)
+    x_ref = x.detach().clone().requires_grad_(True)
 
     out = module(x)
+    out_ref = rmsnorm_ref(x_ref, module.weight.detach(), eps=1e-6)
     assert out.shape == x.shape
+    assert compute_snr(out_ref, out) > 20, "LumenRMSNorm module output mismatch"
+
     loss = out.float().mean()
     loss.backward()
+    out_ref.float().mean().backward()
     assert x.grad is not None
-    assert x.grad.shape == x.shape
+    assert compute_snr(x_ref.grad, x.grad) > 15, "LumenRMSNorm module dx mismatch"
 
 
 @pytest.mark.parametrize("config", NORM_SHAPES[:3], ids=NORM_IDS[:3])
@@ -494,13 +502,23 @@ def test_lumen_layernorm_module(config):
     dtype = torch.bfloat16
     module = norm_ops.LumenLayerNorm(config.N, eps=1e-5).to("cuda", dtype)
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype, requires_grad=True)
+    x_ref = x.detach().clone().requires_grad_(True)
 
     out = module(x)
+    out_ref = layernorm_ref(
+        x_ref,
+        module.weight.detach(),
+        module.bias.detach(),
+        eps=1e-5,
+    )
     assert out.shape == x.shape
+    assert compute_snr(out_ref, out) > 20, "LumenLayerNorm module output mismatch"
+
     loss = out.float().mean()
     loss.backward()
+    out_ref.float().mean().backward()
     assert x.grad is not None
-    assert x.grad.shape == x.shape
+    assert compute_snr(x_ref.grad, x.grad) > 15, "LumenLayerNorm module dx mismatch"
 
 
 # ===================================================================
@@ -563,7 +581,7 @@ def test_rmsnorm_mxfp8_vs_torchao(config):
         block_size=block_size,
     )
     x_fp8_lumen, scales_lumen = result
-    deq_lumen = _dequant_output(x_fp8_lumen, scales_lumen, "mxfp8", config.N, block_size).float()
+    deq_lumen = _dequant_output(x_fp8_lumen, scales_lumen, "mxfp8", block_size).float()
 
     snr_vs_torchao = compute_snr(deq_torchao, deq_lumen)
     snr_vs_ref = compute_snr(normed_ref.cuda(), deq_lumen)
@@ -641,10 +659,12 @@ def test_layernorm_mxfp8_vs_torchao(config):
         block_size=block_size,
     )
     x_fp8_lumen, scales_lumen = result
-    deq_lumen = _dequant_output(x_fp8_lumen, scales_lumen, "mxfp8", config.N, block_size).float()
+    deq_lumen = _dequant_output(x_fp8_lumen, scales_lumen, "mxfp8", block_size).float()
 
     snr_vs_torchao = compute_snr(deq_torchao, deq_lumen)
+    snr_vs_ref = compute_snr(normed_ref.cuda(), deq_lumen)
     assert snr_vs_torchao > 8, f"Lumen fused layernorm+mxfp8 vs torchao SNR: {snr_vs_torchao:.1f} dB"
+    assert snr_vs_ref > 6, f"Lumen fused layernorm+mxfp8 vs exact norm SNR: {snr_vs_ref:.1f} dB"
 
     fp8_match = (
         (x_fp8_lumen.reshape(-1).cpu().view(torch.uint8) == data_lp_torchao.reshape(-1).view(torch.uint8))

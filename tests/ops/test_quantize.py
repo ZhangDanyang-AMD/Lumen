@@ -6,6 +6,7 @@
 import pytest
 import torch
 import triton
+from conftest import compute_snr
 from torchao.kernel.blockwise_quantization import fp8_blockwise_act_quant
 from torchao.prototype.mx_formats.config import ScaleCalculationMode
 from torchao.prototype.mx_formats.mx_tensor import (
@@ -26,15 +27,6 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
 )
 
-
-def compute_snr(x: torch.Tensor, y: torch.Tensor) -> float:
-    """Signal-to-noise ratio in dB. x is reference."""
-    x, y = x.float(), y.float()
-    signal_power = torch.norm(x).pow(2)
-    noise_power = torch.norm(x - y).pow(2)
-    return (10 * torch.log10(signal_power / (noise_power + 1e-12))).detach().item()
-
-
 # ---------------------------------------------------------------------------
 # Tensorwise FP8
 # ---------------------------------------------------------------------------
@@ -49,6 +41,7 @@ SHAPE_IDS = [f"{m}x{n}" for m, n in SHAPES]
 def test_quant_fp8_tensorwise_vs_torchao(shape, dtype_in, fp8_dtype):
     """Compare Lumen tensorwise quant against torchao _quantize_affine_float8."""
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(*shape, device="cuda", dtype=dtype_in)
     fp8_max = torch.finfo(fp8_dtype).max
     amax = x.abs().max().float().clamp(min=1e-6)
@@ -79,6 +72,7 @@ def test_quant_fp8_tensorwise_vs_torchao(shape, dtype_in, fp8_dtype):
 def test_dequant_fp8_tensorwise_vs_torchao(shape, dtype_in, fp8_dtype):
     """Quantize with torchao, dequant with both Lumen and torchao, compare."""
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(*shape, device="cuda", dtype=dtype_in)
     fp8_max = torch.finfo(fp8_dtype).max
     amax = x.abs().max().float().clamp(min=1e-6)
@@ -121,7 +115,7 @@ def test_quant_fp8_tensorwise_zeros(shape, fp8_dtype):
 BLOCK_SIZE = 128
 
 
-def _blockwise_quant_ref(x, block_size, fp8_dtype, axis=1):
+def _blockwise_quant_ref(x, block_size, fp8_dtype):
     """Pure PyTorch blockwise FP8 quantization reference (axis=1 only)."""
     M, N = x.shape
     fp8_max = torch.finfo(fp8_dtype).max
@@ -144,6 +138,7 @@ def test_quant_fp8_blockwise_vs_torchao(shape, fp8_dtype):
         pytest.skip(f"N={N} not divisible by block_size={BLOCK_SIZE}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     x_fp8_lumen, scales_lumen = quant_fp8_blockwise_impl(x, fp8_dtype, axis=1, block_size=BLOCK_SIZE)
@@ -173,6 +168,7 @@ def test_quant_fp8_blockwise_axis0(shape):
         pytest.skip(f"M={M} not divisible by block_size={BLOCK_SIZE}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     x_fp8, scales = quant_fp8_blockwise_impl(x, torch.float8_e4m3fn, axis=0, block_size=BLOCK_SIZE)
@@ -201,6 +197,7 @@ def test_mxfp8_vs_torchao(shape, block_size):
         pytest.skip(f"N={N} not divisible by block_size={block_size}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     data_lp_lumen, scales_lumen = convert_to_mxfp8(
@@ -208,9 +205,10 @@ def test_mxfp8_vs_torchao(shape, block_size):
         block_size=block_size,
         axis=-1,
         float8_dtype_pt=torch.float8_e4m3fn,
+        philox_seed=42,
+        philox_offset=0,
     )
 
-    # torchao quantization for reference (EVEN mode matches Lumen's round-even scaling)
     scale_ref, data_lp_ref = torchao_to_mx(
         x.float().cpu().contiguous(),
         torch.float8_e4m3fn,
@@ -221,15 +219,17 @@ def test_mxfp8_vs_torchao(shape, block_size):
     # Compare quantized FP8 data
     lumen_flat = data_lp_lumen.cpu().flatten().view(torch.float8_e4m3fn).view(torch.uint8)
     ref_flat = data_lp_ref.flatten().view(torch.uint8)
-    min_len = min(lumen_flat.numel(), ref_flat.numel())
-    fp8_match = (lumen_flat[:min_len] == ref_flat[:min_len]).float().mean().item()
+    assert (
+        lumen_flat.numel() == ref_flat.numel()
+    ), f"FP8 data size mismatch: Lumen {lumen_flat.numel()} vs torchao {ref_flat.numel()}"
+    fp8_match = (lumen_flat == ref_flat).float().mean().item()
     assert fp8_match >= 0.95, f"FP8 data match rate {fp8_match:.2%} < 95%"
 
     # Compare scales (torchao returns float8_e8m0fnu, Lumen returns uint8; bitwise reinterpret)
     s_lumen = scales_lumen.cpu().flatten()
     s_ref = scale_ref.flatten().view(torch.uint8)
-    min_slen = min(s_lumen.numel(), s_ref.numel())
-    scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
+    assert s_lumen.numel() == s_ref.numel(), f"Scale size mismatch: Lumen {s_lumen.numel()} vs torchao {s_ref.numel()}"
+    scale_match = (s_lumen == s_ref).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
 
     # Cross-dequant: Lumen quant → torchao dequant
@@ -242,10 +242,8 @@ def test_mxfp8_vs_torchao(shape, block_size):
         torch.float32,
     )
 
-    snr = compute_snr(
-        x.float().cpu(),
-        x_deq_lumen_cpu,
-    )
+    # MXFP8 uses block scaling + E8M0 exponent-only scales → lower SNR than per-tensor
+    snr = compute_snr(x.float().cpu(), x_deq_lumen_cpu)
     assert snr >= 6.0, f"SNR {snr:.1f} dB too low"
     assert not torch.isnan(x_deq_lumen_cpu).any()
     assert not torch.isinf(x_deq_lumen_cpu).any()
@@ -260,6 +258,7 @@ def test_mxfp8_scale_and_data_agreement_with_torchao(shape, block_size):
         pytest.skip(f"N={N} not divisible by block_size={block_size}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     data_lp_lumen, scales_lumen = convert_to_mxfp8(
@@ -267,6 +266,8 @@ def test_mxfp8_scale_and_data_agreement_with_torchao(shape, block_size):
         block_size=block_size,
         axis=-1,
         float8_dtype_pt=torch.float8_e4m3fn,
+        philox_seed=42,
+        philox_offset=0,
     )
     scale_ref, data_lp_ref = torchao_to_mx(
         x.float().cpu().contiguous(),
@@ -278,15 +279,17 @@ def test_mxfp8_scale_and_data_agreement_with_torchao(shape, block_size):
     # Scales agreement (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
     s_lumen = scales_lumen.cpu().flatten()
     s_ref = scale_ref.flatten().view(torch.uint8)
-    min_slen = min(s_lumen.numel(), s_ref.numel())
-    scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
+    assert s_lumen.numel() == s_ref.numel(), f"Scale size mismatch: Lumen {s_lumen.numel()} vs torchao {s_ref.numel()}"
+    scale_match = (s_lumen == s_ref).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
 
     # FP8 data agreement
     d_lumen = data_lp_lumen.cpu().flatten().view(torch.float8_e4m3fn).view(torch.uint8)
     d_ref = data_lp_ref.flatten().view(torch.uint8)
-    min_dlen = min(d_lumen.numel(), d_ref.numel())
-    data_match = (d_lumen[:min_dlen] == d_ref[:min_dlen]).float().mean().item()
+    assert (
+        d_lumen.numel() == d_ref.numel()
+    ), f"FP8 data size mismatch: Lumen {d_lumen.numel()} vs torchao {d_ref.numel()}"
+    data_match = (d_lumen == d_ref).float().mean().item()
     assert data_match >= 0.90, f"FP8 data match rate {data_match:.2%} < 90%"
 
 
@@ -299,6 +302,7 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
         pytest.skip(f"N={N} not divisible by block_size={block_size}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     data_lp_lumen, scales_lumen = convert_to_mxfp8(
@@ -306,6 +310,8 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
         block_size=block_size,
         axis=-1,
         float8_dtype_pt=torch.float8_e4m3fn,
+        philox_seed=42,
+        philox_offset=0,
     )
 
     mx_ref = MXTensor.to_mx(
@@ -318,20 +324,19 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
     # Compare quantized FP8 data directly
     data_lp_ref = mx_ref.qdata.flatten()
     data_lp_lumen_flat = data_lp_lumen.cpu().flatten().view(torch.float8_e4m3fn)
-    min_len = min(data_lp_lumen_flat.numel(), data_lp_ref.numel())
-    fp8_match = (
-        (data_lp_lumen_flat[:min_len].view(torch.uint8) == data_lp_ref[:min_len].view(torch.uint8))
-        .float()
-        .mean()
-        .item()
-    )
+    assert (
+        data_lp_lumen_flat.numel() == data_lp_ref.numel()
+    ), f"FP8 data size mismatch: Lumen {data_lp_lumen_flat.numel()} vs torchao {data_lp_ref.numel()}"
+    fp8_match = (data_lp_lumen_flat.view(torch.uint8) == data_lp_ref.view(torch.uint8)).float().mean().item()
     assert fp8_match >= 0.95, f"FP8 data match rate {fp8_match:.2%} < 95%"
 
     # Compare E8M0 scales directly (bitwise reinterpret float8_e8m0fnu → uint8)
     scales_ref = mx_ref.scale.flatten().view(torch.uint8)
     scales_lumen_flat = scales_lumen.cpu().flatten()
-    min_slen = min(scales_lumen_flat.numel(), scales_ref.numel())
-    scale_match = (scales_lumen_flat[:min_slen] == scales_ref[:min_slen]).float().mean().item()
+    assert (
+        scales_lumen_flat.numel() == scales_ref.numel()
+    ), f"Scale size mismatch: Lumen {scales_lumen_flat.numel()} vs torchao {scales_ref.numel()}"
+    scale_match = (scales_lumen_flat == scales_ref).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
 
     # Compare dequantized results
@@ -344,6 +349,7 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
     )
     x_deq_torchao = mx_ref.dequantize()
 
+    # MXFP8 uses block scaling + E8M0 exponent-only scales → lower SNR than per-tensor
     snr = compute_snr(x.float().cpu(), x_deq_lumen.cpu())
     assert snr >= 6.0, f"SNR {snr:.1f} dB too low"
     torch.testing.assert_close(
@@ -359,7 +365,12 @@ def test_mxfp8_zeros():
     M, N = 64, 128
     block_size = 64
     x = torch.zeros(M, N, device="cuda", dtype=torch.bfloat16)
-    data_lp, scales = convert_to_mxfp8(x.float(), block_size=block_size, axis=-1)
+    data_lp, scales = convert_to_mxfp8(
+        x.float(),
+        block_size=block_size,
+        axis=-1,
+        float8_dtype_pt=torch.float8_e4m3fn,
+    )
     x_deq = convert_from_mxfp8(data_lp, scales, block_size=block_size, axis=-1)
     torch.testing.assert_close(x_deq, x.float())
 
@@ -380,24 +391,27 @@ def test_mxfp8_zeros():
 
 
 @pytest.mark.parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
-def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
+@pytest.mark.parametrize("shape", MX_SHAPES, ids=[f"{m}x{n}" for m, n in MX_SHAPES])
+@pytest.mark.parametrize("block_size", MX_BLOCK_SIZES)
+def test_mxfp8_dtype_variants(fp8_dtype, shape, block_size):
     """Test MXFP8 with different FP8 element dtypes, compared against torchao."""
     M, N = shape
     if N % block_size != 0:
         pytest.skip(f"N={N} not divisible by block_size={block_size}")
 
     torch.manual_seed(42)
+    torch.cuda.manual_seed(42)
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
-    # Lumen
     data_lp, scales = convert_to_mxfp8(
         x.float(),
         block_size=block_size,
         axis=-1,
         float8_dtype_pt=fp8_dtype,
+        philox_seed=42,
+        philox_offset=0,
     )
 
-    # torchao (EVEN mode matches Lumen's round-even scaling)
     scale_ref, data_lp_ref = torchao_to_mx(
         x.float().cpu().contiguous(),
         fp8_dtype,
@@ -408,15 +422,17 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
     # Compare FP8 data
     d_lumen = data_lp.cpu().flatten().view(fp8_dtype).view(torch.uint8)
     d_ref = data_lp_ref.flatten().view(torch.uint8)
-    min_dlen = min(d_lumen.numel(), d_ref.numel())
-    data_match = (d_lumen[:min_dlen] == d_ref[:min_dlen]).float().mean().item()
+    assert (
+        d_lumen.numel() == d_ref.numel()
+    ), f"FP8 data size mismatch: Lumen {d_lumen.numel()} vs torchao {d_ref.numel()}"
+    data_match = (d_lumen == d_ref).float().mean().item()
     assert data_match >= 0.95, f"FP8 data match rate {data_match:.2%} < 95%"
 
     # Compare scales (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
     s_lumen = scales.cpu().flatten()
     s_ref = scale_ref.flatten().view(torch.uint8)
-    min_slen = min(s_lumen.numel(), s_ref.numel())
-    scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
+    assert s_lumen.numel() == s_ref.numel(), f"Scale size mismatch: Lumen {s_lumen.numel()} vs torchao {s_ref.numel()}"
+    scale_match = (s_lumen == s_ref).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
 
     # Compare dequantized results
@@ -431,6 +447,7 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
 
     assert not torch.isnan(x_deq).any()
     assert not torch.isinf(x_deq).any()
+    # MXFP8 uses block scaling + E8M0 exponent-only scales → lower SNR than per-tensor
     snr = compute_snr(x.float().cpu(), x_deq.cpu())
     assert snr >= 6.0, f"Lumen roundtrip SNR {snr:.1f} dB too low"
     torch.testing.assert_close(

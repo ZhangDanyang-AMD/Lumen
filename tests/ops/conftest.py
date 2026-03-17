@@ -101,6 +101,8 @@ def cross_entropy_ref(logits, target, label_smoothing=0.0, ignore_idx=-100):
 def compute_snr(x, y):
     """Compute Signal-to-Noise Ratio in dB."""
     signal = torch.norm(x.float()).pow(2)
+    if signal < 1e-12:
+        return float("inf") if torch.allclose(x.float(), y.float(), atol=1e-7) else 0.0
     noise = torch.norm(x.float() - y.float()).pow(2)
     return 10.0 * torch.log10(signal / (noise + 1e-12)).item()
 
