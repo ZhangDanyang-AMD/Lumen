@@ -73,7 +73,6 @@ class AttentionTritonFunction(torch.autograd.Function):
         is_grad_enabled,
         use_fp8,
         grad_quant_type=None,
-        prefer_asm=False,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -91,6 +90,7 @@ class AttentionTritonFunction(torch.autograd.Function):
             bias,
             alibi_slopes,
             return_softmax,
+            force_triton=True,
         )
 
         if is_grad:
@@ -153,12 +153,13 @@ class AttentionTritonFunction(torch.autograd.Function):
             dropout_p=ctx.dropout_p,
             bias=bias,
             window_size=ctx.window_size,
+            force_triton=True,
         )
         gqt = ctx.grad_quant_type
         dq = quantize_grad_tensor(dq, gqt)
         dk = quantize_grad_tensor(dk, gqt)
         dv = quantize_grad_tensor(dv, gqt)
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 class AttentionTritonMXFP8Function(torch.autograd.Function):
@@ -506,8 +507,6 @@ def attention_fp8_quant(
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
 
-    prefer_asm = backend_type == "aiter_asm_fp8"
-
     # Context-parallelism path
     if cp_param_bundle is not None:
         assert "cp_group" in cp_param_bundle
@@ -608,7 +607,6 @@ def attention_fp8_quant(
             torch.is_grad_enabled(),
             True,
             grad_quant_type,
-            prefer_asm,
         )
     else:
         raise NotImplementedError(f"not supported quant_type {quant_type} backend_type {backend_type} yet")

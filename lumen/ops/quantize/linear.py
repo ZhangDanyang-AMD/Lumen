@@ -557,7 +557,7 @@ def quantized_linear(
     if scaling_manager is None:
         from lumen.quantize import ScalingManager
 
-        scaling_manager = ScalingManager()
+        scaling_manager = ScalingManager(fp8_dtype=fp8_dtype)
 
     return QuantizedLinearFunction.apply(
         input,

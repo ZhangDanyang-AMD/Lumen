@@ -297,7 +297,7 @@ def grouped_gemm_wgrad(
 
             def _ptgmm():
                 fn = _get_ptgmm()
-                return fn(grad_output, input_tensor, group_sizes)
+                return fn(grad_output.t(), input_tensor, group_sizes)
 
             backends.append((Backend.TRITON, _ptgmm))
         return try_backends(backends, op_name="grouped_gemm_wgrad")

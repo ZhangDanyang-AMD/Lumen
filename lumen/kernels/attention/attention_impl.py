@@ -1837,16 +1837,29 @@ def fake_attention_triton_mxfp8_backward_triton_impl(
 
 
 def attention_forward(
-    q, k, v, use_fp8, dropout_p, softmax_scale, causal, window_size, bias, alibi_slopes, return_softmax
+    q,
+    k,
+    v,
+    use_fp8,
+    dropout_p,
+    softmax_scale,
+    causal,
+    window_size,
+    bias,
+    alibi_slopes,
+    return_softmax,
+    force_triton=False,
 ):
     """Dispatched attention forward (FP8 blockwise / non-quantized).
 
     Backend priority for non-quantized: csrc → triton.
     Backend priority for FP8 (inference-only): csrc per-tensor → triton per-block.
     Backend priority for FP8 (training):       triton per-block.
+
+    When *force_triton* is True, csrc branches are skipped unconditionally.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
+    if not force_triton and not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
         out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
             q,
             k,
@@ -1871,7 +1884,7 @@ def attention_forward(
     # aiter has a C++ per-tensor FP8 forward but no matching backward,
     # so we only use it when none of the inputs require grad.
     _no_grad_needed = not (q.requires_grad or k.requires_grad or v.requires_grad)
-    if use_fp8 and _no_grad_needed and csrc_available("flash_attn_fp8_pertensor_fwd"):
+    if not force_triton and use_fp8 and _no_grad_needed and csrc_available("flash_attn_fp8_pertensor_fwd"):
         fp8_dt = get_f8_fwd_dtype()
         q_fp8, q_descale = ScalingManager.quantize_per_tensor_fp8(q, fp8_dt)
         k_fp8, k_descale = ScalingManager.quantize_per_tensor_fp8(k, fp8_dt)
@@ -1947,14 +1960,17 @@ def attention_backward(
     bias=None,
     window_size=(-1, -1),
     deterministic=True,
+    force_triton=False,
 ):
     """Dispatched attention backward (FP8 blockwise / non-quantized).
 
     Backend priority for non-quantized: csrc → triton.
     Backend priority for FP8:           (future csrc fp8) → triton fp8.
+
+    When *force_triton* is True, csrc branches are skipped unconditionally.
     """
     # ── non-quantized: try csrc ─────────────────────────────────────
-    if not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
+    if not force_triton and not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
         dq = torch.empty_like(q)
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)

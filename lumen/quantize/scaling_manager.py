@@ -104,7 +104,7 @@ class ScalingManager:
         recipe: Optional[str] = None,
         history_len: int = 16,
         block_size: int = 32,
-        fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+        fp8_dtype: Optional[torch.dtype] = None,
     ):
         if config is not None:
             self.config = config
@@ -117,6 +117,11 @@ class ScalingManager:
             )
         else:
             self.config = QuantConfig(block_size=block_size, history_len=history_len)
+
+        if fp8_dtype is None:
+            from lumen.quantize.config import _get_float8_e4m3
+
+            fp8_dtype = _get_float8_e4m3()
 
         self.fp8_dtype = self.config.torch_dtype or fp8_dtype
         self.fp8_dtype_bwd = self.config.torch_dtype_bwd or self.fp8_dtype
