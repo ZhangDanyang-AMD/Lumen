@@ -121,10 +121,24 @@ def test_quant_fp8_tensorwise_zeros(shape, fp8_dtype):
 BLOCK_SIZE = 128
 
 
+def _blockwise_quant_ref(x, block_size, fp8_dtype, axis=1):
+    """Pure PyTorch blockwise FP8 quantization reference (axis=1 only)."""
+    M, N = x.shape
+    fp8_max = torch.finfo(fp8_dtype).max
+    x_f32 = x.float()
+    x_blocked = x_f32.reshape(M, N // block_size, block_size)
+    amax = x_blocked.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+    scales = amax / fp8_max  # (M, N//block_size, 1)
+    x_scaled = (x_blocked / scales).clamp(-fp8_max, fp8_max)
+    x_fp8 = x_scaled.reshape(M, N).to(fp8_dtype)
+    scales = scales.squeeze(-1)  # (M, N//block_size)
+    return x_fp8, scales
+
+
 @pytest.mark.parametrize("shape", [(128, 256), (256, 512)], ids=["128x256", "256x512"])
 @pytest.mark.parametrize("fp8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
 def test_quant_fp8_blockwise_vs_torchao(shape, fp8_dtype):
-    """Compare Lumen blockwise (axis=1) against torchao fp8_blockwise_act_quant."""
+    """Compare Lumen blockwise (axis=1) against torchao or PyTorch reference."""
     M, N = shape
     if N % BLOCK_SIZE != 0:
         pytest.skip(f"N={N} not divisible by block_size={BLOCK_SIZE}")
@@ -133,16 +147,19 @@ def test_quant_fp8_blockwise_vs_torchao(shape, fp8_dtype):
     x = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
     x_fp8_lumen, scales_lumen = quant_fp8_blockwise_impl(x, fp8_dtype, axis=1, block_size=BLOCK_SIZE)
-    x_fp8_torchao, scales_torchao = fp8_blockwise_act_quant(x, BLOCK_SIZE, fp8_dtype)
+    try:
+        x_fp8_ref, scales_ref = fp8_blockwise_act_quant(x, BLOCK_SIZE, fp8_dtype)
+    except (AssertionError, RuntimeError):
+        x_fp8_ref, scales_ref = _blockwise_quant_ref(x, BLOCK_SIZE, fp8_dtype)
 
     x_deq_lumen = _dequantize_affine_float8(x_fp8_lumen, scales_lumen, torch.float32)
-    x_deq_torchao = _dequantize_affine_float8(x_fp8_torchao, scales_torchao, torch.float32)
+    x_deq_ref = _dequantize_affine_float8(x_fp8_ref, scales_ref, torch.float32)
 
     snr_lumen = compute_snr(x.float(), x_deq_lumen)
-    snr_torchao = compute_snr(x.float(), x_deq_torchao)
+    snr_ref = compute_snr(x.float(), x_deq_ref)
     assert snr_lumen >= 8.0, f"Lumen SNR {snr_lumen:.1f} dB too low"
-    assert snr_torchao >= 8.0, f"torchao SNR {snr_torchao:.1f} dB too low"
-    torch.testing.assert_close(x_deq_lumen, x_deq_torchao, atol=1e-1, rtol=1e-1)
+    assert snr_ref >= 8.0, f"Reference SNR {snr_ref:.1f} dB too low"
+    torch.testing.assert_close(x_deq_lumen, x_deq_ref, atol=1e-1, rtol=1e-1)
 
 
 @pytest.mark.parametrize("shape", [(256, 128), (512, 256)], ids=["256x128", "512x256"])
@@ -205,17 +222,18 @@ def test_mxfp8_vs_torchao(shape, block_size):
     fp8_match = (lumen_flat[:min_len] == ref_flat[:min_len]).float().mean().item()
     assert fp8_match >= 0.90, f"FP8 data match rate {fp8_match:.2%} < 90%"
 
-    # Compare scales
-    s_lumen = scales_lumen.cpu().flatten().to(torch.uint8)
-    s_ref = scale_ref.flatten().to(torch.uint8)
+    # Compare scales (torchao returns float8_e8m0fnu, Lumen returns uint8; bitwise reinterpret)
+    s_lumen = scales_lumen.cpu().flatten()
+    s_ref = scale_ref.flatten().view(torch.uint8)
     min_slen = min(s_lumen.numel(), s_ref.numel())
     scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
 
     # Cross-dequant: Lumen quant → torchao dequant
+    _e8m0 = scale_ref.dtype  # float8_e8m0fnu
     x_deq_lumen_cpu = torchao_to_dtype(
-        data_lp_lumen.cpu().float().to(torch.float8_e4m3fn),
-        scales_lumen.cpu(),
+        data_lp_lumen.cpu(),
+        scales_lumen.cpu().view(_e8m0),
         torch.float8_e4m3fn,
         block_size,
         torch.float32,
@@ -254,9 +272,9 @@ def test_mxfp8_scale_and_data_agreement_with_torchao(shape, block_size):
         scaling_mode=ScaleCalculationMode.FLOOR,
     )
 
-    # Scales agreement
-    s_lumen = scales_lumen.cpu().flatten().to(torch.uint8)
-    s_ref = scale_ref.flatten().to(torch.uint8)
+    # Scales agreement (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
+    s_lumen = scales_lumen.cpu().flatten()
+    s_ref = scale_ref.flatten().view(torch.uint8)
     min_slen = min(s_lumen.numel(), s_ref.numel())
     scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
@@ -294,7 +312,7 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
     )
 
     # Compare quantized FP8 data directly
-    data_lp_ref = mx_ref._data.flatten()
+    data_lp_ref = mx_ref.qdata.flatten()
     data_lp_lumen_flat = data_lp_lumen.cpu().flatten().view(torch.float8_e4m3fn)
     min_len = min(data_lp_lumen_flat.numel(), data_lp_ref.numel())
     fp8_match = (
@@ -305,9 +323,9 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
     )
     assert fp8_match >= 0.90, f"FP8 data match rate {fp8_match:.2%} < 90%"
 
-    # Compare E8M0 scales directly
-    scales_ref = mx_ref._scale_e8m0.flatten().to(torch.uint8)
-    scales_lumen_flat = scales_lumen.cpu().flatten().to(torch.uint8)
+    # Compare E8M0 scales directly (bitwise reinterpret float8_e8m0fnu → uint8)
+    scales_ref = mx_ref.scale.flatten().view(torch.uint8)
+    scales_lumen_flat = scales_lumen.cpu().flatten()
     min_slen = min(scales_lumen_flat.numel(), scales_ref.numel())
     scale_match = (scales_lumen_flat[:min_slen] == scales_ref[:min_slen]).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
@@ -388,9 +406,9 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
     data_match = (d_lumen[:min_dlen] == d_ref[:min_dlen]).float().mean().item()
     assert data_match >= 0.90, f"FP8 data match rate {data_match:.2%} < 90%"
 
-    # Compare scales
-    s_lumen = scales.cpu().flatten().to(torch.uint8)
-    s_ref = scale_ref.flatten().to(torch.uint8)
+    # Compare scales (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
+    s_lumen = scales.cpu().flatten()
+    s_ref = scale_ref.flatten().view(torch.uint8)
     min_slen = min(s_lumen.numel(), s_ref.numel())
     scale_match = (s_lumen[:min_slen] == s_ref[:min_slen]).float().mean().item()
     assert scale_match >= 0.95, f"Scale match rate {scale_match:.2%} < 95%"
