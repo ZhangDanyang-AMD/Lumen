@@ -25,8 +25,14 @@ from torchao.prototype.mx_formats.config import ScaleCalculationMode
 from torchao.prototype.mx_formats.mx_tensor import to_dtype as torchao_to_dtype
 from torchao.prototype.mx_formats.mx_tensor import to_mx as torchao_to_mx
 
-# --- torchao reference: per-tensor / blockwise FP8 dequant ---
+# --- torchao reference: per-tensor / blockwise FP8 quant & dequant ---
 from torchao.quantization.quant_primitives import _dequantize_affine_float8 as torchao_dequant_fp8
+from torchao.quantization.quant_primitives import _quantize_affine_float8 as torchao_quant_fp8
+
+try:
+    from torchao.kernel.blockwise_quantization import fp8_blockwise_act_quant
+except ImportError:
+    fp8_blockwise_act_quant = None
 
 import lumen.ops.normalization as norm_ops
 
@@ -72,6 +78,65 @@ def _dequant_output(x_fp8, scale, scaling_type, hidden_size, block_size=128):
         return x_deq.reshape(x_fp8.shape).cuda().to(torch.bfloat16)
     else:
         return x_fp8
+
+
+def _blockwise_quant_ref(x, block_size, fp8_dtype, axis=1):
+    """Pure PyTorch blockwise FP8 quantization reference (axis=1 only)."""
+    M, N = x.shape
+    fp8_max = torch.finfo(fp8_dtype).max
+    x_f32 = x.float()
+    x_blocked = x_f32.reshape(M, N // block_size, block_size)
+    amax = x_blocked.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+    scales = amax / fp8_max
+    x_scaled = (x_blocked / scales).clamp(-fp8_max, fp8_max)
+    x_fp8 = x_scaled.reshape(M, N).to(fp8_dtype)
+    scales = scales.squeeze(-1)
+    return x_fp8, scales
+
+
+def _quant_golden(x, scaling_type, block_size=128):
+    """Reference quantization using torchao (golden for fused norm+quant output).
+
+    For tensorwise / per_token: torchao _quantize_affine_float8.
+    For blockwise: torchao fp8_blockwise_act_quant (PyTorch fallback if unavailable).
+    For mxfp8: torchao to_mx with ScaleCalculationMode.EVEN.
+    """
+    fp8_dtype = torch.float8_e4m3fn
+    fp8_max = torch.finfo(fp8_dtype).max
+
+    if scaling_type in ("delayed", "dynamic"):
+        amax = x.abs().max().float().clamp(min=1e-12)
+        scale = (amax / fp8_max).unsqueeze(0)
+        x_fp8 = torchao_quant_fp8(x, scale, fp8_dtype)
+        return x_fp8, scale
+
+    elif scaling_type == "per_token":
+        amax = x.abs().amax(dim=-1, keepdim=True).float().clamp(min=1e-12)
+        scale = amax / fp8_max
+        x_fp8 = torchao_quant_fp8(x, scale, fp8_dtype)
+        return x_fp8, scale.squeeze(-1)
+
+    elif scaling_type == "blockwise":
+        if fp8_blockwise_act_quant is not None:
+            try:
+                x_fp8, scale = fp8_blockwise_act_quant(x, block_size, fp8_dtype)
+                return x_fp8, scale
+            except (AssertionError, RuntimeError):
+                pass
+        x_fp8, scale = _blockwise_quant_ref(x, block_size, fp8_dtype)
+        return x_fp8, scale
+
+    elif scaling_type == "mxfp8":
+        scale, data_lp = torchao_to_mx(
+            x.cpu().float(),
+            fp8_dtype,
+            block_size,
+            scaling_mode=ScaleCalculationMode.EVEN,
+        )
+        return data_lp, scale
+
+    else:
+        raise ValueError(f"Unknown scaling_type: {scaling_type}")
 
 
 # ===================================================================
@@ -146,6 +211,16 @@ def test_rmsnorm_with_quant(config, scaling_type):
     out_dequant = _dequant_output(x_fp8, scale, scaling_type, config.N, block_size)
     snr = compute_snr(out_ref, out_dequant)
     assert snr > 8, f"RMSNorm+quant({scaling_type}) SNR: {snr:.1f} dB"
+
+    golden_fp8, _ = _quant_golden(out_ref, scaling_type, block_size)
+    if scaling_type == "mxfp8":
+        lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
+        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    else:
+        lumen_bytes = x_fp8.reshape(-1).view(torch.uint8)
+        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    fp8_match = (lumen_bytes == golden_bytes).float().mean().item()
+    assert fp8_match >= 0.75, f"RMSNorm fused FP8 vs torchao golden byte match: {fp8_match:.2%}"
 
 
 # ===================================================================
@@ -302,6 +377,16 @@ def test_layernorm_with_quant(config, scaling_type):
     out_dequant = _dequant_output(x_fp8, scale, scaling_type, config.N, block_size)
     snr = compute_snr(out_ref, out_dequant)
     assert snr > 8, f"LayerNorm+quant({scaling_type}) SNR: {snr:.1f} dB"
+
+    golden_fp8, _ = _quant_golden(out_ref, scaling_type, block_size)
+    if scaling_type == "mxfp8":
+        lumen_bytes = x_fp8.reshape(-1).cpu().view(torch.uint8)
+        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    else:
+        lumen_bytes = x_fp8.reshape(-1).view(torch.uint8)
+        golden_bytes = golden_fp8.reshape(-1).view(torch.uint8)
+    fp8_match = (lumen_bytes == golden_bytes).float().mean().item()
+    assert fp8_match >= 0.75, f"LayerNorm fused FP8 vs torchao golden byte match: {fp8_match:.2%}"
 
 
 # ===================================================================
@@ -483,6 +568,22 @@ def test_rmsnorm_mxfp8_vs_torchao(config):
     assert snr_vs_torchao > 8, f"Lumen fused rmsnorm+mxfp8 vs torchao SNR: {snr_vs_torchao:.1f} dB"
     assert snr_vs_ref > 6, f"Lumen fused rmsnorm+mxfp8 vs exact norm SNR: {snr_vs_ref:.1f} dB"
 
+    # Step 4: FP8 data byte-level comparison against torchao golden
+    fp8_match = (
+        (x_fp8_lumen.reshape(-1).cpu().view(torch.uint8) == data_lp_torchao.reshape(-1).view(torch.uint8))
+        .float()
+        .mean()
+        .item()
+    )
+    scale_match = (
+        (scales_lumen.reshape(-1).cpu().view(torch.uint8) == scale_torchao.reshape(-1).view(torch.uint8))
+        .float()
+        .mean()
+        .item()
+    )
+    assert fp8_match >= 0.80, f"Fused rmsnorm+mxfp8 FP8 data vs torchao byte match: {fp8_match:.2%}"
+    assert scale_match >= 0.80, f"Fused rmsnorm+mxfp8 E8M0 scale vs torchao byte match: {scale_match:.2%}"
+
 
 @pytest.mark.parametrize(
     "config",
@@ -541,3 +642,18 @@ def test_layernorm_mxfp8_vs_torchao(config):
 
     snr_vs_torchao = compute_snr(deq_torchao, deq_lumen)
     assert snr_vs_torchao > 8, f"Lumen fused layernorm+mxfp8 vs torchao SNR: {snr_vs_torchao:.1f} dB"
+
+    fp8_match = (
+        (x_fp8_lumen.reshape(-1).cpu().view(torch.uint8) == data_lp_torchao.reshape(-1).view(torch.uint8))
+        .float()
+        .mean()
+        .item()
+    )
+    scale_match = (
+        (scales_lumen.reshape(-1).cpu().view(torch.uint8) == scale_torchao.reshape(-1).view(torch.uint8))
+        .float()
+        .mean()
+        .item()
+    )
+    assert fp8_match >= 0.80, f"Fused layernorm+mxfp8 FP8 data vs torchao byte match: {fp8_match:.2%}"
+    assert scale_match >= 0.80, f"Fused layernorm+mxfp8 E8M0 scale vs torchao byte match: {scale_match:.2%}"
