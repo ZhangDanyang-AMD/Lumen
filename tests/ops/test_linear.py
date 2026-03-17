@@ -160,7 +160,7 @@ def test_fp8_linear_fwd_bwd(config, scaling_type):
 
 
 @pytest.mark.parametrize("config", LINEAR_SHAPES[:2], ids=LINEAR_IDS[:2])
-@pytest.mark.parametrize("scaling_type", ["dynamic", "per_token", "none"])
+@pytest.mark.parametrize("scaling_type", BWD_SCALING_TYPES)
 def test_fp8_linear_bias(config, scaling_type):
     """Forward + backward with bias."""
     dtype = torch.bfloat16
