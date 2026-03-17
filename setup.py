@@ -25,10 +25,17 @@ setup(
         "dev": [
             "amd-aiter",
             "pytest",
+            "pytest-xdist",
             "flake8",
             "pre-commit",
             "black",
             "isort",
+        ],
+        "test": [
+            "amd-aiter",
+            "pytest",
+            "pytest-xdist",
+            "torchao>=0.8",
         ],
     },
     classifiers=[

@@ -1,0 +1,19 @@
+# =============================================================================
+# Lumen test dependencies
+# =============================================================================
+
+# Test framework
+pytest>=7.0
+pytest-xdist
+
+# Lumen core (editable install handled by Dockerfile / setup.py)
+# torch>=2.0
+# triton
+
+# Quantization reference (torchao MX-format / FP8 primitives)
+torchao>=0.8
+
+# AITER — installed from third_party/aiter (editable) in Dockerfile
+
+# Utilities
+numpy>=1.26.0
