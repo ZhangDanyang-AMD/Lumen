@@ -135,7 +135,10 @@ class _LayerNormGradQuant(torch.autograd.Function):
             b_d = bias.detach().requires_grad_(True) if bias is not None else None
             orig_shape = x_d.shape
             x_2d = x_d.reshape(-1, x_d.shape[-1])
-            y = try_backends(_get_layernorm_chain(), x_2d, w_d, b_d, ctx.eps, op_name="layernorm")
+            if _probe_aiter_triton_norm():
+                y = _layernorm_triton(x_2d, w_d, b_d, ctx.eps)
+            else:
+                y = try_backends(_get_layernorm_chain(), x_2d, w_d, b_d, ctx.eps, op_name="layernorm")
             y = y.reshape(orig_shape)
             torch.autograd.backward(y, grad_output)
 
@@ -159,6 +162,10 @@ def layernorm(
 ) -> torch.Tensor:
     """Apply LayerNorm with automatic backend fallback (CK → Triton via AITER).
 
+    When any input requires grad, the Triton backend is preferred because
+    its ``_LayerNorm`` autograd.Function provides forward+backward support,
+    whereas CK kernels do not participate in the autograd graph.
+
     Args:
         x: Input tensor ``(*, hidden_size)``.
         weight: Learnable scale ``(hidden_size,)``.
@@ -177,7 +184,14 @@ def layernorm(
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1])
-    y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
+
+    needs_grad = torch.is_grad_enabled() and (
+        x.requires_grad or weight.requires_grad or (bias is not None and bias.requires_grad)
+    )
+    if needs_grad and _probe_aiter_triton_norm():
+        y = _layernorm_triton(x_2d, weight, bias, eps)
+    else:
+        y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
     return y.reshape(orig_shape)
 
 

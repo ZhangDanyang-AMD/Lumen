@@ -156,7 +156,10 @@ class _RMSNormGradQuant(torch.autograd.Function):
             w_detached = weight.detach().requires_grad_(True)
             orig_shape = x_detached.shape
             x_2d = x_detached.reshape(-1, x_detached.shape[-1])
-            y = try_backends(_get_rmsnorm_chain(), x_2d, w_detached, ctx.eps, op_name="rmsnorm")
+            if _probe_aiter_triton_rmsnorm():
+                y = _rmsnorm_triton(x_2d, w_detached, ctx.eps)
+            else:
+                y = try_backends(_get_rmsnorm_chain(), x_2d, w_detached, ctx.eps, op_name="rmsnorm")
             y = y.reshape(orig_shape)
             torch.autograd.backward(y, grad_output)
 
@@ -178,6 +181,10 @@ def rmsnorm(
 ) -> torch.Tensor:
     """Apply RMSNorm with automatic backend fallback (CK → Triton via AITER).
 
+    When any input requires grad, the Triton backend is preferred because
+    its ``_RMSNorm`` autograd.Function provides forward+backward support,
+    whereas CK kernels do not participate in the autograd graph.
+
     Args:
         x: Input tensor ``(*, hidden_size)``.
         weight: Learnable scale ``(hidden_size,)``.
@@ -192,7 +199,12 @@ def rmsnorm(
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1])
-    y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")
+
+    needs_grad = torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad)
+    if needs_grad and _probe_aiter_triton_rmsnorm():
+        y = _rmsnorm_triton(x_2d, weight, eps)
+    else:
+        y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")
     return y.reshape(orig_shape)
 
 

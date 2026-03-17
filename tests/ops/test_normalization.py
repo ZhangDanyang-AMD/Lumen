@@ -57,9 +57,12 @@ QUANT_SCALING_TYPES = ["dynamic", "per_token", "blockwise", "mxfp8"]
 
 def _dequant_output(x_fp8, scale, scaling_type, hidden_size, block_size=128):
     """Dequantize fused norm+quant output using torchao reference primitives."""
-    if scaling_type in ("delayed", "dynamic"):
-        # Lumen returns scale = fp8_max / amax; torchao expects scale = amax / fp8_max
+    if scaling_type == "delayed":
+        # delayed: caller passes quant scale (fp8_max / amax), invert for dequant
         return torchao_dequant_fp8(x_fp8, 1.0 / scale, output_dtype=torch.bfloat16)
+    elif scaling_type == "dynamic":
+        # dynamic: fused kernel returns dequant multiplier (amax / fp8_max)
+        return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
     elif scaling_type == "per_token":
         # Lumen returns per-row dequant multiplier; _dequantize_affine_float8 broadcasts
         return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
@@ -181,8 +184,8 @@ def test_rmsnorm_with_quant(config, scaling_type):
     dtype = torch.bfloat16
     block_size = 32 if scaling_type == "mxfp8" else 128
 
-    if scaling_type == "mxfp8" and config.N % block_size != 0:
-        pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
+    if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
+        pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
     if scaling_type == "blockwise" and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
@@ -241,8 +244,8 @@ def test_rmsnorm_quant_bwd(config, scaling_type):
     block_size = 32 if scaling_type == "mxfp8" else 128
     N_out = min(config.N, 256)
 
-    if scaling_type == "mxfp8" and config.N % block_size != 0:
-        pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
+    if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
+        pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
     if scaling_type == "blockwise" and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
@@ -345,8 +348,8 @@ def test_layernorm_with_quant(config, scaling_type):
     dtype = torch.bfloat16
     block_size = 32 if scaling_type == "mxfp8" else 128
 
-    if scaling_type == "mxfp8" and config.N % block_size != 0:
-        pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
+    if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
+        pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
     if scaling_type == "blockwise" and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
@@ -407,8 +410,8 @@ def test_layernorm_quant_bwd(config, scaling_type):
     block_size = 32 if scaling_type == "mxfp8" else 128
     N_out = min(config.N, 256)
 
-    if scaling_type == "mxfp8" and config.N % block_size != 0:
-        pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
+    if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
+        pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
     if scaling_type == "blockwise" and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
