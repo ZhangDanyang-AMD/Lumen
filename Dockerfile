@@ -3,9 +3,14 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /workspace
 
-# System build tools (cmake required by mori's CMake-based build)
+# System build tools + mori build dependencies:
+#   cmake/ninja    — mori CMake build
+#   libopenmpi-dev — MPI (mori bootstrap)
+#   libibverbs-dev, rdma-core — RDMA verbs + mlx5 provider (mori transport)
+#   libpci-dev     — PCI topology detection
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git ninja-build cmake && \
+        build-essential git ninja-build cmake \
+        libopenmpi-dev libibverbs-dev rdma-core libpci-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy project source
