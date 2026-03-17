@@ -157,9 +157,12 @@ def test_quant_fp8_blockwise_vs_torchao(shape, fp8_dtype):
 
     snr_lumen = compute_snr(x.float(), x_deq_lumen)
     snr_ref = compute_snr(x.float(), x_deq_ref)
-    assert snr_lumen >= 8.0, f"Lumen SNR {snr_lumen:.1f} dB too low"
-    assert snr_ref >= 8.0, f"Reference SNR {snr_ref:.1f} dB too low"
-    torch.testing.assert_close(x_deq_lumen, x_deq_ref, atol=1e-1, rtol=1e-1)
+    # e5m2 has lower precision (2 mantissa bits) → lower SNR expected
+    snr_floor = 4.0 if fp8_dtype == torch.float8_e5m2 else 8.0
+    assert snr_lumen >= snr_floor, f"Lumen SNR {snr_lumen:.1f} dB too low"
+    assert snr_ref >= snr_floor, f"Reference SNR {snr_ref:.1f} dB too low"
+    tol = 0.5 if fp8_dtype == torch.float8_e5m2 else 1e-1
+    torch.testing.assert_close(x_deq_lumen, x_deq_ref, atol=tol, rtol=tol)
 
 
 @pytest.mark.parametrize("shape", [(256, 128), (512, 256)], ids=["256x128", "512x256"])
@@ -207,12 +210,12 @@ def test_mxfp8_vs_torchao(shape, block_size):
         float8_dtype_pt=torch.float8_e4m3fn,
     )
 
-    # torchao quantization for reference
+    # torchao quantization for reference (EVEN mode matches Lumen's round-even scaling)
     scale_ref, data_lp_ref = torchao_to_mx(
         x.float().cpu().contiguous(),
         torch.float8_e4m3fn,
         block_size,
-        scaling_mode=ScaleCalculationMode.FLOOR,
+        scaling_mode=ScaleCalculationMode.EVEN,
     )
 
     # Compare quantized FP8 data
@@ -220,7 +223,7 @@ def test_mxfp8_vs_torchao(shape, block_size):
     ref_flat = data_lp_ref.flatten().view(torch.uint8)
     min_len = min(lumen_flat.numel(), ref_flat.numel())
     fp8_match = (lumen_flat[:min_len] == ref_flat[:min_len]).float().mean().item()
-    assert fp8_match >= 0.90, f"FP8 data match rate {fp8_match:.2%} < 90%"
+    assert fp8_match >= 0.95, f"FP8 data match rate {fp8_match:.2%} < 95%"
 
     # Compare scales (torchao returns float8_e8m0fnu, Lumen returns uint8; bitwise reinterpret)
     s_lumen = scales_lumen.cpu().flatten()
@@ -241,7 +244,7 @@ def test_mxfp8_vs_torchao(shape, block_size):
 
     snr = compute_snr(
         x.float().cpu(),
-        x_deq_lumen_cpu.to(x.device),
+        x_deq_lumen_cpu,
     )
     assert snr >= 6.0, f"SNR {snr:.1f} dB too low"
     assert not torch.isnan(x_deq_lumen_cpu).any()
@@ -269,7 +272,7 @@ def test_mxfp8_scale_and_data_agreement_with_torchao(shape, block_size):
         x.float().cpu().contiguous(),
         torch.float8_e4m3fn,
         block_size,
-        scaling_mode=ScaleCalculationMode.FLOOR,
+        scaling_mode=ScaleCalculationMode.EVEN,
     )
 
     # Scales agreement (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
@@ -309,6 +312,7 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
         x.float().cpu().contiguous(),
         torch.float8_e4m3fn,
         block_size,
+        scaling_mode=ScaleCalculationMode.EVEN,
     )
 
     # Compare quantized FP8 data directly
@@ -321,7 +325,7 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
         .mean()
         .item()
     )
-    assert fp8_match >= 0.90, f"FP8 data match rate {fp8_match:.2%} < 90%"
+    assert fp8_match >= 0.95, f"FP8 data match rate {fp8_match:.2%} < 95%"
 
     # Compare E8M0 scales directly (bitwise reinterpret float8_e8m0fnu → uint8)
     scales_ref = mx_ref.scale.flatten().view(torch.uint8)
@@ -340,11 +344,11 @@ def test_mxfp8_vs_torchao_mxtensor(shape, block_size):
     )
     x_deq_torchao = mx_ref.dequantize()
 
-    snr = compute_snr(x.float(), x_deq_lumen)
+    snr = compute_snr(x.float().cpu(), x_deq_lumen.cpu())
     assert snr >= 6.0, f"SNR {snr:.1f} dB too low"
     torch.testing.assert_close(
         x_deq_lumen.cpu(),
-        x_deq_torchao,
+        x_deq_torchao.cpu(),
         atol=1e-1,
         rtol=1e-1,
     )
@@ -363,6 +367,7 @@ def test_mxfp8_zeros():
         x.float().cpu(),
         torch.float8_e4m3fn,
         block_size,
+        scaling_mode=ScaleCalculationMode.EVEN,
     )
     x_deq_ref = torchao_to_dtype(
         data_ref,
@@ -392,11 +397,12 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
         float8_dtype_pt=fp8_dtype,
     )
 
-    # torchao
+    # torchao (EVEN mode matches Lumen's round-even scaling)
     scale_ref, data_lp_ref = torchao_to_mx(
         x.float().cpu().contiguous(),
         fp8_dtype,
         block_size,
+        scaling_mode=ScaleCalculationMode.EVEN,
     )
 
     # Compare FP8 data
@@ -404,7 +410,7 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
     d_ref = data_lp_ref.flatten().view(torch.uint8)
     min_dlen = min(d_lumen.numel(), d_ref.numel())
     data_match = (d_lumen[:min_dlen] == d_ref[:min_dlen]).float().mean().item()
-    assert data_match >= 0.90, f"FP8 data match rate {data_match:.2%} < 90%"
+    assert data_match >= 0.95, f"FP8 data match rate {data_match:.2%} < 95%"
 
     # Compare scales (torchao returns float8_e8m0fnu; bitwise reinterpret to uint8)
     s_lumen = scales.cpu().flatten()
@@ -425,11 +431,11 @@ def test_mxfp8_dtype_variants(fp8_dtype, shape=(64, 128), block_size=64):
 
     assert not torch.isnan(x_deq).any()
     assert not torch.isinf(x_deq).any()
-    snr = compute_snr(x.float(), x_deq)
+    snr = compute_snr(x.float().cpu(), x_deq.cpu())
     assert snr >= 6.0, f"Lumen roundtrip SNR {snr:.1f} dB too low"
     torch.testing.assert_close(
         x_deq.cpu(),
-        x_deq_ref,
+        x_deq_ref.cpu(),
         atol=1e-1,
         rtol=1e-1,
     )
