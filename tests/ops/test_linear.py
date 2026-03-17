@@ -102,6 +102,7 @@ def test_fp8_linear_fwd(config, scaling_type):
         scaling_type=scaling_type,
         quantize_activation=True,
     )
+    torch.cuda.synchronize()
 
     snr = compute_snr(out_ref, out_lumen)
     floor = _FWD_SNR[scaling_type]
@@ -125,8 +126,10 @@ def test_fp8_linear_fwd_bwd(config, scaling_type):
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
-    x = torch.randn(M, K, device="cuda", dtype=dtype, requires_grad=True) * 0.1
-    w = torch.randn(N, K, device="cuda", dtype=dtype, requires_grad=True) * 0.02
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+    w.requires_grad_(True)
 
     x_ref = x.detach().clone().requires_grad_(True)
     w_ref = w.detach().clone().requires_grad_(True)
@@ -140,7 +143,9 @@ def test_fp8_linear_fwd_bwd(config, scaling_type):
         scaling_type=scaling_type,
         quantize_activation=True,
     )
+    torch.cuda.synchronize()
     out_lumen.float().mean().backward()
+    torch.cuda.synchronize()
 
     out_snr = compute_snr(out_ref, out_lumen)
     dx_snr = compute_snr(x_ref.grad, x.grad)
@@ -166,9 +171,12 @@ def test_fp8_linear_bias(config, scaling_type):
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
-    x = torch.randn(M, K, device="cuda", dtype=dtype, requires_grad=True) * 0.1
-    w = torch.randn(N, K, device="cuda", dtype=dtype, requires_grad=True) * 0.02
-    b = torch.randn(N, device="cuda", dtype=dtype, requires_grad=True) * 0.01
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+    w.requires_grad_(True)
+    b = torch.randn(N, device="cuda", dtype=dtype) * 0.01
+    b.requires_grad_(True)
 
     x_ref = x.detach().clone().requires_grad_(True)
     w_ref = w.detach().clone().requires_grad_(True)
@@ -184,7 +192,9 @@ def test_fp8_linear_bias(config, scaling_type):
         scaling_type=scaling_type,
         quantize_activation=True,
     )
+    torch.cuda.synchronize()
     out_lumen.float().mean().backward()
+    torch.cuda.synchronize()
 
     fwd_floor = _FWD_SNR[scaling_type]
     assert compute_snr(out_ref, out_lumen) > fwd_floor
@@ -226,6 +236,7 @@ def test_fp8_linear_bias_fwd_only(config, scaling_type):
         scaling_type=scaling_type,
         quantize_activation=True,
     )
+    torch.cuda.synchronize()
 
     snr = compute_snr(out_ref, out_lumen)
     floor = _FWD_SNR[scaling_type]
@@ -244,8 +255,10 @@ def test_fp8_linear_weight_only(config, scaling_type):
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
-    x = torch.randn(M, K, device="cuda", dtype=dtype, requires_grad=True) * 0.1
-    w = torch.randn(N, K, device="cuda", dtype=dtype, requires_grad=True) * 0.02
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+    w.requires_grad_(True)
 
     x_ref = x.detach().clone().requires_grad_(True)
     w_ref = w.detach().clone().requires_grad_(True)
@@ -259,7 +272,9 @@ def test_fp8_linear_weight_only(config, scaling_type):
         scaling_type=scaling_type,
         quantize_activation=False,
     )
+    torch.cuda.synchronize()
     out_lumen.float().mean().backward()
+    torch.cuda.synchronize()
 
     assert compute_snr(out_ref, out_lumen) > 10
     assert compute_snr(x_ref.grad, x.grad) > 6
@@ -277,8 +292,10 @@ def test_fp8_linear_bf16_wgrad(config):
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
-    x = torch.randn(M, K, device="cuda", dtype=dtype, requires_grad=True) * 0.1
-    w = torch.randn(N, K, device="cuda", dtype=dtype, requires_grad=True) * 0.02
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+    w.requires_grad_(True)
 
     x_ref = x.detach().clone().requires_grad_(True)
     w_ref = w.detach().clone().requires_grad_(True)
@@ -293,7 +310,9 @@ def test_fp8_linear_bf16_wgrad(config):
         quantize_activation=True,
         fp8_wgrad=False,
     )
+    torch.cuda.synchronize()
     out_lumen.float().mean().backward()
+    torch.cuda.synchronize()
 
     assert compute_snr(out_ref, out_lumen) > 12
     assert compute_snr(x_ref.grad, x.grad) > 6
@@ -312,8 +331,10 @@ def test_fp8_linear_m1(scaling_type):
     dtype = torch.bfloat16
     M, K, N = 1, 256, 512
 
-    x = torch.randn(M, K, device="cuda", dtype=dtype, requires_grad=True) * 0.1
-    w = torch.randn(N, K, device="cuda", dtype=dtype, requires_grad=True) * 0.02
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+    w.requires_grad_(True)
 
     x_ref = x.detach().clone().requires_grad_(True)
     w_ref = w.detach().clone().requires_grad_(True)
@@ -327,7 +348,9 @@ def test_fp8_linear_m1(scaling_type):
         scaling_type=scaling_type,
         quantize_activation=True,
     )
+    torch.cuda.synchronize()
     out_lumen.float().mean().backward()
+    torch.cuda.synchronize()
 
     fwd_floor = _FWD_SNR[scaling_type]
     assert compute_snr(out_ref, out_lumen) > fwd_floor

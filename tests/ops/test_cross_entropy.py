@@ -70,7 +70,8 @@ def test_cross_entropy_fwd_bwd(batch, vocab):
     seq_len = 1
     dtype = torch.bfloat16
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     logits_ref = logits.detach().clone().requires_grad_(True)
 
@@ -130,7 +131,8 @@ def test_cross_entropy_reduce_loss(batch, vocab):
     seq_len = 1
     dtype = torch.bfloat16
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     logits_ref = logits.detach().clone().requires_grad_(True)
 
@@ -172,7 +174,8 @@ def test_cross_entropy_ignore_idx(batch, vocab):
     dtype = torch.bfloat16
     ignore_idx = -100
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     # Set ~25% of targets to ignore_idx
     mask = torch.rand(batch, seq_len, device="cuda") < 0.25
@@ -216,7 +219,8 @@ def test_cross_entropy_seq_len(seq_len):
     batch, vocab = 32, 32000
     dtype = torch.bfloat16
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     logits_ref = logits.detach().clone().requires_grad_(True)
 
@@ -251,7 +255,8 @@ def test_cross_entropy_cg_capturable():
     batch, seq_len, vocab = 32, 1, 32000
     dtype = torch.bfloat16
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     logits_ref = logits.detach().clone().requires_grad_(True)
 
@@ -279,7 +284,7 @@ def test_cross_entropy_cg_capturable():
 
 def test_cross_entropy_non_contiguous():
     """Non-contiguous logits — implementation has .contiguous() fallback."""
-    batch, seq_len, vocab = 32, 1, 32000
+    batch, seq_len, vocab = 32, 2, 32000
     dtype = torch.bfloat16
 
     logits_base = torch.randn(seq_len, batch, vocab, device="cuda", dtype=dtype)
@@ -315,7 +320,8 @@ def test_cross_entropy_batch1():
     batch, seq_len, vocab = 1, 1, 32000
     dtype = torch.bfloat16
 
-    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype, requires_grad=True) * 0.1
+    logits = torch.randn(batch, seq_len, vocab, device="cuda", dtype=dtype) * 0.1
+    logits.requires_grad_(True)
     target = torch.randint(0, vocab, (batch, seq_len), device="cuda", dtype=torch.long)
     logits_ref = logits.detach().clone().requires_grad_(True)
 
