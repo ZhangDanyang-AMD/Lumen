@@ -194,6 +194,45 @@ def test_fp8_linear_bias(config, scaling_type):
 
 
 # ===================================================================
+# Bias forward-only — scaling types incompatible with backward
+# ===================================================================
+
+
+FWD_ONLY_SCALING_TYPES = [s for s in ALL_SCALING_TYPES if s not in BWD_SCALING_TYPES]
+
+
+@pytest.mark.parametrize("config", LINEAR_SHAPES[:2], ids=LINEAR_IDS[:2])
+@pytest.mark.parametrize("scaling_type", FWD_ONLY_SCALING_TYPES)
+def test_fp8_linear_bias_fwd_only(config, scaling_type):
+    """Forward-only bias test for scaling types that don't support backward.
+
+    per_token/blockwise/mxfp8 weight scales become misaligned after
+    transposition in the backward pass (see BWD_SCALING_TYPES comment),
+    so we only verify the forward output here.
+    """
+    _skip_if_unaligned(config, scaling_type)
+    dtype = torch.bfloat16
+    M, K, N = config.M, config.K, config.N
+
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    b = torch.randn(N, device="cuda", dtype=dtype) * 0.01
+
+    out_ref = x @ w.T + b
+    out_lumen = linear_ops.quantized_linear(
+        x,
+        w,
+        bias=b,
+        scaling_type=scaling_type,
+        quantize_activation=True,
+    )
+
+    snr = compute_snr(out_ref, out_lumen)
+    floor = _FWD_SNR[scaling_type]
+    assert snr > floor, f"FP8 linear bias fwd ({scaling_type}) SNR: {snr:.1f} dB (expected > {floor})"
+
+
+# ===================================================================
 # Weight-only quantization (quantize_activation=False)
 # ===================================================================
 
@@ -267,7 +306,7 @@ def test_fp8_linear_bf16_wgrad(config):
 # ===================================================================
 
 
-@pytest.mark.parametrize("scaling_type", ["dynamic", "per_token", "none"])
+@pytest.mark.parametrize("scaling_type", BWD_SCALING_TYPES)
 def test_fp8_linear_m1(scaling_type):
     """Single-row input (M=1) — exercises per-token edge case."""
     dtype = torch.bfloat16
