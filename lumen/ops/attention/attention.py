@@ -91,7 +91,6 @@ class AttentionTritonFunction(torch.autograd.Function):
             bias,
             alibi_slopes,
             return_softmax,
-            prefer_asm=prefer_asm,
         )
 
         if is_grad:

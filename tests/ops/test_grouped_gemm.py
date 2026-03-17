@@ -18,7 +18,7 @@ import pytest
 import torch
 from conftest import compute_snr, grouped_gemm_ref
 
-import lumen.ops.gemm.grouped_gemm as gemm_ops
+from lumen.ops.gemm.grouped_gemm import grouped_gemm, grouped_gemm_wgrad
 
 
 def _make_group_sizes(num_experts, tokens, device):
@@ -77,7 +77,7 @@ def test_grouped_gemm_fwd(num_experts, tokens, N, K):
     out_ref = grouped_gemm_ref(lhs, rhs_ref, group_sizes)
 
     rhs_lumen = rhs_ref.transpose(1, 2)
-    out_lumen = gemm_ops.grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none")
+    out_lumen = grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none")
 
     assert out_lumen.shape == (total_tokens, N)
     snr = compute_snr(out_ref, out_lumen)
@@ -106,7 +106,7 @@ def test_grouped_gemm_bias(num_experts, tokens):
     out_ref = grouped_gemm_ref(lhs, rhs_ref, group_sizes, bias=bias)
 
     rhs_lumen = rhs_ref.transpose(1, 2)
-    out_lumen = gemm_ops.grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none", bias=bias)
+    out_lumen = grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none", bias=bias)
 
     assert out_lumen.shape == (total_tokens, N)
     snr = compute_snr(out_ref, out_lumen)
@@ -141,7 +141,7 @@ def test_grouped_gemm_zero_groups(sizes):
     out_ref = grouped_gemm_ref(lhs, rhs_ref, group_sizes)
 
     rhs_lumen = rhs_ref.transpose(1, 2)
-    out_lumen = gemm_ops.grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none")
+    out_lumen = grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type="none")
 
     assert out_lumen.shape == (total_tokens, N)
     snr = compute_snr(out_ref, out_lumen)
@@ -167,7 +167,7 @@ def test_grouped_gemm_wgrad(num_experts, tokens):
     input_tensor = torch.randn(total_tokens, K, device=device, dtype=dtype) * 0.1
 
     wgrad_ref = _wgrad_ref(grad_output, input_tensor, group_sizes)
-    wgrad_lumen = gemm_ops.grouped_gemm_wgrad(grad_output, input_tensor, group_sizes, scaling_type="none")
+    wgrad_lumen = grouped_gemm_wgrad(grad_output, input_tensor, group_sizes, scaling_type="none")
 
     assert wgrad_lumen.shape == (num_experts, N, K)
     snr = compute_snr(wgrad_ref, wgrad_lumen)
@@ -188,4 +188,4 @@ def test_grouped_gemm_invalid_scaling_type():
     group_sizes = torch.tensor([8, 8, 8, 8], dtype=torch.int32, device=device)
 
     with pytest.raises(ValueError, match="Unknown scaling_type"):
-        gemm_ops.grouped_gemm(lhs, rhs, group_sizes, scaling_type="invalid")
+        grouped_gemm(lhs, rhs, group_sizes, scaling_type="invalid")

@@ -473,11 +473,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
         grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
 
         # wgrad: grad^T @ input  →  dispatch(grad^T, input^T)
-        # After transpose the GEMM K dimension equals the original batch M.
-        # AITER FP8 kernels require K >= 64; fall back to BF16 for smaller M.
+        # AITER's per-tensor FP8 GEMM backends (hipBLASLt / CK) crash with
+        # uncatchable SIGABRT on transposed wgrad tensors regardless of
+        # dimension, so always dequantize to BF16 before computing wgrad.
+        # mxfp8 / blockwise wgrad would use different GEMM paths and may
+        # support FP8 wgrad in the future.
         _MIN_FP8_K = 64
         wgrad_k = grad_fp8.shape[0]
-        if ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K:
+        _use_fp8_wgrad = ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic")
+        if _use_fp8_wgrad:
             grad_weight = dispatch_gemm(
                 grad_fp8.t().contiguous(),
                 input_fp8.t().contiguous(),
