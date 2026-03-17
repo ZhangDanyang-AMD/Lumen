@@ -17,6 +17,8 @@ import logging
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import torch
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,11 +218,18 @@ def try_backends(
     On ``RuntimeError`` or ``NotImplementedError`` from a backend, logs a
     warning and falls through to the next.  If all fail, raises the last
     exception.
+
+    A ``torch.cuda.synchronize()`` is issued after each backend call so
+    that asynchronous GPU errors are detected immediately, allowing the
+    fallback chain to actually recover from kernel failures.
     """
     last_exc = None
     for backend, fn in backends:
         try:
-            return fn(*args, **kwargs)
+            result = fn(*args, **kwargs)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            return result
         except (RuntimeError, NotImplementedError, TypeError) as exc:
             logger.warning(
                 "%s: %s backend failed (%s), trying next...",

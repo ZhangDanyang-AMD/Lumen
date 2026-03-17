@@ -9,8 +9,10 @@ Tests for lumen.ops.attention: multi-head attention (BSHD layout).
 Covers:
   - Forward vs PyTorch reference (BF16, compute_snr)
   - Forward + backward: dQ/dK/dV gradients vs reference
-  - Causal attention forward
-  - GQA (num_head_q > num_head_kv) forward
+  - Causal attention forward + backward
+  - GQA (num_head_q > num_head_kv) forward + backward
+  - Cross-attention (seqlen_q != seqlen_kv)
+  - Backend selection ("auto" dispatch)
 
 Reference: attention_ref from conftest (pure PyTorch BSHD).
 """
@@ -26,9 +28,11 @@ import lumen.ops.attention as attn_ops
 # ---------------------------------------------------------------------------
 
 ATTN_CONFIGS = [
-    AttnConfig(128, 128, 8, 8, 64, 64),  # standard
+    AttnConfig(128, 128, 8, 8, 64, 64),  # standard MHA
     AttnConfig(256, 256, 16, 4, 64, 64),  # GQA
     AttnConfig(512, 512, 8, 8, 128, 128),  # larger head dim
+    AttnConfig(256, 128, 8, 8, 64, 64),  # cross-attention: seqlen_q > seqlen_kv
+    AttnConfig(128, 256, 8, 8, 64, 64),  # cross-attention: seqlen_q < seqlen_kv
 ]
 
 ATTN_IDS = [repr(c) for c in ATTN_CONFIGS]
@@ -181,6 +185,49 @@ def test_attention_causal(config):
 
 
 # ===================================================================
+# Causal forward + backward
+# ===================================================================
+
+
+@pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
+def test_attention_causal_fwd_bwd(config):
+    """Causal BF16 forward+backward, compare dQ/dK/dV gradients vs reference."""
+    dtype = torch.bfloat16
+    device = "cuda"
+    batch_size = 2
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
+    q_ref = q.detach().clone().requires_grad_(True)
+    k_ref = k.detach().clone().requires_grad_(True)
+    v_ref = v.detach().clone().requires_grad_(True)
+
+    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=True)
+    loss_ref = out_ref.float().mean()
+    loss_ref.backward()
+
+    out = attn_ops.attention(
+        q,
+        k,
+        v,
+        softmax_scale=sm_scale,
+        causal=True,
+        backend_type="aiter_triton",
+    )
+    loss = out.float().mean()
+    loss.backward()
+
+    dq_snr = compute_snr(q_ref.grad, q.grad)
+    dk_snr = compute_snr(k_ref.grad, k.grad)
+    dv_snr = compute_snr(v_ref.grad, v.grad)
+
+    min_snr = 15
+    assert dq_snr > min_snr, f"Causal dQ gradient SNR: {dq_snr:.1f} dB"
+    assert dk_snr > min_snr, f"Causal dK gradient SNR: {dk_snr:.1f} dB"
+    assert dv_snr > min_snr, f"Causal dV gradient SNR: {dv_snr:.1f} dB"
+
+
+# ===================================================================
 # GQA (num_head_q > num_head_kv) forward
 # ===================================================================
 
@@ -217,3 +264,94 @@ def test_attention_gqa(config):
 
     snr = compute_snr(out_ref, out)
     assert snr > 20, f"GQA attention forward SNR: {snr:.1f} dB"
+
+
+# ===================================================================
+# GQA forward + backward
+# ===================================================================
+
+GQA_CONFIGS = [
+    AttnConfig(256, 256, 16, 4, 64, 64),
+    AttnConfig(128, 128, 8, 2, 64, 64),
+]
+GQA_IDS = [repr(c) for c in GQA_CONFIGS]
+
+
+@pytest.mark.parametrize("config", GQA_CONFIGS, ids=GQA_IDS)
+def test_attention_gqa_fwd_bwd(config):
+    """GQA forward+backward, compare dQ/dK/dV gradients vs reference."""
+    dtype = torch.bfloat16
+    device = "cuda"
+    batch_size = 2
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    assert config.num_head_q > config.num_head_kv
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
+    q_ref = q.detach().clone().requires_grad_(True)
+    k_ref = k.detach().clone().requires_grad_(True)
+    v_ref = v.detach().clone().requires_grad_(True)
+
+    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=False)
+    loss_ref = out_ref.float().mean()
+    loss_ref.backward()
+
+    out = attn_ops.attention(
+        q,
+        k,
+        v,
+        softmax_scale=sm_scale,
+        causal=False,
+        backend_type="aiter_triton",
+    )
+    loss = out.float().mean()
+    loss.backward()
+
+    dq_snr = compute_snr(q_ref.grad, q.grad)
+    dk_snr = compute_snr(k_ref.grad, k.grad)
+    dv_snr = compute_snr(v_ref.grad, v.grad)
+
+    min_snr = 15
+    assert dq_snr > min_snr, f"GQA dQ gradient SNR: {dq_snr:.1f} dB"
+    assert dk_snr > min_snr, f"GQA dK gradient SNR: {dk_snr:.1f} dB"
+    assert dv_snr > min_snr, f"GQA dV gradient SNR: {dv_snr:.1f} dB"
+
+
+# ===================================================================
+# Backend selection: "auto" dispatch
+# ===================================================================
+
+
+@pytest.mark.parametrize(
+    "config",
+    [AttnConfig(128, 128, 8, 8, 64, 64)],
+    ids=["sq128_sk128_hq8_hkv8_dqk64_dv64"],
+)
+def test_attention_auto_backend(config):
+    """backend_type='auto' produces same result as explicit backend."""
+    dtype = torch.bfloat16
+    device = "cuda"
+    batch_size = 2
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device)
+
+    out_explicit = attn_ops.attention(
+        q,
+        k,
+        v,
+        softmax_scale=sm_scale,
+        causal=False,
+        backend_type="aiter_triton",
+    )
+    out_auto = attn_ops.attention(
+        q,
+        k,
+        v,
+        softmax_scale=sm_scale,
+        causal=False,
+        backend_type="auto",
+    )
+
+    snr = compute_snr(out_explicit, out_auto)
+    assert snr > 20, f"Auto vs explicit backend SNR: {snr:.1f} dB"

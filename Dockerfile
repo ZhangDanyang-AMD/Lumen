@@ -3,9 +3,9 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /workspace
 
-# System build tools
+# System build tools (cmake required by mori's CMake-based build)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git ninja-build && \
+        build-essential git ninja-build cmake && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy project source
@@ -13,6 +13,13 @@ COPY . /workspace/Lumen
 
 # AITER (editable from third_party)
 RUN cd /workspace/Lumen/third_party/aiter && pip install -e .
+
+# mori — SDMA communication library (editable from third_party)
+# Must init mori's own submodules (spdlog, msgpack-c) before cmake build.
+RUN cd /workspace/Lumen/third_party/mori && \
+    git submodule update --init --recursive && \
+    pip install setuptools-scm && \
+    pip install -e .
 
 # torchao (quantization reference)
 RUN pip install torchao>=0.8

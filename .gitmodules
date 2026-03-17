@@ -2,3 +2,7 @@
 	path = third_party/aiter
 	url = https://github.com/ZhangDanyang-AMD/aiter.git
 	branch = lumen/triton_kernels
+[submodule "third_party/mori"]
+	path = third_party/mori
+	url = https://github.com/ZhangDanyang-AMD/mori.git
+	branch = sdma-new
