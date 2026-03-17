@@ -472,7 +472,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
         grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
 
         # wgrad: grad^T @ input  →  dispatch(grad^T, input^T)
-        if ctx.fp8_wgrad:
+        # After transpose the GEMM K dimension equals the original batch M.
+        # AITER FP8 kernels require K >= 64; fall back to BF16 for smaller M.
+        _MIN_FP8_K = 64
+        wgrad_k = grad_fp8.shape[0]
+        if ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K:
             grad_weight = dispatch_gemm(
                 grad_fp8.t().contiguous(),
                 input_fp8.t().contiguous(),

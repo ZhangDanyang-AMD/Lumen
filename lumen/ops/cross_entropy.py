@@ -125,6 +125,13 @@ class _ParallelCrossEntropy(torch.autograd.Function):
         is_cg_capturable=False,
         use_sdma=False,
     ):
+        # AITER Triton kernels only check stride(-1) == 1 before using
+        # stride(-2) as the row stride.  A transposed-but-last-dim-contiguous
+        # tensor (e.g. from .transpose(0,1)) can have a huge stride(-2) that
+        # causes out-of-bounds GPU memory reads.  Ensure full contiguity here.
+        if not _input.is_contiguous():
+            _input = _input.contiguous()
+
         if use_sdma and dist_process_group is not None:
             loss, grad_input = _cross_entropy_forward_sdma(
                 _input,
