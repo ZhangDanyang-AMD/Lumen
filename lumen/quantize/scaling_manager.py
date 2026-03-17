@@ -118,8 +118,8 @@ class ScalingManager:
         else:
             self.config = QuantConfig(block_size=block_size, history_len=history_len)
 
-        self.fp8_dtype = config.torch_dtype or fp8_dtype if config else fp8_dtype
-        self.fp8_dtype_bwd = config.torch_dtype_bwd or self.fp8_dtype if config else self.fp8_dtype
+        self.fp8_dtype = self.config.torch_dtype or fp8_dtype
+        self.fp8_dtype_bwd = self.config.torch_dtype_bwd or self.fp8_dtype
         self._fp8_max = self.config.fp8_max
         self._fp8_max_bwd = self.config.fp8_max_bwd
         self._margin = self.config.margin

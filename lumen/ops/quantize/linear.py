@@ -43,6 +43,7 @@ from lumen.ops.dispatch import (
     _probe_aiter_triton_quant,
     try_backends,
 )
+from lumen.quantize.config import _get_float8_e4m3
 
 __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
@@ -519,7 +520,7 @@ def quantized_linear(
     scaling_manager=None,
     backend: str = "auto",
     scaling_type: str = "delayed",
-    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    fp8_dtype: Optional[torch.dtype] = None,
     block_size: int = 128,
     tensor_id: str = "weight",
     quantize_activation: bool = True,
@@ -535,7 +536,9 @@ def quantized_linear(
         backend: Legacy parameter (ignored, auto-fallback is always used).
         scaling_type: One of ``"delayed"``, ``"dynamic"``, ``"per_token"``,
             ``"blockwise"``, ``"mxfp8"``, ``"none"``.
-        fp8_dtype: Target FP8 dtype.
+        fp8_dtype: Target FP8 dtype.  ``None`` auto-detects based on GPU
+            architecture (``float8_e4m3fnuz`` on gfx942, ``float8_e4m3fn``
+            on gfx950+).
         block_size: Block size for blockwise/MXFP8 quantization.
         tensor_id: Unique identifier for this layer's weight.
         quantize_activation: If ``True``, quantize both input and weight.
@@ -544,6 +547,9 @@ def quantized_linear(
     Returns:
         Output tensor ``[*, out_features]``.
     """
+    if fp8_dtype is None:
+        fp8_dtype = _get_float8_e4m3()
+
     if scaling_manager is None:
         from lumen.quantize import ScalingManager
 

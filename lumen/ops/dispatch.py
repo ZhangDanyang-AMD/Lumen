@@ -230,7 +230,7 @@ def try_backends(
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             return result
-        except (RuntimeError, NotImplementedError, TypeError) as exc:
+        except (RuntimeError, NotImplementedError, TypeError, ValueError) as exc:
             logger.warning(
                 "%s: %s backend failed (%s), trying next...",
                 op_name,

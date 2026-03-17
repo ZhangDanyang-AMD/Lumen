@@ -26,6 +26,7 @@ import torch.nn as nn
 
 from lumen.ops.quantize import quantized_linear
 from lumen.quantize import QuantConfig, ScalingManager, is_aiter_available
+from lumen.quantize.config import _get_float8_e4m3
 
 __all__ = ["LumenLinear"]
 
@@ -41,7 +42,8 @@ class LumenLinear(nn.Module):
         out_features: Size of each output sample.
         bias: If ``True``, adds a learnable bias. Default: ``True``.
         backend_type: ``"aiter"`` or ``"triton"``.
-        fp8_dtype: Target FP8 dtype. Default: ``torch.float8_e4m3fn``.
+        fp8_dtype: Target FP8 dtype. ``None`` auto-detects based on GPU
+            architecture.
         block_size: Block size for blockwise quantization (triton backend).
         config: Optional :class:`~lumen.quantize.QuantConfig`.
                 If not provided, a default config is created.
@@ -53,7 +55,7 @@ class LumenLinear(nn.Module):
         out_features: int,
         bias: bool = True,
         backend_type: str = "aiter",
-        fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+        fp8_dtype: Optional[torch.dtype] = None,
         block_size: int = 128,
         config: Optional[QuantConfig] = None,
     ):
@@ -68,7 +70,7 @@ class LumenLinear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.backend_type = backend_type
-        self.fp8_dtype = fp8_dtype
+        self.fp8_dtype = fp8_dtype if fp8_dtype is not None else _get_float8_e4m3()
         self.block_size = block_size
 
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
