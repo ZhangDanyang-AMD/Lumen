@@ -252,6 +252,11 @@ def test_fp8_linear_bias_fwd_only(config, scaling_type):
 @pytest.mark.parametrize("scaling_type", ["dynamic", "per_token"])
 def test_fp8_linear_weight_only(config, scaling_type):
     """Weight-only quant: activation stays BF16, weight is FP8-dequanted."""
+    if config.M < 128:
+        pytest.skip(
+            f"M={config.M} too small for wgrad AITER Triton BF16 GEMM "
+            f"(K_gemm=M after transpose, needs BLOCK_SIZE_K>=128)"
+        )
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 

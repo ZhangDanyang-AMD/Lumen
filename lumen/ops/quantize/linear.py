@@ -260,14 +260,32 @@ def gemm_mxfp8(a_fp8, w_fp8, scale_a, scale_w):
     return try_backends(backends, op_name="gemm_mxfp8")
 
 
-def _gemm_bf16_triton(a, w, bias):
-    from aiter.ops.triton.gemm.basic.gemm_a16w16 import gemm_a16w16
+_MIN_TRITON_BF16_K = 128
 
-    return gemm_a16w16(a, w, bias=bias)
+
+def _gemm_bf16_triton(a, w, bias):
+    from aiter.ops.triton.gemm.basic.gemm_a16w16 import _get_config, gemm_a16w16
+
+    M, K = a.shape
+    N = w.shape[0]
+    config, _ = _get_config(M, N, K)
+    if config.get("BLOCK_SIZE_K", _MIN_TRITON_BF16_K) < _MIN_TRITON_BF16_K:
+        config["BLOCK_SIZE_K"] = _MIN_TRITON_BF16_K
+    return gemm_a16w16(a, w, bias=bias, config=config)
 
 
 def gemm_bf16(a, w, bias=None):
-    """BF16 GEMM: Y = X @ W^T via AITER Triton (gemm_a16w16)."""
+    """BF16 GEMM: Y = X @ W^T via AITER Triton (gemm_a16w16).
+
+    Raises ``ValueError`` when K < ``_MIN_TRITON_BF16_K`` (128) because the
+    AITER Triton kernel on gfx942 cannot compile with ``BLOCK_SIZE_K < 128``.
+    """
+    K = a.shape[1]
+    if K < _MIN_TRITON_BF16_K:
+        raise ValueError(
+            f"gemm_bf16: K={K} < {_MIN_TRITON_BF16_K}. "
+            f"AITER Triton gemm_a16w16 requires K >= {_MIN_TRITON_BF16_K} on gfx942."
+        )
     backends = []
     if _probe_aiter_triton_gemm_bf16():
         backends.append((Backend.TRITON, lambda: _gemm_bf16_triton(a, w, bias)))
@@ -434,7 +452,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if not ctx.quantize_activation:
             input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
             weight_dequant = weight_fp8.to(grad_output.dtype) * weight_scale
-            # dgrad: grad @ weight_dequant
             grad_input = dispatch_gemm(
                 grad_output,
                 weight_dequant.t().contiguous(),
@@ -442,7 +459,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None,
                 "none",
             )
-            # wgrad: grad^T @ input
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
             input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
             grad_weight = dispatch_gemm(

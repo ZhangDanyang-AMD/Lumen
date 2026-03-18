@@ -19,6 +19,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 
+try:
+    from triton.compiler.errors import CompilationError as _TritonCompilationError
+except ImportError:
+    _TritonCompilationError = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -215,14 +220,19 @@ def try_backends(
 ) -> Any:
     """Try each ``(backend, fn)`` pair in order; return first success.
 
-    On ``RuntimeError`` or ``NotImplementedError`` from a backend, logs a
-    warning and falls through to the next.  If all fail, raises the last
-    exception.
+    On ``RuntimeError``, ``NotImplementedError``, ``TypeError``,
+    ``ValueError``, or Triton ``CompilationError`` from a backend, logs
+    a warning and falls through to the next.  If all fail, raises the
+    last exception.
 
     A ``torch.cuda.synchronize()`` is issued after each backend call so
     that asynchronous GPU errors are detected immediately, allowing the
     fallback chain to actually recover from kernel failures.
     """
+    _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
+    if _TritonCompilationError is not None:
+        _catchable = _catchable + (_TritonCompilationError,)
+
     last_exc = None
     for backend, fn in backends:
         try:
@@ -230,7 +240,7 @@ def try_backends(
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             return result
-        except (RuntimeError, NotImplementedError, TypeError, ValueError) as exc:
+        except _catchable as exc:
             logger.warning(
                 "%s: %s backend failed (%s), trying next...",
                 op_name,
