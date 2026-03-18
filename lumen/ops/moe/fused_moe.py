@@ -100,7 +100,6 @@ def fused_moe_triton(
     topk_weights: torch.Tensor,
     num_experts: int,
     k: int,
-    block_size: int = 128,
     mul_routed_weight: bool = True,
     expert_weights_scale: Optional[torch.Tensor] = None,
     activation_scale: Optional[torch.Tensor] = None,
@@ -117,6 +116,10 @@ def fused_moe_triton(
     so ``expert_weights`` must be stored in **[E, N, K]** layout (AITER
     convention) where N = intermediate_dim and K = hidden_dim.
 
+    Token alignment uses ``config["BLOCK_SIZE_M"]`` as the block size
+    (matching the kernel's M-tile), so there is no separate ``block_size``
+    parameter.
+
     Args:
         hidden_states: Input activations [num_tokens, hidden_dim].
         expert_weights: Expert weight matrices
@@ -125,7 +128,6 @@ def fused_moe_triton(
         topk_weights: Routing weights [num_tokens, k], float32.
         num_experts: Total number of experts.
         k: Number of experts per token.
-        block_size: Block size for alignment padding (default 128).
         mul_routed_weight: Multiply output by routing weights.
         expert_weights_scale: Scale for expert weights in FP8 mode.
         activation_scale: Scale for activations in FP8 mode.
@@ -142,11 +144,12 @@ def fused_moe_triton(
 
     fused_moe_fn = _get_aiter_fused_moe()
     moe_config = config if config is not None else _DEFAULT_MOE_CONFIG
+    block_size_m = moe_config["BLOCK_SIZE_M"]
 
     sorted_token_ids, expert_ids, num_tokens_post_pad = _align_tokens(
         topk_ids,
         num_experts,
-        block_size,
+        block_size_m,
     )
 
     num_tokens = hidden_states.shape[0]

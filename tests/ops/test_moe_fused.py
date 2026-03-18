@@ -118,11 +118,11 @@ class TestAPISignature:
             "topk_weights",
             "num_experts",
             "k",
-            "block_size",
             "use_fp8",
             "config",
         ]:
             assert name in params
+        assert "block_size" not in params
 
     def test_align_tokens_callable(self):
         from lumen.ops.moe.fused_moe import _align_tokens
