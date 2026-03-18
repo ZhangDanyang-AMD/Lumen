@@ -113,9 +113,14 @@ def fused_moe_triton(
     Fuses token sorting + GEMM + weight multiplication in a single pass.
     Requires AITER Triton MoE kernels.
 
+    The kernel computes ``hidden_states @ expert_weights[e].T`` per expert,
+    so ``expert_weights`` must be stored in **[E, N, K]** layout (AITER
+    convention) where N = intermediate_dim and K = hidden_dim.
+
     Args:
         hidden_states: Input activations [num_tokens, hidden_dim].
-        expert_weights: Expert weight matrices [num_experts, hidden_dim, intermediate_dim].
+        expert_weights: Expert weight matrices
+            [num_experts, intermediate_dim, hidden_dim].
         topk_ids: Top-k expert IDs per token [num_tokens, k], int32/int64.
         topk_weights: Routing weights [num_tokens, k], float32.
         num_experts: Total number of experts.
@@ -145,7 +150,7 @@ def fused_moe_triton(
     )
 
     num_tokens = hidden_states.shape[0]
-    intermediate_dim = expert_weights.shape[2]
+    intermediate_dim = expert_weights.shape[1]
     C = torch.empty(
         (num_tokens, k, intermediate_dim),
         dtype=hidden_states.dtype,

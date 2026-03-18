@@ -75,6 +75,21 @@ def _sbhd_to_bhsd(x: torch.Tensor) -> torch.Tensor:
     return x.permute(1, 2, 0, 3).contiguous()
 
 
+# ── Frequency tensor adapter ────────────────────────────────────────────────
+
+
+def _ensure_cos_sin_4d(t: torch.Tensor) -> torch.Tensor:
+    """Reshape cos/sin to [S, 1, 1, rotary_dim] expected by the AITER kernel.
+
+    Accepts [S, D], [S, 1, D], or [S, 1, 1, D].
+    """
+    if t.dim() == 2:
+        return t.unsqueeze(1).unsqueeze(1)
+    if t.dim() == 3:
+        return t.unsqueeze(1)
+    return t
+
+
 # ── Core RoPE dispatch ──────────────────────────────────────────────────────
 
 
@@ -88,8 +103,9 @@ def apply_rotary_pos_emb(
 
     Args:
         x: Input tensor [B, H, S, D] (BHSD layout).
-        cos: Cosine frequencies [S, rotary_dim].
-        sin: Sine frequencies [S, rotary_dim].
+        cos: Cosine frequencies — [S, rotary_dim], [S, 1, rotary_dim],
+             or [S, 1, 1, rotary_dim].
+        sin: Sine frequencies — same shapes as cos.
         interleaved: If True, use GPT-J interleaved layout.
 
     Returns:
@@ -104,11 +120,14 @@ def apply_rotary_pos_emb(
     rope_cached_fwd = _get_aiter_rope_cached_fwd()
     rotate_style = GPTJ_STYLE if interleaved else NEOX_STYLE
 
+    cos_4d = _ensure_cos_sin_4d(cos)
+    sin_4d = _ensure_cos_sin_4d(sin)
+
     x_sbhd = _bhsd_to_sbhd(x)
     out_sbhd = rope_cached_fwd(
         x_sbhd,
-        cos,
-        sin,
+        cos_4d,
+        sin_4d,
         rotate_style,
         True,  # reuse_freqs_front_part
         False,  # nope_first

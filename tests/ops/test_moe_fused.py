@@ -19,22 +19,26 @@ _CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required"
 def _manual_moe_reference(hidden_states, expert_weights, topk_ids, topk_weights, num_experts, k):
     """Reference: per-expert matmul without fusion.
 
+    AITER layout: expert_weights is [E, N, K] where N = intermediate_dim,
+    K = hidden_dim.  The kernel computes ``x @ W.T`` per expert.
+
     hidden_states:   [num_tokens, hidden_dim]
-    expert_weights:  [num_experts, hidden_dim, intermediate_dim]
+    expert_weights:  [num_experts, intermediate_dim, hidden_dim]
     topk_ids:        [num_tokens, k]
     topk_weights:    [num_tokens, k]
 
     Returns: [num_tokens, k, intermediate_dim]
     """
     num_tokens = hidden_states.shape[0]
-    intermediate_dim = expert_weights.shape[2]
+    intermediate_dim = expert_weights.shape[1]
     out = torch.zeros(num_tokens, k, intermediate_dim, dtype=hidden_states.dtype, device=hidden_states.device)
 
     for i in range(num_tokens):
         for j in range(k):
             eid = topk_ids[i, j].item()
             w = topk_weights[i, j]
-            out[i, j] = w * (hidden_states[i] @ expert_weights[eid])
+            # W is [N, K], matmul: [K] @ [N, K].T = [N]
+            out[i, j] = w * (hidden_states[i] @ expert_weights[eid].T)
 
     return out
 
@@ -49,7 +53,7 @@ class TestAssertions:
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         hidden = torch.randn(8, 64)
-        expert_w = torch.randn(4, 64, 128)
+        expert_w = torch.randn(4, 128, 64)  # [E, N, K]
         topk_ids = torch.zeros(8, 2, dtype=torch.int32)
         topk_weights = torch.ones(8, 2)
 
@@ -61,7 +65,7 @@ class TestAssertions:
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         hidden = torch.randn(8, 64)
-        expert_w = torch.randn(4, 64, 128)
+        expert_w = torch.randn(4, 128, 64)  # [E, N, K]
         topk_ids = torch.zeros(8, 2, dtype=torch.int32)
         topk_weights = torch.ones(8, 2)
 
@@ -75,7 +79,7 @@ class TestAssertions:
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         hidden = torch.randn(8, 64)
-        expert_w = torch.randn(4, 64, 128)
+        expert_w = torch.randn(4, 128, 64)  # [E, N, K]
         topk_ids = torch.zeros(8, 2, dtype=torch.int32)
         topk_weights = torch.ones(8, 2)
 
@@ -161,7 +165,7 @@ class TestFusedMoeCorrectness:
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         topk_ids = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int32)
         topk_weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1).float()
 
@@ -178,7 +182,7 @@ class TestFusedMoeCorrectness:
 
         num_tokens, hidden_dim, intermediate_dim, num_experts, k = 8, 64, 128, 4, 2
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         topk_ids = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int32)
         topk_weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1).float()
 
@@ -191,7 +195,7 @@ class TestFusedMoeCorrectness:
 
         num_tokens, hidden_dim, intermediate_dim, num_experts, k = 4, 64, 128, 4, 2
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         topk_ids = torch.zeros(num_tokens, k, device=DEVICE, dtype=torch.int32)
         topk_weights = torch.zeros(num_tokens, k, device=DEVICE)
 
@@ -204,29 +208,29 @@ class TestFusedMoeCorrectness:
         )
 
     def test_single_expert_equals_matmul(self):
-        """With k=1 and weight=1, should equal direct matmul."""
+        """With k=1 and weight=1, should equal x @ W.T."""
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         num_tokens, hidden_dim, intermediate_dim, num_experts = 8, 64, 128, 4
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         expert_id = 2
         topk_ids = torch.full((num_tokens, 1), expert_id, device=DEVICE, dtype=torch.int32)
         topk_weights = torch.ones(num_tokens, 1, device=DEVICE)
 
         out = fused_moe_triton(hidden, expert_w, topk_ids, topk_weights, num_experts, 1)
-        ref = (hidden.float() @ expert_w[expert_id].float()).unsqueeze(1)
+        ref = (hidden.float() @ expert_w[expert_id].float().T).unsqueeze(1)
 
         assert out.shape == (num_tokens, 1, intermediate_dim)
         torch.testing.assert_close(out.float(), ref, atol=0.1, rtol=0.1)
 
     def test_mul_routed_weight_false(self):
-        """With mul_routed_weight=False, output should be unscaled matmul."""
+        """With mul_routed_weight=False, output should be unscaled x @ W.T."""
         from lumen.ops.moe.fused_moe import fused_moe_triton
 
         num_tokens, hidden_dim, intermediate_dim, num_experts = 8, 64, 128, 4
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         expert_id = 1
         topk_ids = torch.full((num_tokens, 1), expert_id, device=DEVICE, dtype=torch.int32)
         topk_weights = torch.full((num_tokens, 1), 0.5, device=DEVICE)
@@ -240,7 +244,7 @@ class TestFusedMoeCorrectness:
             1,
             mul_routed_weight=False,
         )
-        ref = (hidden.float() @ expert_w[expert_id].float()).unsqueeze(1)
+        ref = (hidden.float() @ expert_w[expert_id].float().T).unsqueeze(1)
 
         assert out.shape == (num_tokens, 1, intermediate_dim)
         torch.testing.assert_close(out.float(), ref, atol=0.1, rtol=0.1)
@@ -250,7 +254,7 @@ class TestFusedMoeCorrectness:
 
         num_tokens, hidden_dim, intermediate_dim, num_experts, k = 16, 128, 256, 8, 2
         hidden = torch.randn(num_tokens, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
-        expert_w = torch.randn(num_experts, hidden_dim, intermediate_dim, device=DEVICE, dtype=torch.bfloat16)
+        expert_w = torch.randn(num_experts, intermediate_dim, hidden_dim, device=DEVICE, dtype=torch.bfloat16)
         topk_ids = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int32)
         topk_weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1).float()
 
