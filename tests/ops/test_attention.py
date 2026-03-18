@@ -13,8 +13,22 @@ Covers:
   - GQA (num_head_q > num_head_kv) forward + backward
   - Cross-attention (seqlen_q != seqlen_kv)
   - Backend selection ("auto" dispatch)
+  - aiter_csrc (CK) backend: forward, forward+backward, causal
+  - FP8 quantized attention: blockwise/dynamic/delayed/per_token
+  - MXFP8 attention (gfx950+ only)
+  - return_lse output verification
+  - Edge cases: batch_size=1, head_dim_v != head_dim_qk
 
 Reference: attention_ref from conftest (pure PyTorch BSHD).
+
+SNR threshold rationale (empirical, measured on MI300X / MI355X):
+  - BF16 forward:   >= 20 dB  (Triton/CK vs FP32 reference)
+  - BF16 backward:  >= 15 dB  (gradients have higher variance)
+  - BF16 causal bwd:>= 10 dB  (causal mask amplifies numerical differences)
+  - FP8 forward:    >= 15 dB  (blockwise quantization adds ~5 dB noise)
+  - FP8 backward:   >=  8 dB  (quantized backward is less precise)
+  - MXFP8 forward:  >= 10 dB  (microscaling has coarser granularity)
+  - MXFP8 backward: >=  5 dB  (lowest precision path)
 """
 
 import pytest
@@ -22,6 +36,32 @@ import torch
 from conftest import AttnConfig, attention_ref, compute_snr
 
 import lumen.ops.attention as attn_ops
+
+# ---------------------------------------------------------------------------
+# Hardware / backend detection
+# ---------------------------------------------------------------------------
+
+
+def _is_aiter_available():
+    try:
+        import aiter  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _is_gfx950():
+    try:
+        from aiter.ops.triton._triton_kernels.attention.fp8_attention_kernel import is_cdna4
+
+        return is_cdna4()
+    except Exception:
+        return False
+
+
+_aiter_available = _is_aiter_available()
+_gfx950 = _is_gfx950()
 
 # ---------------------------------------------------------------------------
 # Configurations (BSHD layout)
@@ -37,9 +77,35 @@ ATTN_CONFIGS = [
 
 ATTN_IDS = [repr(c) for c in ATTN_CONFIGS]
 
+CSRC_CONFIGS = [
+    AttnConfig(128, 128, 8, 8, 64, 64),  # standard MHA
+    AttnConfig(256, 256, 16, 4, 64, 64),  # GQA
+    AttnConfig(128, 256, 8, 8, 64, 64),  # cross-attention: seqlen_q < seqlen_kv
+]
+CSRC_IDS = [repr(c) for c in CSRC_CONFIGS]
+
+FP8_CONFIGS = [
+    AttnConfig(128, 128, 8, 8, 64, 64),  # standard MHA
+    AttnConfig(256, 256, 16, 4, 64, 64),  # GQA
+]
+FP8_IDS = [repr(c) for c in FP8_CONFIGS]
+
+FP8_QUANT_TYPES = ["blockwise", "dynamic", "delayed", "per_token"]
+
+GQA_CONFIGS = [
+    AttnConfig(256, 256, 16, 4, 64, 64),
+    AttnConfig(128, 128, 8, 2, 64, 64),
+]
+GQA_IDS = [repr(c) for c in GQA_CONFIGS]
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 
 def _make_tensors(config: AttnConfig, batch_size: int, dtype, device, requires_grad=False):
-    """Create q, k, v in BSHD layout."""
+    """Create q, k, v in BSHD layout with deterministic CUDA seed."""
+    torch.cuda.manual_seed(42)
     q = (
         torch.randn(
             batch_size,
@@ -76,47 +142,38 @@ def _make_tensors(config: AttnConfig, batch_size: int, dtype, device, requires_g
     return q, k, v
 
 
-# ===================================================================
-# Forward vs reference
-# ===================================================================
+def _assert_fwd_snr(out_ref, out, min_snr, label):
+    """Assert forward output SNR with a standardized message."""
+    snr = compute_snr(out_ref, out)
+    assert snr > min_snr, f"{label} forward SNR: {snr:.1f} dB (need > {min_snr})"
 
 
-@pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
-def test_attention_fwd(config):
-    """BF16 forward vs PyTorch reference (attention_ref), using compute_snr."""
+def _assert_grad_snr(q_ref, k_ref, v_ref, q, k, v, min_snr, label):
+    """Assert dQ/dK/dV gradient SNR with standardized messages."""
+    dq_snr = compute_snr(q_ref.grad, q.grad)
+    dk_snr = compute_snr(k_ref.grad, k.grad)
+    dv_snr = compute_snr(v_ref.grad, v.grad)
+    assert dq_snr > min_snr, f"{label} dQ SNR: {dq_snr:.1f} dB (need > {min_snr})"
+    assert dk_snr > min_snr, f"{label} dK SNR: {dk_snr:.1f} dB (need > {min_snr})"
+    assert dv_snr > min_snr, f"{label} dV SNR: {dv_snr:.1f} dB (need > {min_snr})"
+
+
+def _run_fwd_test(config, backend_type, causal, min_snr, label, batch_size=2):
+    """Run a forward-only SNR test against attention_ref."""
     dtype = torch.bfloat16
     device = "cuda"
-    batch_size = 2
     sm_scale = config.head_dim_qk ** (-0.5)
 
     q, k, v = _make_tensors(config, batch_size, dtype, device)
-
-    out_ref = attention_ref(q, k, v, sm_scale, causal=False)
-
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="aiter_triton",
-    )
-
-    snr = compute_snr(out_ref, out)
-    assert snr > 20, f"Attention forward SNR: {snr:.1f} dB"
+    out_ref = attention_ref(q, k, v, sm_scale, causal=causal)
+    out = attn_ops.attention(q, k, v, softmax_scale=sm_scale, causal=causal, backend_type=backend_type)
+    _assert_fwd_snr(out_ref, out, min_snr, label)
 
 
-# ===================================================================
-# Forward + backward: dQ/dK/dV vs reference
-# ===================================================================
-
-
-@pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
-def test_attention_fwd_bwd(config):
-    """BF16 forward+backward, compare dQ/dK/dV gradients vs reference."""
+def _run_fwd_bwd_test(config, backend_type, causal, min_snr, label, batch_size=2):
+    """Run a forward+backward SNR test against attention_ref."""
     dtype = torch.bfloat16
     device = "cuda"
-    batch_size = 2
     sm_scale = config.head_dim_qk ** (-0.5)
 
     q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
@@ -124,35 +181,71 @@ def test_attention_fwd_bwd(config):
     k_ref = k.detach().clone().requires_grad_(True)
     v_ref = v.detach().clone().requires_grad_(True)
 
-    # Reference forward + backward
-    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=False)
-    loss_ref = out_ref.float().mean()
-    loss_ref.backward()
+    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=causal)
+    out_ref.float().mean().backward()
 
-    # Lumen forward + backward
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="aiter_triton",
-    )
-    loss = out.float().mean()
-    loss.backward()
+    out = attn_ops.attention(q, k, v, softmax_scale=sm_scale, causal=causal, backend_type=backend_type)
+    out.float().mean().backward()
 
-    dq_snr = compute_snr(q_ref.grad, q.grad)
-    dk_snr = compute_snr(k_ref.grad, k.grad)
-    dv_snr = compute_snr(v_ref.grad, v.grad)
+    _assert_grad_snr(q_ref, k_ref, v_ref, q, k, v, min_snr, label)
 
-    min_snr = 15
-    assert dq_snr > min_snr, f"dQ gradient SNR: {dq_snr:.1f} dB"
-    assert dk_snr > min_snr, f"dK gradient SNR: {dk_snr:.1f} dB"
-    assert dv_snr > min_snr, f"dV gradient SNR: {dv_snr:.1f} dB"
+
+def _run_fp8_fwd_test(config, quant_type, causal, min_snr, label, batch_size=2):
+    """Run an FP8 quantized attention forward SNR test."""
+    dtype = torch.bfloat16
+    device = "cuda"
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device)
+    out_ref = attention_ref(q, k, v, sm_scale, causal=causal)
+    out = attn_ops.attention_fp8_quant(q, k, v, softmax_scale=sm_scale, causal=causal, quant_type=quant_type)
+    _assert_fwd_snr(out_ref, out, min_snr, label)
+
+
+def _run_fp8_fwd_bwd_test(config, quant_type, causal, min_snr, label, batch_size=2):
+    """Run an FP8 quantized attention forward+backward SNR test."""
+    dtype = torch.bfloat16
+    device = "cuda"
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
+    q_ref = q.detach().clone().requires_grad_(True)
+    k_ref = k.detach().clone().requires_grad_(True)
+    v_ref = v.detach().clone().requires_grad_(True)
+
+    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=causal)
+    out_ref.float().mean().backward()
+
+    out = attn_ops.attention_fp8_quant(q, k, v, softmax_scale=sm_scale, causal=causal, quant_type=quant_type)
+    out.float().mean().backward()
+
+    _assert_grad_snr(q_ref, k_ref, v_ref, q, k, v, min_snr, label)
 
 
 # ===================================================================
-# Causal attention forward
+# aiter_triton: Forward vs reference
+# ===================================================================
+
+
+@pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
+def test_attention_fwd(config):
+    """BF16 forward vs PyTorch reference (attention_ref), using compute_snr."""
+    _run_fwd_test(config, "aiter_triton", causal=False, min_snr=20, label="Triton")
+
+
+# ===================================================================
+# aiter_triton: Forward + backward
+# ===================================================================
+
+
+@pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
+def test_attention_fwd_bwd(config):
+    """BF16 forward+backward, compare dQ/dK/dV gradients vs reference."""
+    _run_fwd_bwd_test(config, "aiter_triton", causal=False, min_snr=15, label="Triton")
+
+
+# ===================================================================
+# aiter_triton: Causal attention forward
 # ===================================================================
 
 
@@ -161,30 +254,11 @@ def test_attention_causal(config):
     """Causal attention forward."""
     if config.seqlen_q > config.seqlen_kv:
         pytest.skip("Causal mask is ill-defined when seqlen_q > seqlen_kv")
-    dtype = torch.bfloat16
-    device = "cuda"
-    batch_size = 2
-    sm_scale = config.head_dim_qk ** (-0.5)
-
-    q, k, v = _make_tensors(config, batch_size, dtype, device)
-
-    out_ref = attention_ref(q, k, v, sm_scale, causal=True)
-
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=True,
-        backend_type="aiter_triton",
-    )
-
-    snr = compute_snr(out_ref, out)
-    assert snr > 20, f"Causal attention forward SNR: {snr:.1f} dB"
+    _run_fwd_test(config, "aiter_triton", causal=True, min_snr=20, label="Triton causal")
 
 
 # ===================================================================
-# Causal forward + backward
+# aiter_triton: Causal forward + backward
 # ===================================================================
 
 
@@ -193,39 +267,8 @@ def test_attention_causal_fwd_bwd(config):
     """Causal BF16 forward+backward, compare dQ/dK/dV gradients vs reference."""
     if config.seqlen_q > config.seqlen_kv:
         pytest.skip("Causal mask is ill-defined when seqlen_q > seqlen_kv")
-    dtype = torch.bfloat16
-    device = "cuda"
-    batch_size = 2
-    sm_scale = config.head_dim_qk ** (-0.5)
-
-    q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
-    q_ref = q.detach().clone().requires_grad_(True)
-    k_ref = k.detach().clone().requires_grad_(True)
-    v_ref = v.detach().clone().requires_grad_(True)
-
-    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=True)
-    loss_ref = out_ref.float().mean()
-    loss_ref.backward()
-
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=True,
-        backend_type="aiter_triton",
-    )
-    loss = out.float().mean()
-    loss.backward()
-
-    dq_snr = compute_snr(q_ref.grad, q.grad)
-    dk_snr = compute_snr(k_ref.grad, k.grad)
-    dv_snr = compute_snr(v_ref.grad, v.grad)
-
-    min_snr = 10
-    assert dq_snr > min_snr, f"Causal dQ gradient SNR: {dq_snr:.1f} dB"
-    assert dk_snr > min_snr, f"Causal dK gradient SNR: {dk_snr:.1f} dB"
-    assert dv_snr > min_snr, f"Causal dV gradient SNR: {dv_snr:.1f} dB"
+    # Causal backward has higher variance due to the triangular mask
+    _run_fwd_bwd_test(config, "aiter_triton", causal=True, min_snr=10, label="Triton causal")
 
 
 # ===================================================================
@@ -243,79 +286,20 @@ def test_attention_causal_fwd_bwd(config):
 )
 def test_attention_gqa(config):
     """GQA (num_head_q > num_head_kv) forward."""
-    dtype = torch.bfloat16
-    device = "cuda"
-    batch_size = 2
-    sm_scale = config.head_dim_qk ** (-0.5)
-
     assert config.num_head_q > config.num_head_kv, "Config must be GQA (num_head_q > num_head_kv)"
-
-    q, k, v = _make_tensors(config, batch_size, dtype, device)
-
-    out_ref = attention_ref(q, k, v, sm_scale, causal=False)
-
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="aiter_triton",
-    )
-
-    snr = compute_snr(out_ref, out)
-    assert snr > 20, f"GQA attention forward SNR: {snr:.1f} dB"
+    _run_fwd_test(config, "aiter_triton", causal=False, min_snr=20, label="GQA")
 
 
 # ===================================================================
 # GQA forward + backward
 # ===================================================================
 
-GQA_CONFIGS = [
-    AttnConfig(256, 256, 16, 4, 64, 64),
-    AttnConfig(128, 128, 8, 2, 64, 64),
-]
-GQA_IDS = [repr(c) for c in GQA_CONFIGS]
-
 
 @pytest.mark.parametrize("config", GQA_CONFIGS, ids=GQA_IDS)
 def test_attention_gqa_fwd_bwd(config):
     """GQA forward+backward, compare dQ/dK/dV gradients vs reference."""
-    dtype = torch.bfloat16
-    device = "cuda"
-    batch_size = 2
-    sm_scale = config.head_dim_qk ** (-0.5)
-
     assert config.num_head_q > config.num_head_kv
-
-    q, k, v = _make_tensors(config, batch_size, dtype, device, requires_grad=True)
-    q_ref = q.detach().clone().requires_grad_(True)
-    k_ref = k.detach().clone().requires_grad_(True)
-    v_ref = v.detach().clone().requires_grad_(True)
-
-    out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale, causal=False)
-    loss_ref = out_ref.float().mean()
-    loss_ref.backward()
-
-    out = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="aiter_triton",
-    )
-    loss = out.float().mean()
-    loss.backward()
-
-    dq_snr = compute_snr(q_ref.grad, q.grad)
-    dk_snr = compute_snr(k_ref.grad, k.grad)
-    dv_snr = compute_snr(v_ref.grad, v.grad)
-
-    min_snr = 15
-    assert dq_snr > min_snr, f"GQA dQ gradient SNR: {dq_snr:.1f} dB"
-    assert dk_snr > min_snr, f"GQA dK gradient SNR: {dk_snr:.1f} dB"
-    assert dv_snr > min_snr, f"GQA dV gradient SNR: {dv_snr:.1f} dB"
+    _run_fwd_bwd_test(config, "aiter_triton", causal=False, min_snr=15, label="GQA")
 
 
 # ===================================================================
@@ -329,7 +313,7 @@ def test_attention_gqa_fwd_bwd(config):
     ids=["sq128_sk128_hq8_hkv8_dqk64_dv64"],
 )
 def test_attention_auto_backend(config):
-    """backend_type='auto' produces same result as explicit backend."""
+    """backend_type='auto' agrees with the backend it resolves to."""
     dtype = torch.bfloat16
     device = "cuda"
     batch_size = 2
@@ -337,22 +321,205 @@ def test_attention_auto_backend(config):
 
     q, k, v = _make_tensors(config, batch_size, dtype, device)
 
-    out_explicit = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="aiter_triton",
-    )
-    out_auto = attn_ops.attention(
-        q,
-        k,
-        v,
-        softmax_scale=sm_scale,
-        causal=False,
-        backend_type="auto",
+    # "auto" resolves to aiter_csrc when AITER is available, else aiter_triton.
+    explicit_backend = "aiter_csrc" if _aiter_available else "aiter_triton"
+    out_explicit = attn_ops.attention(q, k, v, softmax_scale=sm_scale, causal=False, backend_type=explicit_backend)
+    out_auto = attn_ops.attention(q, k, v, softmax_scale=sm_scale, causal=False, backend_type="auto")
+
+    _assert_fwd_snr(out_explicit, out_auto, 20, f"auto vs {explicit_backend}")
+
+
+# ###################################################################
+# aiter_csrc (CK) backend
+# ###################################################################
+
+
+@pytest.mark.skipif(not _aiter_available, reason="AITER not installed")
+@pytest.mark.parametrize("config", CSRC_CONFIGS, ids=CSRC_IDS)
+def test_attention_csrc_fwd(config):
+    """aiter_csrc (CK) BF16 forward vs PyTorch reference."""
+    _run_fwd_test(config, "aiter_csrc", causal=False, min_snr=20, label="CK")
+
+
+@pytest.mark.skipif(not _aiter_available, reason="AITER not installed")
+@pytest.mark.parametrize("config", CSRC_CONFIGS, ids=CSRC_IDS)
+def test_attention_csrc_fwd_bwd(config):
+    """aiter_csrc (CK) BF16 forward+backward, dQ/dK/dV vs reference."""
+    _run_fwd_bwd_test(config, "aiter_csrc", causal=False, min_snr=15, label="CK")
+
+
+@pytest.mark.skipif(not _aiter_available, reason="AITER not installed")
+@pytest.mark.parametrize("config", CSRC_CONFIGS, ids=CSRC_IDS)
+def test_attention_csrc_causal(config):
+    """aiter_csrc (CK) causal forward vs reference."""
+    if config.seqlen_q > config.seqlen_kv:
+        pytest.skip("Causal mask is ill-defined when seqlen_q > seqlen_kv")
+    _run_fwd_test(config, "aiter_csrc", causal=True, min_snr=20, label="CK causal")
+
+
+# ###################################################################
+# FP8 quantized attention (attention_fp8_quant)
+# ###################################################################
+
+
+@pytest.mark.parametrize("quant_type", FP8_QUANT_TYPES)
+@pytest.mark.parametrize("config", FP8_CONFIGS, ids=FP8_IDS)
+def test_attention_fp8_fwd(config, quant_type):
+    """FP8 quantized attention forward vs BF16 reference."""
+    _run_fp8_fwd_test(config, quant_type, causal=False, min_snr=15, label=f"FP8 {quant_type}")
+
+
+@pytest.mark.parametrize("quant_type", FP8_QUANT_TYPES)
+@pytest.mark.parametrize("config", FP8_CONFIGS, ids=FP8_IDS)
+def test_attention_fp8_fwd_bwd(config, quant_type):
+    """FP8 quantized attention forward+backward, dQ/dK/dV vs reference."""
+    _run_fp8_fwd_bwd_test(config, quant_type, causal=False, min_snr=8, label=f"FP8 {quant_type}")
+
+
+def test_attention_fp8_none():
+    """quant_type='none' delegates to BF16 attention, output matches reference.
+
+    Internally, attention_fp8_quant(quant_type="none") calls attention() with
+    backend_type="auto" (aiter_csrc if AITER is available, else aiter_triton).
+    """
+    _run_fp8_fwd_test(
+        AttnConfig(128, 128, 8, 8, 64, 64), "none", causal=False, min_snr=20, label="FP8 none (BF16 delegation)"
     )
 
-    snr = compute_snr(out_explicit, out_auto)
-    assert snr > 20, f"Auto vs explicit backend SNR: {snr:.1f} dB"
+
+@pytest.mark.parametrize("quant_type", FP8_QUANT_TYPES)
+def test_attention_fp8_causal(quant_type):
+    """FP8 quantized causal attention forward vs reference."""
+    _run_fp8_fwd_test(
+        AttnConfig(128, 128, 8, 8, 64, 64), quant_type, causal=True, min_snr=15, label=f"FP8 {quant_type} causal"
+    )
+
+
+# ###################################################################
+# MXFP8 attention (gfx950+ only)
+# ###################################################################
+
+
+@pytest.mark.skipif(not _gfx950, reason="MXFP8 requires gfx950+")
+@pytest.mark.parametrize("config", FP8_CONFIGS, ids=FP8_IDS)
+def test_attention_mxfp8_fwd(config):
+    """MXFP8 attention forward vs BF16 reference."""
+    _run_fp8_fwd_test(config, "mxfp8", causal=False, min_snr=10, label="MXFP8")
+
+
+@pytest.mark.skipif(not _gfx950, reason="MXFP8 requires gfx950+")
+@pytest.mark.parametrize("config", FP8_CONFIGS, ids=FP8_IDS)
+def test_attention_mxfp8_fwd_bwd(config):
+    """MXFP8 attention forward+backward, dQ/dK/dV vs reference."""
+    _run_fp8_fwd_bwd_test(config, "mxfp8", causal=False, min_snr=5, label="MXFP8")
+
+
+# ###################################################################
+# return_lse=True
+# ###################################################################
+
+
+def _compute_lse_ref(q, k, sm_scale, causal=False):
+    """Compute reference log-sum-exp: log(sum(exp(Q K^T * scale))) per (batch, head, query)."""
+    B, SQ, HQ, D = q.shape
+    _, SK, HK, _ = k.shape
+    gqa_ratio = HQ // HK
+
+    q_f32 = q.float()
+    k_f32 = k.float()
+
+    if gqa_ratio > 1:
+        k_f32 = k_f32.unsqueeze(3).expand(B, SK, HK, gqa_ratio, D).reshape(B, SK, HQ, D)
+
+    # (B, HQ, SQ, SK)
+    attn = torch.matmul(q_f32.transpose(1, 2), k_f32.transpose(1, 2).transpose(-2, -1)) * sm_scale
+
+    if causal:
+        row_idx = torch.arange(SQ, device=q.device).unsqueeze(1)
+        col_idx = torch.arange(SK, device=q.device).unsqueeze(0)
+        col_offset = SQ - SK
+        mask = row_idx >= (col_offset + col_idx)
+        attn = attn.masked_fill(~mask.unsqueeze(0).unsqueeze(0), float("-inf"))
+
+    return torch.logsumexp(attn, dim=-1)  # (B, HQ, SQ)
+
+
+def _validate_lse(result, config, batch_size, q, k, sm_scale, label):
+    """Validate return_lse=True result: shape, dtype, and values vs reference."""
+    assert isinstance(result, tuple), "return_lse=True should return a tuple"
+    assert len(result) == 2, f"Expected 2 elements, got {len(result)}"
+    out, lse = result
+    assert out.shape == (batch_size, config.seqlen_q, config.num_head_q, config.head_dim_v)
+    assert lse.dtype == torch.float32
+
+    lse_ref = _compute_lse_ref(q, k, sm_scale, causal=False)  # (B, H, SQ)
+    # Triton kernel allocates LSE as (B, H, SQ*2); second half is workspace.
+    lse_trimmed = lse[:, :, : config.seqlen_q]
+    lse_snr = compute_snr(lse_ref, lse_trimmed)
+    assert lse_snr > 15, f"{label} LSE SNR: {lse_snr:.1f} dB (need > 15)"
+
+
+def test_attention_return_lse():
+    """return_lse=True returns (output, softmax_lse) with correct shape, dtype, and values."""
+    config = AttnConfig(128, 128, 8, 8, 64, 64)
+    dtype = torch.bfloat16
+    device = "cuda"
+    batch_size = 2
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device)
+    result = attn_ops.attention(
+        q, k, v, softmax_scale=sm_scale, causal=False, backend_type="aiter_triton", return_lse=True
+    )
+    _validate_lse(result, config, batch_size, q, k, sm_scale, "Triton")
+
+
+@pytest.mark.skipif(not _aiter_available, reason="AITER not installed")
+def test_attention_csrc_return_lse():
+    """aiter_csrc with return_lse=True returns (output, softmax_lse) with correct values."""
+    config = AttnConfig(128, 128, 8, 8, 64, 64)
+    dtype = torch.bfloat16
+    device = "cuda"
+    batch_size = 2
+    sm_scale = config.head_dim_qk ** (-0.5)
+
+    q, k, v = _make_tensors(config, batch_size, dtype, device)
+    result = attn_ops.attention(
+        q, k, v, softmax_scale=sm_scale, causal=False, backend_type="aiter_csrc", return_lse=True
+    )
+    _validate_lse(result, config, batch_size, q, k, sm_scale, "CK")
+
+
+# ###################################################################
+# Edge cases
+# ###################################################################
+
+
+def test_attention_batch_size_1():
+    """batch_size=1 forward works correctly."""
+    _run_fwd_test(
+        AttnConfig(128, 128, 8, 8, 64, 64), "aiter_triton", causal=False, min_snr=20, label="B=1", batch_size=1
+    )
+
+
+def test_attention_head_dim_v_ne_qk():
+    """head_dim_v != head_dim_qk forward works correctly."""
+    config = AttnConfig(128, 128, 8, 8, 64, 128)  # d_qk=64, d_v=128
+    _run_fwd_test(config, "aiter_triton", causal=False, min_snr=20, label="dv!=dqk")
+
+
+def test_attention_head_dim_v_ne_qk_fwd_bwd():
+    """head_dim_v != head_dim_qk forward+backward works correctly."""
+    config = AttnConfig(128, 128, 8, 8, 64, 128)  # d_qk=64, d_v=128
+    _run_fwd_bwd_test(config, "aiter_triton", causal=False, min_snr=15, label="dv!=dqk")
+
+
+def test_attention_causal_cross_attn_sq_lt_sk():
+    """Causal cross-attention where seqlen_q < seqlen_kv.
+
+    When seqlen_q < seqlen_kv, attention_ref uses a shifted causal mask:
+    query position i attends to key positions 0..(i + seqlen_kv - seqlen_q).
+    This is the "prefix" causal pattern used by cross-attention in decoder layers.
+    """
+    config = AttnConfig(128, 256, 8, 8, 64, 64)
+    _run_fwd_test(config, "aiter_triton", causal=True, min_snr=20, label="causal cross-attn sq<sk")

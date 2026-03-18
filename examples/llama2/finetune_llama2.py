@@ -55,7 +55,7 @@ def _run_megatron():
 
         if getattr(args, "linear_fp8", False):
             apply_fp8_training(model, args)
-            if getattr(args, "tl_linear", False):
+            if getattr(args, "lumen_linear", False):
                 scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
                 enable_fp8_for_parallel_linear(model, scaling_type=scaling_type)
 

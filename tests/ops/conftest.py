@@ -94,6 +94,72 @@ def cross_entropy_ref(logits, target, label_smoothing=0.0, ignore_idx=-100):
 
 
 # ---------------------------------------------------------------------------
+# FP8 quantization golden references (no TE dependency)
+# ---------------------------------------------------------------------------
+
+
+def fp8_dynamic_scale_ref(tensor, fp8_max, margin=0):
+    """Golden: compute per-tensor dynamic FP8 (dequant) scale = amax / (fp8_max / 2^margin)."""
+    amax = tensor.abs().amax().clamp(min=1e-12)
+    effective_max = fp8_max / (2.0**margin)
+    return amax / effective_max
+
+
+def fp8_quant_dequant_ref(tensor, fp8_dtype=None):
+    """Golden: per-tensor FP8 quant→dequant round-trip in pure PyTorch.
+
+    Returns (reconstructed_bf16, scale) so callers can verify both.
+    """
+    if fp8_dtype is None:
+        fp8_dtype = torch.float8_e4m3fnuz
+    orig_dtype = tensor.dtype
+    fp8_max = torch.finfo(fp8_dtype).max
+    amax = tensor.abs().amax().clamp(min=1e-12)
+    scale = fp8_max / amax
+    clamped = (tensor.float() * scale).clamp(-fp8_max, fp8_max)
+    quantized = clamped.to(fp8_dtype)
+    dequantized = quantized.to(orig_dtype) / scale
+    return dequantized, 1.0 / scale
+
+
+def fp8_blockwise_quant_dequant_ref(tensor, block_size=128, fp8_dtype=None):
+    """Golden: per-block FP8 quant→dequant for blockwise scaling.
+
+    Processes each block_size chunk along the last dim independently.
+    """
+    if fp8_dtype is None:
+        fp8_dtype = torch.float8_e4m3fnuz
+    orig_dtype = tensor.dtype
+    orig_shape = tensor.shape
+    fp8_max = torch.finfo(fp8_dtype).max
+    flat = tensor.reshape(-1, orig_shape[-1]).float()
+    M, N = flat.shape
+
+    out = torch.zeros_like(flat)
+    for start in range(0, N, block_size):
+        end = min(start + block_size, N)
+        block = flat[:, start:end]
+        amax = block.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+        scale = fp8_max / amax
+        q = (block * scale).clamp(-fp8_max, fp8_max).to(fp8_dtype)
+        out[:, start:end] = q.float() / scale
+
+    return out.to(orig_dtype).view(orig_shape)
+
+
+def delayed_scale_ref(amax_history, fp8_max, margin=0):
+    """Golden: compute delayed scale from amax history.
+
+    scale = fp8_max / (max(amax_history) * 2^margin)
+    """
+    amax = max(amax_history) if amax_history else 1.0
+    if isinstance(amax, torch.Tensor):
+        amax = amax.item()
+    amax = max(amax, 1e-12)
+    return fp8_max / (amax * (2.0**margin))
+
+
+# ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
 

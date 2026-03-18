@@ -87,6 +87,7 @@ class ScalingType(Enum):
     DYNAMIC = "dynamic"  # Scale from current tensor amax (= current per-tensor)
     DELAYED = "delayed"  # Scale from amax history (TE-style delayed per-tensor)
     BLOCKWISE = "blockwise"  # Per-block scaling (e.g. per-128 elements)
+    BLOCKWISE2D = "blockwise2d"  # 2D block scaling for attention Q/K/V
     PER_TOKEN = "per_token"  # Per-row (per-token) dynamic scaling
     NONE = "none"  # No quantization (BF16 passthrough)
 
@@ -207,6 +208,14 @@ class QuantConfig:
     # Valid values: None (disabled), "fp8", "mxfp8", "fp4" (placeholder).
     quantize_grad: Optional[str] = None
 
+    # FP8 dot-product attention: run the attention kernel in FP8.
+    fp8_dpa: bool = False
+
+    # FP8 multi-head attention: keep the entire MHA block (QKV projection +
+    # dot-product attention + output projection) in FP8, eliminating BF16
+    # casts at module boundaries.
+    fp8_mha: bool = False
+
     @classmethod
     def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed", **kwargs) -> "QuantConfig":
         """Construct a QuantConfig from plain strings.
@@ -215,7 +224,7 @@ class QuantConfig:
             format: One of ``"fp8_e4m3"``, ``"fp8_e5m2"``, ``"hybrid"``,
                 ``"mxfp8"``, ``"fp4"``.
             scaling: One of ``"dynamic"``, ``"delayed"``, ``"blockwise"``,
-                ``"per_token"``, ``"none"``.
+                ``"blockwise2d"``, ``"per_token"``, ``"none"``.
             **kwargs: Forwarded to :class:`QuantConfig`.  String values for
                 enum fields (``amax_algo``) are auto-converted.
         """

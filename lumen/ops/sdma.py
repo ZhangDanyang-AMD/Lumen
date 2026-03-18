@@ -261,6 +261,83 @@ class SdmaAllreduce:
 # ---------------------------------------------------------------------------
 
 
+class SdmaAll2all:
+    """Reusable All2allSdma handle with automatic buffer management.
+
+    Wraps ``mori.ccl.All2allSdma`` and caches the handle so that
+    repeated calls with the same (or smaller) tensor size reuse the
+    same symmetric-memory buffers.
+
+    The All2all semantics: each PE sends ``count`` elements to every
+    other PE.  Input layout is ``[npes * count]`` where chunk *i* goes
+    to PE *i*.  Output layout is the same: chunk *i* was received from
+    PE *i*.
+
+    Args:
+        ctx: A :class:`SdmaContext` (defaults to the process singleton).
+    """
+
+    def __init__(self, ctx: Optional[SdmaContext] = None):
+        self._ctx = ctx or SdmaContext.get()
+        self._handle = None
+        self._capacity_bytes: int = 0
+
+    @property
+    def npes(self) -> int:
+        return self._ctx.npes
+
+    def _ensure_handle(self, total_bytes: int) -> None:
+        if self._handle is not None and total_bytes <= self._capacity_bytes:
+            return
+
+        from mori.ccl import All2allSdma
+
+        self._handle = All2allSdma(
+            self._ctx.my_pe,
+            self._ctx.npes,
+            input_buffer_size=total_bytes,
+            output_buffer_size=total_bytes,
+            copy_output_to_user=True,
+        )
+        self._capacity_bytes = total_bytes
+        logger.debug(
+            "SdmaAll2all: (re-)allocated handle for %d bytes (PE %d/%d)",
+            total_bytes,
+            self._ctx.my_pe,
+            self._ctx.npes,
+        )
+
+    def __call__(
+        self,
+        input_tensor: torch.Tensor,
+        output_tensor: torch.Tensor,
+        stream: Optional[torch.cuda.Stream] = None,
+    ) -> None:
+        """All-to-all *input_tensor* into *output_tensor* via SDMA.
+
+        Both tensors must be contiguous 1-D with the same numel.  The
+        data is reinterpreted as ``uint32`` for the SDMA transport.
+        """
+        input_tensor = input_tensor.contiguous()
+        npes = self._ctx.npes
+        total_bytes = input_tensor.numel() * input_tensor.element_size()
+        self._ensure_handle(total_bytes)
+
+        count_per_pe_bytes = total_bytes // npes
+        assert count_per_pe_bytes % 4 == 0, (
+            f"Per-PE chunk size ({count_per_pe_bytes} bytes) must be " f"divisible by 4 for uint32 reinterpret"
+        )
+        count_u32_per_pe = count_per_pe_bytes // 4
+
+        in_flat = input_tensor.view(-1).view(torch.uint32)
+        out_flat = output_tensor.view(-1).view(torch.uint32)
+
+        if stream is None:
+            stream = torch.cuda.current_stream(input_tensor.device)
+        self._handle(in_flat, out_flat, count_u32_per_pe, stream)
+        stream.synchronize()
+
+
 def sdma_allgather_max(
     packed: torch.Tensor,
     allgather: SdmaAllgather,

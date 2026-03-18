@@ -94,8 +94,14 @@ class LumenDotProductAttentionMLA(MegatronModule):
         self.cp_comm_type = cp_comm_type
 
         args = get_args()
-        self.backend = getattr(args, "tl_attn_backend", "aiter_csrc")
-        self.fp8_quant_type = getattr(args, "tl_fp8_quant_type", "blockwise")
+        self.backend = getattr(args, "lumen_attn_backend", "aiter_csrc")
+        self.fp8_quant_type = getattr(args, "lumen_fp8_quant_type", "blockwise")
+
+        fp8_attn = getattr(args, "lumen_fp8_attn", "none")
+        self.fp8_dpa = fp8_attn in ("dpa", "mha")
+        self.fp8_mha = fp8_attn == "mha"
+
+        self.scale_manager = None
 
         self.block_m_fwd = getattr(args, "mxfp8_block_m_fwd", 128)
         self.block_n_fwd = getattr(args, "mxfp8_block_n_fwd", 128)
@@ -142,7 +148,7 @@ class LumenDotProductAttentionMLA(MegatronModule):
         cp_param_bundle = None
         if self.cp_size > 1:
             cp_group = parallel_state.get_context_parallel_group()
-            cp_comm_type = self.cp_comm_type or "a2a"
+            cp_comm_type = self.cp_comm_type or getattr(get_args(), "lumen_cp_comm_type", "a2a")
             cp_param_bundle = {
                 "cp_group": cp_group,
                 "cp_comm_type": cp_comm_type,
@@ -167,10 +173,12 @@ class LumenDotProductAttentionMLA(MegatronModule):
                 block_n_dkv_bwd=self.block_n_dkv_bwd,
                 quant_block_size=self.mxfp8_quant_block_size,
                 grad_quant_type=self.grad_quant_type,
+                fp8_mha=self.fp8_mha,
+                scale_manager=self.scale_manager,
             )
         else:
             if self.backend == "aiter_csrc" and not is_aiter_available():
-                raise RuntimeError("AITER not installed. Use --tl-attn-backend aiter_triton.")
+                raise RuntimeError("AITER not installed. Use --lumen-attn-backend aiter_triton.")
             out = attention(
                 q,
                 k,

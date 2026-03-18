@@ -8,13 +8,23 @@
 
 Refer to the paper `DeepSpeed Ulysses <https://arxiv.org/abs/2309.14509>`_
 for the underlying communication pattern.
+
+When ``use_sdma=True`` the all-to-all exchanges are routed through
+mori's SDMA engine (via :class:`~lumen.ops.sdma.SdmaAll2all`),
+freeing the compute units for overlapping work.
 """
 
+import threading
 from functools import lru_cache
+from typing import Optional
 
 import torch
 
 from lumen.core.grad_quant import quantize_grad_tensor
+from lumen.ops.sdma import is_sdma_available
+
+if is_sdma_available():
+    from lumen.ops.sdma import SdmaAll2all
 
 
 def _is_aiter_available() -> bool:
@@ -131,11 +141,35 @@ class _A2ASingle(torch.autograd.Function):
 
 
 # ---------------------------------------------------------------------------
+# Cached SDMA A2A handle (process-level, keyed by capacity)
+# ---------------------------------------------------------------------------
+
+_sdma_a2a_handle: Optional["SdmaAll2all"] = None
+_sdma_a2a_lock = threading.Lock()
+
+
+def _get_sdma_a2a() -> "SdmaAll2all":
+    """Return or create the process-level SdmaAll2all handle."""
+    global _sdma_a2a_handle
+    if _sdma_a2a_handle is None:
+        with _sdma_a2a_lock:
+            if _sdma_a2a_handle is None:
+                _sdma_a2a_handle = SdmaAll2all()
+    return _sdma_a2a_handle
+
+
+def _sdma_a2a_exchange(src: torch.Tensor, dst: torch.Tensor) -> None:
+    """All-to-all *src* into *dst* using mori SDMA."""
+    handle = _get_sdma_a2a()
+    handle(src, dst)
+
+
+# ---------------------------------------------------------------------------
 # Shared A2A communication wrappers
 # ---------------------------------------------------------------------------
 
 
-def _a2a_pre_forward(q, k, v, cp_group):
+def _a2a_pre_forward(q, k, v, cp_group, use_sdma=False):
     """A2A scatter: local tokens -> local heads."""
     n = cp_group.size()
     b, s_local, h_q, d_qk = q.shape
@@ -147,37 +181,49 @@ def _a2a_pre_forward(q, k, v, cp_group):
 
     qkv = attn_helper.combine_qkv_before_a2a(q, k, v)
     qkv_out = torch.empty_like(qkv)
-    torch.distributed.all_to_all_single(qkv_out, qkv, group=cp_group, async_op=False)
+    if use_sdma:
+        _sdma_a2a_exchange(qkv, qkv_out)
+    else:
+        torch.distributed.all_to_all_single(qkv_out, qkv, group=cp_group, async_op=False)
     q_lh, k_lh, v_lh = attn_helper.splits_qkv_after_a2a(qkv_out)
     return q_lh, k_lh, v_lh, attn_helper, seq_dim
 
 
-def _a2a_post_forward(output_local_heads, attn_helper, cp_group):
+def _a2a_post_forward(output_local_heads, attn_helper, cp_group, use_sdma=False):
     """A2A gather: local heads -> local tokens."""
     output_local_heads = attn_helper.reshape_o_before_a2a(output_local_heads)
     output_local_tokens = torch.empty_like(output_local_heads)
-    torch.distributed.all_to_all_single(
-        output_local_tokens,
-        output_local_heads,
-        group=cp_group,
-        async_op=False,
-    )
+    if use_sdma:
+        _sdma_a2a_exchange(output_local_heads, output_local_tokens)
+    else:
+        torch.distributed.all_to_all_single(
+            output_local_tokens,
+            output_local_heads,
+            group=cp_group,
+            async_op=False,
+        )
     return attn_helper.reshape_o_after_a2a(output_local_tokens)
 
 
-def _a2a_pre_backward(dout, attn_helper, cp_group):
+def _a2a_pre_backward(dout, attn_helper, cp_group, use_sdma=False):
     """A2A scatter grad: local tokens -> local heads."""
     dout = attn_helper.reshape_do_before_a2a(dout)
     dout_local_heads = torch.empty_like(dout)
-    torch.distributed.all_to_all_single(dout_local_heads, dout, group=cp_group)
+    if use_sdma:
+        _sdma_a2a_exchange(dout, dout_local_heads)
+    else:
+        torch.distributed.all_to_all_single(dout_local_heads, dout, group=cp_group)
     return attn_helper.reshape_do_after_a2a(dout_local_heads)
 
 
-def _a2a_post_backward(dq, dk, dv, attn_helper, cp_group):
+def _a2a_post_backward(dq, dk, dv, attn_helper, cp_group, use_sdma=False):
     """A2A gather grad: local heads -> local tokens."""
     dqkv = attn_helper.combine_dqkv_before_a2a(dq, dk, dv)
     dqkv_out = torch.empty_like(dqkv)
-    torch.distributed.all_to_all_single(dqkv_out, dqkv, group=cp_group)
+    if use_sdma:
+        _sdma_a2a_exchange(dqkv, dqkv_out)
+    else:
+        torch.distributed.all_to_all_single(dqkv_out, dqkv, group=cp_group)
     return attn_helper.split_dqkv_after_a2a(dqkv_out)
 
 
@@ -205,9 +251,16 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
         use_fp8,
         cp_group,
         grad_quant_type=None,
+        use_sdma=False,
     ):
         assert bias is None
-        q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(q, k, v, cp_group)
+        q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(
+            q,
+            k,
+            v,
+            cp_group,
+            use_sdma=use_sdma,
+        )
 
         (output, softmax_lse, exp_scores, q_lh, k_lh, v_lh, q_scale, k_scale, v_scale, p_scale, rng_state) = (
             triton_fp8_forward(
@@ -252,8 +305,14 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
             ctx.attn_helper = attn_helper
             ctx.cp_group = cp_group
             ctx.grad_quant_type = grad_quant_type
+            ctx.use_sdma = use_sdma
 
-        output_tokens = _a2a_post_forward(output, attn_helper, cp_group)
+        output_tokens = _a2a_post_forward(
+            output,
+            attn_helper,
+            cp_group,
+            use_sdma=use_sdma,
+        )
 
         result = [output_tokens]
         if return_lse:
@@ -267,7 +326,12 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
         (q, k, v, o, softmax_lse, alibi_slopes, bias, q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
         assert bias is None
 
-        dout_lh = _a2a_pre_backward(dout, ctx.attn_helper, ctx.cp_group)
+        dout_lh = _a2a_pre_backward(
+            dout,
+            ctx.attn_helper,
+            ctx.cp_group,
+            use_sdma=ctx.use_sdma,
+        )
         dq, dk, dv = triton_fp8_backward(
             dout_lh,
             q,
@@ -292,7 +356,14 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
             bias=bias,
             window_size=ctx.window_size,
         )
-        dq_t, dk_t, dv_t = _a2a_post_backward(dq, dk, dv, ctx.attn_helper, ctx.cp_group)
+        dq_t, dk_t, dv_t = _a2a_post_backward(
+            dq,
+            dk,
+            dv,
+            ctx.attn_helper,
+            ctx.cp_group,
+            use_sdma=ctx.use_sdma,
+        )
         gqt = ctx.grad_quant_type
         dq_t = quantize_grad_tensor(dq_t, gqt)
         dk_t = quantize_grad_tensor(dk_t, gqt)
@@ -301,7 +372,7 @@ class AttentionTritonFunctionCPA2A(torch.autograd.Function):
             dq_t,
             dk_t,
             dv_t,
-        ) + (None,) * 12
+        ) + (None,) * 13
 
 
 class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
@@ -330,9 +401,16 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
         block_n_dkv_bwd=64,
         quant_block_size=32,
         grad_quant_type=None,
+        use_sdma=False,
     ):
         assert bias is None
-        q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(q, k, v, cp_group)
+        q_lh, k_lh, v_lh, attn_helper, seq_dim = _a2a_pre_forward(
+            q,
+            k,
+            v,
+            cp_group,
+            use_sdma=use_sdma,
+        )
 
         (output, softmax_lse, exp_scores, q_lh, k_lh, v_lh, q_scale, k_scale, v_scale, p_scale, rng_state) = (
             triton_mxfp8_forward(
@@ -385,8 +463,14 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
             ctx.attn_helper = attn_helper
             ctx.cp_group = cp_group
             ctx.grad_quant_type = grad_quant_type
+            ctx.use_sdma = use_sdma
 
-        output_tokens = _a2a_post_forward(output, attn_helper, cp_group)
+        output_tokens = _a2a_post_forward(
+            output,
+            attn_helper,
+            cp_group,
+            use_sdma=use_sdma,
+        )
 
         result = [output_tokens]
         if return_lse:
@@ -400,7 +484,12 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
         (q, k, v, o, softmax_lse, alibi_slopes, bias, q_scale, k_scale, v_scale, rng_state) = ctx.saved_tensors
         assert bias is None
 
-        dout_lh = _a2a_pre_backward(dout, ctx.attn_helper, ctx.cp_group)
+        dout_lh = _a2a_pre_backward(
+            dout,
+            ctx.attn_helper,
+            ctx.cp_group,
+            use_sdma=ctx.use_sdma,
+        )
         dq, dk, dv = triton_mxfp8_backward(
             dout_lh,
             q,
@@ -430,7 +519,14 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
             bias=bias,
             window_size=ctx.window_size,
         )
-        dq_t, dk_t, dv_t = _a2a_post_backward(dq, dk, dv, ctx.attn_helper, ctx.cp_group)
+        dq_t, dk_t, dv_t = _a2a_post_backward(
+            dq,
+            dk,
+            dv,
+            ctx.attn_helper,
+            ctx.cp_group,
+            use_sdma=ctx.use_sdma,
+        )
         gqt = ctx.grad_quant_type
         dq_t = quantize_grad_tensor(dq_t, gqt)
         dk_t = quantize_grad_tensor(dk_t, gqt)
@@ -439,13 +535,30 @@ class AttentionTritonMXFP8FunctionCPA2A(torch.autograd.Function):
             dq_t,
             dk_t,
             dv_t,
-        ) + (None,) * 19
+        ) + (None,) * 20
 
 
 # ---------------------------------------------------------------------------
 # Aiter CP variant — uses differentiable _A2ASingle so autograd flows
 # through flash_attn_func naturally (no custom backward needed).
 # ---------------------------------------------------------------------------
+
+
+class _SdmaA2ASingle(torch.autograd.Function):
+    """Differentiable all-to-all via mori SDMA (mirrors _A2ASingle)."""
+
+    @staticmethod
+    def forward(ctx, x, cp_group):
+        ctx.cp_group = cp_group
+        out = torch.empty_like(x)
+        _sdma_a2a_exchange(x, out)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = torch.empty_like(grad_output)
+        _sdma_a2a_exchange(grad_output, grad_input)
+        return grad_input, None
 
 
 class AttentionAiterFunctionCPA2A:
@@ -465,6 +578,7 @@ class AttentionAiterFunctionCPA2A:
         return_softmax,
         is_grad_enabled,
         cp_group,
+        use_sdma=False,
     ):
         assert bias is None
         n = cp_group.size()
@@ -476,7 +590,8 @@ class AttentionAiterFunctionCPA2A:
         attn_helper = get_attention_cp_a2a_helper(b, s, h_q, h_kv, d_qk, d_v, seq_dim, n)
 
         qkv = attn_helper.combine_qkv_before_a2a(q, k, v)
-        qkv_out = _A2ASingle.apply(qkv, cp_group)
+        a2a_fn = _SdmaA2ASingle.apply if use_sdma else _A2ASingle.apply
+        qkv_out = a2a_fn(qkv, cp_group)
         q_lh, k_lh, v_lh = attn_helper.splits_qkv_after_a2a(qkv_out)
 
         _return_softmax = return_softmax and dropout_p > 0
@@ -502,7 +617,7 @@ class AttentionAiterFunctionCPA2A:
             S_dmask = None
 
         output_lh = attn_helper.reshape_o_before_a2a(output_lh)
-        output_tokens = _A2ASingle.apply(output_lh, cp_group)
+        output_tokens = a2a_fn(output_lh, cp_group)
         output_tokens = attn_helper.reshape_o_after_a2a(output_tokens)
 
         result = [output_tokens]

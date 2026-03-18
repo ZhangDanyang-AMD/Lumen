@@ -1,0 +1,163 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
+
+"""FP8-aware activation checkpointing for Lumen.
+
+Wraps PyTorch's gradient checkpointing with proper FP8 scaling manager
+context preservation and RNG state tracking for stochastic rounding.
+"""
+
+import logging
+from contextlib import contextmanager
+from typing import Any, Callable, Optional
+
+import torch
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
+
+logger = logging.getLogger(__name__)
+
+
+class _FP8ScalingContext:
+    """Captures and restores FP8 scaling manager state for recompute."""
+
+    def __init__(self):
+        self._saved_state: Optional[dict] = None
+
+    def save(self, scaling_manager):
+        """Save current scaling manager state."""
+        if scaling_manager is None:
+            self._saved_state = None
+            return
+
+        state = {}
+        if hasattr(scaling_manager, "amax_history"):
+            state["amax_history"] = (
+                {k: v.clone() for k, v in scaling_manager.amax_history.items()}
+                if isinstance(scaling_manager.amax_history, dict)
+                else scaling_manager.amax_history.clone()
+            )
+        if hasattr(scaling_manager, "scale"):
+            state["scale"] = (
+                {k: v.clone() for k, v in scaling_manager.scale.items()}
+                if isinstance(scaling_manager.scale, dict)
+                else scaling_manager.scale.clone()
+            )
+        if hasattr(scaling_manager, "step"):
+            state["step"] = scaling_manager.step
+        self._saved_state = state
+
+    def restore(self, scaling_manager):
+        """Restore saved scaling manager state."""
+        if scaling_manager is None or self._saved_state is None:
+            return
+
+        state = self._saved_state
+        if "amax_history" in state and hasattr(scaling_manager, "amax_history"):
+            if isinstance(state["amax_history"], dict):
+                for k, v in state["amax_history"].items():
+                    if k in scaling_manager.amax_history:
+                        scaling_manager.amax_history[k].copy_(v)
+            else:
+                scaling_manager.amax_history.copy_(state["amax_history"])
+        if "scale" in state and hasattr(scaling_manager, "scale"):
+            if isinstance(state["scale"], dict):
+                for k, v in state["scale"].items():
+                    if k in scaling_manager.scale:
+                        scaling_manager.scale[k].copy_(v)
+            else:
+                scaling_manager.scale.copy_(state["scale"])
+
+
+@contextmanager
+def _fp8_recompute_context(scaling_manager=None):
+    """Context manager that saves/restores FP8 state during recompute."""
+    fp8_ctx = _FP8ScalingContext()
+    fp8_ctx.save(scaling_manager)
+
+    # Save RNG state for stochastic rounding
+    rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+
+    try:
+        yield
+    finally:
+        # Restore FP8 state after recompute
+        fp8_ctx.restore(scaling_manager)
+        if rng_state is not None:
+            torch.cuda.set_rng_state(rng_state)
+
+
+def lumen_checkpoint(
+    forward_fn: Callable,
+    *args,
+    scaling_manager=None,
+    use_reentrant: bool = False,
+    preserve_rng_state: bool = True,
+    **kwargs,
+) -> Any:
+    """FP8-aware gradient checkpointing.
+
+    Wraps torch.utils.checkpoint.checkpoint with FP8 scaling manager
+    context preservation. Ensures that:
+    1. FP8 scaling state is consistent during recompute
+    2. RNG state for stochastic rounding is preserved
+    3. Amax history is not corrupted by recompute
+
+    Args:
+        forward_fn: Forward function to checkpoint.
+        *args: Arguments to forward_fn.
+        scaling_manager: Optional FP8 scaling manager.
+        use_reentrant: Use reentrant checkpointing (default False).
+        preserve_rng_state: Preserve RNG state for reproducibility.
+        **kwargs: Additional kwargs for forward_fn.
+
+    Returns:
+        Output of forward_fn.
+    """
+    if scaling_manager is not None:
+        fp8_ctx = _FP8ScalingContext()
+        fp8_ctx.save(scaling_manager)
+
+        original_fn = forward_fn
+
+        def wrapped_fn(*a, **kw):
+            fp8_ctx.restore(scaling_manager)
+            return original_fn(*a, **kw)
+
+        forward_fn = wrapped_fn
+
+    return torch_checkpoint(
+        forward_fn,
+        *args,
+        use_reentrant=use_reentrant,
+        preserve_rng_state=preserve_rng_state,
+        **kwargs,
+    )
+
+
+def lumen_checkpoint_core_attention(
+    attn_forward_fn: Callable,
+    *args,
+    scaling_manager=None,
+    **kwargs,
+) -> Any:
+    """Selective checkpointing for attention core computation.
+
+    Checkpoints only the attention dot-product and softmax,
+    while keeping QKV projections and output projection in memory.
+
+    Args:
+        attn_forward_fn: Attention core forward function.
+        *args: Q, K, V tensors and other attention args.
+        scaling_manager: Optional FP8 scaling manager.
+        **kwargs: Attention kwargs (causal, softmax_scale, etc.).
+    """
+    return lumen_checkpoint(
+        attn_forward_fn,
+        *args,
+        scaling_manager=scaling_manager,
+        use_reentrant=False,
+        **kwargs,
+    )

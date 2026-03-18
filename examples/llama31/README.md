@@ -22,7 +22,7 @@ The entry point (`pretrain_llama31.py`) selects the backend via `--backend megat
 | Feature | CLI Flag | Default |
 |---------|----------|---------|
 | Model size | `SIZE=8b` (env var) | 8b |
-| MXFP8 attention | `--tl-fp8-quant-type mxfp8` | mxfp8 |
+| MXFP8 attention | `--lumen-fp8-quant-type mxfp8` | mxfp8 |
 | FP8 training | `--linear-fp8` | enabled |
 | Amax algorithm | `--linear-fp8-amax-algo most_recent` | most_recent |
 | Amax history | `--linear-fp8-amax-history 4` | 4 |

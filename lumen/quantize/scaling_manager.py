@@ -694,3 +694,128 @@ class ScalingManager:
             & mask_s
         )
         return (raw - s_bias + hp_ebias).to(torch.uint32).item()
+
+    @staticmethod
+    def quantize_block_2d_fp8(
+        tensor: torch.Tensor,
+        block_m: int,
+        block_n: int,
+        float8_dtype: Optional[torch.dtype] = None,
+    ):
+        """2D block FP8 quantization for attention Q/K/V.
+
+        Expects input in ``[B, S, H, D]`` (BSHD) layout.  Internally permutes
+        to ``[B, H, S, D]``, partitions into ``(block_m x block_n)`` 2D tiles,
+        computes one scale per tile, quantizes, and permutes back to BSHD.
+
+        Scale shape: ``[B, H, S//block_m, D//block_n]`` (float32).
+
+        Returns ``(tensor_fp8, scale_inv)`` where *scale_inv* is the inverse
+        scale suitable for dequantization.
+        """
+        if float8_dtype is None:
+            float8_dtype = _get_float8_e4m3()
+        tensor = tensor.permute(0, 2, 1, 3)  # [B, H, S, D]
+        B, H, S, D = tensor.shape
+        MAX_FP8 = torch.finfo(float8_dtype).max
+
+        tensor = tensor.reshape(B, H, S // block_m, block_m, D // block_n, block_n)
+        tensor_max = tensor.abs().amax(dim=(3, 5))  # [B, H, S//bm, D//bn]
+        tensor_max = torch.where(tensor_max == 0, MAX_FP8, tensor_max)
+        scale = MAX_FP8 / tensor_max  # [B, H, S//bm, D//bn]
+
+        scale_expanded = scale[:, :, :, None, :, None].expand_as(tensor)
+        tensor = (tensor * scale_expanded).clamp(-MAX_FP8, MAX_FP8).to(float8_dtype)
+        tensor = tensor.reshape(B, H, S, D).permute(0, 2, 1, 3).contiguous()
+
+        return tensor, (1.0 / scale).to(torch.float32).contiguous()
+
+
+class Blockwise2DScaleManager:
+    """Manages 2D block FP8 scales across forward/backward for a single attention layer.
+
+    Lifecycle:
+        1. Forward: call :meth:`quantize_and_cache` — quantizes Q/K/V with 2D
+           blocks and caches the FP8 tensors + scales.
+        2. Backward: call :meth:`get_cached` — returns the cached FP8 tensors
+           and scales so that backward can skip re-quantization.
+        3. Backward (dO): optionally call :meth:`get_do_scale` to reuse the dO
+           scale from the previous iteration, and :meth:`cache_do_scale` to
+           persist the current iteration's dO scale.
+    """
+
+    def __init__(self, block_m: int = 64, block_n: int = 64):
+        self.block_m = block_m
+        self.block_n = block_n
+        self._q_fp8 = None
+        self._k_fp8 = None
+        self._v_fp8 = None
+        self._q_scale = None
+        self._k_scale = None
+        self._v_scale = None
+        self._do_scale = None
+
+    def quantize_and_cache(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        float8_dtype: Optional[torch.dtype] = None,
+    ):
+        """Forward: quantize Q/K/V with 2D blocks, cache results.
+
+        Args:
+            q, k, v: Tensors in ``[B, S, H, D]`` layout.
+            float8_dtype: Target FP8 dtype (default: auto-detected E4M3).
+
+        Returns:
+            ``(q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale)``
+        """
+        q_fp8, q_scale = ScalingManager.quantize_block_2d_fp8(q, self.block_m, self.block_n, float8_dtype)
+        k_fp8, k_scale = ScalingManager.quantize_block_2d_fp8(k, self.block_m, self.block_n, float8_dtype)
+        v_fp8, v_scale = ScalingManager.quantize_block_2d_fp8(v, self.block_m, self.block_n, float8_dtype)
+
+        self._q_fp8 = q_fp8
+        self._k_fp8 = k_fp8
+        self._v_fp8 = v_fp8
+        self._q_scale = q_scale
+        self._k_scale = k_scale
+        self._v_scale = v_scale
+
+        return q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale
+
+    def get_cached(self):
+        """Backward: return cached FP8 tensors and scales.
+
+        Returns:
+            ``(q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale)``
+
+        Raises:
+            RuntimeError: If :meth:`quantize_and_cache` was not called first.
+        """
+        if self._q_fp8 is None:
+            raise RuntimeError(
+                "Blockwise2DScaleManager.get_cached() called before " "quantize_and_cache(). Ensure forward runs first."
+            )
+        return (
+            self._q_fp8,
+            self._k_fp8,
+            self._v_fp8,
+            self._q_scale,
+            self._k_scale,
+            self._v_scale,
+        )
+
+    def get_do_scale(self) -> Optional[torch.Tensor]:
+        """Return cached dO scale from previous backward, or None."""
+        return self._do_scale
+
+    def cache_do_scale(self, do_scale: torch.Tensor) -> None:
+        """Backward: save dO scale for next iteration's backward."""
+        self._do_scale = do_scale.detach()
+
+    def clear(self) -> None:
+        """Release all cached tensors (useful between training steps)."""
+        self._q_fp8 = self._k_fp8 = self._v_fp8 = None
+        self._q_scale = self._k_scale = self._v_scale = None
+        self._do_scale = None

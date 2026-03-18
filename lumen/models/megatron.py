@@ -282,12 +282,33 @@ _TE_FORCE_OVERRIDES = {
 
 _FP8_FORMAT_MAP = {"e4m3": "fp8_e4m3", "hybrid": "hybrid"}
 
+_BACKEND_MAP = {
+    "auto": ("aiter_csrc", "aiter_triton_fp8"),
+    "triton": ("aiter_triton", "aiter_triton_fp8"),
+    "csrc": ("aiter_csrc", "aiter_csrc_fp8"),
+    "asm": ("aiter_csrc", "aiter_asm_fp8"),
+}
+
+
+def resolve_attn_backend(backend: str, fp8_attn: str) -> str:
+    """Derive the concrete ``aiter_*`` backend string from user-facing flags.
+
+    Args:
+        backend: One of ``auto``, ``triton``, ``csrc``, ``asm``.
+        fp8_attn: One of ``none``, ``dpa``, ``mha``.
+
+    Returns:
+        A concrete backend name like ``aiter_triton_fp8``.
+    """
+    bf16_be, fp8_be = _BACKEND_MAP.get(backend, ("aiter_csrc", "aiter_triton_fp8"))
+    return fp8_be if fp8_attn in ("dpa", "mha") else bf16_be
+
 
 def _override_te_args_for_lumen(args):
     """Configure Lumen FP8 settings from Megatron args.
 
     The ``--fp8-format`` value (``args.fp8``) is mapped to the Lumen
-    :class:`QuantFormat` string and stored as ``args.tl_fp8_format`` for
+    :class:`QuantFormat` string and stored as ``args.lumen_fp8_format`` for
     :func:`apply_fp8_training`.  ``args.fp8`` is then set to ``None`` so
     that ``TransformerConfig`` uses Lumen's own FP8 code-paths.
 
@@ -303,7 +324,17 @@ def _override_te_args_for_lumen(args):
     for attr, value in _TE_FORCE_OVERRIDES.items():
         setattr(args, attr, value)
 
-    if getattr(args, "tl_cross_entropy", False):
+    fp8_attn = getattr(args, "lumen_fp8_attn", "none")
+    if getattr(args, "fp8_multi_head_attention", False):
+        fp8_attn = "mha"
+    elif getattr(args, "fp8_dot_product_attention", False) and fp8_attn == "none":
+        fp8_attn = "dpa"
+    args.lumen_fp8_attn = fp8_attn
+
+    backend_base = getattr(args, "lumen_attn_backend", "auto")
+    args.lumen_attn_backend = resolve_attn_backend(backend_base, fp8_attn)
+
+    if getattr(args, "lumen_cross_entropy", False):
         _patch_cross_entropy()
 
 
@@ -368,14 +399,14 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     """Build a GPTModel with Lumen attention replacing the default
     DotProductAttention in every layer.
 
-    When ``--tl-linear`` is set, uses the Lumen spec provider for all
+    When ``--lumen-linear`` is set, uses the Lumen spec provider for all
     linear, norm, and attention modules.  Otherwise, uses the Megatron-Core
     local spec and patches attention/norms post-hoc.
 
     Args:
         model_name: Label used in the startup log message (e.g. ``"LLaMA 3.1"``).
     """
-    if getattr(args, "tl_linear", False):
+    if getattr(args, "lumen_linear", False):
         return lumen_gpt_builder_with_spec(
             args,
             pre_process,
@@ -428,7 +459,7 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     grad_quant_type = getattr(args, "grad_quant_type", None)
     normalization = getattr(args, "normalization", "RMSNorm")
 
-    if getattr(args, "tl_rmsnorm", False) or getattr(args, "tl_norm", False):
+    if getattr(args, "lumen_rmsnorm", False) or getattr(args, "lumen_norm", False):
         _patch_all_norms(model, normalization, grad_quant_type)
 
     return model
@@ -522,9 +553,23 @@ def _patch_mla_attention(spec):
 
 
 def enable_fp8_for_parallel_linear(
-    model, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None
+    model,
+    scaling_manager=None,
+    scaling_type="dynamic",
+    fp8_dtype=None,
+    block_size=None,
+    fp8_mha=False,
+    gradient_accumulation_fusion=False,
 ):
-    """Enable FP8 GEMM on all Lumen parallel linear modules in the model."""
+    """Enable FP8 GEMM on all Lumen parallel linear modules in the model.
+
+    When *fp8_mha* is True, a shared :class:`Blockwise2DScaleManager` is
+    attached to each ``LumenDotProductAttention`` (or MLA variant) so that
+    QKV projection, dot-product attention and output projection share the
+    same FP8 scale context within a single MHA block.
+    """
+    from lumen.modules.attention_megatron import LumenDotProductAttention
+    from lumen.modules.attention_mla import LumenDotProductAttentionMLA
     from lumen.modules.grouped_linear import LumenGroupedLinear
     from lumen.modules.layernorm_linear import LumenLayerNormLinear
     from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
@@ -540,7 +585,21 @@ def enable_fp8_for_parallel_linear(
                 fp8_dtype=fp8_dtype,
                 block_size=block_size,
             )
+            if hasattr(module, "gradient_accumulation_fusion"):
+                module.gradient_accumulation_fusion = gradient_accumulation_fusion
             count += 1
+
+    if fp8_mha:
+        from lumen.quantize.scaling_manager import Blockwise2DScaleManager
+
+        attn_count = 0
+        for module in model.modules():
+            if isinstance(module, (LumenDotProductAttention, LumenDotProductAttentionMLA)):
+                module.scale_manager = Blockwise2DScaleManager()
+                attn_count += 1
+        if attn_count > 0:
+            print_rank_0(f"> Attached Blockwise2DScaleManager to {attn_count} attention modules for FP8 MHA")
+
     if count > 0:
         print_rank_0(f"> Enabled FP8 (scaling={scaling_type}) on {count} Lumen parallel linear modules")
 
@@ -598,7 +657,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         ScalingType,
     )
 
-    fmt = getattr(args, "tl_fp8_format", "fp8_e4m3")
+    fmt = getattr(args, "lumen_fp8_format", "fp8_e4m3")
     scaling = getattr(args, "linear_fp8_scaling", "delayed")
     block_size = getattr(args, "linear_fp8_block_size", 128)
     amax_algo = getattr(args, "linear_fp8_amax_algo", "max")
@@ -613,6 +672,9 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
     num_layers = getattr(args, "num_layers", 0)
     use_sdma = getattr(args, "use_sdma", False)
+    fp8_attn = getattr(args, "lumen_fp8_attn", "none")
+    fp8_dpa = fp8_attn in ("dpa", "mha")
+    fp8_mha = fp8_attn == "mha"
 
     print_rank_0(
         f"> transformer_impl='Aiter Backend', fp8_format='{fmt}', \
@@ -625,7 +687,8 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         fp8_wgrad='{fp8_wgrad}', \
         grad_quant='{grad_quant_type}', \
         first_last_bf16='{first_last_bf16}' (start={bf16_start}, end={bf16_end}), \
-        use_sdma='{use_sdma}'"
+        use_sdma='{use_sdma}', \
+        fp8_attn='{fp8_attn}'"
     )
 
     config = QuantConfig(
@@ -644,6 +707,8 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         num_layers_at_end_in_bf16=bf16_end,
         num_layers=num_layers,
         use_sdma=use_sdma,
+        fp8_dpa=fp8_dpa,
+        fp8_mha=fp8_mha,
     )
 
     dp_group = None
@@ -811,7 +876,7 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
 def add_common_megatron_args(parser):
     """Register CLI argument groups shared by all Megatron model scripts.
 
-    Registers: ``--backend``, transformer-light, mxfp8-block-config, lora,
+    Registers: ``--backend``, lumen, mxfp8-block-config, lora,
     fp8-training, and warmup/early-stop groups.
 
     Uses :func:`safe_add_argument` so that model-specific scripts can
@@ -825,37 +890,49 @@ def add_common_megatron_args(parser):
     lumen = parser.add_argument_group(title="Lumen")
     safe_add_argument(
         lumen,
-        "--tl-attn-backend",
+        "--lumen-attn-backend",
         type=str,
-        default="aiter_csrc",
-        choices=["aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8"],
-        help="Lumen attention backend. aiter_asm_fp8 uses ASM kernels with " "fallback chain: asm -> csrc -> triton.",
+        default="auto",
+        choices=["auto", "triton", "csrc", "asm"],
+        help="Lumen attention kernel backend. 'auto' prefers csrc with triton fallback. "
+        "'asm' uses ASM kernels with fallback chain: asm -> csrc -> triton.",
     )
     safe_add_argument(
         lumen,
-        "--tl-fp8-quant-type",
+        "--lumen-fp8-attn",
+        type=str,
+        default="none",
+        choices=["none", "dpa", "mha"],
+        help="FP8 attention scope: 'none' = BF16 attention, "
+        "'dpa' = FP8 dot-product attention only, "
+        "'mha' = FP8 for full Multi-Head Attention block "
+        "(QKV projection + attention + output projection).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fp8-quant-type",
         type=str,
         default="blockwise",
-        choices=["dynamic", "delayed", "blockwise", "per_token", "none", "mxfp8"],
+        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"],
         help="FP8 quantisation type for FP8 attention backends.",
     )
     safe_add_argument(
         lumen,
-        "--tl-rmsnorm",
+        "--lumen-rmsnorm",
         action="store_true",
         default=False,
         help="Replace RMSNorm with Lumen Triton-accelerated RMSNorm.",
     )
     safe_add_argument(
         lumen,
-        "--tl-norm",
+        "--lumen-norm",
         action="store_true",
         default=False,
         help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
     )
     safe_add_argument(
         lumen,
-        "--tl-linear",
+        "--lumen-linear",
         action="store_true",
         default=False,
         help="Use Lumen parallel linear modules (LumenColumnParallelLinear, "
@@ -863,10 +940,110 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(
         lumen,
-        "--tl-cross-entropy",
+        "--lumen-cross-entropy",
         action="store_true",
         default=False,
         help="Compute loss using Lumen's Triton parallel cross-entropy kernel.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-cpu-offload",
+        action="store_true",
+        default=False,
+        help="Offload activations to CPU pinned memory during forward, prefetch in backward.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fsdp2",
+        action="store_true",
+        default=False,
+        help="Use FSDP2 (fully_shard) instead of legacy FSDP when backend=fsdp.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fp8-checkpoint",
+        action="store_true",
+        default=False,
+        help="Use FP8-aware activation checkpointing that preserves scaling state.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-hip-graphs",
+        action="store_true",
+        default=False,
+        help="Graph-capture training steps to reduce kernel launch overhead.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fused-moe-routing",
+        action="store_true",
+        default=False,
+        help="Use fused MoE token routing (top-k + permute + unpermute).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fp8-activation-store",
+        action="store_true",
+        default=False,
+        help="Store MLP activations in FP8 during forward for reduced memory in backward.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-cp-comm-type",
+        type=str,
+        default="a2a",
+        choices=["a2a", "p2p"],
+        help="Context parallelism communication type: 'a2a' (all-to-all) or 'p2p' (ring).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-delay-wgrad",
+        action="store_true",
+        default=False,
+        help="Defer weight gradient computation to overlap with next layer comm.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fp8-param-gather",
+        action="store_true",
+        default=False,
+        help="Store and all-gather parameters in FP8 for reduced communication volume.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-tp-comm-overlap",
+        action="store_true",
+        default=False,
+        help="Overlap TP communication (SDMA) with GEMM computation.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fused-rope",
+        action="store_true",
+        default=False,
+        help="Use AITER fused RoPE kernel for rotary positional embeddings.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-gradient-accumulation-fusion",
+        action="store_true",
+        default=False,
+        help="Fuse weight gradient accumulation into GEMM backward (accumulate into main_grad).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fused-mlp",
+        action="store_true",
+        default=False,
+        help="Use fused MLP modules (LumenFusedMLP / LumenGatedMLP) for reduced kernel launch overhead.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-softmax-type",
+        type=str,
+        default="vanilla",
+        choices=["vanilla", "off_by_one"],
+        help="Softmax variant: 'vanilla' (standard) or 'off_by_one' (adds 1 to denominator).",
     )
 
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")

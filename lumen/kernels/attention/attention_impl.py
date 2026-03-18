@@ -7,11 +7,11 @@
 """Unified attention kernel dispatcher.
 
 Selects between aiter's C++/asm backend and Triton kernels based on the
-environment variable ``TRANSFORMER_LIGHT_ATTN_BACKEND``:
+environment variable ``LUMEN_ATTN_KERNEL_BACKEND``:
 
-    TRANSFORMER_LIGHT_ATTN_BACKEND=auto    # (default) prefer csrc, fallback triton
-    TRANSFORMER_LIGHT_ATTN_BACKEND=csrc    # force csrc, fallback triton if missing
-    TRANSFORMER_LIGHT_ATTN_BACKEND=triton  # always use triton
+    LUMEN_ATTN_KERNEL_BACKEND=auto    # (default) prefer csrc, fallback triton
+    LUMEN_ATTN_KERNEL_BACKEND=csrc    # force csrc, fallback triton if missing
+    LUMEN_ATTN_KERNEL_BACKEND=triton  # always use triton
 
 **Extending with new aiter kernels**
 
@@ -75,7 +75,7 @@ _torch_custom_op_wrapper = torch.library.custom_op
 # 1. Configuration
 ###########################################################################
 
-_BACKEND_PREF = os.environ.get("TRANSFORMER_LIGHT_ATTN_BACKEND", "auto")
+_BACKEND_PREF = os.environ.get("LUMEN_ATTN_KERNEL_BACKEND", "auto")
 
 
 ###########################################################################

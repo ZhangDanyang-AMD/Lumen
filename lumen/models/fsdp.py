@@ -15,6 +15,7 @@ subpackages.
 
 import logging
 
+import torch
 import torch.distributed as dist
 import torch.nn as nn
 
@@ -77,6 +78,13 @@ def add_common_fsdp_args(parser):
         default="full_shard",
         choices=["full_shard", "shard_grad_op", "no_shard"],
     )
+    f.add_argument(
+        "--fsdp-version",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="FSDP version: 1 (legacy FullyShardedDataParallel) or 2 (fully_shard API).",
+    )
 
     # -- LoRA --
     lora = parser.add_argument_group("lora")
@@ -128,10 +136,153 @@ def add_common_fsdp_args(parser):
     lfp8.add_argument("--num-layers-at-start-in-bf16", type=int, default=1)
     lfp8.add_argument("--num-layers-at-end-in-bf16", type=int, default=1)
 
+    # -- Attention FP8 --
+    afp8 = parser.add_argument_group("attention-fp8")
+    afp8.add_argument(
+        "--lumen-attn-backend",
+        type=str,
+        default="auto",
+        choices=["auto", "triton", "csrc", "asm"],
+        help="Lumen attention kernel backend. 'auto' prefers csrc with triton fallback.",
+    )
+    afp8.add_argument(
+        "--lumen-fp8-attn",
+        type=str,
+        default="none",
+        choices=["none", "dpa", "mha"],
+        help="FP8 attention scope: 'none' = BF16, 'dpa' = FP8 dot-product, " "'mha' = FP8 for full MHA block.",
+    )
+    afp8.add_argument(
+        "--lumen-fp8-quant-type",
+        type=str,
+        default="blockwise",
+        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"],
+        help="FP8 quantisation type for FP8 attention backends.",
+    )
+
+    # -- Context parallelism --
+    cp = parser.add_argument_group("context-parallelism")
+    cp.add_argument(
+        "--lumen-cp-comm-type",
+        type=str,
+        default="a2a",
+        choices=["a2a", "p2p"],
+        help="Context parallelism comm type: 'a2a' or 'p2p' (ring).",
+    )
+
+    # -- Comm overlap --
+    overlap = parser.add_argument_group("comm-overlap")
+    overlap.add_argument(
+        "--lumen-tp-comm-overlap",
+        action="store_true",
+        default=False,
+        help="Overlap TP communication (SDMA) with GEMM computation.",
+    )
+
+    # -- Fused MLP --
+    fmlp = parser.add_argument_group("fused-mlp")
+    fmlp.add_argument(
+        "--lumen-fused-mlp",
+        action="store_true",
+        default=False,
+        help="Use fused MLP modules for reduced kernel launch overhead.",
+    )
+
+    # -- FP8 activation store --
+    fp8act = parser.add_argument_group("fp8-activation-store")
+    fp8act.add_argument(
+        "--lumen-fp8-activation-store",
+        action="store_true",
+        default=False,
+        help="Store MLP activations in FP8 during forward.",
+    )
+
+    # -- CPU offload --
+    cpuoff = parser.add_argument_group("cpu-offload")
+    cpuoff.add_argument(
+        "--lumen-cpu-offload",
+        action="store_true",
+        default=False,
+        help="Offload activations to CPU during forward, prefetch in backward.",
+    )
+
+    # -- Delay wgrad --
+    dwg = parser.add_argument_group("delay-wgrad")
+    dwg.add_argument(
+        "--lumen-delay-wgrad",
+        action="store_true",
+        default=False,
+        help="Defer weight gradient to overlap with next layer comm.",
+    )
+
+    # -- Softmax --
+    sfx = parser.add_argument_group("softmax")
+    sfx.add_argument(
+        "--lumen-softmax-type",
+        type=str,
+        default="vanilla",
+        choices=["vanilla", "off_by_one"],
+        help="Softmax variant: 'vanilla' or 'off_by_one'.",
+    )
+
+    # -- Gradient accumulation fusion --
+    gaf = parser.add_argument_group("grad-accum-fusion")
+    gaf.add_argument(
+        "--lumen-gradient-accumulation-fusion",
+        action="store_true",
+        default=False,
+        help="Fuse weight gradient accumulation into GEMM backward.",
+    )
+
+    # -- FP8 param all-gather --
+    fp8p = parser.add_argument_group("fp8-params")
+    fp8p.add_argument(
+        "--lumen-fp8-param-gather",
+        action="store_true",
+        default=False,
+        help="Store and all-gather parameters in FP8 for reduced comm volume.",
+    )
+
+    # -- Fused RoPE --
+    rope = parser.add_argument_group("fused-rope")
+    rope.add_argument(
+        "--lumen-fused-rope",
+        action="store_true",
+        default=False,
+        help="Use AITER fused RoPE kernel for rotary positional embeddings.",
+    )
+
+    # -- HIP graphs --
+    hg = parser.add_argument_group("hip-graphs")
+    hg.add_argument(
+        "--lumen-hip-graphs",
+        action="store_true",
+        default=False,
+        help="Graph-capture training steps to reduce kernel launch overhead.",
+    )
+
+    # -- FP8 checkpoint --
+    ckpt = parser.add_argument_group("fp8-checkpoint")
+    ckpt.add_argument(
+        "--lumen-fp8-checkpoint",
+        action="store_true",
+        default=False,
+        help="Use FP8-aware activation checkpointing.",
+    )
+
+    # -- MoE routing --
+    moe = parser.add_argument_group("moe-routing")
+    moe.add_argument(
+        "--lumen-fused-moe-routing",
+        action="store_true",
+        default=False,
+        help="Use fused MoE token routing.",
+    )
+
     # -- Norm replacement --
     norm = parser.add_argument_group("norm")
     norm.add_argument(
-        "--tl-norm",
+        "--lumen-norm",
         action="store_true",
         default=False,
         help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
@@ -155,7 +306,7 @@ def patch_norms(model: nn.Module, args) -> None:
 
     Works for both HuggingFace and other FSDP-compatible models.
     """
-    if not getattr(args, "tl_norm", False):
+    if not getattr(args, "lumen_norm", False):
         return
 
     from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
@@ -216,6 +367,9 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
     bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
     use_sdma = getattr(args, "use_sdma", False)
+    fp8_attn = getattr(args, "lumen_fp8_attn", "none")
+    fp8_dpa = fp8_attn in ("dpa", "mha")
+    fp8_mha = fp8_attn == "mha"
 
     config = QuantConfig(
         format=QuantFormat(fmt),
@@ -232,6 +386,8 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         num_layers_at_start_in_bf16=bf16_start,
         num_layers_at_end_in_bf16=bf16_end,
         use_sdma=use_sdma,
+        fp8_dpa=fp8_dpa,
+        fp8_mha=fp8_mha,
     )
 
     if dp_group is None and config.reduce_amax and dist.is_initialized():
@@ -278,6 +434,62 @@ def reset_fp8_state(model: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 # LoRA (via HuggingFace PEFT)
 # ---------------------------------------------------------------------------
+
+
+def apply_fsdp2(
+    model: nn.Module,
+    args,
+    dp_group=None,
+) -> nn.Module:
+    """Apply PyTorch FSDP2 (fully_shard) to the model.
+
+    Uses torch.distributed.fsdp.fully_shard() which provides per-parameter
+    sharding with lazy initialization and better composability.
+
+    Args:
+        model: The model to shard.
+        args: CLI arguments.
+        dp_group: Data-parallel process group.
+
+    Returns:
+        FSDP2-wrapped model.
+    """
+    try:
+        from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+    except ImportError as e:
+        raise ImportError(
+            "FSDP2 (fully_shard) requires PyTorch 2.4+. "
+            "Install a compatible PyTorch version or use --fsdp-version 1."
+        ) from e
+
+    # Build mixed precision policy
+    mp_policy = None
+    if getattr(args, "linear_fp8", False):
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.float32,
+            buffer_dtype=torch.bfloat16,
+        )
+
+    # Apply fully_shard to each transformer layer (bottom-up)
+    for name, module in model.named_children():
+        if hasattr(module, "layers") or "layers" in name:
+            for layer_name, layer in module.named_children():
+                fully_shard(
+                    layer,
+                    mesh=dp_group,
+                    mp_policy=mp_policy,
+                )
+
+    # Shard the top-level model
+    fully_shard(
+        model,
+        mesh=dp_group,
+        mp_policy=mp_policy,
+    )
+
+    _rank0_print(f"> FSDP2 applied (fully_shard, mp_policy={mp_policy})")
+    return model
 
 
 def apply_lora(model: nn.Module, args) -> nn.Module:

@@ -21,7 +21,7 @@ The training script (`finetune_llama2.py`) selects the backend via `--backend me
 
 | Feature | CLI Flag |
 |---------|----------|
-| Attention backend | `--tl-attn-backend {aiter_csrc,aiter_triton,aiter_triton_fp8,aiter_csrc_fp8}` |
+| Attention backend | `--lumen-attn-backend {aiter_csrc,aiter_triton,aiter_triton_fp8,aiter_csrc_fp8}` |
 | FP8 quantised training | `--linear-fp8 --fp8-format e4m3` |
 | MXFP8 block sizes | `--mxfp8-block-m-fwd 128 ...` (6 independent dims) |
 | LoRA | `--lora-rank 16 --lora-alpha 32` |

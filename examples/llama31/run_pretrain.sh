@@ -63,8 +63,8 @@ run_megatron() {
         exit 1
     }
 
-    TL_ATTN_BACKEND=${TL_ATTN_BACKEND:-"aiter_csrc"}
-    TL_FP8_QUANT=${TL_FP8_QUANT:-"blockwise"}
+    LUMEN_ATTN_BACKEND=${LUMEN_ATTN_BACKEND:-"aiter_csrc"}
+    LUMEN_FP8_QUANT=${LUMEN_FP8_QUANT:-"blockwise"}
 
     # LLaMA 3.1 architecture
     case "${SIZE}" in
@@ -110,17 +110,17 @@ run_megatron() {
         fi
     fi
 
-    TL_RMSNORM=${TL_RMSNORM:-0}
-    TL_RMSNORM_ARGS=""
-    [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
+    LUMEN_RMSNORM=${LUMEN_RMSNORM:-0}
+    LUMEN_RMSNORM_ARGS=""
+    [ "${LUMEN_RMSNORM}" -eq 1 ] && LUMEN_RMSNORM_ARGS="--lumen-rmsnorm"
 
-    TL_LINEAR=${TL_LINEAR:-0}
-    TL_LINEAR_ARGS=""
-    [ "${TL_LINEAR}" -eq 1 ] && TL_LINEAR_ARGS="--tl-linear"
+    LUMEN_LINEAR=${LUMEN_LINEAR:-0}
+    LUMEN_LINEAR_ARGS=""
+    [ "${LUMEN_LINEAR}" -eq 1 ] && LUMEN_LINEAR_ARGS="--lumen-linear"
 
-    TL_CROSS_ENTROPY=${TL_CROSS_ENTROPY:-0}
-    TL_CE_ARGS=""
-    [ "${TL_CROSS_ENTROPY}" -eq 1 ] && TL_CE_ARGS="--tl-cross-entropy"
+    LUMEN_CROSS_ENTROPY=${LUMEN_CROSS_ENTROPY:-0}
+    LUMEN_CE_ARGS=""
+    [ "${LUMEN_CROSS_ENTROPY}" -eq 1 ] && LUMEN_CE_ARGS="--lumen-cross-entropy"
 
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
@@ -135,7 +135,7 @@ run_megatron() {
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
     echo "  LR:       max=${MAX_LR} min=${MIN_LR} warmup=${LR_WARMUP_STEPS}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND} (fp8_quant=${TL_FP8_QUANT}) rmsnorm=${TL_RMSNORM}"
+    echo "  Lumen attn: ${LUMEN_ATTN_BACKEND} (fp8_quant=${LUMEN_FP8_QUANT}) rmsnorm=${LUMEN_RMSNORM}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "  LoRA:     rank=${LORA_RANK}"
     echo "  Target:   log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
@@ -189,8 +189,8 @@ run_megatron() {
         --eval-iters ${EVAL_ITERS} \
         --eval-interval ${EVAL_INTERVAL} \
         --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
-        --tl-attn-backend ${TL_ATTN_BACKEND} \
-        --tl-fp8-quant-type ${TL_FP8_QUANT} \
+        --lumen-attn-backend ${LUMEN_ATTN_BACKEND} \
+        --lumen-fp8-quant-type ${LUMEN_FP8_QUANT} \
         --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD} \
         --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD} \
         --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD} \
@@ -204,8 +204,8 @@ run_megatron() {
         --ckpt-start-step ${CKPT_START_STEP} \
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
-        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${TL_RMSNORM_ARGS} \
-        ${TL_LINEAR_ARGS} ${TL_CE_ARGS} \
+        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${LUMEN_RMSNORM_ARGS} \
+        ${LUMEN_LINEAR_ARGS} ${LUMEN_CE_ARGS} \
         ${CMD_SUFFIX}
 }
 

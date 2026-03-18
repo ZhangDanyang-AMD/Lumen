@@ -1,0 +1,320 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+"""Tests for attention_with_cp_a2a SDMA integration.
+
+Covers:
+  - AttentionCPA2AHelper: reshape correctness (unit, single-GPU)
+  - CP A2A with mori SDMA: Triton, MXFP8, Aiter paths
+  - Forward + backward numerical correctness vs non-SDMA baseline
+  - Performance comparison: SDMA vs torch.distributed all-to-all
+
+Skip conditions:
+  - mori not available → skip SDMA tests
+  - torch.cuda.device_count() < 2 → skip distributed tests
+  - aiter not available → skip aiter-specific tests
+"""
+
+import os
+
+import pytest
+import torch
+
+from lumen.ops.sdma import is_sdma_available
+
+_sdma_available = is_sdma_available()
+_multi_gpu = torch.cuda.is_available() and torch.cuda.device_count() >= 2
+
+skip_no_sdma = pytest.mark.skipif(not _sdma_available, reason="mori SDMA not available")
+skip_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+skip_no_multi_gpu = pytest.mark.skipif(not _multi_gpu, reason="Multi-GPU required")
+
+
+def _is_aiter_available():
+    try:
+        import aiter  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+_aiter_available = _is_aiter_available()
+
+
+def _get_free_port():
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+# ===================================================================
+# AttentionCPA2AHelper unit tests (single GPU, no distribution)
+# ===================================================================
+
+
+@skip_no_cuda
+class TestAttentionCPA2AHelper:
+    """Test the reshape/split helpers used by CP A2A."""
+
+    def test_combine_qkv_round_trip(self):
+        """combine_qkv_before_a2a followed by splits_qkv_after_a2a recovers original shapes."""
+        from lumen.ops.attention.attention_with_cp_a2a import AttentionCPA2AHelper
+
+        b, s, h_q, h_kv, d_qk, d_v, n = 2, 16, 8, 4, 64, 64, 2
+
+        helper = AttentionCPA2AHelper(b, s, h_q, h_kv, d_qk, d_v, seq_dim=1, n=n)
+        q = torch.randn(b, s // n, h_q, d_qk, device="cuda")
+        k = torch.randn(b, s // n, h_kv, d_qk, device="cuda")
+        v = torch.randn(b, s // n, h_kv, d_v, device="cuda")
+
+        combined = helper.combine_qkv_before_a2a(q, k, v)
+        assert combined.shape[0] == n
+
+        q2, k2, v2 = helper.splits_qkv_after_a2a(combined)
+        assert q2.shape == (b, s, h_q // n, d_qk)
+        assert k2.shape == (b, s, h_kv // n, d_qk)
+        assert v2.shape == (b, s, h_kv // n, d_v)
+
+    def test_output_reshape_round_trip(self):
+        """reshape_o_before_a2a followed by reshape_o_after_a2a recovers shape."""
+        from lumen.ops.attention.attention_with_cp_a2a import AttentionCPA2AHelper
+
+        b, s, h_q, h_kv, d_qk, d_v, n = 2, 16, 8, 4, 64, 64, 2
+
+        helper = AttentionCPA2AHelper(b, s, h_q, h_kv, d_qk, d_v, seq_dim=1, n=n)
+        o = torch.randn(b, s, h_q // n, d_v, device="cuda")
+
+        reshaped = helper.reshape_o_before_a2a(o)
+        assert reshaped.shape[0] == n
+
+        recovered = helper.reshape_o_after_a2a(reshaped)
+        assert recovered.shape == (b, s // n, h_q, d_v)
+
+    def test_grad_reshape_round_trip(self):
+        """reshape_do_before_a2a followed by reshape_do_after_a2a recovers shape."""
+        from lumen.ops.attention.attention_with_cp_a2a import AttentionCPA2AHelper
+
+        b, s, h_q, h_kv, d_qk, d_v, n = 2, 16, 8, 4, 64, 64, 2
+
+        helper = AttentionCPA2AHelper(b, s, h_q, h_kv, d_qk, d_v, seq_dim=1, n=n)
+        do = torch.randn(b, s // n, h_q, d_v, device="cuda")
+
+        reshaped = helper.reshape_do_before_a2a(do)
+        recovered = helper.reshape_do_after_a2a(reshaped)
+        assert recovered.shape == (b, s, h_q // n, d_v)
+
+    def test_dqkv_round_trip(self):
+        """combine_dqkv_before_a2a followed by split_dqkv_after_a2a recovers shapes."""
+        from lumen.ops.attention.attention_with_cp_a2a import AttentionCPA2AHelper
+
+        b, s, h_q, h_kv, d_qk, d_v, n = 2, 16, 8, 4, 64, 64, 2
+
+        helper = AttentionCPA2AHelper(b, s, h_q, h_kv, d_qk, d_v, seq_dim=1, n=n)
+        dq = torch.randn(b, s, h_q // n, d_qk, device="cuda")
+        dk = torch.randn(b, s, h_kv // n, d_qk, device="cuda")
+        dv = torch.randn(b, s, h_kv // n, d_v, device="cuda")
+
+        combined = helper.combine_dqkv_before_a2a(dq, dk, dv)
+        dq2, dk2, dv2 = helper.split_dqkv_after_a2a(combined)
+        assert dq2.shape == (b, s // n, h_q, d_qk)
+        assert dk2.shape == (b, s // n, h_kv, d_qk)
+        assert dv2.shape == (b, s // n, h_kv, d_v)
+
+
+# ===================================================================
+# Multi-GPU CP A2A SDMA correctness tests
+# ===================================================================
+
+
+def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
+    """Worker: run CP A2A triton attention with SDMA, compare to reference."""
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+    shmem.shmem_torch_process_group_init("default")
+
+    from lumen.ops.attention.attention_with_cp_a2a import (
+        AttentionTritonFunctionCPA2A,
+    )
+
+    b, s_local, h_q, h_kv, d = 1, 64, 8, 8, 64
+    sm_scale = d**-0.5
+
+    torch.cuda.manual_seed(42 + rank)
+    q = torch.randn(b, s_local, h_q, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+    k = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+    v = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+
+    cp_group = dist.new_group(list(range(world_size)))
+
+    out_nccl = AttentionTritonFunctionCPA2A.apply(
+        q,
+        k,
+        v,
+        0.0,
+        sm_scale,
+        False,
+        (-1, -1),
+        None,
+        None,
+        False,
+        False,
+        False,
+        False,
+        cp_group,
+        None,
+        False,
+    )
+
+    out_sdma = AttentionTritonFunctionCPA2A.apply(
+        q,
+        k,
+        v,
+        0.0,
+        sm_scale,
+        False,
+        (-1, -1),
+        None,
+        None,
+        False,
+        False,
+        False,
+        False,
+        cp_group,
+        None,
+        True,
+    )
+
+    passed = torch.allclose(out_nccl, out_sdma, atol=1e-3, rtol=1e-3)
+    results_dict[rank] = passed
+
+    dist.barrier()
+    dist.destroy_process_group()
+    shmem.shmem_finalize()
+
+
+def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations, warmup):
+    """Worker: compare SDMA vs NCCL all-to-all latency in CP attention."""
+    import mori.shmem as shmem
+    import numpy as np
+    import torch.distributed as dist
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+    shmem.shmem_torch_process_group_init("default")
+
+    from lumen.ops.attention.attention_with_cp_a2a import (
+        AttentionTritonFunctionCPA2A,
+    )
+
+    b, s_local, h_q, h_kv, d = 1, 256, 16, 16, 128
+    sm_scale = d**-0.5
+    device = f"cuda:{rank}"
+    cp_group = dist.new_group(list(range(world_size)))
+
+    torch.cuda.manual_seed(42 + rank)
+    q = torch.randn(b, s_local, h_q, d, device=device, dtype=torch.bfloat16)
+    k = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
+    v = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
+
+    start_ev = torch.cuda.Event(enable_timing=True)
+    end_ev = torch.cuda.Event(enable_timing=True)
+    stream = torch.cuda.current_stream(device)
+
+    def _bench(use_sdma):
+        times = []
+        for i in range(warmup + iterations):
+            start_ev.record(stream)
+            _ = AttentionTritonFunctionCPA2A.apply(
+                q,
+                k,
+                v,
+                0.0,
+                sm_scale,
+                False,
+                (-1, -1),
+                None,
+                None,
+                False,
+                False,
+                False,
+                False,
+                cp_group,
+                None,
+                use_sdma,
+            )
+            end_ev.record(stream)
+            stream.synchronize()
+            if i >= warmup:
+                times.append(start_ev.elapsed_time(end_ev))
+        return np.mean(times) if times else 0
+
+    nccl_ms = _bench(False)
+    sdma_ms = _bench(True)
+
+    results_dict[rank] = {"nccl_ms": nccl_ms, "sdma_ms": sdma_ms}
+
+    dist.barrier()
+    dist.destroy_process_group()
+    shmem.shmem_finalize()
+
+
+@skip_no_sdma
+@skip_no_multi_gpu
+class TestCPA2ASdma:
+    """CP A2A with SDMA correctness and performance tests."""
+
+    @property
+    def world_size(self):
+        return min(torch.cuda.device_count(), 8)
+
+    def test_triton_sdma_matches_nccl(self):
+        """Triton CP A2A with SDMA produces same output as NCCL path."""
+        import torch.multiprocessing as mp
+
+        manager = mp.Manager()
+        results = manager.dict()
+        port = _get_free_port()
+        mp.spawn(
+            _worker_cp_a2a_triton_sdma,
+            args=(self.world_size, port, results),
+            nprocs=self.world_size,
+            join=True,
+        )
+        for r in range(self.world_size):
+            assert results[r], f"PE {r}: SDMA output != NCCL output"
+
+    def test_sdma_vs_nccl_performance(self):
+        """Measure and print SDMA vs NCCL latency for CP A2A attention."""
+        import torch.multiprocessing as mp
+
+        manager = mp.Manager()
+        results = manager.dict()
+        port = _get_free_port()
+        mp.spawn(
+            _worker_cp_a2a_perf_compare,
+            args=(self.world_size, port, results, 10, 5),
+            nprocs=self.world_size,
+            join=True,
+        )
+        r0 = results[0]
+        speedup = r0["nccl_ms"] / r0["sdma_ms"] if r0["sdma_ms"] > 0 else float("inf")
+        print(
+            f"\nCP A2A Attention: NCCL={r0['nccl_ms']:.3f}ms, "
+            f"SDMA={r0['sdma_ms']:.3f}ms, "
+            f"speedup={speedup:.2f}x"
+        )

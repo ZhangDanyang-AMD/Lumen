@@ -28,8 +28,8 @@ export SAVE_DIR="/results/checkpoints"
 # ---- Data / tokenizer --------------------------------------------------------
 export TRAIN_DATA="/data/train.npy"
 export VALID_DATA="/data/validation.npy"
-_TL_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export TOKENIZER="${_TL_CONFIG_DIR}/tokenizer"
+_LUMEN_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export TOKENIZER="${_LUMEN_CONFIG_DIR}/tokenizer"
 
 # ---- LoRA --------------------------------------------------------------------
 export LORA_RANK=0
@@ -71,28 +71,28 @@ export CKPT_DIR="/model"
 export LORA_A2A=0
 
 # Lumen
-# TL_ATTN_BACKEND options:
+# LUMEN_ATTN_BACKEND options:
 #   aiter_csrc          – CK/C++ flash-attention (fastest on MI300X)
 #   aiter_triton        – Triton flash-attention (no attention quantization)
 #   aiter_triton_fp8    – Triton FP8-quantized attention
 #   aiter_csrc_fp8      – CK/C++ FP8 attention (forward-only, inference)
 #   aiter_asm_fp8       – ASM FP8 attention with fallback: asm -> csrc -> triton
 #
-# TL_FP8_QUANT options (used when backend is *_fp8):
+# LUMEN_FP8_QUANT options (used when backend is *_fp8):
 #   blockwise   – per-block FP8 scaling (works on all MI-series)
 #   dynamic     – per-tensor dynamic FP8 scaling
 #   delayed     – delayed FP8 scaling (uses amax history)
 #   per_token   – per-token FP8 quantization
 #   none        – no FP8 quantization (fall back to bf16 attention)
 #   mxfp8       – microscaling FP8 (legacy, gfx950 / MI355X only)
-export TL_ATTN_BACKEND="aiter_asm_fp8"
-# TRANSFORMER_LIGHT_ATTN_BACKEND controls attention_impl.py's module-load-time
-# csrc probe (_probe_aiter_csrc). Keep as "triton" whenever TL_ATTN_BACKEND is
+export LUMEN_ATTN_BACKEND="aiter_asm_fp8"
+# LUMEN_ATTN_KERNEL_BACKEND controls attention_impl.py's module-load-time
+# csrc probe (_probe_aiter_csrc). Keep as "triton" whenever LUMEN_ATTN_BACKEND is
 # any triton-family value to prevent aiter csrc kernels from being probed.
-export TRANSFORMER_LIGHT_ATTN_BACKEND="triton"
-export TL_FP8_QUANT="blockwise"
-export TL_RMSNORM=0
-export TL_NORM=0
+export LUMEN_ATTN_KERNEL_BACKEND="triton"
+export LUMEN_FP8_QUANT="blockwise"
+export LUMEN_RMSNORM=0
+export LUMEN_NORM=0
 
 # MXFP8 attention block sizes
 export MXFP8_BLOCK_M_FWD=128

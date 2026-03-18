@@ -219,7 +219,7 @@ def add_pretrain_args(parser):
     # calling add_common_megatron_args (safe_add_argument skips duplicates).
     safe_add_argument(
         parser,
-        "--tl-fp8-quant-type",
+        "--lumen-fp8-quant-type",
         type=str,
         default="blockwise",
         choices=["dynamic", "delayed", "blockwise", "per_token", "none", "mxfp8"],

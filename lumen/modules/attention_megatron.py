@@ -77,12 +77,11 @@ class LumenDotProductAttention(MegatronModule):
     with explicit forward **and** backward kernels), and converts the
     output back.
 
-    Backends (``--tl-attn-backend``):
-        * ``aiter_csrc``       – AITER CK flash-attention (default, fastest on MI300X)
-        * ``aiter_triton``     – AITER Triton flash-attention (always available)
-        * ``aiter_triton_fp8`` – AITER Triton FP8 quantised attention
-        * ``aiter_csrc_fp8``   – AITER CK FP8 attention (forward-only, inference)
-        * ``aiter_asm_fp8``    – ASM FP8 attention with fallback: asm → csrc → triton
+    Backends (``--lumen-attn-backend``):
+        User-facing choices: ``auto``, ``triton``, ``csrc``, ``asm``.
+        Combined with ``--lumen-fp8-attn`` (``none``/``dpa``/``mha``), these
+        resolve to concrete kernels: ``aiter_csrc``, ``aiter_triton``,
+        ``aiter_triton_fp8``, ``aiter_csrc_fp8``, ``aiter_asm_fp8``.
     """
 
     def __init__(
@@ -123,8 +122,15 @@ class LumenDotProductAttention(MegatronModule):
         self.cp_comm_type = cp_comm_type
 
         args = get_args()
-        self.backend = getattr(args, "tl_attn_backend", "aiter_csrc")
-        self.fp8_quant_type = getattr(args, "tl_fp8_quant_type", "blockwise")
+        self.backend = getattr(args, "lumen_attn_backend", "aiter_csrc")
+        self.fp8_quant_type = getattr(args, "lumen_fp8_quant_type", "blockwise")
+
+        fp8_attn = getattr(args, "lumen_fp8_attn", "none")
+        self.fp8_dpa = fp8_attn in ("dpa", "mha")
+        self.fp8_mha = fp8_attn == "mha"
+
+        # Shared scale manager for FP8 MHA (set externally by enable_fp8_for_parallel_linear)
+        self.scale_manager = None
 
         # Fine-grained MXFP8 block configuration (per-dimension)
         self.block_m_fwd = getattr(args, "mxfp8_block_m_fwd", 128)
@@ -168,7 +174,7 @@ class LumenDotProductAttention(MegatronModule):
         cp_param_bundle = None
         if self.cp_size > 1:
             cp_group = parallel_state.get_context_parallel_group()
-            cp_comm_type = self.cp_comm_type or "a2a"
+            cp_comm_type = self.cp_comm_type or getattr(get_args(), "lumen_cp_comm_type", "a2a")
             cp_param_bundle = {
                 "cp_group": cp_group,
                 "cp_comm_type": cp_comm_type,
@@ -193,13 +199,15 @@ class LumenDotProductAttention(MegatronModule):
                 block_n_dkv_bwd=self.block_n_dkv_bwd,
                 quant_block_size=self.mxfp8_quant_block_size,
                 grad_quant_type=self.grad_quant_type,
+                fp8_mha=self.fp8_mha,
+                scale_manager=self.scale_manager,
             )
         else:
             if self.backend == "aiter_csrc" and not is_aiter_available():
                 raise RuntimeError(
                     "AITER is not installed. The aiter_csrc backend "
                     "requires 'aiter' — install it or use "
-                    "--tl-attn-backend aiter_triton."
+                    "--lumen-attn-backend aiter_triton."
                 )
             out = attention(
                 q,

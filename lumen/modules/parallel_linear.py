@@ -37,7 +37,35 @@ from megatron.core.tensor_parallel.utils import divide
 from megatron.core.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
-__all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear"]
+__all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear", "_DeferredWgrad"]
+
+
+class _DeferredWgrad:
+    """Stores a deferred weight gradient computation."""
+
+    def __init__(self):
+        self._pending_wgrad = None
+
+    def defer(self, weight, compute_fn):
+        """Defer wgrad computation. compute_fn() should return grad_weight."""
+        self._pending_wgrad = (weight, compute_fn)
+
+    def execute(self):
+        """Execute any pending wgrad computation."""
+        if self._pending_wgrad is not None:
+            weight, compute_fn = self._pending_wgrad
+            grad_weight = compute_fn()
+            if hasattr(weight, "main_grad"):
+                weight.main_grad.add_(grad_weight)
+            elif weight.grad is not None:
+                weight.grad.add_(grad_weight)
+            else:
+                weight.grad = grad_weight
+            self._pending_wgrad = None
+
+    @property
+    def has_pending(self):
+        return self._pending_wgrad is not None
 
 
 def _use_sdma_from_args() -> bool:
@@ -46,6 +74,16 @@ def _use_sdma_from_args() -> bool:
         from megatron.training import get_args
 
         return getattr(get_args(), "use_sdma", False)
+    except Exception:
+        return False
+
+
+def _tp_comm_overlap_from_args() -> bool:
+    """Read ``--lumen-tp-comm-overlap`` from args (safe fallback to False)."""
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "lumen_tp_comm_overlap", False)
     except Exception:
         return False
 
@@ -70,7 +108,16 @@ def _pg_rank(group):
     return torch.distributed.get_rank(group=group)
 
 
-def _do_gemm(input_, weight, bias, scaling_manager, scaling_type, fp8_dtype, block_size):
+def _do_gemm(
+    input_,
+    weight,
+    bias,
+    scaling_manager,
+    scaling_type,
+    fp8_dtype,
+    block_size,
+    gradient_accumulation_fusion=False,
+):
     """Route to Lumen FP8 GEMM or standard F.linear."""
     if scaling_type != "none":
         from lumen.ops.quantize.linear import quantized_linear
@@ -83,6 +130,7 @@ def _do_gemm(input_, weight, bias, scaling_manager, scaling_type, fp8_dtype, blo
             scaling_type=scaling_type,
             fp8_dtype=fp8_dtype,
             block_size=block_size,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
         )
     return F.linear(input_, weight, bias)
 
@@ -143,6 +191,7 @@ class LumenColumnParallelLinear(nn.Module):
         self.allreduce_dgrad = self.tp_size > 1 and not self.sequence_parallel and not self.explicit_expert_comm
 
         self.use_sdma = _use_sdma_from_args()
+        self.tp_comm_overlap = getattr(config, "lumen_tp_comm_overlap", False) or _tp_comm_overlap_from_args()
         self._sdma_comm = None
 
         # FP8 config (disabled by default; enabled via enable_fp8())
@@ -150,6 +199,9 @@ class LumenColumnParallelLinear(nn.Module):
         self.scaling_manager = None
         self.fp8_dtype = torch.float8_e4m3fn
         self.block_size = 128
+        self.gradient_accumulation_fusion = False
+        self.delay_wgrad = False
+        self._deferred_wgrad = _DeferredWgrad()
 
         # Weight allocation
         if not skip_weight_param_allocation:
@@ -228,31 +280,40 @@ class LumenColumnParallelLinear(nn.Module):
         if weight is None:
             weight = self.weight
 
-        if self.use_sdma and self.tp_size > 1:
-            input_parallel = self._forward_sdma_pre_gemm(input_)
+        if (
+            self.use_sdma
+            and self.tp_size > 1
+            and self.tp_comm_overlap
+            and self.sequence_parallel
+            and not self.explicit_expert_comm
+        ):
+            output_parallel, gemm_bias = self._forward_sdma_overlap_column(input_, weight)
         else:
-            if self.allreduce_dgrad or self.sequence_parallel or self.explicit_expert_comm:
-                input_parallel = input_
+            if self.use_sdma and self.tp_size > 1:
+                input_parallel = self._forward_sdma_pre_gemm(input_)
             else:
-                input_parallel = copy_to_tensor_model_parallel_region(input_, group=self.tp_group)
+                if self.allreduce_dgrad or self.sequence_parallel or self.explicit_expert_comm:
+                    input_parallel = input_
+                else:
+                    input_parallel = copy_to_tensor_model_parallel_region(input_, group=self.tp_group)
 
-            if self.sequence_parallel and not self.explicit_expert_comm:
-                input_parallel = gather_from_sequence_parallel_region(
-                    input_parallel,
-                    tensor_parallel_output_grad=True,
-                    group=self.tp_group,
-                )
+                if self.sequence_parallel and not self.explicit_expert_comm:
+                    input_parallel = gather_from_sequence_parallel_region(
+                        input_parallel,
+                        tensor_parallel_output_grad=True,
+                        group=self.tp_group,
+                    )
 
-        gemm_bias = self.bias if not self.skip_bias_add else None
-        output_parallel = _do_gemm(
-            input_parallel,
-            weight,
-            gemm_bias,
-            self.scaling_manager,
-            self.scaling_type,
-            self.fp8_dtype,
-            self.block_size,
-        )
+            gemm_bias = self.bias if not self.skip_bias_add else None
+            output_parallel = _do_gemm(
+                input_parallel,
+                weight,
+                gemm_bias,
+                self.scaling_manager,
+                self.scaling_type,
+                self.fp8_dtype,
+                self.block_size,
+            )
 
         gather = self.gather_output
         if runtime_gather_output is not None:
@@ -291,6 +352,46 @@ class LumenColumnParallelLinear(nn.Module):
 
         return input_parallel
 
+    def _forward_sdma_overlap_column(
+        self, input_: torch.Tensor, weight: torch.Tensor
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Overlap allgather with GEMM: compute local-shard GEMM while allgather runs."""
+        comm = self._get_sdma_comm()
+        if getattr(self, "_sdma_stream", None) is None:
+            self._sdma_stream = torch.cuda.Stream(device=input_.device)
+        sdma_stream = self._sdma_stream
+        compute_stream = torch.cuda.current_stream(input_.device)
+
+        input_parallel = input_.contiguous()
+        seq_local = input_parallel.shape[1]
+        comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
+
+        gemm_bias = self.bias if not self.skip_bias_add else None
+        out_local = _do_gemm(
+            input_parallel,
+            weight,
+            gemm_bias,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
+        )
+
+        input_gathered = comm.wait_allgather_dim0(stream=sdma_stream)
+        compute_stream.wait_stream(sdma_stream)
+
+        out_remaining = _do_gemm(
+            input_gathered[:, seq_local:, :],
+            weight,
+            None,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
+        )
+        output_parallel = torch.cat([out_local, out_remaining], dim=1)
+        return output_parallel, self.bias if self.skip_bias_add else None
+
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
         from lumen.quantize import QuantConfig, ScalingManager
 
@@ -315,6 +416,10 @@ class LumenColumnParallelLinear(nn.Module):
 
     def get_extra_state(self):
         return None
+
+    def execute_deferred_wgrad(self):
+        """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
 
     def __repr__(self):
         return (
@@ -376,6 +481,7 @@ class LumenRowParallelLinear(nn.Module):
             raise RuntimeError("sequence_parallel requires input_is_parallel=True")
 
         self.use_sdma = _use_sdma_from_args()
+        self.tp_comm_overlap = getattr(config, "lumen_tp_comm_overlap", False) or _tp_comm_overlap_from_args()
         self._sdma_comm = None
 
         # FP8 config
@@ -383,6 +489,9 @@ class LumenRowParallelLinear(nn.Module):
         self.scaling_manager = None
         self.fp8_dtype = torch.float8_e4m3fn
         self.block_size = 128
+        self.gradient_accumulation_fusion = False
+        self.delay_wgrad = False
+        self._deferred_wgrad = _DeferredWgrad()
 
         # Weight
         if getattr(config, "use_cpu_initialization", False):
@@ -469,10 +578,18 @@ class LumenRowParallelLinear(nn.Module):
             self.scaling_type,
             self.fp8_dtype,
             self.block_size,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
         )
 
         if self.explicit_expert_comm:
             output_ = output_parallel
+        elif (
+            self.use_sdma
+            and self.tp_size > 1
+            and self.tp_comm_overlap
+            and (self.sequence_parallel or not self.sequence_parallel)
+        ):
+            output_ = self._forward_sdma_overlap_row(output_parallel)
         elif self.use_sdma and self.tp_size > 1:
             output_ = self._forward_sdma_post_gemm(output_parallel)
         elif self.sequence_parallel:
@@ -501,6 +618,23 @@ class LumenRowParallelLinear(nn.Module):
         else:
             return sdma_reduce_from_tensor_model_parallel_region(output_parallel, comm)
 
+    def _forward_sdma_overlap_row(self, output_parallel: torch.Tensor) -> torch.Tensor:
+        """Overlap reduce-scatter / allreduce with GEMM via async SDMA."""
+        comm = self._get_sdma_comm()
+        if getattr(self, "_sdma_stream", None) is None:
+            self._sdma_stream = torch.cuda.Stream(device=output_parallel.device)
+        sdma_stream = self._sdma_stream
+        compute_stream = torch.cuda.current_stream(output_parallel.device)
+        sdma_stream.wait_stream(compute_stream)
+
+        if self.sequence_parallel:
+            comm.reduce_scatter_dim0_async(output_parallel, stream=sdma_stream)
+            return comm.wait_reduce_scatter_dim0(stream=sdma_stream)
+        else:
+            comm.allreduce_sum_async(output_parallel, stream=sdma_stream)
+            comm.wait_allreduce_sum(stream=sdma_stream)
+            return output_parallel
+
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
         from lumen.quantize import QuantConfig, ScalingManager
 
@@ -525,6 +659,10 @@ class LumenRowParallelLinear(nn.Module):
 
     def get_extra_state(self):
         return None
+
+    def execute_deferred_wgrad(self):
+        """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
 
     def __repr__(self):
         return (

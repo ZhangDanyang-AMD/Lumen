@@ -110,25 +110,25 @@ run_megatron() {
         fi
     fi
 
-    TL_ATTN_ARGS="--tl-attn-backend ${TL_ATTN_BACKEND}"
-    case "${TL_ATTN_BACKEND}" in
+    LUMEN_ATTN_ARGS="--lumen-attn-backend ${LUMEN_ATTN_BACKEND}"
+    case "${LUMEN_ATTN_BACKEND}" in
         aiter_triton_fp8|aiter_csrc_fp8|aiter_asm_fp8)
-            TL_ATTN_ARGS+=" --tl-fp8-quant-type ${TL_FP8_QUANT}"
-            if [ "${TL_FP8_QUANT}" = "mxfp8" ]; then
-                TL_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
-                TL_ATTN_ARGS+=" --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD}"
-                TL_ATTN_ARGS+=" --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD}"
-                TL_ATTN_ARGS+=" --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD}"
-                TL_ATTN_ARGS+=" --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD}"
-                TL_ATTN_ARGS+=" --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD}"
-                TL_ATTN_ARGS+=" --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE}"
+            LUMEN_ATTN_ARGS+=" --lumen-fp8-quant-type ${LUMEN_FP8_QUANT}"
+            if [ "${LUMEN_FP8_QUANT}" = "mxfp8" ]; then
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-m-fwd ${MXFP8_BLOCK_M_FWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-n-fwd ${MXFP8_BLOCK_N_FWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-m-dq-bwd ${MXFP8_BLOCK_M_DQ_BWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-n-dq-bwd ${MXFP8_BLOCK_N_DQ_BWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-m-dkv-bwd ${MXFP8_BLOCK_M_DKV_BWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-block-n-dkv-bwd ${MXFP8_BLOCK_N_DKV_BWD}"
+                LUMEN_ATTN_ARGS+=" --mxfp8-quant-block-size ${MXFP8_QUANT_BLOCK_SIZE}"
             fi
             ;;
     esac
 
-    TL_RMSNORM_ARGS=""
-    [ "${TL_RMSNORM}" -eq 1 ] && TL_RMSNORM_ARGS="--tl-rmsnorm"
-    [ "${TL_NORM:-0}" -eq 1 ] && TL_RMSNORM_ARGS="${TL_RMSNORM_ARGS} --tl-norm"
+    LUMEN_RMSNORM_ARGS=""
+    [ "${LUMEN_RMSNORM}" -eq 1 ] && LUMEN_RMSNORM_ARGS="--lumen-rmsnorm"
+    [ "${LUMEN_NORM:-0}" -eq 1 ] && LUMEN_RMSNORM_ARGS="${LUMEN_RMSNORM_ARGS} --lumen-norm"
 
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
@@ -139,7 +139,7 @@ run_megatron() {
     echo "  Model:    ${MODEL_SIZE} | TP=${TP} PP=${PP} CP=${CP} VP=${VP} SP=${SP}"
     echo "  GPUs:     ${NGPU}x${NNODES}"
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
-    echo "  TL attn:  ${TL_ATTN_BACKEND}$(case "${TL_ATTN_BACKEND}" in *fp8) echo " (fp8_quant=${TL_FP8_QUANT})";; esac) rmsnorm=${TL_RMSNORM}"
+    echo "  Lumen attn: ${LUMEN_ATTN_BACKEND}$(case "${LUMEN_ATTN_BACKEND}" in *fp8) echo " (fp8_quant=${LUMEN_FP8_QUANT})";; esac) rmsnorm=${LUMEN_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
     echo "================================================================"
@@ -189,7 +189,7 @@ run_megatron() {
         --finetune --no-load-optim --no-load-rng --auto-detect-ckpt-format \
         --eval-iters 10 --eval-interval ${EVAL_INTERVAL} \
         --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
-        ${TL_ATTN_ARGS} ${TL_RMSNORM_ARGS} \
+        ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS}
 }
 
@@ -249,7 +249,7 @@ run_fsdp() {
         fi
     fi
 
-    [ "${TL_NORM:-0}" -eq 1 ] && CMD+=" --tl-norm"
+    [ "${LUMEN_NORM:-0}" -eq 1 ] && CMD+=" --lumen-norm"
 
     [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"
     [ -n "${VAL_LOSS_TARGET}" ] && CMD+=" --val-loss-target ${VAL_LOSS_TARGET}"

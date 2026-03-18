@@ -140,6 +140,56 @@ class _TpSdmaAllgather:
 
         return gathered[: orig_numel * npes].reshape(npes, orig_numel)
 
+    def start_async(self, tensor: torch.Tensor, stream=None) -> bool:
+        """Start async all-gather. Call :meth:`wait_async` to complete."""
+        tensor = tensor.contiguous()
+        orig_dtype = tensor.dtype
+        orig_numel = tensor.numel()
+        flat = tensor.view(-1)
+
+        if orig_dtype != torch.float32:
+            flat_f32 = flat.view(torch.float32)
+        else:
+            flat_f32 = flat
+        n_f32 = flat_f32.numel()
+
+        self._ensure(n_f32)
+        npes = self._ctx.npes
+
+        if (
+            self._gathered_buf is None
+            or self._gathered_buf.numel() < n_f32 * npes
+            or self._gathered_buf.device != tensor.device
+        ):
+            self._gathered_buf = torch.empty(
+                n_f32 * npes,
+                dtype=torch.float32,
+                device=tensor.device,
+            )
+
+        s = stream if stream is not None else torch.cuda.current_stream(tensor.device)
+        self._async_meta = {
+            "orig_dtype": orig_dtype,
+            "orig_numel": orig_numel,
+            "n_f32": n_f32,
+            "npes": npes,
+        }
+        return self._handle.start_async(flat_f32, self._gathered_buf, n_f32, s)
+
+    def wait_async(self, stream=None) -> torch.Tensor:
+        """Wait for async all-gather and return ``(npes, n_elems)`` in original dtype."""
+        meta = getattr(self, "_async_meta", None)
+        if meta is None:
+            raise RuntimeError("wait_async called without prior start_async")
+        s = stream if stream is not None else torch.cuda.current_stream(self._gathered_buf.device)
+        self._handle.wait_async(s)
+        gathered = self._gathered_buf[: meta["n_f32"] * meta["npes"]]
+        if meta["orig_dtype"] != torch.float32:
+            gathered = gathered.view(meta["orig_dtype"])
+        result = gathered[: meta["orig_numel"] * meta["npes"]].reshape(meta["npes"], meta["orig_numel"])
+        del self._async_meta
+        return result
+
 
 class _TpSdmaAllreduce:
     """Cached ``AllreduceSdma`` handle (SUM) for a specific dtype."""
@@ -254,6 +304,71 @@ class SdmaTpComm:
         chunk_size = tensor.shape[0] // self.npes
         start = self.my_pe * chunk_size
         return reduced[start : start + chunk_size].contiguous()
+
+    # -- Async primitives (for comm-GEMM overlap) --
+
+    def allgather_dim0_async(self, tensor: torch.Tensor, stream=None) -> bool:
+        """Start async all-gather along dim 0. Call :meth:`wait_allgather_dim0` to complete."""
+        shape = tensor.shape
+        self._ag_async_shape = shape
+        return self._ag.start_async(tensor, stream)
+
+    def wait_allgather_dim0(self, stream=None) -> torch.Tensor:
+        """Wait for async all-gather and return ``[S, ...]``."""
+        gathered = self._ag.wait_async(stream)  # (npes, numel_per_pe)
+        shape = getattr(self, "_ag_async_shape", None)
+        if shape is None:
+            raise RuntimeError("wait_allgather_dim0 called without prior allgather_dim0_async")
+        del self._ag_async_shape
+        return gathered.reshape(self.npes * shape[0], *shape[1:])
+
+    def allreduce_sum_async(self, tensor: torch.Tensor, stream=None) -> bool:
+        """Start async in-place all-reduce SUM. Call :meth:`wait_allreduce_sum` to complete."""
+        tensor = tensor.contiguous()
+        self._ar_async_dtype = tensor.dtype
+        ar = self._get_ar(tensor.dtype)
+        return ar.start_async_inplace(tensor, stream)
+
+    def wait_allreduce_sum(self, stream=None) -> None:
+        """Wait for async all-reduce to complete."""
+        # For in-place, we need the last-used ar handle; we store it per dtype.
+        # The caller must call wait after start_async on the same tensor.
+        # We use the first dtype's handle as a heuristic - actually we need to track
+        # which handle was used. Store _ar_async_dtype on start.
+        dtype = getattr(self, "_ar_async_dtype", None)
+        if dtype is None:
+            raise RuntimeError("wait_allreduce_sum called without prior allreduce_sum_async")
+        ar = self._get_ar(dtype)
+        ar.wait_async(stream)
+        del self._ar_async_dtype
+
+    def reduce_scatter_dim0_async(self, tensor: torch.Tensor, stream=None) -> bool:
+        """Start async reduce-scatter along dim 0. Call :meth:`wait_reduce_scatter_dim0` to complete."""
+        tensor = tensor.contiguous()
+        n_elems = tensor.numel()
+        if (
+            self._rs_output_buf is None
+            or self._rs_output_buf.numel() < n_elems
+            or self._rs_output_buf.device != tensor.device
+            or self._rs_output_buf.dtype != tensor.dtype
+        ):
+            self._rs_output_buf = torch.empty_like(tensor)
+        self._rs_async_shape = tensor.shape
+        ar = self._get_ar(tensor.dtype)
+        return ar._handle.start_async(tensor, self._rs_output_buf, n_elems, stream)
+
+    def wait_reduce_scatter_dim0(self, stream=None) -> torch.Tensor:
+        """Wait for async reduce-scatter and return ``[S/TP, ...]``."""
+        shape = getattr(self, "_rs_async_shape", None)
+        if shape is None:
+            raise RuntimeError("wait_reduce_scatter_dim0 called without prior reduce_scatter_dim0_async")
+        ar = self._get_ar(self._rs_output_buf.dtype)
+        ar.wait_async(stream)
+        chunk_size = shape[0] // self.npes
+        start = self.my_pe * chunk_size
+        result = self._rs_output_buf[start : start + chunk_size].contiguous()
+        del self._rs_async_shape
+        return result
 
     @classmethod
     def get(cls, tp_group: torch.distributed.ProcessGroup) -> "SdmaTpComm":

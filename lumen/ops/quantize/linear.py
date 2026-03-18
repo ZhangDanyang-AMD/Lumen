@@ -339,6 +339,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
         tensor_id: str = "weight",
         quantize_activation: bool = True,
         fp8_wgrad: bool = True,
+        gradient_accumulation_fusion: bool = False,
     ) -> torch.Tensor:
         # weight is [N, K] — standard PyTorch Linear convention
         if scaling_type == "none":
@@ -346,6 +347,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.save_for_backward(input, weight)
             ctx.has_bias = bias is not None
             ctx.scaling_type = "none"
+            ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+            ctx.weight_ref = weight
             return output
 
         if not quantize_activation:
@@ -366,6 +369,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.scaling_type = scaling_type
             ctx.fp8_wgrad = True
             ctx.tensor_id = tensor_id
+            ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+            ctx.weight_ref = weight
             return output
 
         input_2d = input.reshape(-1, input.shape[-1]).contiguous()
@@ -402,6 +407,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         ctx.quantize_activation = True
         ctx.fp8_wgrad = fp8_wgrad
         ctx.input_shape = input.shape
+        ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+        ctx.weight_ref = weight
         return output
 
     @staticmethod
@@ -428,8 +435,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None,
                 "none",
             )
+            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                ctx.weight_ref.main_grad.add_(grad_weight)
+                grad_weight = None
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
 
         if not ctx.quantize_activation:
             input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
@@ -452,8 +462,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
             if ctx.scaling_manager is not None:
                 grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
+            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                ctx.weight_ref.main_grad.add_(grad_weight)
+                grad_weight = None
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
@@ -508,9 +521,13 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if mgr is not None:
             grad_weight = mgr.quantize_grad(grad_weight)
 
+        if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+            ctx.weight_ref.main_grad.add_(grad_weight)
+            grad_weight = None
+
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
@@ -534,6 +551,7 @@ def quantized_linear(
     tensor_id: str = "weight",
     quantize_activation: bool = True,
     fp8_wgrad: bool = True,
+    gradient_accumulation_fusion: bool = False,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -576,4 +594,5 @@ def quantized_linear(
         tensor_id,
         quantize_activation,
         fp8_wgrad,
+        gradient_accumulation_fusion,
     )

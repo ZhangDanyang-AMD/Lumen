@@ -90,22 +90,22 @@ export START_EVAL_AT=0
 # ---- Lumen -------------------------------------------------------
 # Attention backend: "aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8"
 #   aiter_asm_fp8 uses ASM kernels with fallback: asm -> csrc -> triton
-export TL_ATTN_BACKEND="aiter_asm_fp8"
-# FP8 attention quantization type (used when TL_ATTN_BACKEND is *_fp8):
+export LUMEN_ATTN_BACKEND="aiter_asm_fp8"
+# FP8 attention quantization type (used when LUMEN_ATTN_BACKEND is *_fp8):
 #   "blockwise"  — per-block FP8 scaling
 #   "dynamic"    — per-tensor dynamic FP8 scaling
 #   "delayed"    — delayed FP8 scaling (uses amax history)
 #   "per_token"  — per-token FP8 quantization
 #   "none"       — no FP8 quantization (fall back to bf16)
 #   "mxfp8"      — microscaling FP8 (legacy)
-export TL_FP8_QUANT="blockwise"
+export LUMEN_FP8_QUANT="blockwise"
 # Use Lumen Triton-accelerated RMSNorm (0 = native Megatron norm)
-export TL_RMSNORM=0
-export TL_NORM=0
+export LUMEN_RMSNORM=0
+export LUMEN_NORM=0
 # Use Lumen parallel linear modules (0 = Megatron native, 1 = Lumen spec provider)
-export TL_LINEAR=0
+export LUMEN_LINEAR=0
 # Use Lumen Triton parallel cross-entropy (0 = Megatron native)
-export TL_CROSS_ENTROPY=0
+export LUMEN_CROSS_ENTROPY=0
 
 # ---- Megatron backend --------------------------------------------------------
 export TP=1
