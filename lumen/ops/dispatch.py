@@ -24,6 +24,11 @@ try:
 except ImportError:
     _TritonCompilationError = None
 
+try:
+    from triton.runtime.errors import OutOfResources as _TritonOutOfResources
+except ImportError:
+    _TritonOutOfResources = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +111,16 @@ def _probe_aiter_triton_gemm():
 def _probe_aiter_triton_gemm_bf16():
     try:
         from aiter.ops.triton.gemm.basic.gemm_a16w16 import gemm_a16w16 as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_tuned_gemm_bf16():
+    try:
+        from aiter.tuned_gemm import gemm_a16w16 as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
@@ -232,6 +247,8 @@ def try_backends(
     _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
     if _TritonCompilationError is not None:
         _catchable = _catchable + (_TritonCompilationError,)
+    if _TritonOutOfResources is not None:
+        _catchable = _catchable + (_TritonOutOfResources,)
 
     last_exc = None
     for backend, fn in backends:

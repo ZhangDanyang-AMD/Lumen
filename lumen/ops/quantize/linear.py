@@ -39,9 +39,9 @@ from lumen.ops.dispatch import (
     _probe_aiter_ck_gemm,
     _probe_aiter_quant,
     _probe_aiter_triton_gemm,
-    _probe_aiter_triton_gemm_bf16,
     _probe_aiter_triton_gemm_mxfp8,
     _probe_aiter_triton_quant,
+    _probe_aiter_tuned_gemm_bf16,
     try_backends,
 )
 from lumen.quantize.config import _get_float8_e4m3
@@ -260,35 +260,17 @@ def gemm_mxfp8(a_fp8, w_fp8, scale_a, scale_w):
     return try_backends(backends, op_name="gemm_mxfp8")
 
 
-_MIN_TRITON_BF16_K = 128
+def _gemm_bf16_tuned(a, w, bias):
+    from aiter.tuned_gemm import gemm_a16w16
 
-
-def _gemm_bf16_triton(a, w, bias):
-    from aiter.ops.triton.gemm.basic.gemm_a16w16 import _get_config, gemm_a16w16
-
-    M, K = a.shape
-    N = w.shape[0]
-    config, _ = _get_config(M, N, K)
-    if config.get("BLOCK_SIZE_K", _MIN_TRITON_BF16_K) < _MIN_TRITON_BF16_K:
-        config["BLOCK_SIZE_K"] = _MIN_TRITON_BF16_K
-    return gemm_a16w16(a, w, bias=bias, config=config)
+    return gemm_a16w16(a, w, bias=bias)
 
 
 def gemm_bf16(a, w, bias=None):
-    """BF16 GEMM: Y = X @ W^T via AITER Triton (gemm_a16w16).
-
-    Raises ``ValueError`` when K < ``_MIN_TRITON_BF16_K`` (128) because the
-    AITER Triton kernel on gfx942 cannot compile with ``BLOCK_SIZE_K < 128``.
-    """
-    K = a.shape[1]
-    if K < _MIN_TRITON_BF16_K:
-        raise ValueError(
-            f"gemm_bf16: K={K} < {_MIN_TRITON_BF16_K}. "
-            f"AITER Triton gemm_a16w16 requires K >= {_MIN_TRITON_BF16_K} on gfx942."
-        )
+    """BF16 GEMM: Y = X @ W^T via AITER tuned_gemm (hipBLASLt / ASM / Triton)."""
     backends = []
-    if _probe_aiter_triton_gemm_bf16():
-        backends.append((Backend.TRITON, lambda: _gemm_bf16_triton(a, w, bias)))
+    if _probe_aiter_tuned_gemm_bf16():
+        backends.append((Backend.CK, lambda: _gemm_bf16_tuned(a, w, bias)))
     return try_backends(backends, op_name="gemm_bf16")
 
 
