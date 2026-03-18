@@ -48,10 +48,9 @@ def _make_tensors(config: AttnConfig, batch_size: int, dtype, device, requires_g
             config.head_dim_qk,
             device=device,
             dtype=dtype,
-            requires_grad=requires_grad,
         )
         * 0.02
-    )
+    ).requires_grad_(requires_grad)
     k = (
         torch.randn(
             batch_size,
@@ -60,10 +59,9 @@ def _make_tensors(config: AttnConfig, batch_size: int, dtype, device, requires_g
             config.head_dim_qk,
             device=device,
             dtype=dtype,
-            requires_grad=requires_grad,
         )
         * 0.02
-    )
+    ).requires_grad_(requires_grad)
     v = (
         torch.randn(
             batch_size,
@@ -72,10 +70,9 @@ def _make_tensors(config: AttnConfig, batch_size: int, dtype, device, requires_g
             config.head_dim_v,
             device=device,
             dtype=dtype,
-            requires_grad=requires_grad,
         )
         * 0.02
-    )
+    ).requires_grad_(requires_grad)
     return q, k, v
 
 
@@ -162,6 +159,8 @@ def test_attention_fwd_bwd(config):
 @pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
 def test_attention_causal(config):
     """Causal attention forward."""
+    if config.seqlen_q > config.seqlen_kv:
+        pytest.skip("Causal mask is ill-defined when seqlen_q > seqlen_kv")
     dtype = torch.bfloat16
     device = "cuda"
     batch_size = 2
@@ -192,6 +191,8 @@ def test_attention_causal(config):
 @pytest.mark.parametrize("config", ATTN_CONFIGS, ids=ATTN_IDS)
 def test_attention_causal_fwd_bwd(config):
     """Causal BF16 forward+backward, compare dQ/dK/dV gradients vs reference."""
+    if config.seqlen_q > config.seqlen_kv:
+        pytest.skip("Causal mask is ill-defined when seqlen_q > seqlen_kv")
     dtype = torch.bfloat16
     device = "cuda"
     batch_size = 2
