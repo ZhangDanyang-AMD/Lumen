@@ -357,7 +357,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 scaling_manager,
                 tensor_id,
             )
-            weight_dequant = weight_fp8.to(input.dtype) * weight_scale
+            weight_dequant = (weight_fp8.to(input.dtype) * weight_scale).to(input.dtype)
             output = gemm_bf16(input, weight_dequant, bias)
             ctx.save_for_backward(input, weight_fp8, weight_scale)
             ctx.scaling_manager = scaling_manager
@@ -433,7 +433,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         if not ctx.quantize_activation:
             input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
-            weight_dequant = weight_fp8.to(grad_output.dtype) * weight_scale
+            weight_dequant = (weight_fp8.to(grad_output.dtype) * weight_scale).to(grad_output.dtype)
             grad_input = dispatch_gemm(
                 grad_output,
                 weight_dequant.t().contiguous(),
