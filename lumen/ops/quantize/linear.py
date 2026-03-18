@@ -29,6 +29,7 @@ GEMM backends are selected automatically:
     - **hipBLASLt**: ``hipb_mm`` (per-tensor)
 """
 
+import logging as _logging
 from typing import Optional
 
 import torch
@@ -44,6 +45,8 @@ from lumen.ops.dispatch import (
     try_backends,
 )
 from lumen.quantize.config import _get_float8_e4m3
+
+_logger = _logging.getLogger(__name__)
 
 __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
@@ -157,7 +160,11 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
 
 
 def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
-    """hipBLASLt per-tensor GEMM via AITER hipb_mm."""
+    """hipBLASLt per-tensor GEMM via AITER hipb_mm.
+
+    hipb_mm computes mat1 @ mat2 (NN layout).  Lumen's dispatch convention
+    passes w as (N, K), so we must transpose to (K, N) before calling hipb_mm.
+    """
     from aiter.ops.gradlib import hipb_create_extension, hipb_mm
 
     import lumen.ops.quantize.linear as _self
@@ -175,7 +182,7 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
         if isinstance(scale_w, torch.Tensor)
         else torch.tensor([[scale_w]], dtype=torch.float32, device=w_fp8.device)
     )
-    return hipb_mm(a_fp8, w_fp8, -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
+    return hipb_mm(a_fp8, w_fp8.t().contiguous(), -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
 def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w):
@@ -553,6 +560,7 @@ def quantized_linear(
     """
     if fp8_dtype is None:
         fp8_dtype = _get_float8_e4m3()
+        _logger.info("quantized_linear: auto-detected fp8_dtype=%s", fp8_dtype)
 
     if scaling_manager is None:
         from lumen.quantize import ScalingManager

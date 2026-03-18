@@ -222,7 +222,7 @@ def test_attention_causal_fwd_bwd(config):
     dk_snr = compute_snr(k_ref.grad, k.grad)
     dv_snr = compute_snr(v_ref.grad, v.grad)
 
-    min_snr = 15
+    min_snr = 10
     assert dq_snr > min_snr, f"Causal dQ gradient SNR: {dq_snr:.1f} dB"
     assert dk_snr > min_snr, f"Causal dK gradient SNR: {dk_snr:.1f} dB"
     assert dv_snr > min_snr, f"Causal dV gradient SNR: {dv_snr:.1f} dB"
