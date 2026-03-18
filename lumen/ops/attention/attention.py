@@ -29,7 +29,7 @@ from lumen.kernels.attention.attention_impl import attention_mxfp8_backward as t
 from lumen.kernels.attention.attention_impl import attention_mxfp8_forward as triton_mxfp8_forward
 from lumen.ops.attention.attention_with_cp_p2p import attention_cp_p2p
 
-__all__ = ["attention", "attention_fp8_quant", "apply_softmax_variant"]
+__all__ = ["attention", "attention_fp8_quant"]
 
 _FP8_BACKENDS = ("aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8")
 
@@ -455,36 +455,6 @@ _mark_allow_in_graph(AttentionTritonFunction, AttentionTritonMXFP8Function, Atte
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-
-def apply_softmax_variant(
-    attn_weights: torch.Tensor,
-    softmax_type: str = "vanilla",
-    temperature: Optional[float] = None,
-) -> torch.Tensor:
-    """Apply softmax variant to attention logits.
-
-    Args:
-        attn_weights: Raw attention logits [B, H, Sq, Sk].
-        softmax_type: "vanilla" or "off_by_one".
-        temperature: Optional learnable temperature scalar.
-
-    Returns:
-        Attention probabilities.
-    """
-    if temperature is not None:
-        attn_weights = attn_weights * temperature
-
-    if softmax_type == "vanilla":
-        return torch.softmax(attn_weights, dim=-1)
-    elif softmax_type == "off_by_one":
-        max_val = attn_weights.amax(dim=-1, keepdim=True)
-        shifted = attn_weights - max_val
-        exp_vals = torch.exp(shifted)
-        denom = 1.0 + exp_vals.sum(dim=-1, keepdim=True)
-        return exp_vals / denom
-    else:
-        raise ValueError(f"Unknown softmax_type={softmax_type!r}")
 
 
 def attention(

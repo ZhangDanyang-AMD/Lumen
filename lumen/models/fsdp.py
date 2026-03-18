@@ -215,16 +215,6 @@ def add_common_fsdp_args(parser):
         help="Defer weight gradient to overlap with next layer comm.",
     )
 
-    # -- Softmax --
-    sfx = parser.add_argument_group("softmax")
-    sfx.add_argument(
-        "--lumen-softmax-type",
-        type=str,
-        default="vanilla",
-        choices=["vanilla", "off_by_one"],
-        help="Softmax variant: 'vanilla' or 'off_by_one'.",
-    )
-
     # -- Gradient accumulation fusion --
     gaf = parser.add_argument_group("grad-accum-fusion")
     gaf.add_argument(

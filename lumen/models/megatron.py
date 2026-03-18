@@ -1037,15 +1037,6 @@ def add_common_megatron_args(parser):
         default=False,
         help="Use fused MLP modules (LumenFusedMLP / LumenGatedMLP) for reduced kernel launch overhead.",
     )
-    safe_add_argument(
-        lumen,
-        "--lumen-softmax-type",
-        type=str,
-        default="vanilla",
-        choices=["vanilla", "off_by_one"],
-        help="Softmax variant: 'vanilla' (standard) or 'off_by_one' (adds 1 to denominator).",
-    )
-
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
     safe_add_argument(mxfp8, "--mxfp8-block-m-fwd", type=int, default=128)
     safe_add_argument(mxfp8, "--mxfp8-block-n-fwd", type=int, default=128)
