@@ -201,6 +201,83 @@ def _probe_aiter_triton_gemm_mxfp8():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_rope_cached():
+    """Check if AITER Triton cached RoPE (SBHD layout) is available."""
+    try:
+        from aiter.ops.triton.rope.rope import rope_cached_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_rope_cached_2c():
+    """Check if AITER Triton cached RoPE 2-component (THD Q+K) is available."""
+    try:
+        from aiter.ops.triton.rope.rope import rope_cached_thd_positions_2c_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_rope_2d():
+    """Check if AITER Triton 2D RoPE is available."""
+    try:
+        from aiter.ops.triton.rope.rope import rope_fwd_2d as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_rope_3d():
+    """Check if AITER Triton 3D RoPE is available."""
+    try:
+        from aiter.ops.triton.rope.rope import rope_fwd_3d as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_moe_topk_softmax():
+    """Check if AITER fused topk+softmax ASM kernel is available."""
+    try:
+        from aiter.ops.moe_op import topk_softmax as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_moe_sorting():
+    """Check if AITER moe_sorting HIP kernel is available."""
+    try:
+        from aiter.ops.moe_sorting import moe_sorting_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_moe_sum():
+    """Check if AITER moe_sum ASM kernel is available."""
+    try:
+        from aiter.ops.moe_op import moe_sum as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_moe_gemm_per_token():
     """Check if AITER fused per-token MOE GEMM is available."""
     try:
@@ -216,6 +293,28 @@ def _probe_aiter_moe_gemm_mxfp8():
     """Check if AITER fused MXFP8 MOE GEMM is available."""
     try:
         from aiter.ops.triton.moe.moe_gemm_mxfp8 import moe_gemm_mxfp8 as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_moe_align():
+    """Check if AITER Triton MoE block alignment kernel is available."""
+    try:
+        from aiter.ops.triton.moe.moe_align_block_size import moe_align_block_size_triton as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_fused_moe():
+    """Check if AITER Triton fused MoE (sort+GEMM) kernel is available."""
+    try:
+        from aiter.ops.triton.moe.moe_op import fused_moe as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
