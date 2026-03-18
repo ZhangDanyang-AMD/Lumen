@@ -74,7 +74,12 @@ def _align_tokens(
     max_num_m_blocks = _ceil_div(max_num_tokens_padded, block_size)
 
     device = topk_ids.device
-    sorted_token_ids = torch.empty(max_num_tokens_padded, dtype=torch.int32, device=device)
+    sorted_token_ids = torch.full(
+        (max_num_tokens_padded,),
+        numel,
+        dtype=torch.int32,
+        device=device,
+    )
     expert_ids = torch.empty(max_num_m_blocks, dtype=torch.int32, device=device)
     num_tokens_post_pad = torch.empty(1, dtype=torch.int32, device=device)
 
@@ -154,7 +159,7 @@ def fused_moe_triton(
 
     num_tokens = hidden_states.shape[0]
     intermediate_dim = expert_weights.shape[1]
-    C = torch.empty(
+    C = torch.zeros(
         (num_tokens, k, intermediate_dim),
         dtype=hidden_states.dtype,
         device=hidden_states.device,
