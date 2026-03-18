@@ -115,10 +115,10 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
         if manager is not None:
             return manager.quantize(tensor_id or "input", x_2d, backward=backward)
         backends = []
-        if _probe_aiter_triton_quant():
-            backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
         if _probe_aiter_quant():
             backends.append((Backend.CK, lambda: _quant_per_tensor_hip(x_2d, fp8_dtype)))
+        if _probe_aiter_triton_quant():
+            backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
         return try_backends(backends, op_name="quant_delayed_per_tensor")
 
     if scaling_type == "dynamic":
