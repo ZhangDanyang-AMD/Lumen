@@ -252,6 +252,7 @@ class SdmaTpComm:
         self._ctx = SdmaTpContext.get(tp_group)
         self._ag = _TpSdmaAllgather(self._ctx)
         self._ar_handles: dict = {}
+        self._rs_output_buf: Optional[torch.Tensor] = None
 
     @property
     def npes(self) -> int:

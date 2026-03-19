@@ -538,6 +538,10 @@ class TestBlockwiseRecomputeOptimization:
             quant_block_size=quant_block_size,
             block_m_fwd=quant_block_size,
             block_n_fwd=quant_block_size,
+            block_m_dq_bwd=quant_block_size,
+            block_n_dq_bwd=quant_block_size,
+            block_m_dkv_bwd=quant_block_size,
+            block_n_dkv_bwd=quant_block_size,
         )
         out.float().mean().backward()
 
