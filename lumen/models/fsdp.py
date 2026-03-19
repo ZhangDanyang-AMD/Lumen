@@ -104,7 +104,7 @@ def add_common_fsdp_args(parser):
         "--linear-fp8-scaling",
         type=str,
         default="delayed",
-        choices=["dynamic", "delayed", "blockwise", "per_token", "none"],
+        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none"],
     )
     lfp8.add_argument("--linear-fp8-block-size", type=int, default=128)
     lfp8.add_argument("--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])

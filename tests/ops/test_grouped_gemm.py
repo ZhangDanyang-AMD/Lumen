@@ -11,6 +11,7 @@ Covers:
   - BF16 grouped GEMM forward with bias
   - BF16 grouped GEMM wgrad
   - Zero-group edge cases
+  - FP8 scaling_type dispatch (blockwise, blockwise2d)
   - Invalid scaling_type error
 """
 
@@ -172,6 +173,35 @@ def test_grouped_gemm_wgrad(num_experts, tokens):
     assert wgrad_lumen.shape == (num_experts, N, K)
     snr = compute_snr(wgrad_ref, wgrad_lumen)
     assert snr > 20, f"Grouped GEMM wgrad SNR: {snr:.1f} dB (expected > 20)"
+
+
+# ===================================================================
+# FP8 scaling_type dispatch (blockwise, blockwise2d)
+# ===================================================================
+
+
+@pytest.mark.parametrize("scaling_type", ["blockwise", "blockwise2d"])
+@pytest.mark.parametrize("num_experts", [4])
+@pytest.mark.parametrize("tokens", [64, 256])
+def test_grouped_gemm_fp8_scaling(num_experts, tokens, scaling_type):
+    """Grouped GEMM forward with blockwise/blockwise2d scaling dispatch."""
+    dtype = torch.bfloat16
+    N, K = 256, 256
+    device = "cuda"
+    group_sizes = _make_group_sizes(num_experts, tokens, device)
+    total_tokens = int(group_sizes.sum().item())
+
+    lhs = torch.randn(total_tokens, K, device=device, dtype=dtype) * 0.1
+    rhs_ref = torch.randn(num_experts, N, K, device=device, dtype=dtype) * 0.02
+
+    out_ref = grouped_gemm_ref(lhs, rhs_ref, group_sizes)
+
+    rhs_lumen = rhs_ref.transpose(1, 2)
+    out_lumen = grouped_gemm(lhs, rhs_lumen, group_sizes, scaling_type=scaling_type)
+
+    assert out_lumen.shape == (total_tokens, N)
+    snr = compute_snr(out_ref, out_lumen)
+    assert snr > 8, f"Grouped GEMM {scaling_type} SNR: {snr:.1f} dB (expected > 8)"
 
 
 # ===================================================================

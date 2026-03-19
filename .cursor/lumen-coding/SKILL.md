@@ -66,9 +66,12 @@ def my_op(x, ...):
 | `dynamic` | hipBLASLt → CK → Triton | Full FP8 bwd OK |
 | `per_token` | Triton only | No FP8 wgrad (scale misalignment after transpose) |
 | `blockwise` | CK → Triton | No FP8 wgrad |
+| `blockwise2d` | CK → Triton (same kernels as `blockwise`) | No FP8 wgrad |
 | `mxfp8` | Triton only | No FP8 wgrad |
 
-**Scale misalignment:** Per-tensor scalar scales survive `weight.t()`. Per-token `(N,1)`, blockwise `(N,K/bs)`, and mxfp8 block scales become misaligned — FP8 backward restricted to `["delayed", "dynamic", "none"]`.
+**`blockwise2d` in linear:** Routes through the same 1D block quant (`_quant_blockwise`) and blockscale GEMM (`gemm_blockscale`) as `blockwise`. All `scaling_type == "blockwise"` checks are updated to `in ("blockwise", "blockwise2d")` across `linear.py`, `rmsnorm.py`, `layernorm.py`, `grouped_gemm.py`, and `scaling_manager.py`. The "2D" naming provides API consistency with the attention path.
+
+**Scale misalignment:** Per-tensor scalar scales survive `weight.t()`. Per-token `(N,1)`, blockwise/blockwise2d `(N,K/bs)`, and mxfp8 block scales become misaligned — FP8 backward restricted to `["delayed", "dynamic", "none"]`.
 
 ### Scaling Types — Attention
 
@@ -78,7 +81,16 @@ def my_op(x, ...):
 | `blockwise2d` | Triton (`AttentionTritonBlockwise2DFunction`) | 2D block scales `[B, H, S//bm, D//bn]` via `Blockwise2DScaleManager` |
 | `mxfp8` | Triton (`AttentionTritonMXFP8Function`) | MXFP8 block scales |
 
-`blockwise2d` is **Lumen-only** (no TE equivalent). The `Blockwise2DScaleManager` caches FP8-quantized Q/K/V and their scales across forward/backward, allowing backward to skip re-quantization and reuse the dO scale across iterations.
+**`blockwise2d` in attention:** Uses true 2D block scales. The `Blockwise2DScaleManager` caches FP8-quantized Q/K/V and their scales across forward/backward, allowing backward to skip re-quantization and reuse the dO scale across iterations. The underlying Triton kernel still receives 1D block scales internally (`quantize_block_fp8` for Q/K, per-tensor for V).
+
+### blockwise2d: Dual Behavior Summary
+
+| Context | Quantization | Scale Shape | Kernel |
+|---------|-------------|-------------|--------|
+| Linear (GEMM) | 1D block (identical to `blockwise`) | `(M, ceil(K/bs))` | `gemm_blockscale` (CK/Triton) |
+| Attention | 2D block via `Blockwise2DScaleManager` | `[B, H, S//bm, D//bn]` | `AttentionTritonBlockwise2DFunction` |
+
+`blockwise2d` is **Lumen-only** (no TE equivalent). When `--lumen-fp8-quant-type blockwise2d` is set, both the linear and attention paths activate. For MHA, a shared `Blockwise2DScaleManager` is attached to each `LumenDotProductAttention` so QKV projection, dot-product attention, and output projection share the same FP8 scale context.
 
 ### Deriving Constants
 

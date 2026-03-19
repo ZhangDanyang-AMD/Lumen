@@ -44,7 +44,7 @@
 | Delayed Scaling | Supported | Default TE path |
 | Dynamic (per-tensor) | Supported | |
 | Block Scaling | Supported | |
-| Blockwise 2D | Supported | **Lumen-only** |
+| Blockwise 2D | Supported | **Lumen-only** — attention: true 2D scales; linear: 1D blockscale kernel |
 | MXFP8 | Supported | gfx950+ |
 | Per-Token | Supported | **Lumen-only** |
 | E4M3 / E5M2 / Hybrid | Supported | fnuz on gfx94x |
@@ -74,10 +74,10 @@
 |---|---|---|
 | delayed/dynamic | hipBLASLt → CK (`gemm_a8w8_CK`) → Triton | `a8w8_tuned_gemm.csv` |
 | per_token | Triton only (`gemm_a8w8_per_token_scale`) | None |
-| blockwise | CK (`gemm_a8w8_blockscale`) → Triton | `a8w8_blockscale_tuned_gemm.csv` |
+| blockwise / blockwise2d | CK (`gemm_a8w8_blockscale`) → Triton | `a8w8_blockscale_tuned_gemm.csv` |
 | mxfp8 | Triton only (`gemm_mxfp8`) | None |
 
-Note: `blockwise2d` does NOT dispatch through GEMM — it is attention-only.
+`blockwise2d` shares the same GEMM kernels as `blockwise`. All `scaling_type == "blockwise"` checks are `in ("blockwise", "blockwise2d")` in: `linear.py`, `rmsnorm.py`, `layernorm.py`, `grouped_gemm.py`, `scaling_manager.py`.
 
 ## FP8 Attention Dispatch
 
@@ -114,7 +114,7 @@ Note: `blockwise2d` does NOT dispatch through GEMM — it is attention-only.
 
 ## Lumen-Only Features (No TE Equivalent)
 
-1. **Blockwise2D quantization** — 2D block FP8 scaling for attention Q/K/V
+1. **Blockwise2D quantization** — 2D block FP8 scaling for attention Q/K/V; linear path uses 1D blockscale kernels for API consistency
 2. **Per-Token FP8 scaling** — per-row FP8 quantization
 3. **SDMA-based TP collectives** — System DMA on MI300X shared memory
 4. **SDMA cross-entropy** — SDMA-routed all-gather in parallel cross-entropy

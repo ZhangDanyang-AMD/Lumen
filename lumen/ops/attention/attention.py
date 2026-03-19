@@ -23,6 +23,7 @@ def _is_aiter_available() -> bool:
 if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
+from lumen.kernels.attention.attention_impl import FIXED_BLOCK_M
 from lumen.kernels.attention.attention_impl import attention_backward as triton_fp8_backward
 from lumen.kernels.attention.attention_impl import attention_forward as triton_fp8_forward
 from lumen.kernels.attention.attention_impl import attention_mxfp8_backward as triton_mxfp8_backward
@@ -49,6 +50,22 @@ def _mark_allow_in_graph(*classes):
             allow_in_graph(cls)
     except Exception:
         pass
+
+
+def _extract_triton_lse(lse_raw, seqlen_q):
+    """Extract contiguous LSE from the Triton kernel's interleaved buffer.
+
+    The kernel allocates (B, H, SQ*2) and writes each block's LSE followed
+    by BLOCK_M slots reserved for backward delta:
+        [LSE_blk0(BM) | delta_blk0(BM) | LSE_blk1(BM) | delta_blk1(BM) | ...]
+
+    Requires seqlen_q to be a multiple of FIXED_BLOCK_M (kernel constraint).
+    """
+    B, H, total = lse_raw.shape
+    num_blocks = (seqlen_q + FIXED_BLOCK_M - 1) // FIXED_BLOCK_M
+    reshaped = lse_raw.reshape(B, H, num_blocks, 2 * FIXED_BLOCK_M)
+    lse_clean = reshaped[:, :, :, :FIXED_BLOCK_M].contiguous().reshape(B, H, num_blocks * FIXED_BLOCK_M)
+    return lse_clean[:, :, :seqlen_q]
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +139,7 @@ class AttentionTritonFunction(torch.autograd.Function):
 
         result = [output]
         if return_lse:
-            result.append(softmax_lse)
+            result.append(_extract_triton_lse(softmax_lse, q.shape[1]))
         if return_softmax:
             result.append(exp_scores)
         return result[0] if len(result) == 1 else tuple(result)
@@ -343,8 +360,6 @@ class AttentionTritonBlockwise2DFunction(torch.autograd.Function):
         if scale_manager is not None and isinstance(scale_manager, Blockwise2DScaleManager):
             scale_manager.quantize_and_cache(q, k, v, fp8_dt)
 
-        from lumen.kernels.attention.attention_impl import FIXED_BLOCK_M
-
         q_fp8, q_scale_1d = ScalingManager.quantize_block_fp8(q, FIXED_BLOCK_M, fp8_dt)
         k_fp8, k_scale_1d = ScalingManager.quantize_block_fp8(k, FIXED_BLOCK_M, fp8_dt)
         v_fp8, v_scale_1d, p_scale = ScalingManager.quantize_v_fp8(v, fp8_dt)
@@ -393,7 +408,7 @@ class AttentionTritonBlockwise2DFunction(torch.autograd.Function):
 
         result = [output]
         if return_lse:
-            result.append(softmax_lse)
+            result.append(_extract_triton_lse(softmax_lse, q.shape[1]))
         if return_softmax:
             result.append(exp_scores)
         return result[0] if len(result) == 1 else tuple(result)
@@ -608,8 +623,10 @@ def attention(
                 "'aiter' — install it or use backend_type='aiter_triton'."
             )
         _return_softmax = return_attn_probs and dropout_p > 0
+        _needs_grad = torch.is_grad_enabled() and any(t.requires_grad for t in [q, k, v])
+        _internal_return_lse = return_lse or _needs_grad
         try:
-            return flash_attn_func(
+            result = flash_attn_func(
                 q,
                 k,
                 v,
@@ -620,9 +637,16 @@ def attention(
                 bias=bias,
                 alibi_slopes=alibi_slopes,
                 deterministic=deterministic,
-                return_lse=return_lse,
+                return_lse=_internal_return_lse,
                 return_attn_probs=_return_softmax,
             )
+            if _internal_return_lse and not return_lse and isinstance(result, tuple):
+                if len(result) == 2:
+                    result = result[0]
+                elif len(result) == 3:
+                    # (out, lse, S_dmask) -> (out, S_dmask)
+                    result = (result[0], result[2])
+            return result
         except RuntimeError as _aiter_err:
             import warnings
 

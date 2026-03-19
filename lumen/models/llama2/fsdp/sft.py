@@ -421,7 +421,9 @@ def get_args() -> argparse.Namespace:
     fp8 = parser.add_argument_group("fp8-training")
     fp8.add_argument("--fp8-training", action="store_true", default=False)
     fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
-    fp8.add_argument("--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise"])
+    fp8.add_argument(
+        "--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise", "blockwise2d"]
+    )
     fp8.add_argument("--fp8-block-size", type=int, default=128)
     fp8.add_argument("--fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
     fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)

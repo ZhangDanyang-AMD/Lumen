@@ -8,7 +8,7 @@ Tests for lumen.ops.normalization: RMSNorm and LayerNorm.
 
 Covers:
   - Forward + backward (BF16, FP32)
-  - Fused quantized variants — forward (delayed, dynamic, per_token, blockwise, mxfp8)
+  - Fused quantized variants — forward (delayed, dynamic, per_token, blockwise, blockwise2d, mxfp8)
   - Fused quantized variants — backward (FP8 training: norm→quant→dequant→linear→loss)
   - MXFP8 fused quant benchmarked against torchao reference
 
@@ -52,7 +52,7 @@ NORM_SHAPES = [
 
 NORM_IDS = [repr(c) for c in NORM_SHAPES]
 
-QUANT_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "mxfp8"]
+QUANT_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "blockwise2d", "mxfp8"]
 
 
 def _delayed_scale(norm_ref, fp8_dtype=torch.float8_e4m3fn):
@@ -84,7 +84,7 @@ def _dequant_output(x_fp8, scale, scaling_type, block_size=128, norm_ref=None):
         return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
     elif scaling_type == "per_token":
         return torchao_dequant_fp8(x_fp8, scale.float(), output_dtype=torch.bfloat16)
-    elif scaling_type == "blockwise":
+    elif scaling_type in ("blockwise", "blockwise2d"):
         return torchao_dequant_fp8(x_fp8, scale, output_dtype=torch.bfloat16)
     elif scaling_type == "mxfp8":
         # torchao MX-format dequantization (CPU-based OCP spec reference).
@@ -137,7 +137,7 @@ def _quant_golden(x, scaling_type, block_size=128):
         x_fp8 = torchao_quant_fp8(x, scale, fp8_dtype)
         return x_fp8, scale.squeeze(-1)
 
-    elif scaling_type == "blockwise":
+    elif scaling_type in ("blockwise", "blockwise2d"):
         if fp8_blockwise_act_quant is not None:
             try:
                 x_fp8, scale = fp8_blockwise_act_quant(x, block_size, fp8_dtype)
@@ -204,7 +204,7 @@ def test_rmsnorm_with_quant(config, scaling_type):
 
     if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
         pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
-    if scaling_type == "blockwise" and config.N % block_size != 0:
+    if scaling_type in ("blockwise", "blockwise2d") and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype)
@@ -257,7 +257,7 @@ def test_rmsnorm_quant_bwd(config, scaling_type):
 
     if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
         pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
-    if scaling_type == "blockwise" and config.N % block_size != 0:
+    if scaling_type in ("blockwise", "blockwise2d") and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype)
@@ -361,7 +361,7 @@ def test_layernorm_with_quant(config, scaling_type):
 
     if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
         pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
-    if scaling_type == "blockwise" and config.N % block_size != 0:
+    if scaling_type in ("blockwise", "blockwise2d") and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype)
@@ -416,7 +416,7 @@ def test_layernorm_quant_bwd(config, scaling_type):
 
     if scaling_type == "mxfp8" and (config.N % block_size != 0 or config.M % block_size != 0):
         pytest.skip(f"M={config.M}/N={config.N} not aligned to block_size={block_size}")
-    if scaling_type == "blockwise" and config.N % block_size != 0:
+    if scaling_type in ("blockwise", "blockwise2d") and config.N % block_size != 0:
         pytest.skip(f"N={config.N} not divisible by block_size={block_size}")
 
     x = torch.randn(config.M, config.N, device="cuda", dtype=dtype)

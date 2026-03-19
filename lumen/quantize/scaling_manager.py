@@ -6,7 +6,7 @@
 
 import logging
 from collections import defaultdict, deque
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -197,7 +197,7 @@ class ScalingManager:
                     group=self._dp_group,
                 )
             return self._compute_scale(amax, fp8_max)
-        elif recipe in ("blockwise", "mxfp8", "per_token"):
+        elif recipe in ("blockwise", "blockwise2d", "mxfp8", "per_token"):
             return None
 
     def update_amax(self, tensor_id: str, tensor: torch.Tensor):
@@ -412,7 +412,7 @@ class ScalingManager:
                 float8_dtype_pt=dtype,
             )
 
-        if scale is None and self.config.scaling == ScalingType.BLOCKWISE:
+        if scale is None and self.config.scaling in (ScalingType.BLOCKWISE, ScalingType.BLOCKWISE2D):
             _, _, quant_fp8_blockwise_impl = _get_quant_ops()
             orig_shape = tensor.shape
             flat = tensor.reshape(-1, orig_shape[-1])
@@ -447,6 +447,44 @@ class ScalingManager:
         self._fp8_param_cache.clear()
         self._fp8_param_stale.clear()
         self._fp8_step_counter = -1
+
+    # ------------------------------------------------------------------
+    # Backward delayed scaling (blockwise2d cross-iteration reuse)
+    # ------------------------------------------------------------------
+
+    def quantize_bwd_delayed(
+        self,
+        tensor_id: str,
+        tensor: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Quantize a backward tensor using delayed per-tensor scaling.
+
+        On the first call for *tensor_id* (no history), computes scale from
+        the current tensor's amax (same as dynamic).  On subsequent calls,
+        reuses the amax history to derive the scale without waiting for the
+        current tensor's reduction — mirroring
+        :meth:`Blockwise2DScaleManager.cache_do_scale` from the attention path.
+
+        The current tensor's amax is always appended to history for the next
+        iteration.
+
+        Returns ``(fp8_tensor, per_tensor_scale)``.
+        """
+        fp8_max = self._fp8_max_bwd
+        dtype = self.fp8_dtype_bwd
+
+        history = self.amax_history[tensor_id]
+        if len(history) == 0:
+            amax = tensor.abs().amax()
+        elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
+            amax = history[-1].to(device=tensor.device)
+        else:
+            amax = torch.stack(list(history)).amax().to(device=tensor.device)
+
+        scale = self._compute_scale(amax, fp8_max)
+        fp8_tensor = (tensor / scale).clamp(-fp8_max, fp8_max).to(dtype)
+        self.amax_history[tensor_id].append(tensor.detach().abs().amax())
+        return fp8_tensor, scale
 
     # ------------------------------------------------------------------
     # Gradient quantization

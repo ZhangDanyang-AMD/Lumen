@@ -424,9 +424,9 @@ def rmsnorm_with_quant(
 
     Args:
         scaling_type: One of ``"delayed"``, ``"dynamic"``, ``"per_token"``,
-            ``"blockwise"``, ``"mxfp8"``, ``"none"``.
+            ``"blockwise"``, ``"blockwise2d"``, ``"mxfp8"``, ``"none"``.
         scale: Pre-computed scale (required for ``"delayed"``).
-        block_size: Block size for ``"blockwise"`` or ``"mxfp8"``.
+        block_size: Block size for ``"blockwise"``, ``"blockwise2d"``, or ``"mxfp8"``.
 
     Returns:
         For ``"none"``: just the normalized tensor.
@@ -441,7 +441,7 @@ def rmsnorm_with_quant(
         return rmsnorm_current_per_tensor(x, weight, eps, fp8_dtype)
     elif scaling_type == "per_token":
         return rmsnorm_per_token(x, weight, eps, fp8_dtype)
-    elif scaling_type == "blockwise":
+    elif scaling_type in ("blockwise", "blockwise2d"):
         return rmsnorm_blockwise(x, weight, eps, block_size, fp8_dtype)
     elif scaling_type == "mxfp8":
         mxfp8_block = 32 if block_size > 64 else block_size

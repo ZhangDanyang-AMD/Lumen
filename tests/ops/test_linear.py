@@ -7,8 +7,8 @@
 Tests for lumen.ops.quantize.linear: FP8 quantized linear / GEMM.
 
 Covers:
-  - FP8 quantized GEMM forward — all 6 scaling types vs torch.mm reference
-  - FP8 quantized linear forward + backward — all 6 scaling types
+  - FP8 quantized GEMM forward — all 7 scaling types vs torch.mm reference
+  - FP8 quantized linear forward + backward — all 7 scaling types
   - Bias, weight-only quant, BF16 wgrad, edge cases
 """
 
@@ -30,7 +30,7 @@ LINEAR_SHAPES = [
 
 LINEAR_IDS = [repr(c) for c in LINEAR_SHAPES]
 
-ALL_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "mxfp8", "none"]
+ALL_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "blockwise2d", "mxfp8", "none"]
 
 # Backward reuses forward's weight_scale after transposing weight_fp8.
 # Only per-tensor (scalar) scales survive transposition; per_token (N,1),
@@ -45,6 +45,7 @@ _FWD_SNR = {
     "dynamic": 12,
     "per_token": 12,
     "blockwise": 8,
+    "blockwise2d": 8,
     "mxfp8": 5,
     "none": 25,
 }
@@ -53,6 +54,7 @@ _BWD_DX_SNR = {
     "dynamic": 6,
     "per_token": 6,
     "blockwise": 4,
+    "blockwise2d": 4,
     "mxfp8": 3,
     "none": 20,
 }
@@ -61,6 +63,7 @@ _BWD_DW_SNR = {
     "dynamic": 6,
     "per_token": 6,
     "blockwise": 4,
+    "blockwise2d": 4,
     "mxfp8": 3,
     "none": 20,
 }
@@ -75,7 +78,7 @@ def _block_size_for(scaling_type, default=128):
 
 def _skip_if_unaligned(config, scaling_type):
     block_size = _block_size_for(scaling_type)
-    if scaling_type in ("blockwise", "mxfp8") and config.K % block_size != 0:
+    if scaling_type in ("blockwise", "blockwise2d", "mxfp8") and config.K % block_size != 0:
         pytest.skip(f"K={config.K} not divisible by block_size={block_size}")
 
 
@@ -216,8 +219,8 @@ FWD_ONLY_SCALING_TYPES = [s for s in ALL_SCALING_TYPES if s not in BWD_SCALING_T
 def test_fp8_linear_bias_fwd_only(config, scaling_type):
     """Forward-only bias test for scaling types that don't support backward.
 
-    per_token/blockwise/mxfp8 weight scales become misaligned after
-    transposition in the backward pass (see BWD_SCALING_TYPES comment),
+    per_token/blockwise/blockwise2d/mxfp8 weight scales become misaligned
+    after transposition in the backward pass (see BWD_SCALING_TYPES comment),
     so we only verify the forward output here.
     """
     _skip_if_unaligned(config, scaling_type)

@@ -24,6 +24,7 @@ Quantization modes:
     - ``dynamic``    — per-tensor FP8 MOE GEMM via AITER Triton
     - ``per_token``  — per-token FP8 fused MOE GEMM via AITER Triton
     - ``blockwise``  — per-block FP8 MOE GEMM via AITER Triton
+    - ``blockwise2d`` — same as blockwise (shared kernel)
     - ``mxfp8``      — MXFP8 fused MOE GEMM via AITER Triton
 """
 
@@ -162,7 +163,7 @@ def grouped_gemm(
         backends.append((Backend.TRITON, _sequential_fallback))
         return try_backends(backends, op_name="grouped_gemm_per_tensor")
 
-    if scaling_type == "blockwise":
+    if scaling_type in ("blockwise", "blockwise2d"):
         backends = []
 
         def _moe_blockscale():

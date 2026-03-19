@@ -12,13 +12,14 @@ All backends are AITER implementations — no torch.nn.functional fallbacks.
 All AITER GEMM kernels follow TN layout convention:
     ``Y = X @ W^T``  where X is (M, K) and W is (N, K).
 
-Supports all 6 scaling modes:
-    - ``delayed``    — per-tensor FP8 (delayed scaling from amax history)
-    - ``dynamic``    — per-tensor FP8 (current scaling from current amax)
-    - ``per_token``  — per-row FP8 dynamic scaling
-    - ``blockwise``  — per-block FP8 scaling (e.g. block=128)
-    - ``mxfp8``      — microscaling FP8
-    - ``none``       — BF16 passthrough (no quantization)
+Supports all 7 scaling modes:
+    - ``delayed``      — per-tensor FP8 (delayed scaling from amax history)
+    - ``dynamic``      — per-tensor FP8 (current scaling from current amax)
+    - ``per_token``    — per-row FP8 dynamic scaling
+    - ``blockwise``    — per-block FP8 scaling (e.g. block=128)
+    - ``blockwise2d``  — 2D block FP8 scaling (same kernel, 2D scale management)
+    - ``mxfp8``        — microscaling FP8
+    - ``none``         — BF16 passthrough (no quantization)
 
 GEMM backends are selected automatically:
     - **ASM**: ``gemm_a8w8_asm``, ``gemm_a8w8_blockscale_bpreshuffle_asm``
@@ -104,7 +105,7 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
     Returns ``(x_quant, x_scale)`` where x_scale shape depends on mode:
     - per-tensor: ``(1,)``
     - per-token: ``(M, 1)``
-    - blockwise: ``(M, ceil(N/block_size))``
+    - blockwise / blockwise2d: ``(M, ceil(N/block_size))``
     - mxfp8: ``(scales_shape,)``
     - none: ``(None, None)``
     """
@@ -137,7 +138,7 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
             backends.append((Backend.TRITON, lambda: _quant_per_token_triton(x_2d, fp8_dtype)))
         return try_backends(backends, op_name="quant_per_token")
 
-    if scaling_type == "blockwise":
+    if scaling_type in ("blockwise", "blockwise2d"):
         return _quant_blockwise(x_2d, fp8_dtype, block_size)
 
     if scaling_type == "mxfp8":
@@ -301,7 +302,7 @@ def dispatch_gemm(a, w, scale_a, scale_w, scaling_type, bias=None):
         out = gemm_per_tensor(a, w, scale_a, scale_w)
     elif scaling_type == "per_token":
         out = gemm_per_token(a, w, scale_a, scale_w)
-    elif scaling_type == "blockwise":
+    elif scaling_type in ("blockwise", "blockwise2d"):
         out = gemm_blockscale(a, w, scale_a, scale_w)
     elif scaling_type == "mxfp8":
         out = gemm_mxfp8(a, w, scale_a, scale_w)
@@ -321,7 +322,7 @@ def dispatch_gemm(a, w, scale_a, scale_w, scaling_type, bias=None):
 class QuantizedLinearFunction(torch.autograd.Function):
     """FP8 quantized linear: quant -> GEMM -> dequant, for both fwd and bwd.
 
-    Supports all 6 scaling modes via ``scaling_type`` parameter.
+    Supports all 7 scaling modes via ``scaling_type`` parameter.
     Backend selection uses ASM → CK → Triton fallback automatically.
     All backends are AITER implementations.
     """
@@ -477,8 +478,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
-        bwd_scaling = "dynamic" if scaling_type in ("per_token", "blockwise") else scaling_type
-        grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
+        if scaling_type == "blockwise2d" and mgr is not None:
+            bwd_scaling = "dynamic"
+            grad_fp8, grad_scale = mgr.quantize_bwd_delayed(
+                (ctx.tensor_id or "linear") + "_bwd",
+                grad_flat,
+            )
+        else:
+            bwd_scaling = "dynamic" if scaling_type in ("per_token", "blockwise", "blockwise2d") else scaling_type
+            grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
 
         # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
         grad_input = dispatch_gemm(
@@ -562,7 +570,7 @@ def quantized_linear(
         scaling_manager: A :class:`~lumen.quantize.ScalingManager`.
         backend: Legacy parameter (ignored, auto-fallback is always used).
         scaling_type: One of ``"delayed"``, ``"dynamic"``, ``"per_token"``,
-            ``"blockwise"``, ``"mxfp8"``, ``"none"``.
+            ``"blockwise"``, ``"blockwise2d"``, ``"mxfp8"``, ``"none"``.
         fp8_dtype: Target FP8 dtype.  ``None`` auto-detects based on GPU
             architecture (``float8_e4m3fnuz`` on gfx942, ``float8_e4m3fn``
             on gfx950+).

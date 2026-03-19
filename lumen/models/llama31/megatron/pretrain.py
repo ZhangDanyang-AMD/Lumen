@@ -222,7 +222,7 @@ def add_pretrain_args(parser):
         "--lumen-fp8-quant-type",
         type=str,
         default="blockwise",
-        choices=["dynamic", "delayed", "blockwise", "per_token", "none", "mxfp8"],
+        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"],
         help="FP8 quantisation type for FP8 attention backends.",
     )
     safe_add_argument(parser, "--linear-fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])

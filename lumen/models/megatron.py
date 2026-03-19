@@ -1071,7 +1071,7 @@ def add_common_megatron_args(parser):
         "--linear-fp8-scaling",
         type=str,
         default="delayed",
-        choices=["dynamic", "delayed", "blockwise", "per_token", "none"],
+        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none"],
     )
     safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
     safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])

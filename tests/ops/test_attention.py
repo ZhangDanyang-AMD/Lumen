@@ -14,7 +14,7 @@ Covers:
   - Cross-attention (seqlen_q != seqlen_kv)
   - Backend selection ("auto" dispatch)
   - aiter_csrc (CK) backend: forward, forward+backward, causal
-  - FP8 quantized attention: blockwise/dynamic/delayed/per_token
+  - FP8 quantized attention: blockwise/blockwise2d/dynamic/delayed/per_token
   - MXFP8 attention (gfx950+ only)
   - return_lse output verification
   - Edge cases: batch_size=1, head_dim_v != head_dim_qk
@@ -90,7 +90,7 @@ FP8_CONFIGS = [
 ]
 FP8_IDS = [repr(c) for c in FP8_CONFIGS]
 
-FP8_QUANT_TYPES = ["blockwise", "dynamic", "delayed", "per_token"]
+FP8_QUANT_TYPES = ["blockwise", "blockwise2d", "dynamic", "delayed", "per_token"]
 
 GQA_CONFIGS = [
     AttnConfig(256, 256, 16, 4, 64, 64),
@@ -453,9 +453,7 @@ def _validate_lse(result, config, batch_size, q, k, sm_scale, label):
     assert lse.dtype == torch.float32
 
     lse_ref = _compute_lse_ref(q, k, sm_scale, causal=False)  # (B, H, SQ)
-    # Triton kernel allocates LSE as (B, H, SQ*2); second half is workspace.
-    lse_trimmed = lse[:, :, : config.seqlen_q]
-    lse_snr = compute_snr(lse_ref, lse_trimmed)
+    lse_snr = compute_snr(lse_ref, lse)
     assert lse_snr > 15, f"{label} LSE SNR: {lse_snr:.1f} dB (need > 15)"
 
 

@@ -52,6 +52,7 @@ class TestScalingType:
             ScalingType.DYNAMIC,
             ScalingType.DELAYED,
             ScalingType.BLOCKWISE,
+            ScalingType.BLOCKWISE2D,
             ScalingType.PER_TOKEN,
             ScalingType.NONE,
         }
@@ -116,6 +117,11 @@ class TestQuantConfigFromStr:
         cfg = QuantConfig.from_str("mxfp8", "blockwise")
         assert cfg.format == QuantFormat.MXFP8
         assert cfg.scaling == ScalingType.BLOCKWISE
+
+    def test_blockwise2d(self):
+        cfg = QuantConfig.from_str("fp8_e4m3", "blockwise2d")
+        assert cfg.format == QuantFormat.FP8_E4M3
+        assert cfg.scaling == ScalingType.BLOCKWISE2D
 
     def test_scaling_alias_current(self):
         cfg = QuantConfig.from_str("fp8_e4m3", "current")

@@ -14,6 +14,7 @@ Covers:
   - quantize round-trip: delayed, dynamic, blockwise — numerical correctness vs golden
   - FP8 param lifecycle: register, mark stale, re-quantize
   - Gradient quantization: quantize_grad_tensor static method — SNR check
+  - quantize_bwd_delayed: cross-iteration delayed scaling for blockwise2d backward
   - reset clears all tracked state
   - Benchmarks: quantize throughput for various recipes and tensor sizes
 """
@@ -298,6 +299,156 @@ class TestGradQuantStatic:
         t = torch.randn(4, 8, device="cuda")
         with pytest.raises(ValueError):
             ScalingManager.quantize_grad_tensor(t, "bogus")
+
+
+# ===================================================================
+# quantize_bwd_delayed — cross-iteration delayed scaling for blockwise2d
+# ===================================================================
+
+
+class TestQuantizeBwdDelayed:
+    """Tests for ScalingManager.quantize_bwd_delayed (blockwise2d backward path)."""
+
+    def test_returns_fp8_and_scale(self):
+        mgr = ScalingManager(recipe="delayed")
+        t = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
+        fp8_t, scale = mgr.quantize_bwd_delayed("grad_bwd", t)
+        assert fp8_t.dtype == mgr.fp8_dtype_bwd
+        assert fp8_t.shape == t.shape
+        assert scale.numel() == 1
+
+    def test_first_call_uses_current_amax(self):
+        """Without history, scale should be derived from the current tensor."""
+        mgr = ScalingManager(recipe="delayed")
+        torch.manual_seed(42)
+        t = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
+        fp8_t, scale = mgr.quantize_bwd_delayed("grad", t)
+
+        fp8_max = mgr._fp8_max_bwd
+        expected_amax = t.abs().amax()
+        expected_scale = mgr._compute_scale(expected_amax, fp8_max)
+        assert torch.allclose(scale, expected_scale, rtol=1e-5)
+
+    def test_records_amax_in_history(self):
+        mgr = ScalingManager(recipe="delayed")
+        t = torch.randn(16, 32, device="cuda", dtype=torch.bfloat16)
+        mgr.quantize_bwd_delayed("grad", t)
+        assert len(mgr.amax_history["grad"]) == 1
+
+    def test_subsequent_call_uses_history(self):
+        """Second call should use the amax recorded from the first call."""
+        mgr = ScalingManager(recipe="delayed")
+        t1 = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16) * 2.0
+        mgr.quantize_bwd_delayed("grad", t1)
+
+        t2 = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16) * 0.5
+        _, scale2 = mgr.quantize_bwd_delayed("grad", t2)
+
+        fp8_max = mgr._fp8_max_bwd
+        expected_amax = t1.abs().amax()
+        expected_scale = mgr._compute_scale(expected_amax, fp8_max)
+        assert torch.allclose(scale2, expected_scale, rtol=1e-5)
+
+    def test_most_recent_algo(self):
+        cfg = QuantConfig(scaling=ScalingType.DELAYED, amax_algo=AmaxAlgo.MOST_RECENT)
+        mgr = ScalingManager(cfg)
+        t1 = torch.ones(8, 16, device="cuda", dtype=torch.bfloat16) * 10.0
+        mgr.quantize_bwd_delayed("grad", t1)
+
+        t2 = torch.ones(8, 16, device="cuda", dtype=torch.bfloat16) * 1.0
+        mgr.quantize_bwd_delayed("grad", t2)
+
+        t3 = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
+        _, scale3 = mgr.quantize_bwd_delayed("grad", t3)
+
+        fp8_max = mgr._fp8_max_bwd
+        expected_amax = t2.abs().amax()
+        expected_scale = mgr._compute_scale(expected_amax, fp8_max)
+        assert torch.allclose(scale3, expected_scale, rtol=1e-5)
+
+    def test_max_algo_uses_global_max(self):
+        cfg = QuantConfig(scaling=ScalingType.DELAYED, amax_algo=AmaxAlgo.MAX)
+        mgr = ScalingManager(cfg)
+        t1 = torch.ones(8, 16, device="cuda", dtype=torch.bfloat16) * 10.0
+        mgr.quantize_bwd_delayed("grad", t1)
+
+        t2 = torch.ones(8, 16, device="cuda", dtype=torch.bfloat16) * 1.0
+        mgr.quantize_bwd_delayed("grad", t2)
+
+        t3 = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
+        _, scale3 = mgr.quantize_bwd_delayed("grad", t3)
+
+        fp8_max = mgr._fp8_max_bwd
+        expected_amax = torch.stack([t1.abs().amax(), t2.abs().amax()]).amax()
+        expected_scale = mgr._compute_scale(expected_amax.to("cuda"), fp8_max)
+        assert torch.allclose(scale3, expected_scale, rtol=1e-5)
+
+    def test_round_trip_snr(self):
+        """quantize_bwd_delayed → dequant round-trip should have decent SNR."""
+        mgr = ScalingManager(recipe="delayed")
+        torch.manual_seed(42)
+        t = torch.randn(64, 128, device="cuda", dtype=torch.bfloat16)
+        fp8_t, scale = mgr.quantize_bwd_delayed("grad", t)
+        reconstructed = fp8_t.to(torch.bfloat16) * scale
+        snr = compute_snr(t, reconstructed)
+        assert snr > 10, f"quantize_bwd_delayed round-trip SNR too low: {snr:.1f} dB"
+
+    def test_history_respects_maxlen(self):
+        mgr = ScalingManager(recipe="delayed", history_len=4)
+        for i in range(10):
+            t = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16) * (i + 1)
+            mgr.quantize_bwd_delayed("grad", t)
+        assert len(mgr.amax_history["grad"]) == 4
+
+    def test_independent_tensor_ids(self):
+        mgr = ScalingManager(recipe="delayed")
+        t1 = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16) * 5.0
+        t2 = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16) * 0.1
+        mgr.quantize_bwd_delayed("grad_a", t1)
+        mgr.quantize_bwd_delayed("grad_b", t2)
+
+        assert len(mgr.amax_history["grad_a"]) == 1
+        assert len(mgr.amax_history["grad_b"]) == 1
+        assert not torch.equal(
+            mgr.amax_history["grad_a"][-1],
+            mgr.amax_history["grad_b"][-1],
+        )
+
+    def test_zero_tensor_no_nan(self):
+        """Zero input should not produce NaN/Inf in scale or output."""
+        mgr = ScalingManager(recipe="delayed")
+        t = torch.zeros(16, 32, device="cuda", dtype=torch.bfloat16)
+        fp8_t, scale = mgr.quantize_bwd_delayed("grad_zero", t)
+        assert not torch.any(torch.isnan(fp8_t.float()))
+        assert not torch.any(torch.isinf(scale))
+
+
+# ===================================================================
+# ScalingManager with blockwise2d recipe
+# ===================================================================
+
+
+class TestBlockwise2DRecipe:
+    """Verify ScalingManager routes blockwise2d through blockwise kernels."""
+
+    def test_get_scale_returns_none(self):
+        mgr = ScalingManager(recipe="blockwise2d")
+        t = torch.randn(4, 8, device="cuda")
+        assert mgr.get_scale("test", t) is None
+
+    def test_quantize_matches_blockwise(self):
+        """blockwise2d quantize should produce same result as blockwise."""
+        torch.manual_seed(42)
+        mgr_bw = ScalingManager(recipe="blockwise")
+        mgr_bw2d = ScalingManager(recipe="blockwise2d")
+        t = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
+
+        fp8_bw, scale_bw = mgr_bw.quantize("w", t)
+        fp8_bw2d, scale_bw2d = mgr_bw2d.quantize("w", t)
+
+        assert torch.equal(fp8_bw, fp8_bw2d)
+        if scale_bw is not None and scale_bw2d is not None:
+            assert torch.allclose(scale_bw, scale_bw2d)
 
 
 # ===================================================================
