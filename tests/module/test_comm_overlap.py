@@ -261,6 +261,7 @@ class TestColumnParallelNonSdma:
             config=config,
             init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
         )
+        torch.nn.init.kaiming_uniform_(m.weight)
         m.use_sdma = False
         m.tp_comm_overlap = False
         m.tp_size = 2
@@ -356,6 +357,7 @@ class TestRowParallelNonSdma:
             config=config,
             init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
         )
+        torch.nn.init.kaiming_uniform_(m.weight)
         m.use_sdma = False
         m.tp_comm_overlap = False
         m.tp_size = 2
