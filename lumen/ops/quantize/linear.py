@@ -496,8 +496,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # case.
         _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
         if _mixed_dtype:
-            grad_bf16 = grad_fp8.to(torch.bfloat16) * grad_scale
-            weight_t_bf16 = weight_fp8.t().contiguous().to(torch.bfloat16) * weight_scale
+            grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+            weight_t_bf16 = (weight_fp8.t().contiguous().float() * weight_scale).bfloat16()
             grad_input = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
         else:
             grad_input = dispatch_gemm(
@@ -528,8 +528,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 bwd_scaling,
             )
         else:
-            grad_bf16 = grad_fp8.to(torch.bfloat16) * grad_scale
-            input_bf16 = input_fp8.to(torch.bfloat16) * input_scale
+            grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+            input_bf16 = (input_fp8.float() * input_scale).bfloat16()
             grad_weight = dispatch_gemm(
                 grad_bf16.t().contiguous(),
                 input_bf16.t().contiguous(),
