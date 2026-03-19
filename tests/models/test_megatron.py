@@ -1293,12 +1293,13 @@ class TestApplyLoraMegatron:
         decoder = SimpleNamespace(layers=[layer])
         model_config = SimpleNamespace(sequence_parallel=False)
 
+        _param = nn.Parameter(torch.randn(4))
         model = mock.MagicMock()
         model.config = model_config
         model.embedding = None
         model.decoder = decoder
         model.output_layer = None
-        model.parameters.return_value = iter([nn.Parameter(torch.randn(4))])
+        model.parameters = mock.Mock(side_effect=lambda: iter([_param]))
         model.modules.return_value = iter([model])
 
         args = SimpleNamespace(lora_rank=4, lora_alpha=16.0, lora_dropout=0.0)
@@ -1332,12 +1333,13 @@ class TestApplyLoraMegatron:
         decoder = SimpleNamespace(layers=[layer])
         model_config = SimpleNamespace(sequence_parallel=False)
 
+        _param = nn.Parameter(torch.randn(4))
         model = mock.MagicMock()
         model.config = model_config
         model.embedding = embedding
         model.decoder = decoder
         model.output_layer = mock_output
-        model.parameters.return_value = iter([nn.Parameter(torch.randn(4))])
+        model.parameters = mock.Mock(side_effect=lambda: iter([_param]))
         model.modules.return_value = iter([model])
 
         args = SimpleNamespace(lora_rank=4, lora_alpha=16.0, lora_dropout=0.0)
