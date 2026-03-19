@@ -519,6 +519,10 @@ def attention_triton_forward_impl(
         bias_strides = (0, 0, 0, 0)
 
     if alibi_slopes is not None:
+        if alibi_slopes.dim() == 1:
+            alibi_slopes = alibi_slopes.unsqueeze(0).expand(batch, -1)
+        elif alibi_slopes.shape[0] == 1 and batch > 1:
+            alibi_slopes = alibi_slopes.expand(batch, -1)
         alibi_strides = (alibi_slopes.stride(0), alibi_slopes.stride(1))
     else:
         alibi_strides = (0, 0)
@@ -1203,6 +1207,10 @@ def attention_mxfp8_forward_triton_impl(
         bias_strides = (0, 0, 0, 0)
 
     if alibi_slopes is not None:
+        if alibi_slopes.dim() == 1:
+            alibi_slopes = alibi_slopes.unsqueeze(0).expand(batch, -1)
+        elif alibi_slopes.shape[0] == 1 and batch > 1:
+            alibi_slopes = alibi_slopes.expand(batch, -1)
         alibi_strides = (alibi_slopes.stride(0), alibi_slopes.stride(1))
     else:
         alibi_strides = (0, 0)
@@ -2002,6 +2010,11 @@ def attention_backward(
     #     return _csrc_fp8_backward(...)
 
     # ── triton fallback ─────────────────────────────────────────────
+    if alibi_slopes is not None:
+        raise NotImplementedError(
+            "ALiBi backward is not supported by the Triton attention kernels. "
+            "Install AITER with CK support (csrc backend) or remove alibi_slopes."
+        )
     return attention_triton_backward_impl(
         do,
         q,
@@ -2206,6 +2219,11 @@ def attention_mxfp8_backward(
     #     return _csrc_mxfp8_backward(...)
 
     # ── triton fallback ─────────────────────────────────────────────
+    if alibi_slopes is not None:
+        raise NotImplementedError(
+            "ALiBi backward is not supported by the Triton MXFP8 attention kernels. "
+            "Install AITER with CK support (csrc backend) or remove alibi_slopes."
+        )
     return attention_triton_mxfp8_backward_triton_impl(
         do=do,
         q=q,

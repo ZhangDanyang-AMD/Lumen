@@ -498,6 +498,17 @@ def attention(
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
 
+    # Normalize alibi_slopes to (B, H) so Triton pointer arithmetic
+    # (off_z * stride_az + off_h * stride_ah) never reads out of bounds.
+    # AITER kernels expect (batch, nheads); (1, H) with stride (H, 1)
+    # would OOB for off_z > 0.  expand() sets stride(0)=0, no copy.
+    if alibi_slopes is not None:
+        batch = q.shape[0]
+        if alibi_slopes.dim() == 1:
+            alibi_slopes = alibi_slopes.unsqueeze(0).expand(batch, -1)
+        elif alibi_slopes.shape[0] == 1 and batch > 1:
+            alibi_slopes = alibi_slopes.expand(batch, -1)
+
     # Resolve "auto": prefer CK csrc when available, fall back to Triton.
     if backend_type == "auto":
         backend_type = "aiter_csrc" if _is_aiter_available() else "aiter_triton"
@@ -765,6 +776,13 @@ def attention_fp8_quant(
 
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
+
+    if alibi_slopes is not None:
+        batch = q.shape[0]
+        if alibi_slopes.dim() == 1:
+            alibi_slopes = alibi_slopes.unsqueeze(0).expand(batch, -1)
+        elif alibi_slopes.shape[0] == 1 and batch > 1:
+            alibi_slopes = alibi_slopes.expand(batch, -1)
 
     # Context-parallelism path
     if cp_param_bundle is not None:

@@ -42,7 +42,7 @@ def _csrc_available():
     try:
         from lumen.kernels.attention.attention_impl import csrc_available
 
-        return csrc_available()
+        return csrc_available("flash_attn_fwd")
     except Exception:
         return False
 
@@ -146,7 +146,11 @@ def _attention_ref_with_window(q, k, v, sm_scale, window_left, window_right, cau
 
 
 def _get_alibi_slopes(nheads, device):
-    """Generate ALiBi slopes for nheads (following AITER convention)."""
+    """Generate ALiBi slopes for nheads.
+
+    Returns shape (nheads,) — the standard 1-D form accepted by both AITER
+    CK and Triton kernels.  Lumen's attention() expands to (B, H) internally.
+    """
     closest_pow2 = 2 ** math.floor(math.log2(nheads))
     base = torch.tensor(2 ** (-(2 ** -(math.log2(closest_pow2) - 3))), dtype=torch.float32, device=device)
     powers = torch.arange(1, 1 + closest_pow2, dtype=torch.int32, device=device)
@@ -156,8 +160,7 @@ def _get_alibi_slopes(nheads, device):
         num_remaining = min(closest_pow2, nheads - closest_pow2)
         extra_powers = torch.arange(1, 1 + 2 * num_remaining, 2, dtype=torch.int32, device=device)
         slopes = torch.cat([slopes, torch.pow(extra_base, extra_powers.float())])
-    # Return (1, nheads) — the Triton kernel accesses stride(0) and stride(1)
-    return slopes[:nheads].unsqueeze(0)
+    return slopes[:nheads]
 
 
 def _attention_ref_with_alibi(q, k, v, sm_scale, alibi_slopes, causal=False):
@@ -407,7 +410,7 @@ class TestALiBiForward:
     @pytest.mark.parametrize("config", ALIBI_CONFIGS[:1], ids=ALIBI_IDS[:1])
     def test_zero_slopes_matches_vanilla(self, config):
         q, k, v, sm_scale = _make_tensors(config)
-        slopes = torch.zeros(1, config.num_head_q, device=q.device, dtype=torch.float32)
+        slopes = torch.zeros(config.num_head_q, device=q.device, dtype=torch.float32)
         out_alibi = attn_ops.attention(q, k, v, softmax_scale=sm_scale, alibi_slopes=slopes)
         out_vanilla = attn_ops.attention(q, k, v, softmax_scale=sm_scale)
         torch.testing.assert_close(out_alibi, out_vanilla, atol=1e-5, rtol=1e-4)

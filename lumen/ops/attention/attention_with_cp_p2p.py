@@ -40,10 +40,10 @@ def _ring_send_recv_kv(
     recv_k = torch.empty_like(send_k)
     recv_v = torch.empty_like(send_v)
 
-    send_k_op = dist.P2POp(dist.isend, send_k.contiguous(), next_rank, group=cp_group)
-    send_v_op = dist.P2POp(dist.isend, send_v.contiguous(), next_rank, group=cp_group)
-    recv_k_op = dist.P2POp(dist.irecv, recv_k, prev_rank, group=cp_group)
-    recv_v_op = dist.P2POp(dist.irecv, recv_v, prev_rank, group=cp_group)
+    send_k_op = dist.P2POp(dist.isend, send_k.contiguous(), group=cp_group, group_peer=next_rank)
+    send_v_op = dist.P2POp(dist.isend, send_v.contiguous(), group=cp_group, group_peer=next_rank)
+    recv_k_op = dist.P2POp(dist.irecv, recv_k, group=cp_group, group_peer=prev_rank)
+    recv_v_op = dist.P2POp(dist.irecv, recv_v, group=cp_group, group_peer=prev_rank)
 
     reqs = dist.batch_isend_irecv([send_k_op, send_v_op, recv_k_op, recv_v_op])
     for req in reqs:
@@ -108,26 +108,29 @@ class AttentionCPP2PFunction(torch.autograd.Function):
 
         for step in range(cp_size):
             is_local = step == 0
-            use_causal = causal and is_local
+            source_rank = (cp_rank - step) % cp_size
+            is_future = causal and source_rank > cp_rank
 
-            out_chunk, lse_chunk = attn_fn(
-                q,
-                current_k,
-                current_v,
-                causal=use_causal,
-                softmax_scale=softmax_scale,
-            )
-
-            if step == 0:
-                out_accum = out_chunk
-                lse_accum = lse_chunk
-            else:
-                out_accum, lse_accum = _online_softmax_update(
-                    out_accum,
-                    lse_accum,
-                    out_chunk,
-                    lse_chunk,
+            if not is_future:
+                use_causal = causal and is_local
+                out_chunk, lse_chunk = attn_fn(
+                    q,
+                    current_k,
+                    current_v,
+                    causal=use_causal,
+                    softmax_scale=softmax_scale,
                 )
+
+                if step == 0:
+                    out_accum = out_chunk
+                    lse_accum = lse_chunk
+                else:
+                    out_accum, lse_accum = _online_softmax_update(
+                        out_accum,
+                        lse_accum,
+                        out_chunk,
+                        lse_chunk,
+                    )
 
             if step < cp_size - 1:
                 current_k, current_v = _ring_send_recv_kv(
@@ -164,27 +167,31 @@ class AttentionCPP2PFunction(torch.autograd.Function):
 
         for step in range(cp_size):
             is_local = step == 0
-            use_causal = ctx.causal and is_local
+            source_rank = (cp_rank - step) % cp_size
+            is_future = ctx.causal and source_rank > cp_rank
 
-            q_req_grad = q.detach().requires_grad_(True)
-            k_req_grad = current_k.detach().requires_grad_(True)
-            v_req_grad = current_v.detach().requires_grad_(True)
+            if not is_future:
+                use_causal = ctx.causal and is_local
 
-            with torch.enable_grad():
-                out_chunk, _ = ctx.attn_fn(
-                    q_req_grad,
-                    k_req_grad,
-                    v_req_grad,
-                    causal=use_causal,
-                    softmax_scale=ctx.softmax_scale,
-                )
-                out_chunk.backward(grad_output)
+                q_req_grad = q.detach().requires_grad_(True)
+                k_req_grad = current_k.detach().requires_grad_(True)
+                v_req_grad = current_v.detach().requires_grad_(True)
 
-            grad_q.add_(q_req_grad.grad)
+                with torch.enable_grad():
+                    out_chunk, _ = ctx.attn_fn(
+                        q_req_grad,
+                        k_req_grad,
+                        v_req_grad,
+                        causal=use_causal,
+                        softmax_scale=ctx.softmax_scale,
+                    )
+                    out_chunk.backward(grad_output)
 
-            if is_local:
-                grad_k.add_(k_req_grad.grad)
-                grad_v.add_(v_req_grad.grad)
+                grad_q.add_(q_req_grad.grad)
+
+                if is_local:
+                    grad_k.add_(k_req_grad.grad)
+                    grad_v.add_(v_req_grad.grad)
 
             if step < cp_size - 1:
                 current_k, current_v = _ring_send_recv_kv(
