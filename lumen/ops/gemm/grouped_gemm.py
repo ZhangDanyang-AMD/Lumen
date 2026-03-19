@@ -44,6 +44,77 @@ from lumen.ops.dispatch import (
 logger = logging.getLogger(__name__)
 
 
+def _build_routing_data_from_group_sizes(group_sizes, total_tokens):
+    """Build aiter RoutingData from Lumen's simple group_sizes tensor.
+
+    Lumen's grouped GEMM API uses expert-sorted tokens with a per-expert
+    count vector.  The aiter fused kernels need a full RoutingData with
+    block-to-expert mapping.  This function bridges the two.
+    """
+    import triton
+    from aiter.ops.triton.moe.moe_routing.routing import (
+        RoutingData,
+        compute_expt_data_torch,
+    )
+
+    n_expts_tot = group_sizes.shape[0]
+    tokens_per_expert = max(1, total_tokens // n_expts_tot)
+    block_m = max(16, min(triton.next_power_of_2(tokens_per_expert), 128))
+    expt_data = compute_expt_data_torch(group_sizes, n_expts_tot, total_tokens, block_m)
+    return RoutingData(
+        block_m=block_m,
+        gate_scal=None,
+        expt_hist=group_sizes,
+        n_expts_tot=n_expts_tot,
+        n_expts_act=1,
+        expt_data=expt_data,
+    )
+
+
+def _quant_blockwise_2d(w, fp8_dtype, block_size=128):
+    """Quantize a 3D weight tensor [E, K, N] with 2D block scales.
+
+    Each expert's [K, N] matrix is divided into [block_size, block_size]
+    blocks.  Per-block amax determines the FP8 scale.
+
+    Returns (w_fp8 [E, K, N], w_scales [E, ceil(K/bs), ceil(N/bs)]).
+    """
+    import triton
+
+    E, K, N = w.shape
+    bs = block_size
+    bk = triton.cdiv(K, bs)
+    bn = triton.cdiv(N, bs)
+    fp8_max = torch.finfo(fp8_dtype).max
+
+    K_pad = bk * bs
+    N_pad = bn * bs
+    need_pad = (K_pad != K) or (N_pad != N)
+
+    w_fp8 = torch.empty(E, K, N, dtype=fp8_dtype, device=w.device)
+    w_scales = torch.empty(E, bk, bn, dtype=torch.float32, device=w.device)
+
+    for e in range(E):
+        we = w[e]
+        if need_pad:
+            we_padded = torch.zeros(K_pad, N_pad, dtype=w.dtype, device=w.device)
+            we_padded[:K, :N] = we
+        else:
+            we_padded = we
+
+        blocks = we_padded.reshape(bk, bs, bn, bs).permute(0, 2, 1, 3)
+        amax = blocks.float().abs().amax(dim=(-2, -1)).clamp(min=1e-12)
+        scales = amax / fp8_max
+        w_scales[e] = scales
+
+        scale_expanded = scales.unsqueeze(-1).unsqueeze(-1)
+        q_blocks = (blocks.float() / scale_expanded).clamp(-fp8_max, fp8_max)
+        q_full = q_blocks.permute(0, 2, 1, 3).reshape(K_pad, N_pad)
+        w_fp8[e] = q_full[:K, :N].to(fp8_dtype)
+
+    return w_fp8, w_scales
+
+
 # ---------------------------------------------------------------------------
 # Lazy imports
 # ---------------------------------------------------------------------------
@@ -167,8 +238,29 @@ def grouped_gemm(
         backends = []
 
         def _moe_blockscale():
+            total_tokens = int(group_sizes.sum().item())
+            routing_data = _build_routing_data_from_group_sizes(group_sizes, total_tokens)
+
+            if lhs.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+                lhs_fp8, lhs_scales = lhs, x_scale
+                rhs_fp8, rhs_scales = rhs, w_scale
+            else:
+                from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
+
+                lhs_2d = lhs.reshape(-1, lhs.shape[-1]).contiguous()
+                lhs_fp8, lhs_scales = quant_fp8_blockwise_impl(lhs_2d, fp8_dtype, axis=1, block_size=block_size)
+                rhs_fp8, rhs_scales = _quant_blockwise_2d(rhs, fp8_dtype, block_size)
+
             fn = _get_moe_gemm_a8w8_blockscale()
-            return fn(lhs, rhs, x_scale, w_scale, group_sizes)
+            return fn(
+                x=lhs_fp8,
+                w=rhs_fp8,
+                x_block_scales=lhs_scales,
+                w_block_scales=rhs_scales,
+                routing_data=routing_data,
+                out_dtype=torch.bfloat16,
+                per_row_x_scale=True,
+            )
 
         try:
             _get_moe_gemm_a8w8_blockscale()
@@ -185,6 +277,8 @@ def grouped_gemm(
                 w_scale,
                 scaling_type,
                 bias,
+                block_size=block_size,
+                fp8_dtype=fp8_dtype,
             )
 
         backends.append((Backend.TRITON, _sequential_fallback))
@@ -243,9 +337,19 @@ def grouped_gemm(
     raise ValueError(f"Unknown scaling_type={scaling_type!r}")
 
 
-def _grouped_gemm_fp8_sequential(lhs, rhs, group_sizes, x_scale, w_scale, scaling_type, bias=None):
+def _grouped_gemm_fp8_sequential(
+    lhs,
+    rhs,
+    group_sizes,
+    x_scale,
+    w_scale,
+    scaling_type,
+    bias=None,
+    block_size=128,
+    fp8_dtype=torch.float8_e4m3fn,
+):
     """Sequential per-expert FP8 GEMM via AITER Triton GEMM backends."""
-    from lumen.ops.quantize.linear import dispatch_gemm
+    from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
 
     outputs = []
     offset = 0
@@ -258,6 +362,12 @@ def _grouped_gemm_fp8_sequential(lhs, rhs, group_sizes, x_scale, w_scale, scalin
         xs = x_scale[g] if x_scale is not None and x_scale.dim() > 0 else x_scale
         ws = w_scale[g] if w_scale is not None and w_scale.dim() > 0 else w_scale
         b_g = bias[g] if bias is not None else None
+
+        if xs is None and scaling_type != "none":
+            x_g, xs = quantize_input(x_g, scaling_type, fp8_dtype, block_size)
+        if ws is None and scaling_type != "none":
+            w_g, ws = quantize_input(w_g, scaling_type, fp8_dtype, block_size)
+
         out_g = dispatch_gemm(x_g, w_g, xs, ws, scaling_type, b_g)
         outputs.append(out_g)
         offset += size

@@ -36,6 +36,7 @@ RUN pip install -r /workspace/Lumen/requirements.txt
 # Environment
 ENV PYTHONPATH="/workspace/Lumen:${PYTHONPATH}"
 ENV HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+ENV MORI_ENABLE_SDMA=1
 
 WORKDIR /workspace/Lumen
 

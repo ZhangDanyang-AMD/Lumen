@@ -18,12 +18,58 @@ Covers:
 Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
 """
 
+import functools
 import os
+import subprocess
+import sys
 
 import pytest
 import torch
 
 from lumen.ops.sdma import is_sdma_available
+
+
+@functools.lru_cache(maxsize=1)
+def _sdma_hardware_available() -> bool:
+    """Probe whether SDMA hardware is usable by doing a minimal mori init in a subprocess.
+
+    Returns True only if a single-rank mori shmem init (including SDMA queue
+    creation) succeeds.  The result is cached for the lifetime of the process.
+    """
+    if not is_sdma_available():
+        return False
+    if torch.cuda.device_count() < 2:
+        return False
+    probe_script = """
+import os, torch, torch.distributed as dist
+os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+os.environ.setdefault("MASTER_PORT", "29399")
+os.environ["MORI_ENABLE_SDMA"] = "1"
+torch.cuda.set_device(0)
+device = torch.device("cuda", 0)
+dist.init_process_group("cpu:gloo,cuda:nccl", rank=0, world_size=1, device_id=device)
+torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+import mori.shmem as shmem
+shmem.shmem_torch_process_group_init("default")
+shmem.shmem_finalize()
+dist.destroy_process_group()
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe_script],
+            capture_output=True,
+            timeout=60,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+_requires_sdma_hw = pytest.mark.skipif(
+    not _sdma_hardware_available(),
+    reason="SDMA hardware not available (mori shmem init fails)",
+)
+
 
 # ===================================================================
 # is_sdma_available
@@ -276,6 +322,7 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
+@_requires_sdma_hw
 class TestSdmaDistributed:
     """Multi-GPU SDMA correctness tests."""
 
@@ -624,6 +671,7 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
         shmem.shmem_finalize()
 
 
+@_requires_sdma_hw
 class TestSdmaVsNcclGolden:
     """SDMA vs NCCL golden comparison with random data."""
 
@@ -859,6 +907,7 @@ def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterat
     shmem.shmem_finalize()
 
 
+@_requires_sdma_hw
 class TestSdmaPerformance:
     """SDMA performance benchmarks.
 

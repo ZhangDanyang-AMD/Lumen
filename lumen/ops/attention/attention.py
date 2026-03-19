@@ -28,6 +28,7 @@ from lumen.kernels.attention.attention_impl import attention_backward as triton_
 from lumen.kernels.attention.attention_impl import attention_forward as triton_fp8_forward
 from lumen.kernels.attention.attention_impl import attention_mxfp8_backward as triton_mxfp8_backward
 from lumen.kernels.attention.attention_impl import attention_mxfp8_forward as triton_mxfp8_forward
+from lumen.kernels.attention.attention_impl import attention_triton_forward_impl
 from lumen.ops.attention.attention_with_cp_p2p import attention_cp_p2p
 
 __all__ = ["attention", "attention_fp8_quant"]
@@ -364,25 +365,30 @@ class AttentionTritonBlockwise2DFunction(torch.autograd.Function):
         k_fp8, k_scale_1d = ScalingManager.quantize_block_fp8(k, FIXED_BLOCK_M, fp8_dt)
         v_fp8, v_scale_1d, p_scale = ScalingManager.quantize_v_fp8(v, fp8_dt)
 
-        (output, softmax_lse, exp_scores, q_out, k_out, _, _, _, _, _, rng_state) = triton_fp8_forward(
+        output, softmax_lse, exp_scores = attention_triton_forward_impl(
             q_fp8,
             k_fp8,
             v_fp8,
-            True,
+            p_scale,
+            q_scale_1d,
+            k_scale_1d,
+            v_scale_1d,
             dropout_p,
             softmax_scale,
             causal,
-            window_size,
+            window_size[0],
+            window_size[1],
             bias,
             alibi_slopes,
             return_softmax,
-            force_triton=True,
+            True,
         )
+        rng_state = None
 
         if is_grad:
             ctx.save_for_backward(
-                q_out,
-                k_out,
+                q_fp8,
+                k_fp8,
                 v_fp8,
                 output,
                 softmax_lse,
