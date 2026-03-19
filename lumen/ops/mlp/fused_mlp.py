@@ -7,40 +7,21 @@
 """Fused MLP operations with AITER backend dispatch.
 
 Provides fused gated and ungated MLP forward operations that dispatch
-to AITER Triton kernels when available, with PyTorch sequential fallback.
+to AITER Triton kernels when available, with decomposed AITER GEMM fallback.
 """
 
-import functools
 import logging
 from typing import Optional
 
 import torch
-import torch.nn.functional as F
+from torch.nn.functional import gelu, relu, silu
+
+from lumen.ops.dispatch import _probe_aiter_fused_gated, _probe_aiter_fused_ungated
+from lumen.ops.quantize.linear import gemm_bf16, quantize_input
 
 logger = logging.getLogger(__name__)
 
 
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_fused_gated():
-    try:
-        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_gated as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_fused_ungated():
-    try:
-        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_ungated as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-# Map Lumen activation names to AITER kernel names
 _ACTIVATION_TO_AITER = {
     "swiglu": "silu",
     "geglu": "gelu",
@@ -51,13 +32,21 @@ _ACTIVATION_TO_AITER = {
 }
 
 _ACTIVATION_FNS = {
-    "swiglu": lambda x: F.silu(x),
-    "geglu": lambda x: F.gelu(x),
-    "reglu": lambda x: F.relu(x),
-    "gelu": lambda x: F.gelu(x),
-    "relu": lambda x: F.relu(x),
-    "silu": lambda x: F.silu(x),
+    "swiglu": silu,
+    "geglu": gelu,
+    "reglu": relu,
+    "gelu": gelu,
+    "relu": relu,
+    "silu": silu,
 }
+
+
+def _gemm(x: torch.Tensor, w: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """N-D input GEMM via AITER: reshapes to 2D, dispatches gemm_bf16, reshapes back."""
+    orig_shape = x.shape
+    x_2d = x.reshape(-1, orig_shape[-1]).contiguous()
+    out = gemm_bf16(x_2d, w, bias)
+    return out.reshape(orig_shape[:-1] + (out.shape[-1],))
 
 
 def fused_gated_mlp(
@@ -72,7 +61,9 @@ def fused_gated_mlp(
 ) -> torch.Tensor:
     """Fused gated MLP: down(gate_act(gate(x)) * up(x)).
 
-    Dispatches to AITER ff_a16w16_fused_gated when available.
+    Dispatches to AITER ff_a16w16_fused_gated (single kernel) when
+    available and no bias is used.  Falls back to decomposed AITER
+    BF16 GEMMs otherwise.
     """
     use_bias = bias_up is not None or bias_gate is not None or bias_down is not None
     if _probe_aiter_fused_gated() and not use_bias:
@@ -82,20 +73,18 @@ def fused_gated_mlp(
             aiter_act = _ACTIVATION_TO_AITER.get(activation, "silu")
             orig_shape = x.shape
             x_2d = x.reshape(-1, x.shape[-1]) if x.dim() > 2 else x
-            # AITER: w_up (N, K) = (2*hidden, input), w_down (N//2, K) = (hidden, input)
-            w_combined = torch.cat([w_gate, w_up], dim=0)  # (2*hidden, input)
-            w_down_aiter = w_down.T  # (hidden, input) for AITER
+            w_combined = torch.cat([w_gate, w_up], dim=0)
+            w_down_aiter = w_down.T
             out = ff_a16w16_fused_gated(x_2d, w_combined, w_down_aiter, dtype=x.dtype, activation=aiter_act)
             return out.reshape(orig_shape[:-1] + (out.shape[-1],))
         except (RuntimeError, TypeError):
             pass
 
-    # PyTorch fallback
-    act_fn = _ACTIVATION_FNS.get(activation, F.silu)
-    gate_out = F.linear(x, w_gate, bias_gate)
-    up_out = F.linear(x, w_up, bias_up)
+    act_fn = _ACTIVATION_FNS.get(activation, silu)
+    gate_out = _gemm(x, w_gate, bias_gate)
+    up_out = _gemm(x, w_up, bias_up)
     hidden = act_fn(gate_out) * up_out
-    return F.linear(hidden, w_down, bias_down)
+    return _gemm(hidden, w_down, bias_down)
 
 
 def fused_mlp(
@@ -108,7 +97,9 @@ def fused_mlp(
 ) -> torch.Tensor:
     """Fused ungated MLP: down(act(up(x))).
 
-    Dispatches to AITER ff_a16w16_fused_ungated when available.
+    Dispatches to AITER ff_a16w16_fused_ungated (single kernel) when
+    available and no bias is used.  Falls back to decomposed AITER
+    BF16 GEMMs otherwise.
     """
     use_bias = bias_up is not None or bias_down is not None
     if _probe_aiter_fused_ungated() and not use_bias:
@@ -118,17 +109,15 @@ def fused_mlp(
             aiter_act = _ACTIVATION_TO_AITER.get(activation, "gelu")
             orig_shape = x.shape
             x_2d = x.reshape(-1, x.shape[-1]) if x.dim() > 2 else x
-            # AITER: w_up (N, K), w_down (N, K); our w_down is (K, N)
             w_down_aiter = w_down.T
             out = ff_a16w16_fused_ungated(x_2d, w_up, w_down_aiter, dtype=x.dtype, activation=aiter_act)
             return out.reshape(orig_shape[:-1] + (out.shape[-1],))
         except (RuntimeError, TypeError):
             pass
 
-    # PyTorch fallback
-    act_fn = _ACTIVATION_FNS.get(activation, F.gelu)
-    hidden = act_fn(F.linear(x, w_up, bias_up))
-    return F.linear(hidden, w_down, bias_down)
+    act_fn = _ACTIVATION_FNS.get(activation, gelu)
+    hidden = act_fn(_gemm(x, w_up, bias_up))
+    return _gemm(hidden, w_down, bias_down)
 
 
 # ---------------------------------------------------------------------------
@@ -136,75 +125,95 @@ def fused_mlp(
 # ---------------------------------------------------------------------------
 
 
+def _quant_activation(t: torch.Tensor, fp8_dtype: torch.dtype):
+    """Quantize an activation tensor to FP8 via AITER dynamic per-tensor quant.
+
+    Returns ``(fp8_uint8_view, scale)`` where scale follows AITER convention
+    (``dequant = fp8.to(float32) * scale``).
+    """
+    t_2d = t.reshape(-1, t.shape[-1]).contiguous()
+    t_fp8, scale = quantize_input(t_2d, "dynamic", fp8_dtype)
+    return t_fp8.view(torch.uint8), scale
+
+
+def _dequant_activation(t_u8: torch.Tensor, scale: torch.Tensor, fp8_dtype: torch.dtype, out_dtype: torch.dtype):
+    """Dequantize a uint8-stored FP8 activation back to working precision."""
+    return (t_u8.view(fp8_dtype).to(torch.float32) * scale).to(out_dtype)
+
+
 class _FusedGatedMLPFP8Store(torch.autograd.Function):
     """Fused gated MLP with FP8 activation storage for backward."""
 
     @staticmethod
     def forward(ctx, x, w_gate, w_up, w_down, activation, bias_gate, bias_up, bias_down, fp8_dtype):
-        act_fn = _ACTIVATION_FNS.get(activation, F.silu)
-        gate_out = F.linear(x, w_gate, bias_gate)
-        up_out = F.linear(x, w_up, bias_up)
+        act_fn = _ACTIVATION_FNS.get(activation, silu)
+        gate_out = _gemm(x, w_gate, bias_gate)
+        up_out = _gemm(x, w_up, bias_up)
         hidden = act_fn(gate_out) * up_out
-        output = F.linear(hidden, w_down, bias_down)
+        output = _gemm(hidden, w_down, bias_down)
 
-        # Store activations in FP8
-        amax_x = x.abs().amax().clamp(min=1e-12)
-        amax_h = hidden.abs().amax().clamp(min=1e-12)
-        fp8_max = torch.finfo(fp8_dtype).max if hasattr(torch.finfo(fp8_dtype), "max") else 448.0
-
-        scale_x = fp8_max / amax_x
-        scale_h = fp8_max / amax_h
-
-        x_fp8 = (x.float() * scale_x).to(fp8_dtype)
-        hidden_fp8 = (hidden.float() * scale_h).to(fp8_dtype)
+        x_u8, scale_x = _quant_activation(x, fp8_dtype)
+        hidden_u8, scale_h = _quant_activation(hidden, fp8_dtype)
 
         ctx.save_for_backward(
-            x_fp8,
-            hidden_fp8,
+            x_u8,
+            hidden_u8,
             w_gate,
             w_up,
             w_down,
-            scale_x.unsqueeze(0),
-            scale_h.unsqueeze(0),
+            scale_x,
+            scale_h,
         )
         ctx.activation = activation
         ctx.has_bias = (bias_gate is not None, bias_up is not None, bias_down is not None)
         ctx.fp8_dtype = fp8_dtype
+        ctx.x_shape = x.shape
+        ctx.bias_gate = bias_gate
+        ctx.bias_up = bias_up
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        x_fp8, hidden_fp8, w_gate, w_up, w_down, scale_x, scale_h = ctx.saved_tensors
+        x_u8, hidden_u8, w_gate, w_up, w_down, scale_x, scale_h = ctx.saved_tensors
+        fp8_dtype = ctx.fp8_dtype
+        dtype = grad_output.dtype
 
-        # Dequantize
-        x = (x_fp8.to(torch.float32) / scale_x).to(grad_output.dtype)
-        hidden = (hidden_fp8.to(torch.float32) / scale_h).to(grad_output.dtype)
+        x_2d = _dequant_activation(x_u8, scale_x, fp8_dtype, dtype)
+        hidden_2d = _dequant_activation(hidden_u8, scale_h, fp8_dtype, dtype)
 
-        # Backward through down projection
-        grad_hidden = grad_output @ w_down
-        grad_w_down = grad_output.reshape(-1, grad_output.shape[-1]).T @ hidden.reshape(-1, hidden.shape[-1])
+        grad_2d = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        # dgrad through down projection
+        grad_hidden_2d = gemm_bf16(grad_2d, w_down.t().contiguous())
+        # wgrad for down projection
+        grad_w_down = gemm_bf16(grad_2d.t().contiguous(), hidden_2d.t().contiguous())
         grad_bias_down = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias[2] else None
 
-        # Backward through activation * up
-        act_fn = _ACTIVATION_FNS.get(ctx.activation, F.silu)
-        gate_out = F.linear(x, w_gate)
-        up_out = F.linear(x, w_up)
+        # Recompute gate/up from dequantized x (include bias for correct activation grad)
+        act_fn = _ACTIVATION_FNS.get(ctx.activation, silu)
+        gate_out_2d = gemm_bf16(x_2d, w_gate, ctx.bias_gate)
+        up_out_2d = gemm_bf16(x_2d, w_up, ctx.bias_up)
 
         with torch.enable_grad():
-            gate_out_g = gate_out.detach().requires_grad_(True)
+            gate_out_g = gate_out_2d.detach().requires_grad_(True)
             act_val = act_fn(gate_out_g)
         act_grad = torch.autograd.grad(act_val.sum(), gate_out_g, retain_graph=False)[0]
 
-        grad_gate = grad_hidden * up_out * act_grad
-        grad_up = grad_hidden * act_fn(gate_out)
+        grad_gate_2d = grad_hidden_2d * up_out_2d * act_grad
+        grad_up_2d = grad_hidden_2d * act_fn(gate_out_2d)
 
-        grad_x = grad_gate @ w_gate + grad_up @ w_up
-        grad_w_gate = grad_gate.reshape(-1, grad_gate.shape[-1]).T @ x.reshape(-1, x.shape[-1])
-        grad_w_up = grad_up.reshape(-1, grad_up.shape[-1]).T @ x.reshape(-1, x.shape[-1])
+        # dgrad through gate+up projections
+        grad_x_2d = gemm_bf16(grad_gate_2d, w_gate.t().contiguous()) + gemm_bf16(grad_up_2d, w_up.t().contiguous())
 
-        grad_bias_gate = grad_gate.sum(dim=tuple(range(grad_gate.dim() - 1))) if ctx.has_bias[0] else None
-        grad_bias_up = grad_up.sum(dim=tuple(range(grad_up.dim() - 1))) if ctx.has_bias[1] else None
+        # wgrad for gate and up projections
+        grad_w_gate = gemm_bf16(grad_gate_2d.t().contiguous(), x_2d.t().contiguous())
+        grad_w_up = gemm_bf16(grad_up_2d.t().contiguous(), x_2d.t().contiguous())
+
+        grad_bias_gate = grad_gate_2d.sum(dim=0) if ctx.has_bias[0] else None
+        grad_bias_up = grad_up_2d.sum(dim=0) if ctx.has_bias[1] else None
+
+        grad_x = grad_x_2d.reshape(ctx.x_shape)
 
         return (
             grad_x,
@@ -239,61 +248,64 @@ class _FusedMLPFP8Store(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, w_up, w_down, activation, bias_up, bias_down, fp8_dtype):
-        act_fn = _ACTIVATION_FNS.get(activation, F.gelu)
-        hidden = act_fn(F.linear(x, w_up, bias_up))
-        output = F.linear(hidden, w_down, bias_down)
+        act_fn = _ACTIVATION_FNS.get(activation, gelu)
+        hidden = act_fn(_gemm(x, w_up, bias_up))
+        output = _gemm(hidden, w_down, bias_down)
 
-        # Store activations in FP8
-        amax_x = x.abs().amax().clamp(min=1e-12)
-        amax_h = hidden.abs().amax().clamp(min=1e-12)
-        fp8_max = torch.finfo(fp8_dtype).max if hasattr(torch.finfo(fp8_dtype), "max") else 448.0
-
-        scale_x = fp8_max / amax_x
-        scale_h = fp8_max / amax_h
-
-        x_fp8 = (x.float() * scale_x).to(fp8_dtype)
-        hidden_fp8 = (hidden.float() * scale_h).to(fp8_dtype)
+        x_u8, scale_x = _quant_activation(x, fp8_dtype)
+        hidden_u8, scale_h = _quant_activation(hidden, fp8_dtype)
 
         ctx.save_for_backward(
-            x_fp8,
-            hidden_fp8,
+            x_u8,
+            hidden_u8,
             w_up,
             w_down,
-            scale_x.unsqueeze(0),
-            scale_h.unsqueeze(0),
+            scale_x,
+            scale_h,
         )
         ctx.activation = activation
         ctx.has_bias = (bias_up is not None, bias_down is not None)
         ctx.fp8_dtype = fp8_dtype
+        ctx.x_shape = x.shape
+        ctx.bias_up = bias_up
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        x_fp8, hidden_fp8, w_up, w_down, scale_x, scale_h = ctx.saved_tensors
+        x_u8, hidden_u8, w_up, w_down, scale_x, scale_h = ctx.saved_tensors
+        fp8_dtype = ctx.fp8_dtype
+        dtype = grad_output.dtype
 
-        # Dequantize
-        x = (x_fp8.to(torch.float32) / scale_x).to(grad_output.dtype)
-        hidden = (hidden_fp8.to(torch.float32) / scale_h).to(grad_output.dtype)
+        x_2d = _dequant_activation(x_u8, scale_x, fp8_dtype, dtype)
+        hidden_2d = _dequant_activation(hidden_u8, scale_h, fp8_dtype, dtype)
 
-        # Backward through down projection
-        grad_hidden = grad_output @ w_down
-        grad_w_down = grad_output.reshape(-1, grad_output.shape[-1]).T @ hidden.reshape(-1, hidden.shape[-1])
+        grad_2d = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        # dgrad through down projection
+        grad_hidden_2d = gemm_bf16(grad_2d, w_down.t().contiguous())
+        # wgrad for down projection
+        grad_w_down = gemm_bf16(grad_2d.t().contiguous(), hidden_2d.t().contiguous())
         grad_bias_down = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias[1] else None
 
-        # Backward through activation
-        act_fn = _ACTIVATION_FNS.get(ctx.activation, F.gelu)
-        up_out = F.linear(x, w_up)
+        # Recompute pre-activation from dequantized x (include bias for correct activation grad)
+        act_fn = _ACTIVATION_FNS.get(ctx.activation, gelu)
+        up_out_2d = gemm_bf16(x_2d, w_up, ctx.bias_up)
 
         with torch.enable_grad():
-            up_out_g = up_out.detach().requires_grad_(True)
+            up_out_g = up_out_2d.detach().requires_grad_(True)
             act_val = act_fn(up_out_g)
         act_grad = torch.autograd.grad(act_val.sum(), up_out_g, retain_graph=False)[0]
 
-        grad_pre_act = grad_hidden * act_grad
-        grad_x = grad_pre_act @ w_up
-        grad_w_up = grad_pre_act.reshape(-1, grad_pre_act.shape[-1]).T @ x.reshape(-1, x.shape[-1])
-        grad_bias_up = grad_pre_act.sum(dim=tuple(range(grad_pre_act.dim() - 1))) if ctx.has_bias[0] else None
+        grad_pre_act_2d = grad_hidden_2d * act_grad
+
+        # dgrad through up projection
+        grad_x_2d = gemm_bf16(grad_pre_act_2d, w_up.t().contiguous())
+        # wgrad for up projection
+        grad_w_up = gemm_bf16(grad_pre_act_2d.t().contiguous(), x_2d.t().contiguous())
+        grad_bias_up = grad_pre_act_2d.sum(dim=0) if ctx.has_bias[0] else None
+
+        grad_x = grad_x_2d.reshape(ctx.x_shape)
 
         return (
             grad_x,

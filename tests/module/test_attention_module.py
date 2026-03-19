@@ -536,6 +536,8 @@ class TestBlockwiseRecomputeOptimization:
             backend_type="aiter_triton_fp8",
             quant_type="mxfp8",
             quant_block_size=quant_block_size,
+            block_m_fwd=quant_block_size,
+            block_n_fwd=quant_block_size,
         )
         out.float().mean().backward()
 

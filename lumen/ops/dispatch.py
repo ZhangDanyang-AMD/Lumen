@@ -321,6 +321,28 @@ def _probe_aiter_triton_fused_moe():
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_gated():
+    """Check if AITER Triton fused gated feed-forward is available."""
+    try:
+        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_gated as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_ungated():
+    """Check if AITER Triton fused ungated feed-forward is available."""
+    try:
+        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_ungated as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Core fallback dispatcher
 # ---------------------------------------------------------------------------
