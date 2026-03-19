@@ -34,6 +34,7 @@ from lumen.models.fsdp import (  # noqa: E402
     _rank0_print,
     add_common_fsdp_args,
     apply_fp8_training,
+    apply_lora,
     patch_norms,
     reset_fp8_state,
 )
@@ -470,6 +471,23 @@ class TestPatchedNormGoldenOutput:
         snr = _compute_snr(golden, out)
         assert snr > 25, f"Patched RMSNorm h={hidden} vs golden SNR: {snr:.1f} dB"
 
+    def test_patched_rmsnorm_with_grad_quant_matches_golden(self):
+        hidden = 64
+        model = nn.Module()
+        model.norm = _FakeRMSNorm(hidden)
+        model.norm.weight.data.uniform_(0.5, 1.5)
+        args = SimpleNamespace(lumen_norm=True, grad_quant_type="fp8")
+        patch_norms(model, args)
+
+        model.norm = model.norm.cuda()
+        torch.manual_seed(7)
+        x = torch.randn(2, 16, hidden, device="cuda", dtype=torch.bfloat16)
+        out = model.norm(x)
+
+        golden = _rmsnorm_golden(x, model.norm.weight.data)
+        snr = _compute_snr(golden, out)
+        assert snr > 25, f"Patched RMSNorm (grad_quant=fp8) vs golden SNR: {snr:.1f} dB"
+
 
 # ===================================================================
 # Norm benchmarks
@@ -726,6 +744,21 @@ class TestResetFP8State:
         with mock.patch("lumen.models.fsdp._rank0_print"):
             reset_fp8_state(model)
 
+    def test_forward_works_after_reset(self):
+        module = nn.Linear(64, 64)
+        module.fp8_initialized = True
+        module._quant_manager = mock.MagicMock()
+        model = nn.Sequential(module)
+
+        with mock.patch("lumen.models.fsdp._rank0_print"):
+            reset_fp8_state(model)
+
+        x = torch.randn(2, 64)
+        out = model(x)
+        assert out.shape == (2, 64)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+
 
 # ===================================================================
 # apply_lora
@@ -751,12 +784,37 @@ class TestApplyLora:
         model = AutoModelForCausalLM.from_config(config)
 
         args = SimpleNamespace(lora_rank=4, lora_alpha=16.0, lora_dropout=0.0)
-
-        from lumen.models.fsdp import apply_lora
-
         peft_model = apply_lora(model, args)
 
         trainable = sum(p.numel() for p in peft_model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in peft_model.parameters())
         assert trainable < total
         assert trainable > 0
+
+    @mock.patch("lumen.models.fsdp.dist")
+    def test_lora_forward_produces_valid_output(self, mock_dist):
+        mock_dist.is_initialized.return_value = False
+
+        try:
+            import peft  # noqa: F401
+        except ImportError:
+            pytest.skip("peft not installed")
+
+        from transformers import AutoConfig, AutoModelForCausalLM
+
+        config = AutoConfig.from_pretrained("gpt2")
+        config.n_layer = 1
+        config.n_head = 2
+        config.n_embd = 64
+        model = AutoModelForCausalLM.from_config(config)
+
+        args = SimpleNamespace(lora_rank=4, lora_alpha=16.0, lora_dropout=0.0)
+        peft_model = apply_lora(model, args)
+
+        x = torch.randint(0, config.vocab_size, (1, 8))
+        with torch.no_grad():
+            out = peft_model(x).logits
+
+        assert out.shape == (1, 8, config.vocab_size)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()

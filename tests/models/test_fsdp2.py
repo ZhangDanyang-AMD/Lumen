@@ -7,6 +7,7 @@
 import argparse
 from unittest.mock import patch
 
+import torch
 import torch.nn as nn
 
 
@@ -46,3 +47,18 @@ class TestApplyFSDP2:
         with patch("torch.distributed.fsdp.fully_shard", side_effect=lambda m, **kw: m):
             result = apply_fsdp2(model, args)
             assert result is model
+
+    def test_forward_works_after_apply(self):
+        from lumen.models.fsdp import apply_fsdp2
+
+        model = nn.Sequential(nn.Linear(8, 4))
+        args = argparse.Namespace(linear_fp8=False)
+
+        with patch("torch.distributed.fsdp.fully_shard", side_effect=lambda m, **kw: m):
+            result = apply_fsdp2(model, args)
+
+        x = torch.randn(2, 8)
+        out = result(x)
+        assert out.shape == (2, 4)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()

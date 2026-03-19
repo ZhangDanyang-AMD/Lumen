@@ -95,8 +95,6 @@ class TestSdmaTpCommAsync:
             SdmaTpComm.reset()
             comm = SdmaTpComm(mock.MagicMock())
             comm._ar_handles = {torch.float32: mock_ar_instance}
-            comm.npes = 2
-            comm.my_pe = 0
 
             t = torch.randn(32, device="cuda", dtype=torch.float32)
             comm.reduce_scatter_dim0_async(t)
@@ -204,7 +202,7 @@ class TestRowParallelOverlap:
         with mock.patch.object(
             m, "_forward_sdma_overlap_row", return_value=torch.randn(4, 128, device="cuda")
         ) as mock_overlap:
-            x = torch.randn(4, 64, device="cuda", dtype=torch.bfloat16)
+            x = torch.randn(4, 32, device="cuda", dtype=torch.bfloat16)
             m.forward(x)
             mock_overlap.assert_called_once()
 
@@ -226,6 +224,6 @@ class TestRowParallelOverlap:
 
         with mock.patch.object(m, "_forward_sdma_post_gemm") as mock_post:
             mock_post.return_value = torch.randn(4, 128, device="cuda")
-            x = torch.randn(4, 64, device="cuda", dtype=torch.bfloat16)
+            x = torch.randn(4, 32, device="cuda", dtype=torch.bfloat16)
             m.forward(x)
             mock_post.assert_called_once()

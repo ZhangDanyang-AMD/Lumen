@@ -429,6 +429,24 @@ class TestPatchRMSNorm:
         _patch_rmsnorm(model)
         assert isinstance(model.norm, LumenRMSNorm), f"Expected replacement for {cls_name}"
 
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_patched_rmsnorm_forward_matches_golden(self, mock_print):
+        from lumen.models.megatron import _patch_rmsnorm
+
+        model = nn.Module()
+        model.norm = _FakeRMSNorm(64)
+        model.norm.weight.data.uniform_(0.5, 1.5)
+        _patch_rmsnorm(model)
+
+        model.norm = model.norm.cuda()
+        torch.manual_seed(0)
+        x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
+        out = model.norm(x)
+
+        golden = _rmsnorm_golden(x, model.norm.weight.data)
+        snr = _compute_snr(golden, out)
+        assert snr > 30, f"Patched RMSNorm vs golden SNR: {snr:.1f} dB"
+
 
 class _FakeRMSNormWithEpsilon(nn.Module):
     """Uses ``epsilon`` instead of ``eps`` — matches some Megatron-Core norms."""
@@ -530,6 +548,26 @@ class TestPatchLayerNorm:
 
         _patch_layernorm(model)
         assert isinstance(model.norm, LumenLayerNorm), f"Expected replacement for {cls_name}"
+
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_patched_layernorm_forward_matches_golden(self, mock_print):
+        from lumen.models.megatron import _patch_layernorm
+
+        model = nn.Module()
+        model.norm = _FakeLayerNorm(64)
+        model.norm.weight.data.uniform_(0.5, 1.5)
+        model.norm.bias.data.uniform_(-0.1, 0.1)
+        _patch_layernorm(model)
+
+        model.norm = model.norm.cuda().bfloat16()
+        torch.manual_seed(0)
+        x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
+        out = model.norm(x)
+
+        bias = model.norm.bias.data if hasattr(model.norm, "bias") and model.norm.bias is not None else None
+        golden = _layernorm_golden(x, model.norm.weight.data, bias=bias)
+        snr = _compute_snr(golden, out)
+        assert snr > 30, f"Patched LayerNorm vs golden SNR: {snr:.1f} dB"
 
 
 class TestPatchAllNorms:
@@ -809,6 +847,23 @@ class TestLossFunc:
         report_tensor = report["lm loss"]
         assert report_tensor[0].item() == 0.0
         assert report_tensor[1].item() == 0
+
+    @mock.patch("lumen.models.megatron.get_args")
+    def test_loss_gradients_flow(self, mock_get_args):
+        mock_get_args.return_value = SimpleNamespace(val_loss_target=None)
+        from lumen.models.megatron import loss_func
+
+        output_tensor = torch.tensor([0.5, 1.0, 0.2], device="cuda", requires_grad=True)
+        loss_mask = torch.tensor([1.0, 1.0, 0.0], device="cuda")
+
+        loss, num_tokens, report = loss_func(loss_mask, output_tensor)
+        loss.backward()
+
+        assert output_tensor.grad is not None
+        assert torch.isfinite(output_tensor.grad).all()
+        assert output_tensor.grad[0].item() != 0.0
+        assert output_tensor.grad[1].item() != 0.0
+        assert output_tensor.grad[2].item() == 0.0
 
 
 # ===================================================================
@@ -1221,8 +1276,9 @@ class TestPatchCrossEntropy:
 
 
 class TestApplyLoraMegatron:
+    @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch("lumen.models.megatron.print_rank_0")
-    def test_wraps_decoder_layers(self, mock_print):
+    def test_wraps_decoder_layers(self, mock_print, mock_rank):
         from megatron.core.transformer.lora_adapter import LoraAdapter
 
         mock_linear_qkv = nn.Linear(16, 48)
@@ -1256,8 +1312,9 @@ class TestApplyLoraMegatron:
         assert isinstance(layer.mlp.linear_fc1, LoraAdapter)
         assert isinstance(layer.mlp.linear_fc2, LoraAdapter)
 
+    @mock.patch("torch.distributed.get_rank", return_value=0)
     @mock.patch("lumen.models.megatron.print_rank_0")
-    def test_wraps_embedding_and_output_layer(self, mock_print):
+    def test_wraps_embedding_and_output_layer(self, mock_print, mock_rank):
         from megatron.core.transformer.lora_adapter import LoraAdapter
 
         mock_linear_qkv = nn.Linear(16, 48)
@@ -1341,6 +1398,47 @@ class TestMakeForwardStep:
             output_tensor, loss_partial = forward_step(iter([None]), mock_model)
 
             assert output_tensor is not None
+            assert callable(loss_partial)
+        finally:
+            meg_mod._warmup_step_counter = orig_counter
+            meg_mod._warmup_completed = orig_completed
+
+    @mock.patch("lumen.models.megatron.get_args")
+    @mock.patch("lumen.models.megatron.get_timers")
+    @mock.patch("lumen.models.megatron.stimer")
+    @mock.patch("lumen.models.megatron.get_attr_wrapped_model")
+    def test_output_matches_model_return(self, mock_gawm, mock_stimer, mock_timers, mock_get_args):
+        import lumen.models.megatron as meg_mod
+
+        orig_counter = meg_mod._warmup_step_counter
+        orig_completed = meg_mod._warmup_completed
+        meg_mod._warmup_step_counter = 0
+        meg_mod._warmup_completed = True
+
+        try:
+            mock_get_args.return_value = SimpleNamespace(warmup_steps=0)
+            mock_timer_obj = mock.MagicMock()
+            mock_timers.return_value = mock_timer_obj
+            mock_timer_obj.return_value = mock.MagicMock()
+            mock_gawm.return_value = None
+
+            expected_output = torch.tensor([1.5, 2.5], device="cuda")
+            batch = (
+                torch.ones(1, 8, dtype=torch.long, device="cuda"),
+                torch.ones(1, 8, dtype=torch.long, device="cuda"),
+                torch.ones(1, 8, device="cuda"),
+                torch.ones(1, 1, 8, 8, dtype=torch.bool, device="cuda"),
+                torch.arange(8, device="cuda").unsqueeze(0),
+            )
+            mock_get_batch = mock.MagicMock(return_value=batch)
+
+            mock_model = mock.MagicMock()
+            mock_model.return_value = expected_output
+
+            forward_step = meg_mod.make_forward_step(mock_get_batch)
+            output_tensor, loss_partial = forward_step(iter([None]), mock_model)
+
+            assert torch.equal(output_tensor, expected_output)
             assert callable(loss_partial)
         finally:
             meg_mod._warmup_step_counter = orig_counter

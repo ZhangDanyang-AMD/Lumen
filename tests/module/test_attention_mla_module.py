@@ -251,14 +251,14 @@ class TestLumenDotProductAttentionMLABenchmark:
         k = torch.randn(sq, b, h, d, device="cuda", dtype=torch.bfloat16) * 0.02
         v = torch.randn(sq, b, h, d, device="cuda", dtype=torch.bfloat16) * 0.02
         for _ in range(3):
-            attn(q, k, v)
+            attn(q, k, v, attention_mask=None)
         torch.cuda.synchronize()
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         iters = 10
         start.record()
         for _ in range(iters):
-            attn(q, k, v)
+            attn(q, k, v, attention_mask=None)
         end.record()
         torch.cuda.synchronize()
         avg_ms = start.elapsed_time(end) / iters

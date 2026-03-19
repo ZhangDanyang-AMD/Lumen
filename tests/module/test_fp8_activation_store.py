@@ -20,8 +20,8 @@ class TestFP8ActivationStoreGatedMLP:
     def test_backward_runs(self):
         from lumen.modules.fused_mlp import LumenGatedMLP
 
-        mlp = LumenGatedMLP(64, 128, fp8_activation_store=True)
-        x = torch.randn(2, 16, 64, requires_grad=True)
+        mlp = LumenGatedMLP(64, 128, fp8_activation_store=True).cuda()
+        x = torch.randn(2, 16, 64, device="cuda", requires_grad=True)
         out = mlp(x)
         loss = out.sum()
         loss.backward()
@@ -65,8 +65,8 @@ class TestFP8ActivationStoreFusedMLP:
     def test_backward_runs(self):
         from lumen.modules.fused_mlp import LumenFusedMLP
 
-        mlp = LumenFusedMLP(64, 128, fp8_activation_store=True)
-        x = torch.randn(2, 16, 64, requires_grad=True)
+        mlp = LumenFusedMLP(64, 128, fp8_activation_store=True).cuda()
+        x = torch.randn(2, 16, 64, device="cuda", requires_grad=True)
         out = mlp(x)
         out.sum().backward()
         assert x.grad is not None

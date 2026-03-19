@@ -77,8 +77,19 @@ class LumenAttention(torch.nn.Module):
         bias: Optional[torch.Tensor] = None,
     ):
         if self._is_fp8:
+            _backend = self.backend_type
+            # attention_fp8_quant only accepts FP8-capable backends
+            # (aiter_triton, aiter_triton_fp8, aiter_csrc_fp8, aiter_asm_fp8).
+            # When the user sets quant_type without changing backend_type from
+            # its default ("aiter_csrc"), _is_fp8 becomes True but the backend
+            # is still the non-FP8 variant.  Map to the corresponding FP8
+            # backend so the dispatch succeeds transparently.
+            if _backend == "aiter_csrc":
+                _backend = "aiter_triton"
+            elif _backend == "aiter_asm":
+                _backend = "aiter_asm_fp8"
             kwargs = {
-                "backend_type": self.backend_type,
+                "backend_type": _backend,
                 "quant_type": self.quant_type or "blockwise",
                 "block_m_fwd": self.block_m_fwd,
                 "block_n_fwd": self.block_n_fwd,

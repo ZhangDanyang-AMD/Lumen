@@ -102,8 +102,8 @@ class TestLumenLinearBackward:
         torch.manual_seed(42)
         torch.cuda.manual_seed(42)
         x = torch.randn(2, 32, 64, device="cuda", dtype=torch.bfloat16) * 0.02
-        w = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True) * 0.02
-        b = torch.zeros(128, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        w = (torch.randn(128, 64, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        b = torch.zeros(128, device="cuda", dtype=torch.bfloat16).requires_grad_(True)
 
         linear = LumenLinear(64, 128, backend_type="triton").cuda().to(torch.bfloat16)
         linear.weight.data.copy_(w)
@@ -113,6 +113,8 @@ class TestLumenLinearBackward:
         out.float().mean().backward()
         dinput_lumen = x_in.grad
         dweight_lumen = linear.weight.grad
+        assert dinput_lumen is not None, "Lumen backward did not populate x_in.grad"
+        assert dweight_lumen is not None, "Lumen backward did not populate linear.weight.grad"
 
         x_ref = x.clone().requires_grad_(True)
         ref = F.linear(x_ref, w, b)
