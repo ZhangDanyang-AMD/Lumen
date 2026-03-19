@@ -34,7 +34,7 @@ from megatron.core.tensor_parallel.mappings import (
     reduce_scatter_to_sequence_parallel_region,
 )
 from megatron.core.tensor_parallel.utils import divide
-from megatron.core.utils import make_sharded_tensors_for_checkpoint
+from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
 __all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear", "_DeferredWgrad"]

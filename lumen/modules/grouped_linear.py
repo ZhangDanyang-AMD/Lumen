@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from megatron.core.tensor_parallel.utils import divide
-from megatron.core.utils import make_sharded_tensors_for_checkpoint
+from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
 from lumen.modules.parallel_linear import _get_tp_group, _pg_size

@@ -28,7 +28,7 @@ from megatron.core.tensor_parallel.mappings import (
     gather_from_sequence_parallel_region,
 )
 from megatron.core.tensor_parallel.utils import divide
-from megatron.core.utils import make_sharded_tensors_for_checkpoint
+from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
 from lumen.modules.parallel_linear import (
