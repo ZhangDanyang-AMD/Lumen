@@ -10,6 +10,8 @@ Covers:
   - SdmaTpComm async APIs (allgather, allreduce, reduce_scatter) with mocks
   - ColumnParallelLinear overlap path selection when tp_comm_overlap=True
   - RowParallelLinear overlap path selection when tp_comm_overlap=True
+  - ColumnParallelLinear non-SDMA forward correctness (use_sdma=False)
+  - RowParallelLinear non-SDMA forward correctness (use_sdma=False)
   - Mock all mori imports since this is unit testing
 """
 
@@ -227,3 +229,172 @@ class TestRowParallelOverlap:
             x = torch.randn(4, 32, device="cuda", dtype=torch.bfloat16)
             m.forward(x)
             mock_post.assert_called_once()
+
+
+# ===================================================================
+# TestColumnParallelNonSdma — non-SDMA forward correctness
+# ===================================================================
+
+
+@mock.patch("lumen.modules.parallel_linear._get_tp_group", return_value=mock.MagicMock())
+@mock.patch("lumen.modules.parallel_linear._pg_size", return_value=2)
+@mock.patch("lumen.modules.parallel_linear._pg_rank", return_value=0)
+@mock.patch("lumen.modules.parallel_linear._use_sdma_from_args", return_value=False)
+@mock.patch("lumen.modules.parallel_linear._tp_comm_overlap_from_args", return_value=False)
+@mock.patch("lumen.modules.parallel_linear.divide", side_effect=lambda a, b: a // b)
+@mock.patch("lumen.modules.parallel_linear._initialize_affine_weight_gpu")
+@mock.patch("lumen.modules.parallel_linear.set_tensor_model_parallel_attributes")
+@mock.patch("lumen.modules.parallel_linear.make_sharded_tensors_for_checkpoint", return_value={})
+@mock.patch("lumen.modules.parallel_linear.copy_to_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.gather_from_sequence_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.gather_from_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.reduce_from_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.reduce_scatter_to_sequence_parallel_region", side_effect=lambda x, **kw: x)
+class TestColumnParallelNonSdma:
+    """Full forward correctness when use_sdma=False (non-SDMA comm paths)."""
+
+    def _make_column(self, sequence_parallel=False, gather_output=False):
+        config = _make_config(sequence_parallel=sequence_parallel, lumen_tp_comm_overlap=False)
+        m = LumenColumnParallelLinear(
+            64,
+            128,
+            config=config,
+            init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+        )
+        m.use_sdma = False
+        m.tp_comm_overlap = False
+        m.tp_size = 2
+        m.sequence_parallel = sequence_parallel
+        m.gather_output = gather_output
+        m.explicit_expert_comm = False
+        return m
+
+    def test_forward_seq_parallel_no_gather(
+        self,
+        mock_rs,
+        mock_reduce,
+        mock_gather_tp,
+        mock_gather_sp,
+        mock_copy,
+        *_,
+    ):
+        m = self._make_column(sequence_parallel=True, gather_output=False)
+        x = torch.randn(4, 4, 64, device="cuda", dtype=torch.bfloat16)
+        out, bias = m.forward(x)
+
+        mock_gather_sp.assert_called_once()
+        assert out.shape == (4, 4, 64)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+
+    def test_forward_no_seq_parallel_gather_output(
+        self,
+        mock_rs,
+        mock_reduce,
+        mock_gather_tp,
+        mock_gather_sp,
+        mock_copy,
+        *_,
+    ):
+        m = self._make_column(sequence_parallel=False, gather_output=True)
+        x = torch.randn(4, 4, 64, device="cuda", dtype=torch.bfloat16)
+        out, bias = m.forward(x)
+
+        mock_gather_tp.assert_called_once()
+        mock_gather_sp.assert_not_called()
+        assert out.shape == (4, 4, 64)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+
+    def test_forward_no_seq_parallel_no_gather(
+        self,
+        mock_rs,
+        mock_reduce,
+        mock_gather_tp,
+        mock_gather_sp,
+        mock_copy,
+        *_,
+    ):
+        m = self._make_column(sequence_parallel=False, gather_output=False)
+        x = torch.randn(4, 4, 64, device="cuda", dtype=torch.bfloat16)
+        out, bias = m.forward(x)
+
+        mock_gather_sp.assert_not_called()
+        mock_gather_tp.assert_not_called()
+        assert out.shape == (4, 4, 64)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+
+
+# ===================================================================
+# TestRowParallelNonSdma — non-SDMA forward correctness
+# ===================================================================
+
+
+@mock.patch("lumen.modules.parallel_linear._get_tp_group", return_value=mock.MagicMock())
+@mock.patch("lumen.modules.parallel_linear._pg_size", return_value=2)
+@mock.patch("lumen.modules.parallel_linear._pg_rank", return_value=0)
+@mock.patch("lumen.modules.parallel_linear._use_sdma_from_args", return_value=False)
+@mock.patch("lumen.modules.parallel_linear._tp_comm_overlap_from_args", return_value=False)
+@mock.patch("lumen.modules.parallel_linear.divide", side_effect=lambda a, b: a // b)
+@mock.patch("lumen.modules.parallel_linear._initialize_affine_weight_gpu")
+@mock.patch("lumen.modules.parallel_linear.set_tensor_model_parallel_attributes")
+@mock.patch("lumen.modules.parallel_linear.make_sharded_tensors_for_checkpoint", return_value={})
+@mock.patch("lumen.modules.parallel_linear.copy_to_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.gather_from_sequence_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.gather_from_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.reduce_from_tensor_model_parallel_region", side_effect=lambda x, **kw: x)
+@mock.patch("lumen.modules.parallel_linear.reduce_scatter_to_sequence_parallel_region", side_effect=lambda x, **kw: x)
+class TestRowParallelNonSdma:
+    """Full forward correctness when use_sdma=False (non-SDMA comm paths)."""
+
+    def _make_row(self, sequence_parallel=False):
+        config = _make_config(sequence_parallel=sequence_parallel, lumen_tp_comm_overlap=False)
+        m = LumenRowParallelLinear(
+            64,
+            128,
+            config=config,
+            init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+        )
+        m.use_sdma = False
+        m.tp_comm_overlap = False
+        m.tp_size = 2
+        m.sequence_parallel = sequence_parallel
+        m.explicit_expert_comm = False
+        return m
+
+    def test_forward_seq_parallel(
+        self,
+        mock_rs,
+        mock_reduce,
+        mock_gather_tp,
+        mock_gather_sp,
+        mock_copy,
+        *_,
+    ):
+        m = self._make_row(sequence_parallel=True)
+        x = torch.randn(4, 32, device="cuda", dtype=torch.bfloat16)
+        out, bias = m.forward(x)
+
+        mock_rs.assert_called_once()
+        assert out.shape == (4, 128)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
+
+    def test_forward_no_seq_parallel(
+        self,
+        mock_rs,
+        mock_reduce,
+        mock_gather_tp,
+        mock_gather_sp,
+        mock_copy,
+        *_,
+    ):
+        m = self._make_row(sequence_parallel=False)
+        x = torch.randn(4, 32, device="cuda", dtype=torch.bfloat16)
+        out, bias = m.forward(x)
+
+        mock_reduce.assert_called_once()
+        assert out.shape == (4, 128)
+        assert not torch.isnan(out).any()
+        assert not torch.isinf(out).any()
