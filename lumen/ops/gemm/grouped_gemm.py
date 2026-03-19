@@ -61,6 +61,7 @@ def _build_routing_data_from_group_sizes(group_sizes, total_tokens):
     tokens_per_expert = max(1, total_tokens // n_expts_tot)
     block_m = max(16, min(triton.next_power_of_2(tokens_per_expert), 128))
     expt_data = compute_expt_data_torch(group_sizes, n_expts_tot, total_tokens, block_m)
+    # gate_scal is unused for expert-sorted tokens (n_expts_act=1, no scatter)
     return RoutingData(
         block_m=block_m,
         gate_scal=None,
@@ -242,6 +243,8 @@ def grouped_gemm(
             routing_data = _build_routing_data_from_group_sizes(group_sizes, total_tokens)
 
             if lhs.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
+                if x_scale is None or w_scale is None:
+                    raise ValueError("Pre-quantized FP8 inputs require explicit x_scale and w_scale")
                 lhs_fp8, lhs_scales = lhs, x_scale
                 rhs_fp8, rhs_scales = rhs, w_scale
             else:
@@ -257,6 +260,7 @@ def grouped_gemm(
                 w=rhs_fp8,
                 x_block_scales=lhs_scales,
                 w_block_scales=rhs_scales,
+                bias=bias,
                 routing_data=routing_data,
                 out_dtype=torch.bfloat16,
                 per_row_x_scale=True,
