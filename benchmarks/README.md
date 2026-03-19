@@ -1,0 +1,90 @@
+# Lumen Benchmarks
+
+Performance benchmarks validating Lumen's key feature optimizations.
+
+## Benchmarks
+
+| # | File | Lumen Features Exercised | Requirements |
+|---|------|--------------------------|-------------|
+| 1 | `bench_kernel_launch.py` | FP8 quantized_linear (7 scaling modes), fused MoE, FP8 activation store, attention backends (csrc/triton), norm+GEMM pipeline | 1 GPU + AITER |
+| 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison | 2+ GPUs |
+| 3 | `bench_fp8_param_allgather.py` | FP8ParamManager on LumenGatedMLP/LumenFusedMLP, dequant hooks, param compression SNR | 1 GPU |
+| 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
+| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU |
+
+## Quick Start
+
+### Single GPU
+
+```bash
+# Run all single-GPU benchmarks
+pytest benchmarks/ -v -s -k "not Distributed and not NCCL and not Sdma"
+
+# Individual benchmarks
+python -m benchmarks.bench_kernel_launch
+python -m benchmarks.bench_rope_fusion
+python -m benchmarks.bench_fp8_param_allgather
+python -m benchmarks.bench_wgrad_delay
+```
+
+### Multi-GPU
+
+```bash
+# 2-GPU communication overlap
+torchrun --nproc_per_node=2 -m benchmarks.bench_comm_overlap
+
+# 8-GPU
+torchrun --nproc_per_node=8 -m benchmarks.bench_comm_overlap
+```
+
+## Feature Coverage
+
+### 1. Single-GPU Kernel Launch Reduction (`bench_kernel_launch.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| `quantized_linear` scaling modes | Latency of all 7 modes: none, delayed, dynamic, per_token, blockwise, blockwise2d, mxfp8 |
+| `fused_moe_triton` | End-to-end fused MoE vs individual `fused_topk` + per-expert GEMMs + `fused_unpermute` |
+| `fp8_activation_store` | `LumenGatedMLP(fp8_activation_store=True)` vs `False`: fwd, bwd, and activation memory |
+| Attention backends | `aiter_csrc` vs `aiter_triton`: causal, GQA (32Q/8KV), sliding window, seqlen sweep |
+| Norm + GEMM pipeline | `rmsnorm` → `quantized_linear` with different FP8 scaling modes |
+
+### 2. Multi-GPU Comm-Compute Overlap (`bench_comm_overlap.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| Column-parallel overlap | Allgather on comm stream, local-shard GEMM on compute stream |
+| Row-parallel overlap | Reduce-scatter on comm stream, GEMM on compute stream |
+| `SdmaTpComm` async | `allgather_dim0_async` / `reduce_scatter_dim0_async` with true SDMA hardware |
+| NCCL vs SDMA | Direct comparison of overlap ratios |
+
+Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
+
+### 3. FP8 Param All-Gather (`bench_fp8_param_allgather.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| `FP8ParamManager` | Applied to `LumenGatedMLP`, `LumenFusedMLP`, multi-layer stacks |
+| Dequant hooks | Forward latency with BF16 vs FP8 params + dequant overhead |
+| Param compression | ~2x memory reduction, per-layer bandwidth savings |
+| Round-trip SNR | Quantization quality (>15 dB param, >10 dB output) |
+
+### 4. RoPE Fusion (`bench_rope_fusion.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| `apply_rotary_pos_emb` | 1D RoPE across S={128..8192}, NeoX vs GPT-J interleaved |
+| `fused_rope` | Q+K fused vs separate `apply_rotary_pos_emb` x2 |
+| `apply_rotary_pos_emb_2d` | Vision 2D RoPE (14x14, 16x16, 32x32) |
+| `apply_rotary_pos_emb_3d` | Video 3D RoPE (4x8x8) |
+| GQA configs | H_kv = {1, 4, 8, 32} with H_q = 32 |
+
+### 5. Wgrad Delay (`bench_wgrad_delay.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| `_DeferredWgrad` API | `defer()` + `execute()` vs eager wgrad |
+| Wgrad-forward overlap | Deferred dW on secondary stream while next-layer forward runs |
+| Two-layer pipeline | End-to-end: layer-2 dW overlaps layer-1 dX |
+| `gradient_accumulation_fusion` | `w.main_grad.add_(dw)` vs `w.grad = dw` |
+| Wgrad-comm overlap | Deferred dW overlaps with reduce-scatter |

@@ -1,0 +1,326 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
+
+"""Benchmark 4 — RoPE fusion latency reduction via Lumen AITER kernels.
+
+Exercises all Lumen RoPE variants:
+
+  * **apply_rotary_pos_emb**:  Standard 1D RoPE (NeoX / GPT-J style).
+  * **fused_rope**:            Q+K fused RoPE (single dispatch for both).
+  * **apply_rotary_pos_emb_2d**: Vision 2D RoPE (height × width).
+  * **apply_rotary_pos_emb_3d**: Video 3D RoPE (temporal × spatial).
+  * **GQA**:                   Fused RoPE with different Q / KV head counts.
+  * **Interleaved**:           GPT-J interleaved vs NeoX half-split.
+
+Run::
+
+    python -m benchmarks.bench_rope_fusion
+    pytest benchmarks/bench_rope_fusion.py -v -s
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+import pytest
+import torch
+
+from benchmarks.bench_utils import (
+    BenchResult,
+    cuda_timer,
+    print_report,
+    require_aiter,
+    require_cuda,
+)
+from benchmarks.conftest import AITER, CUDA
+
+# ---------------------------------------------------------------------------
+# Default dimensions
+# ---------------------------------------------------------------------------
+B, H, D = 2, 32, 128
+ROTARY_DIM = D
+
+
+def _make_cos_sin(seqlen: int, rotary_dim: int, device="cuda", dtype=torch.bfloat16):
+    """Create cos/sin frequency tables."""
+    positions = torch.arange(seqlen, device=device, dtype=torch.float32)
+    dim_half = rotary_dim // 2
+    freqs = 1.0 / (10000.0 ** (torch.arange(0, dim_half, device=device, dtype=torch.float32) / dim_half))
+    angles = torch.outer(positions, freqs)
+    return angles.cos().to(dtype), angles.sin().to(dtype)
+
+
+# ---------------------------------------------------------------------------
+# 1. Standard 1D RoPE — sequence length sweep
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPE1D:
+    """apply_rotary_pos_emb: AITER Triton kernel for standard NeoX RoPE."""
+
+    # Expected: Latency scales linearly with sequence length because RoPE is
+    # an element-wise operation (O(S*H*D)). The AITER Triton kernel fuses the
+    # sin/cos multiply and rotate into a single kernel, avoiding the 4+ separate
+    # PyTorch ops (slice, mul, cat, add) of a naive implementation.
+    @pytest.mark.parametrize("seqlen", [128, 512, 2048, 4096, 8192])
+    def test_seqlen_sweep(self, seqlen):
+        from lumen.ops.rope import apply_rotary_pos_emb
+
+        x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin),
+            label=f"apply_rotary_pos_emb S={seqlen}",
+        )
+        print_report(f"RoPE 1D S={seqlen}", [r])
+        assert r.avg_ms > 0
+
+    # Expected: Both NeoX and GPT-J styles should have similar latency because
+    # the AITER Triton kernel handles the index permutation internally. NeoX
+    # splits the head dim in half (x[:d/2], x[d/2:]); GPT-J interleaves
+    # (x[::2], x[1::2]). The kernel absorbs this layout difference at no cost.
+    def test_neox_vs_gptj(self):
+        """Compare NeoX (half-split) vs GPT-J (interleaved) style."""
+        from lumen.ops.rope import apply_rotary_pos_emb
+
+        seqlen = 2048
+        x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r_neox = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin, interleaved=False),
+            label="RoPE NeoX (interleaved=False)",
+        )
+        r_gptj = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin, interleaved=True),
+            label="RoPE GPT-J (interleaved=True)",
+        )
+        print_report("RoPE: NeoX vs GPT-J Style", [r_neox, r_gptj])
+
+
+# ---------------------------------------------------------------------------
+# 2. Fused Q+K RoPE
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestFusedRoPEQK:
+    """fused_rope: apply RoPE to Q and K in one call."""
+
+    # Expected: fused_rope (Q+K in one dispatch) should be ~1.5-2x faster than
+    # calling apply_rotary_pos_emb twice. The fused kernel reads cos/sin tables
+    # once and applies rotation to both Q and K in a single pass, saving one
+    # full kernel launch and one round of cos/sin memory reads.
+    @pytest.mark.parametrize("seqlen", [512, 2048, 4096])
+    def test_fused_qk(self, seqlen):
+        from lumen.ops.rope import apply_rotary_pos_emb, fused_rope
+
+        q = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r_fused = cuda_timer(
+            lambda: fused_rope(q, k, cos, sin),
+            label=f"fused_rope Q+K S={seqlen}",
+        )
+
+        def _separate():
+            apply_rotary_pos_emb(q, cos, sin)
+            apply_rotary_pos_emb(k, cos, sin)
+
+        r_sep = cuda_timer(_separate, label=f"apply_rotary x2 S={seqlen}")
+
+        speedup = r_sep.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report(f"Fused vs Separate RoPE S={seqlen}", [r_fused, r_sep])
+
+
+# ---------------------------------------------------------------------------
+# 3. GQA RoPE (different Q/KV head counts)
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPEGQA:
+    """Fused RoPE with GQA configurations."""
+
+    # Expected: Latency with fewer KV heads (h_kv=1,4) should be noticeably
+    # lower than h_kv=32 (MHA) because the K tensor is smaller. With h_kv=1
+    # (MQA), K has H/32 the elements of Q. The fused kernel processes Q and K
+    # in parallel threads; fewer K elements = less total work.
+    @pytest.mark.parametrize("h_kv", [1, 4, 8, 32])
+    def test_gqa_head_configs(self, h_kv):
+        from lumen.ops.rope import fused_rope
+
+        seqlen = 2048
+        q = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, h_kv, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r = cuda_timer(
+            lambda: fused_rope(q, k, cos, sin),
+            label=f"fused_rope GQA H_q={H} H_kv={h_kv}",
+        )
+        print_report(f"RoPE GQA H_kv={h_kv}", [r])
+        assert r.avg_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# 4. Vision 2D RoPE
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPE2D:
+    """apply_rotary_pos_emb_2d: 2D RoPE for vision models (ViT etc.)."""
+
+    # Expected: 2D RoPE applies separate rotations for height and width
+    # dimensions in a single kernel launch. Latency should scale with spatial
+    # resolution (H*W). The fused kernel avoids the 2 separate 1D RoPE calls
+    # and the intermediate reshape that a naive 2D implementation would need.
+    @pytest.mark.parametrize("img_size", [(14, 14), (16, 16), (32, 32)])
+    def test_2d_rope_sizes(self, img_size):
+        from lumen.ops.rope import apply_rotary_pos_emb_2d
+
+        img_h, img_w = img_size
+        spatial = img_h * img_w
+        n_heads = 16
+        dim = 64
+        rot_dim = dim // 2
+
+        x = torch.randn(B, spatial, n_heads, dim, device="cuda", dtype=torch.bfloat16)
+        cos_h, sin_h = _make_cos_sin(img_h, rot_dim)
+        cos_w, sin_w = _make_cos_sin(img_w, rot_dim)
+
+        r = cuda_timer(
+            lambda: apply_rotary_pos_emb_2d(x, cos_h, sin_h, cos_w, sin_w, img_h, img_w),
+            label=f"RoPE 2D {img_h}x{img_w}",
+        )
+        print_report(f"RoPE 2D {img_h}x{img_w}", [r])
+        assert r.avg_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# 5. Video 3D RoPE
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPE3D:
+    """apply_rotary_pos_emb_3d: 3D RoPE for video models."""
+
+    # Expected: 3D RoPE fuses temporal (T) and spatial (H, W) rotations into
+    # one kernel. The head dimension is split into 3 equal parts, each rotated
+    # by the corresponding axis frequencies. Without fusion, this would require
+    # 3 separate rotation passes plus complex slicing, making the fused version
+    # significantly faster for video model workloads (T*H*W tokens).
+    def test_3d_rope(self):
+        from lumen.ops.rope import apply_rotary_pos_emb_3d
+
+        T, H_img, W_img = 4, 8, 8
+        spatial = T * H_img * W_img
+        n_heads = 16
+        dim = 192  # must be divisible by 3 for 3D
+
+        x = torch.randn(B, spatial, n_heads, dim, device="cuda", dtype=torch.float32)
+        grid_sizes = torch.tensor([[T, H_img, W_img]], dtype=torch.int32, device="cuda")
+
+        half_dim = dim // 2
+        freqs_per_axis = half_dim // 3
+        freqs = torch.randn(spatial, 3, freqs_per_axis, device="cuda", dtype=torch.float32)
+        freqs_complex = torch.view_as_complex(torch.stack([freqs.cos(), freqs.sin()], dim=-1))
+
+        r = cuda_timer(
+            lambda: apply_rotary_pos_emb_3d(x, grid_sizes, freqs_complex),
+            label=f"RoPE 3D T={T} H={H_img} W={W_img}",
+        )
+        print_report(f"RoPE 3D {T}x{H_img}x{W_img}", [r])
+        assert r.avg_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# 6. Dtype comparison
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPEDtype:
+    """RoPE performance across dtypes."""
+
+    # Expected: float16 and bfloat16 should have nearly identical latency
+    # because both are 16-bit and the Triton kernel uses the same memory
+    # bandwidth. Any difference reflects register-level instruction throughput
+    # differences (e.g., bfloat16 may have slightly different FMA latency on
+    # some AMD architectures).
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_dtype_latency(self, dtype):
+        from lumen.ops.rope import apply_rotary_pos_emb
+
+        seqlen = 2048
+        x = torch.randn(B, H, seqlen, D, device="cuda", dtype=dtype)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM, dtype=dtype)
+
+        r = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin),
+            label=f"RoPE S={seqlen} dtype={dtype}",
+        )
+        print_report(f"RoPE dtype={dtype}", [r])
+        assert r.avg_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# Standalone runner
+# ---------------------------------------------------------------------------
+
+
+def main():
+    require_cuda()
+    require_aiter()
+
+    from lumen.ops.rope import apply_rotary_pos_emb, fused_rope
+
+    results: List[BenchResult] = []
+
+    for seqlen in [128, 512, 2048, 4096, 8192]:
+        x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin),
+            label=f"apply_rotary S={seqlen}",
+        )
+        results.append(r)
+
+    # Fused Q+K
+    seqlen = 2048
+    q = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+    cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+    results.append(cuda_timer(lambda: fused_rope(q, k, cos, sin), label="fused_rope Q+K S=2048"))
+
+    # GQA variants
+    for h_kv in [1, 4, 8]:
+        k_gqa = torch.randn(B, h_kv, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        results.append(
+            cuda_timer(
+                lambda: fused_rope(q, k_gqa, cos, sin),
+                label=f"fused_rope GQA H_kv={h_kv}",
+            )
+        )
+
+    print_report("Lumen RoPE Fusion Benchmarks", results)
+
+
+if __name__ == "__main__":
+    main()

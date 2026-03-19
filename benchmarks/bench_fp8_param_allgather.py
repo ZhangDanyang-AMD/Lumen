@@ -1,0 +1,352 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
+
+"""Benchmark 3 — FP8 param all-gather reduces memory.
+
+Exercises Lumen's ``FP8ParamManager`` feature:
+
+  * **Quantize params**: Convert BF16 model weights → FP8 (E4M3).
+  * **Dequant hooks**: Forward pre-hooks that dequantize before compute.
+  * **Memory savings**: ~2x reduction in param storage and all-gather volume.
+  * **Numerical quality**: Round-trip quant→dequant SNR.
+  * **End-to-end**: ``LumenGatedMLP`` with FP8 params — latency & accuracy.
+
+Run::
+
+    python -m benchmarks.bench_fp8_param_allgather
+    pytest benchmarks/bench_fp8_param_allgather.py -v -s
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+import pytest
+import torch
+import torch.nn as nn
+
+from benchmarks.bench_utils import (
+    BenchResult,
+    cuda_timer,
+    format_bytes,
+    print_report,
+    require_cuda,
+)
+from benchmarks.conftest import CUDA
+
+# ---------------------------------------------------------------------------
+# Dimensions
+# ---------------------------------------------------------------------------
+HIDDEN = 4096
+FFN_HIDDEN = 11008
+N_LAYERS = 32
+
+
+def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
+    """Build an nn.Linear stack mimicking transformer MLP layers.
+
+    FP8ParamManager operates on nn.Linear (checks ``isinstance(module,
+    nn.Linear)``), so we use standard Linear layers to model the
+    gate/up/down projections of each transformer layer.
+    """
+    layers = []
+    for _ in range(n_layers):
+        layers.extend(
+            [
+                nn.Linear(hidden, ffn, bias=False),  # gate_proj
+                nn.Linear(hidden, ffn, bias=False),  # up_proj
+                nn.Linear(ffn, hidden, bias=False),  # down_proj
+                nn.Linear(hidden, hidden, bias=False),  # qkv_proj
+            ]
+        )
+    return nn.Sequential(*layers)
+
+
+# ---------------------------------------------------------------------------
+# 1. FP8ParamManager on nn.Linear stacks (matching Lumen shapes)
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+class TestFP8ParamManagerCompression:
+    """FP8ParamManager applied to nn.Linear stacks with Lumen-scale shapes."""
+
+    # Expected: ~2x memory reduction. BF16 uses 2 bytes/element; FP8 uses
+    # 1 byte/element plus a small per-tensor scale (4 bytes). For large weight
+    # matrices (e.g., 4096x11008), the scale overhead is negligible, yielding
+    # close to 2x compression. This directly halves all-gather volume in TP.
+    def test_single_layer_savings(self):
+        """Quantize a single layer's linears to FP8."""
+        from lumen.quantize.fp8_params import FP8ParamManager
+
+        model = _build_mlp_stack(n_layers=1).to(device="cuda", dtype=torch.bfloat16)
+        bf16_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+
+        mgr = FP8ParamManager()
+        n_quant = mgr.quantize_params(model)
+
+        fp8_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+        scale_overhead = n_quant * 4
+        total_fp8 = fp8_bytes + scale_overhead
+        ratio = bf16_bytes / total_fp8
+
+        print(f"\n  Single layer ({n_quant} tensors quantized)")
+        print(f"  BF16: {format_bytes(bf16_bytes)}")
+        print(f"  FP8:  {format_bytes(total_fp8)}")
+        print(f"  Compression: {ratio:.2f}x")
+        assert ratio > 1.9, f"Expected ~2x, got {ratio:.2f}x"
+
+    # Expected: Same ~2x compression as single layer, confirming that
+    # FP8ParamManager scales across the full model. The per-tensor scale
+    # overhead becomes even more negligible with more parameters, so the
+    # compression ratio should be at least 1.9x across 4 layers (16 linears).
+    def test_multi_layer_savings(self):
+        """Quantize a 4-layer stack to FP8."""
+        from lumen.quantize.fp8_params import FP8ParamManager
+
+        model = _build_mlp_stack(n_layers=4).to(device="cuda", dtype=torch.bfloat16)
+        bf16_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+
+        mgr = FP8ParamManager()
+        n_quant = mgr.quantize_params(model)
+        fp8_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+        saved = mgr.memory_savings_bytes(model)
+
+        ratio = bf16_bytes / (fp8_bytes + n_quant * 4)
+        print(f"\n  4-layer stack: {n_quant} tensors, {ratio:.2f}x compression")
+        print(f"  Estimated savings: {format_bytes(saved)}")
+        assert ratio > 1.9
+
+
+# ---------------------------------------------------------------------------
+# 2. Dequant hooks — forward latency with FP8 params
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+class TestFP8DequantHookLatency:
+    """Forward latency of nn.Linear with FP8 param dequant hooks vs BF16."""
+
+    # Expected: FP8 params with dequant hooks add small overhead (<10%) over
+    # BF16 forward. The dequant hook runs a fast FP8→BF16 cast before each
+    # nn.Linear forward. For large matrices, GEMM dominates and the cast is
+    # nearly free. The benefit is 2x less memory, enabling larger models to
+    # fit in GPU memory and halving all-gather communication in TP training.
+    def test_bf16_vs_fp8_forward(self):
+        from lumen.quantize.fp8_params import FP8ParamManager
+
+        x = torch.randn(2, 2048, HIDDEN, device="cuda", dtype=torch.bfloat16)
+
+        # BF16 baseline
+        model_bf16 = nn.Sequential(
+            nn.Linear(HIDDEN, FFN_HIDDEN, bias=False),
+            nn.SiLU(),
+            nn.Linear(FFN_HIDDEN, HIDDEN, bias=False),
+        ).to(device="cuda", dtype=torch.bfloat16)
+        r_bf16 = cuda_timer(lambda: model_bf16(x), label="Linear forward (BF16 params)")
+
+        # FP8 params with dequant hooks
+        model_fp8 = nn.Sequential(
+            nn.Linear(HIDDEN, FFN_HIDDEN, bias=False),
+            nn.SiLU(),
+            nn.Linear(FFN_HIDDEN, HIDDEN, bias=False),
+        ).to(device="cuda", dtype=torch.bfloat16)
+        mgr = FP8ParamManager()
+        mgr.quantize_params(model_fp8)
+        mgr.register_dequant_hooks(model_fp8)
+
+        r_fp8 = cuda_timer(lambda: model_fp8(x), label="Linear forward (FP8 params + dequant)")
+
+        overhead = (r_fp8.avg_ms - r_bf16.avg_ms) / max(r_bf16.avg_ms, 1e-6) * 100
+        r_fp8.extra["overhead"] = f"{overhead:+.1f}%"
+        print_report("FP8 Param Forward Latency", [r_bf16, r_fp8])
+
+
+# ---------------------------------------------------------------------------
+# 3. Quant/dequant primitive latency
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+class TestFP8QuantDequantLatency:
+    """Latency of quantize_param_to_fp8 / dequantize_param_from_fp8."""
+
+    # Expected: Quant and dequant are both memory-bound element-wise ops.
+    # Quant (BF16→FP8) finds amax then divides+casts; dequant (FP8→BF16)
+    # divides by scale then casts. Dequant should be slightly faster than
+    # quant because it skips the absmax reduction pass. Larger shapes (FFN gate)
+    # take proportionally longer due to more memory traffic.
+    @pytest.mark.parametrize(
+        "shape,name",
+        [
+            ((HIDDEN, HIDDEN), "QKV"),
+            ((FFN_HIDDEN, HIDDEN), "FFN gate"),
+            ((HIDDEN, FFN_HIDDEN), "FFN down"),
+        ],
+    )
+    def test_quant_dequant(self, shape, name):
+        from lumen.quantize.fp8_params import (
+            dequantize_param_from_fp8,
+            quantize_param_to_fp8,
+        )
+
+        weight = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
+
+        r_q = cuda_timer(lambda: quantize_param_to_fp8(weight), label=f"quantize {name} {shape}")
+        fp8_w, scale = quantize_param_to_fp8(weight)
+        r_d = cuda_timer(
+            lambda: dequantize_param_from_fp8(fp8_w, scale),
+            label=f"dequantize {name} {shape}",
+        )
+        print_report(f"FP8 quant/dequant: {name}", [r_q, r_d])
+
+
+# ---------------------------------------------------------------------------
+# 4. All-gather bandwidth simulation (per-layer)
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+class TestFP8AllgatherBandwidth:
+    """Simulate all-gather volume for a full 7B model: BF16 vs FP8."""
+
+    # Expected: ~2x bandwidth reduction. A 7B model has ~7 billion BF16
+    # params = ~14 GB. FP8 params = ~7 GB + negligible scale overhead.
+    # In TP all-gather, each GPU broadcasts its shard to all peers; FP8
+    # halves the bytes on the interconnect, directly reducing communication
+    # time which is often the TP bottleneck at scale.
+    def test_7b_allgather_volume(self):
+        per_layer_shapes = [
+            ("gate", FFN_HIDDEN, HIDDEN),
+            ("up", FFN_HIDDEN, HIDDEN),
+            ("down", HIDDEN, FFN_HIDDEN),
+            ("qkv", HIDDEN * 3, HIDDEN),
+        ]
+
+        total_bf16 = 0
+        total_fp8 = 0
+        for name, rows, cols in per_layer_shapes:
+            numel = rows * cols
+            total_bf16 += numel * 2 * N_LAYERS
+            total_fp8 += (numel * 1 + 4) * N_LAYERS  # 1 byte data + 4 bytes scale
+
+        ratio = total_bf16 / total_fp8
+        print(f"\n  Simulated {N_LAYERS}-layer 7B all-gather volume:")
+        print(f"  BF16: {format_bytes(total_bf16)}")
+        print(f"  FP8:  {format_bytes(total_fp8)}")
+        print(f"  Bandwidth reduction: {ratio:.2f}x")
+        assert ratio > 1.9
+
+
+# ---------------------------------------------------------------------------
+# 5. Numerical quality — round-trip SNR
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+class TestFP8ParamSNR:
+    """Verify numerical quality of FP8 param compression."""
+
+    # Expected: SNR > 15 dB. FP8 E4M3 has 3 mantissa bits (vs BF16's 7),
+    # giving ~23 dB theoretical SNR for uniform-distributed data. For
+    # normally-distributed weights, per-tensor scaling preserves most dynamic
+    # range. Values near zero suffer more quantization noise, but the overall
+    # SNR for transformer weights typically exceeds 18-25 dB.
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_roundtrip_snr(self, shape):
+        from lumen.quantize.fp8_params import (
+            dequantize_param_from_fp8,
+            quantize_param_to_fp8,
+        )
+
+        weight = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
+        fp8_w, scale = quantize_param_to_fp8(weight)
+        recovered = dequantize_param_from_fp8(fp8_w, scale, torch.bfloat16)
+
+        signal_power = (weight.float() ** 2).mean()
+        noise_power = ((weight.float() - recovered.float()) ** 2).mean()
+        snr_db = 10 * torch.log10(signal_power / noise_power).item()
+
+        print(f"\n  FP8 param round-trip SNR {shape}: {snr_db:.1f} dB")
+        assert snr_db > 15, f"FP8 param SNR too low: {snr_db:.1f} dB"
+
+    # Expected: Model output SNR > 10 dB. Quantization error accumulates
+    # through multiple layers (Linear → SiLU → Linear), but per-tensor FP8
+    # preserves enough precision for training convergence. Lower than per-param
+    # SNR because errors compound through nonlinearities. This validates that
+    # FP8 param storage is viable for training without significant accuracy loss.
+    def test_linear_stack_output_snr(self):
+        """Compare model output with BF16 vs FP8 params."""
+        from lumen.quantize.fp8_params import FP8ParamManager
+
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(256, 512, bias=False),
+            nn.SiLU(),
+            nn.Linear(512, 256, bias=False),
+        ).to(device="cuda", dtype=torch.bfloat16)
+        x = torch.randn(2, 32, 256, device="cuda", dtype=torch.bfloat16)
+
+        with torch.no_grad():
+            ref_out = model(x).clone()
+
+        mgr = FP8ParamManager()
+        mgr.quantize_params(model)
+        mgr.register_dequant_hooks(model)
+
+        with torch.no_grad():
+            fp8_out = model(x)
+
+        signal = (ref_out.float() ** 2).mean()
+        noise = ((ref_out.float() - fp8_out.float()) ** 2).mean()
+        snr_db = 10 * torch.log10(signal / noise).item()
+
+        print(f"\n  Model output SNR (BF16 vs FP8 params): {snr_db:.1f} dB")
+        assert snr_db > 10, f"Output SNR too low: {snr_db:.1f} dB"
+
+
+# ---------------------------------------------------------------------------
+# Standalone runner
+# ---------------------------------------------------------------------------
+
+
+def main():
+    require_cuda()
+
+    from lumen.quantize.fp8_params import (
+        FP8ParamManager,
+        dequantize_param_from_fp8,
+        quantize_param_to_fp8,
+    )
+
+    results: List[BenchResult] = []
+
+    # Quant/dequant latency
+    for name, shape in [("QKV", (HIDDEN * 3, HIDDEN)), ("FFN", (FFN_HIDDEN, HIDDEN))]:
+        w = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
+        r_q = cuda_timer(lambda: quantize_param_to_fp8(w), label=f"quantize {name}")
+        fp8_w, sc = quantize_param_to_fp8(w)
+        r_d = cuda_timer(lambda: dequantize_param_from_fp8(fp8_w, sc), label=f"dequantize {name}")
+        results.extend([r_q, r_d])
+
+    # Linear stack with FP8 params
+    model = _build_mlp_stack(n_layers=4).to(device="cuda", dtype=torch.bfloat16)
+    bf16_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+    mgr = FP8ParamManager()
+    n_quant = mgr.quantize_params(model)
+    fp8_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+
+    r_mem = BenchResult(name="4-layer BF16→FP8 compression", avg_ms=0)
+    r_mem.extra["bf16"] = format_bytes(bf16_bytes)
+    r_mem.extra["fp8"] = format_bytes(fp8_bytes)
+    r_mem.extra["ratio"] = round(bf16_bytes / (fp8_bytes + n_quant * 4), 2)
+    results.append(r_mem)
+
+    print_report("Lumen FP8 Param All-Gather", results)
+
+
+if __name__ == "__main__":
+    main()
