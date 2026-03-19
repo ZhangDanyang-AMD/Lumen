@@ -357,15 +357,17 @@ def try_backends(
     """Try each ``(backend, fn)`` pair in order; return first success.
 
     On ``RuntimeError``, ``NotImplementedError``, ``TypeError``,
-    ``ValueError``, or Triton ``CompilationError`` from a backend, logs
-    a warning and falls through to the next.  If all fail, raises the
-    last exception.
+    ``ValueError``, ``IndexError``, ``KeyError``, or Triton
+    ``CompilationError`` from a backend, logs a warning and falls
+    through to the next.  ``IndexError`` / ``KeyError`` are included
+    because AITER JIT wrappers raise ``map::at`` when a kernel config
+    lookup fails.  If all fail, raises the last exception.
 
     A ``torch.cuda.synchronize()`` is issued after each backend call so
     that asynchronous GPU errors are detected immediately, allowing the
     fallback chain to actually recover from kernel failures.
     """
-    _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
+    _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError, IndexError, KeyError)
     if _TritonCompilationError is not None:
         _catchable = _catchable + (_TritonCompilationError,)
     if _TritonOutOfResources is not None:

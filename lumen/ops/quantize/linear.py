@@ -490,39 +490,39 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
         # In hybrid mode (e.g. E4M3 fwd / E5M2 bwd), weight_fp8 was saved
-        # as the fwd dtype.  FP8 GEMM kernels require both operands to share
-        # a dtype, so cast weight when they differ.  E4M3→E5M2 loses 1 bit
-        # of mantissa but avoids misinterpreting the binary representation.
-        weight_dgrad = weight_fp8
-        if weight_dgrad.dtype != grad_fp8.dtype:
-            weight_dgrad = weight_dgrad.to(grad_fp8.dtype)
-        grad_input = dispatch_gemm(
-            grad_fp8,
-            weight_dgrad.t().contiguous(),
-            grad_scale,
-            weight_scale,
-            bwd_scaling,
-        )
+        # as the forward dtype.  AITER FP8 GEMM kernels do not support
+        # mixed-dtype operands (CK rejects, Triton misinterprets, hipBLASLt
+        # has no tuned config for E5M2).  Dequantize both to BF16 in that
+        # case.
+        _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
+        if _mixed_dtype:
+            grad_bf16 = grad_fp8.to(torch.bfloat16) * grad_scale
+            weight_t_bf16 = weight_fp8.t().contiguous().to(torch.bfloat16) * weight_scale
+            grad_input = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
+        else:
+            grad_input = dispatch_gemm(
+                grad_fp8,
+                weight_fp8.t().contiguous(),
+                grad_scale,
+                weight_scale,
+                bwd_scaling,
+            )
         grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
 
         # wgrad: grad^T @ input  →  dispatch(grad^T, input^T)
         # AITER's per-tensor FP8 GEMM backends (hipBLASLt / CK) crash with
         # uncatchable SIGABRT on transposed wgrad tensors regardless of
         # dimension, so always dequantize to BF16 before computing wgrad.
-        # mxfp8 / blockwise wgrad would use different GEMM paths and may
-        # support FP8 wgrad in the future.
-        # In hybrid mode, input_fp8 (E4M3) and grad_fp8 (E5M2) may differ;
-        # cast input to match grad dtype for FP8 GEMM compatibility.
+        # In hybrid mode, the same mixed-dtype constraint applies.
         _MIN_FP8_K = 64
         wgrad_k = grad_fp8.shape[0]
-        _use_fp8_wgrad = ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic")
+        _use_fp8_wgrad = (
+            ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic") and not _mixed_dtype
+        )
         if _use_fp8_wgrad:
-            input_wgrad = input_fp8
-            if input_wgrad.dtype != grad_fp8.dtype:
-                input_wgrad = input_wgrad.to(grad_fp8.dtype)
             grad_weight = dispatch_gemm(
                 grad_fp8.t().contiguous(),
-                input_wgrad.t().contiguous(),
+                input_fp8.t().contiguous(),
                 grad_scale,
                 input_scale,
                 bwd_scaling,

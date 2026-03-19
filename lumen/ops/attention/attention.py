@@ -646,11 +646,35 @@ def attention(
         _internal_return_lse = return_lse or _needs_grad
 
         # CK csrc requires bias as 2D [sq, sk] — one bias broadcast across
-        # all batches and heads.  Only squeeze when that is semantically safe.
+        # all batches and heads.  Squeeze (1,1,sq,sk) silently; route
+        # per-head / per-batch bias directly to Triton (csrc can't handle it).
         _csrc_bias = bias
+        _csrc_bias_unsupported = False
         if _csrc_bias is not None and _csrc_bias.dim() == 4:
             if _csrc_bias.shape[0] == 1 and _csrc_bias.shape[1] == 1:
                 _csrc_bias = _csrc_bias.squeeze(0).squeeze(0)
+            else:
+                _csrc_bias_unsupported = True
+        if _csrc_bias is not None and _csrc_bias.dim() == 3:
+            _csrc_bias_unsupported = True
+
+        if _csrc_bias_unsupported:
+            return AttentionTritonFunction.apply(
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                bias,
+                alibi_slopes,
+                return_lse,
+                return_attn_probs,
+                torch.is_grad_enabled(),
+                False,
+                grad_quant_type,
+            )
 
         try:
             result = flash_attn_func(
