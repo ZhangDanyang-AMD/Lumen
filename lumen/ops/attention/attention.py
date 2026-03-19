@@ -644,6 +644,16 @@ def attention(
         _return_softmax = return_attn_probs and dropout_p > 0
         _needs_grad = torch.is_grad_enabled() and any(t.requires_grad for t in [q, k, v])
         _internal_return_lse = return_lse or _needs_grad
+
+        # CK csrc requires bias as 2D [sq, sk].  Squeeze higher dims when
+        # they are broadcastable (batch=1, heads=1).
+        _csrc_bias = bias
+        if _csrc_bias is not None and _csrc_bias.dim() == 4:
+            if _csrc_bias.shape[0] == 1 and _csrc_bias.shape[1] == 1:
+                _csrc_bias = _csrc_bias.squeeze(0).squeeze(0)
+            else:
+                _csrc_bias = _csrc_bias.view(-1, _csrc_bias.shape[-2], _csrc_bias.shape[-1])[0]
+
         try:
             result = flash_attn_func(
                 q,
@@ -653,7 +663,7 @@ def attention(
                 softmax_scale=softmax_scale,
                 causal=causal,
                 window_size=window_size,
-                bias=bias,
+                bias=_csrc_bias,
                 alibi_slopes=alibi_slopes,
                 deterministic=deterministic,
                 return_lse=_internal_return_lse,
