@@ -77,6 +77,18 @@
 | blockwise | CK (`gemm_a8w8_blockscale`) → Triton | `a8w8_blockscale_tuned_gemm.csv` |
 | mxfp8 | Triton only (`gemm_mxfp8`) | None |
 
+Note: `blockwise2d` does NOT dispatch through GEMM — it is attention-only.
+
+## FP8 Attention Dispatch
+
+| Quant Type | Autograd Function | Scale Shape |
+|---|---|---|
+| `blockwise` | `AttentionTritonFunction` | 1D: `[B, H, ceil(S/bm)]` |
+| `blockwise2d` | `AttentionTritonBlockwise2DFunction` | 2D: `[B, H, S//bm, D//bn]` |
+| `mxfp8` | `AttentionTritonMXFP8Function` | MXFP8 block scales |
+
+`blockwise2d` uses `Blockwise2DScaleManager` to cache FP8 Q/K/V tensors and scales across forward/backward. Internally the Triton kernel still receives 1D block scales (via `quantize_block_fp8` for Q/K, per-tensor for V).
+
 ## Grouped GEMM
 
 - BF16: `aiter.ops.triton.gmm`

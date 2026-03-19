@@ -58,7 +58,7 @@ def my_op(x, ...):
 
 ## FP8 Quantization
 
-### Scaling Types
+### Scaling Types — GEMM
 
 | Type | Backends (priority) | Backward Constraint |
 |------|--------------------|--------------------|
@@ -69,6 +69,16 @@ def my_op(x, ...):
 | `mxfp8` | Triton only | No FP8 wgrad |
 
 **Scale misalignment:** Per-tensor scalar scales survive `weight.t()`. Per-token `(N,1)`, blockwise `(N,K/bs)`, and mxfp8 block scales become misaligned — FP8 backward restricted to `["delayed", "dynamic", "none"]`.
+
+### Scaling Types — Attention
+
+| Type | Backend | Mechanism |
+|------|---------|-----------|
+| `blockwise` | Triton (`AttentionTritonFunction`) | 1D block quant per Q/K/V tensor |
+| `blockwise2d` | Triton (`AttentionTritonBlockwise2DFunction`) | 2D block scales `[B, H, S//bm, D//bn]` via `Blockwise2DScaleManager` |
+| `mxfp8` | Triton (`AttentionTritonMXFP8Function`) | MXFP8 block scales |
+
+`blockwise2d` is **Lumen-only** (no TE equivalent). The `Blockwise2DScaleManager` caches FP8-quantized Q/K/V and their scales across forward/backward, allowing backward to skip re-quantization and reuse the dO scale across iterations.
 
 ### Deriving Constants
 
