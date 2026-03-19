@@ -489,9 +489,16 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
 
         # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
+        # In hybrid mode (e.g. E4M3 fwd / E5M2 bwd), weight_fp8 was saved
+        # as the fwd dtype.  FP8 GEMM kernels require both operands to share
+        # a dtype, so cast weight when they differ.  E4M3→E5M2 loses 1 bit
+        # of mantissa but avoids misinterpreting the binary representation.
+        weight_dgrad = weight_fp8
+        if weight_dgrad.dtype != grad_fp8.dtype:
+            weight_dgrad = weight_dgrad.to(grad_fp8.dtype)
         grad_input = dispatch_gemm(
             grad_fp8,
-            weight_fp8.t().contiguous(),
+            weight_dgrad.t().contiguous(),
             grad_scale,
             weight_scale,
             bwd_scaling,
@@ -504,13 +511,18 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # dimension, so always dequantize to BF16 before computing wgrad.
         # mxfp8 / blockwise wgrad would use different GEMM paths and may
         # support FP8 wgrad in the future.
+        # In hybrid mode, input_fp8 (E4M3) and grad_fp8 (E5M2) may differ;
+        # cast input to match grad dtype for FP8 GEMM compatibility.
         _MIN_FP8_K = 64
         wgrad_k = grad_fp8.shape[0]
         _use_fp8_wgrad = ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic")
         if _use_fp8_wgrad:
+            input_wgrad = input_fp8
+            if input_wgrad.dtype != grad_fp8.dtype:
+                input_wgrad = input_wgrad.to(grad_fp8.dtype)
             grad_weight = dispatch_gemm(
                 grad_fp8.t().contiguous(),
-                input_fp8.t().contiguous(),
+                input_wgrad.t().contiguous(),
                 grad_scale,
                 input_scale,
                 bwd_scaling,
