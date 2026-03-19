@@ -753,7 +753,7 @@ class ScalingManager:
         """
         if float8_dtype is None:
             float8_dtype = _get_float8_e4m3()
-        tensor = tensor.permute(0, 2, 1, 3)  # [B, H, S, D]
+        tensor = tensor.permute(0, 2, 1, 3).float()  # [B, H, S, D]
         B, H, S, D = tensor.shape
         MAX_FP8 = torch.finfo(float8_dtype).max
 

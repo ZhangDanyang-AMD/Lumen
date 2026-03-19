@@ -29,6 +29,16 @@ RUN cd /workspace/Lumen/third_party/mori && \
 # torchao (quantization reference)
 RUN pip install torchao>=0.8
 
+# Megatron-LM-AMD (for Megatron backend)
+ARG MEGATRON_COMMIT=8dd45f5a51378ec1ee7937dee3c20d8626df4763
+RUN git clone --recursive https://github.com/ROCm/Megatron-LM.git megatron_lm
+RUN pip uninstall -y megatron-core
+RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
+    && pip install -e .  -U --force-reinstall --no-deps \
+    && cd megatron/core/datasets && make
+
+ENV PYTHONPATH="/workspace/megatron_lm:${PYTHONPATH:-}"
+
 # Lumen + test dependencies
 RUN cd /workspace/Lumen && pip install -e ".[dev]"
 RUN pip install -r /workspace/Lumen/requirements.txt

@@ -86,7 +86,7 @@ class FP8ParamManager:
                 fp8_weight, scale = quantize_param_to_fp8(weight.data, self.fp8_dtype)
                 self._param_scales[name] = scale
 
-                weight.data = fp8_weight.view(torch.uint8).to(weight.device)
+                weight.data = fp8_weight.to(weight.device)
                 weight._fp8_scale = scale
                 weight._fp8_dtype = self.fp8_dtype
                 weight._original_dtype = self._original_dtypes[name]
@@ -113,12 +113,11 @@ class FP8ParamManager:
 
     def _make_dequant_hook(self, param_name: str):
         original_dtype = self._original_dtypes[param_name]
-        fp8_dtype = self.fp8_dtype
 
         def hook(module, inputs):
             weight = module.weight
             if hasattr(weight, "_fp8_scale"):
-                fp8_data = weight.data.view(fp8_dtype)
+                fp8_data = weight.data
                 dequant = dequantize_param_from_fp8(fp8_data, weight._fp8_scale, original_dtype)
                 module._dequantized_weight = dequant
 
