@@ -162,8 +162,9 @@ def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v,
         def attn_fn(q_chunk, k_chunk, v_chunk, causal, softmax_scale):
             from lumen.ops.attention.attention import attention
 
-            out = attention(q_chunk, k_chunk, v_chunk, softmax_scale=softmax_scale, causal=causal, return_lse=True)
-            return out[0], out[1]
+            out, lse = attention(q_chunk, k_chunk, v_chunk, softmax_scale=softmax_scale, causal=causal, return_lse=True)
+            # Backend returns LSE as (B, H, S); _online_softmax_update expects (B, S, H)
+            return out, lse.transpose(1, 2).contiguous()
 
         out_local = attention_cp_p2p(
             q_local,

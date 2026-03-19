@@ -279,13 +279,17 @@ class TestMiniTransformerBlock:
     """End-to-end test: norm → attn → norm → MLP as a single block."""
 
     def test_forward_shape(self):
-        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to("cuda")
+        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to(
+            device="cuda", dtype=torch.bfloat16
+        )
         x = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16)
         out = block(x)
         assert out.shape == (2, 64, 128)
 
     def test_backward_all_grads(self):
-        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to("cuda")
+        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to(
+            device="cuda", dtype=torch.bfloat16
+        )
         x = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16, requires_grad=True)
         out = block(x)
         out.sum().backward()
@@ -296,7 +300,9 @@ class TestMiniTransformerBlock:
                 assert param.grad is not None, f"Missing gradient for {name}"
 
     def test_train_step_loss_decreases(self):
-        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to("cuda")
+        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to(
+            device="cuda", dtype=torch.bfloat16
+        )
         optimizer = torch.optim.Adam(block.parameters(), lr=1e-3)
 
         losses = []
@@ -312,7 +318,9 @@ class TestMiniTransformerBlock:
         assert losses[-1] < losses[0], f"Loss should decrease: {losses}"
 
     def test_no_nan_inf(self):
-        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to("cuda")
+        block = _MiniTransformerBlock(hidden_dim=128, num_heads=4, mlp_hidden=256).to(
+            device="cuda", dtype=torch.bfloat16
+        )
         x = torch.randn(2, 64, 128, device="cuda", dtype=torch.bfloat16) * 0.1
         out = block(x)
         assert torch.isfinite(out).all(), "Output contains NaN or Inf"

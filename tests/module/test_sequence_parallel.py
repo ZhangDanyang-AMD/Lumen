@@ -68,15 +68,15 @@ class TestSequenceParallelFlagPropagation:
         assert m.sequence_parallel is False, "SP should be disabled when tp_size=1"
 
     @_apply_common_patches
-    @mock.patch("lumen.modules.parallel_linear._pg_size", return_value=2)
     def test_sp_enabled_when_tp_size_gt_1(self, *_):
-        config = _make_config(sequence_parallel=True, tp_size=2)
-        m = LumenColumnParallelLinear(
-            64,
-            128,
-            config=config,
-            init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
-        )
+        with mock.patch("lumen.modules.parallel_linear._pg_size", return_value=2):
+            config = _make_config(sequence_parallel=True, tp_size=2)
+            m = LumenColumnParallelLinear(
+                64,
+                128,
+                config=config,
+                init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+            )
         assert m.sequence_parallel is True
 
 
@@ -155,7 +155,8 @@ class TestRowParallelSP:
                 )
             m.sequence_parallel = True
             torch.nn.init.kaiming_uniform_(m.weight)
-            x = torch.randn(4, 128, device="cuda", dtype=torch.bfloat16)
+            # input_is_parallel=True with tp_size=2: input is pre-sharded to 128//2=64
+            x = torch.randn(4, 64, device="cuda", dtype=torch.bfloat16)
             m(x)
             assert rs_mock.called, "reduce_scatter should be called in SP mode"
 

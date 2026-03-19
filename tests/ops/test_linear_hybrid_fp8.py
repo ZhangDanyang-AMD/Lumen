@@ -60,7 +60,7 @@ class TestHybridFP8Config:
     def test_non_hybrid_uses_same_dtype(self):
         from lumen.quantize.config import QuantConfig, QuantFormat
 
-        cfg = QuantConfig(format=QuantFormat.E4M3)
+        cfg = QuantConfig(format=QuantFormat.FP8_E4M3)
         assert cfg.torch_dtype == cfg.torch_dtype_bwd
 
     def test_hybrid_fp8_max_values_differ(self):
@@ -80,14 +80,14 @@ class TestHybridFP8Forward:
     @pytest.mark.parametrize("config", LINEAR_SHAPES, ids=LINEAR_IDS)
     def test_forward_snr(self, config):
         from lumen.ops.quantize.linear import quantized_linear
-        from lumen.quantize.config import QuantConfig, QuantFormat
+        from lumen.quantize.config import QuantConfig, QuantFormat, ScalingType
         from lumen.quantize.scaling_manager import ScalingManager
 
         x = torch.randn(config.M, config.K, device="cuda", dtype=torch.bfloat16) * 0.1
         w = torch.randn(config.N, config.K, device="cuda", dtype=torch.bfloat16) * 0.02
         ref = (x.float() @ w.float().T).to(torch.bfloat16)
 
-        cfg = QuantConfig(format=QuantFormat.HYBRID, scaling_type="delayed")
+        cfg = QuantConfig(format=QuantFormat.HYBRID, scaling=ScalingType.DELAYED)
         mgr = ScalingManager(cfg)
         mgr.quantize("input", x, backward=False)
         mgr.quantize("weight", w, backward=False)
@@ -105,7 +105,7 @@ class TestHybridFP8Backward:
     @pytest.mark.parametrize("config", LINEAR_SHAPES[:1], ids=LINEAR_IDS[:1])
     def test_backward_snr(self, config):
         from lumen.ops.quantize.linear import quantized_linear
-        from lumen.quantize.config import QuantConfig, QuantFormat
+        from lumen.quantize.config import QuantConfig, QuantFormat, ScalingType
         from lumen.quantize.scaling_manager import ScalingManager
 
         x_ref = (torch.randn(config.M, config.K, device="cuda", dtype=torch.bfloat16) * 0.1).requires_grad_(True)
@@ -114,7 +114,7 @@ class TestHybridFP8Backward:
         ref_out.sum().backward()
 
         x = x_ref.detach().clone().requires_grad_(True)
-        cfg = QuantConfig(format=QuantFormat.HYBRID, scaling_type="delayed")
+        cfg = QuantConfig(format=QuantFormat.HYBRID, scaling=ScalingType.DELAYED)
         mgr = ScalingManager(cfg)
         mgr.quantize("input", x.detach(), backward=False)
         mgr.quantize("weight", w, backward=False)

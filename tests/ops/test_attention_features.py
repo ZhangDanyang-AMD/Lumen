@@ -156,11 +156,17 @@ def _get_alibi_slopes(nheads, device):
         num_remaining = min(closest_pow2, nheads - closest_pow2)
         extra_powers = torch.arange(1, 1 + 2 * num_remaining, 2, dtype=torch.int32, device=device)
         slopes = torch.cat([slopes, torch.pow(extra_base, extra_powers.float())])
-    return slopes[:nheads]
+    # Return (1, nheads) — the Triton kernel accesses stride(0) and stride(1)
+    return slopes[:nheads].unsqueeze(0)
 
 
 def _attention_ref_with_alibi(q, k, v, sm_scale, alibi_slopes, causal=False):
-    """Pure-PyTorch reference with ALiBi position bias."""
+    """Pure-PyTorch reference with ALiBi position bias.
+
+    alibi_slopes: (1, nheads) or (nheads,)
+    """
+    if alibi_slopes.dim() == 2:
+        alibi_slopes = alibi_slopes.squeeze(0)
     B, SQ, HQ, D = q.shape
     _, SK, HK, _ = k.shape
     DV = v.shape[-1]
@@ -401,7 +407,7 @@ class TestALiBiForward:
     @pytest.mark.parametrize("config", ALIBI_CONFIGS[:1], ids=ALIBI_IDS[:1])
     def test_zero_slopes_matches_vanilla(self, config):
         q, k, v, sm_scale = _make_tensors(config)
-        slopes = torch.zeros(config.num_head_q, device=q.device, dtype=torch.float32)
+        slopes = torch.zeros(1, config.num_head_q, device=q.device, dtype=torch.float32)
         out_alibi = attn_ops.attention(q, k, v, softmax_scale=sm_scale, alibi_slopes=slopes)
         out_vanilla = attn_ops.attention(q, k, v, softmax_scale=sm_scale)
         torch.testing.assert_close(out_alibi, out_vanilla, atol=1e-5, rtol=1e-4)

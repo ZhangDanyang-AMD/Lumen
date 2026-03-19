@@ -566,6 +566,8 @@ def attention(
                 _deterministic = deterministic
 
                 def attn_fn(q_chunk, k_chunk, v_chunk, causal, softmax_scale):
+                    # Backends return LSE as (B, H, S); _online_softmax_update
+                    # expects (B, S, H) to broadcast with output (B, S, H, D).
                     if _backend_type == "aiter_csrc" and _is_aiter_available():
                         out, lse = flash_attn_func(
                             q_chunk,
@@ -581,7 +583,7 @@ def attention(
                             return_lse=True,
                             return_attn_probs=False,
                         )
-                        return out, lse
+                        return out, lse.transpose(1, 2).contiguous()
                     else:
                         result = AttentionTritonFunction.apply(
                             q_chunk,
@@ -599,7 +601,7 @@ def attention(
                             False,
                             _grad_quant_type,
                         )
-                        return result[0], result[1]
+                        return result[0], result[1].transpose(1, 2).contiguous()
 
                 return attn_fn
 
