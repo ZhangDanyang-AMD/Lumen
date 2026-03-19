@@ -438,7 +438,8 @@ class LumenLayerNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         w = self.weight if self.weight is not None else torch.ones(x.shape[-1], device=x.device, dtype=x.dtype)
-        b = self.bias
+        w = w.to(x.dtype)
+        b = self.bias.to(x.dtype) if self.bias is not None else None
         return layernorm(x, w, b, self.eps, self.grad_quant_type)
 
     def extra_repr(self) -> str:

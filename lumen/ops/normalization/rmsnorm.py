@@ -483,7 +483,7 @@ class LumenRMSNorm(nn.Module):
         self.grad_quant_type = grad_quant_type
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return rmsnorm(x, self.weight, self.eps, self.grad_quant_type)
+        return rmsnorm(x, self.weight.to(x.dtype), self.eps, self.grad_quant_type)
 
     def extra_repr(self) -> str:
         gq = f", grad_quant={self.grad_quant_type}" if self.grad_quant_type else ""

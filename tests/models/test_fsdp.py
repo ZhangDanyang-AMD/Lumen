@@ -423,7 +423,7 @@ class TestPatchedNormGoldenOutput:
         args = SimpleNamespace(lumen_norm=True, grad_quant_type=None)
         patch_norms(model, args)
 
-        model.norm = model.norm.cuda()
+        model.norm = model.norm.cuda().bfloat16()
         torch.manual_seed(0)
         x = torch.randn(4, 32, hidden, device="cuda", dtype=torch.bfloat16)
         out = model.norm(x)

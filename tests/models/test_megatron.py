@@ -107,7 +107,7 @@ class TestMegatronCompatibleTLLayerNorm:
         """LayerNorm wrapper output should match pure-PyTorch golden."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda()
+        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda().bfloat16()
         torch.manual_seed(0)
         x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
         out = norm(x)
@@ -121,7 +121,7 @@ class TestMegatronCompatibleTLLayerNorm:
         """LayerNorm wrapper output should be correct with non-zero bias."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda()
+        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda().bfloat16()
         norm._norm.bias.data.uniform_(-0.5, 0.5)
         torch.manual_seed(0)
         x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
@@ -171,7 +171,7 @@ class TestMegatronCompatibleTLNorm:
         """Auto-dispatch LayerNorm output should match golden."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLNorm(config, hidden_size=128, eps=eps).cuda()
+        norm = _MegatronCompatibleTLNorm(config, hidden_size=128, eps=eps).cuda().bfloat16()
         torch.manual_seed(1)
         x = torch.randn(2, 32, 128, device="cuda", dtype=torch.bfloat16)
         out = norm(x)
@@ -1235,7 +1235,7 @@ class TestApplyLoraMegatron:
         layer = SimpleNamespace(self_attention=sa, mlp=mlp)
 
         decoder = SimpleNamespace(layers=[layer])
-        model_config = SimpleNamespace()
+        model_config = SimpleNamespace(sequence_parallel=False)
 
         model = mock.MagicMock()
         model.config = model_config
@@ -1273,7 +1273,7 @@ class TestApplyLoraMegatron:
 
         embedding = SimpleNamespace(word_embeddings=mock_embedding)
         decoder = SimpleNamespace(layers=[layer])
-        model_config = SimpleNamespace()
+        model_config = SimpleNamespace(sequence_parallel=False)
 
         model = mock.MagicMock()
         model.config = model_config
