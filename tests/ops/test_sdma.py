@@ -150,6 +150,7 @@ def _worker_allgather(rank, world_size, port, results_dict):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -188,6 +189,7 @@ def _worker_all2all(rank, world_size, port, results_dict):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     a2a = None
@@ -235,6 +237,7 @@ def _worker_allreduce(rank, world_size, port, results_dict):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -343,6 +346,7 @@ def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -379,6 +383,7 @@ def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, 
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -420,6 +425,7 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -456,6 +462,7 @@ def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, 
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -492,6 +499,7 @@ def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -527,6 +535,7 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -570,6 +579,7 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     try:
@@ -746,6 +756,7 @@ def _worker_all2all_perf(rank, world_size, port, results_dict, elems_per_pe, ite
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     ctx = SdmaContext.get()
@@ -799,6 +810,7 @@ def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterat
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
     shmem.shmem_torch_process_group_init("default")
 
     ctx = SdmaContext.get()
