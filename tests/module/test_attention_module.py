@@ -514,19 +514,20 @@ class TestBlockwiseRecomputeOptimization:
         from lumen.ops.attention.attention import attention_fp8_quant
 
         head_dim = 256
+        seqlen = 256
         sm_scale = head_dim**-0.5
 
         torch.cuda.manual_seed(0)
-        q_ref = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
-        k_ref = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
-        v_ref = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        q_ref = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        k_ref = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        v_ref = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
         out_ref = attention_ref(q_ref, k_ref, v_ref, sm_scale)
         out_ref.float().mean().backward()
 
         torch.cuda.manual_seed(0)
-        q = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
-        k = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
-        v = (torch.randn(1, 128, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        q = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        k = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+        v = (torch.randn(1, seqlen, 4, head_dim, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
         out = attention_fp8_quant(
             q,
             k,

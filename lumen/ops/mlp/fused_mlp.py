@@ -198,7 +198,7 @@ class _FusedGatedMLPFP8Store(torch.autograd.Function):
         with torch.enable_grad():
             gate_out_g = gate_out_2d.detach().requires_grad_(True)
             act_val = act_fn(gate_out_g)
-        act_grad = torch.autograd.grad(act_val.sum(), gate_out_g, retain_graph=False)[0]
+            act_grad = torch.autograd.grad(act_val.sum(), gate_out_g, retain_graph=False)[0]
 
         grad_gate_2d = grad_hidden_2d * up_out_2d * act_grad
         grad_up_2d = grad_hidden_2d * act_fn(gate_out_2d)
@@ -295,7 +295,7 @@ class _FusedMLPFP8Store(torch.autograd.Function):
         with torch.enable_grad():
             up_out_g = up_out_2d.detach().requires_grad_(True)
             act_val = act_fn(up_out_g)
-        act_grad = torch.autograd.grad(act_val.sum(), up_out_g, retain_graph=False)[0]
+            act_grad = torch.autograd.grad(act_val.sum(), up_out_g, retain_graph=False)[0]
 
         grad_pre_act_2d = grad_hidden_2d * act_grad
 
