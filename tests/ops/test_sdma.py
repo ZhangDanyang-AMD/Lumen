@@ -199,6 +199,7 @@ def _worker_allgather(rank, world_size, port, results_dict):
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ag = None
     try:
         ctx = SdmaContext.get()
         ag = SdmaAllgather(ctx)
@@ -218,9 +219,8 @@ def _worker_allgather(rank, world_size, port, results_dict):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ag
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_all2all(rank, world_size, port, results_dict):
@@ -265,10 +265,8 @@ def _worker_all2all(rank, world_size, port, results_dict):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
         del a2a
-        shmem.shmem_finalize()
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allreduce(rank, world_size, port, results_dict):
@@ -286,6 +284,7 @@ def _worker_allreduce(rank, world_size, port, results_dict):
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ar = None
     try:
         ctx = SdmaContext.get()
         ar = SdmaAllreduce(ctx=ctx)
@@ -306,9 +305,8 @@ def _worker_allreduce(rank, world_size, port, results_dict):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ar
+        _sdma_worker_teardown(shmem)
 
 
 def _get_free_port():
@@ -317,6 +315,41 @@ def _get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+
+def _sdma_worker_teardown(shmem_mod):
+    """Standard teardown for SDMA worker processes.
+
+    Follows the cleanup order from the mori ccl reference tests
+    (``test_allgather.py``, ``test_all2all.py``, etc.) plus
+    ``TorchDistContext.__exit__``:
+
+    1. CUDA sync — flush any outstanding GPU work.
+    2. Barrier — all ranks rendezvous before tearing down.
+    3. ``SdmaContext.reset()`` — clears the singleton reference.
+       Callers must ``del`` their SDMA wrapper objects (``ag``,
+       ``a2a``, ``ar``, …) **before** calling this function so that
+       the C++ SDMA handle destructors run while shmem is still alive.
+    4. Barrier — sync again after handle destruction.
+    5. ``shmem_finalize()`` — release mori symmetric-memory resources.
+    6. Barrier — mirrors ``TorchDistContext.__exit__`` rendezvous.
+    7. ``destroy_process_group()`` — must be **last** so that shmem can
+       still use the torch process group during finalization.
+    """
+    import torch.distributed as dist
+
+    from lumen.ops.sdma import SdmaContext
+
+    torch.cuda.synchronize()
+    if dist.is_initialized():
+        dist.barrier()
+    SdmaContext.reset()
+    if dist.is_initialized():
+        dist.barrier()
+    shmem_mod.shmem_finalize()
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 @_requires_sdma_hw
@@ -396,6 +429,7 @@ def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ag = None
     try:
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
@@ -413,9 +447,8 @@ def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ag
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, seed):
@@ -433,11 +466,11 @@ def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, 
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    a2a = None
     try:
         device = f"cuda:{rank}"
         total_elems = elems_per_pe * world_size
         torch.manual_seed(seed + rank)
-        # Restrict to [0, 2^31) so uint32 and int32 views are equivalent
         input_tensor = torch.randint(0, 2**31, (total_elems,), dtype=torch.uint32, device=device)
 
         sdma_output = torch.zeros_like(input_tensor)
@@ -454,10 +487,8 @@ def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, 
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
         del a2a
-        shmem.shmem_finalize()
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, seed):
@@ -475,6 +506,7 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ar = None
     try:
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
@@ -492,9 +524,8 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ar
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, seed):
@@ -512,6 +543,7 @@ def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, 
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ar = None
     try:
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
@@ -529,9 +561,8 @@ def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, 
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ar
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
@@ -549,6 +580,7 @@ def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ag = None
     try:
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
@@ -565,9 +597,8 @@ def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ag
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
@@ -585,6 +616,7 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    ag = None
     try:
         device = f"cuda:{rank}"
         ctx = SdmaContext.get()
@@ -609,9 +641,8 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
-        shmem.shmem_finalize()
+        del ag
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
@@ -629,6 +660,7 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
+    a2a = None
     try:
         device = f"cuda:{rank}"
         ctx = SdmaContext.get()
@@ -638,7 +670,6 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
         for call_idx, elems_per_pe in enumerate([64, 512, 256, 1024, 64]):
             total = elems_per_pe * world_size
             torch.manual_seed(seed + rank * 100 + call_idx)
-            # Restrict to [0, 2^31) so uint32 and int32 views are equivalent
             inp = torch.randint(0, 2**31, (total,), dtype=torch.uint32, device=device)
             sdma_out = torch.zeros_like(inp)
             a2a(inp, sdma_out)
@@ -655,10 +686,8 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
     except Exception:
         results_dict[rank] = False
     finally:
-        dist.barrier()
-        dist.destroy_process_group()
         del a2a
-        shmem.shmem_finalize()
+        _sdma_worker_teardown(shmem)
 
 
 @_requires_sdma_hw
@@ -807,42 +836,42 @@ def _worker_all2all_perf(rank, world_size, port, results_dict, elems_per_pe, ite
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ctx = SdmaContext.get()
-    a2a = SdmaAll2all(ctx)
-    device = f"cuda:{rank}"
+    a2a = None
+    try:
+        ctx = SdmaContext.get()
+        a2a = SdmaAll2all(ctx)
+        device = f"cuda:{rank}"
 
-    input_tensor = torch.randint(0, 2**31, (elems_per_pe * world_size,), dtype=torch.uint32, device=device)
-    output_tensor = torch.zeros_like(input_tensor)
+        input_tensor = torch.randint(0, 2**31, (elems_per_pe * world_size,), dtype=torch.uint32, device=device)
+        output_tensor = torch.zeros_like(input_tensor)
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device)
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device)
 
-    times = []
-    for i in range(warmup + iterations):
-        start_event.record(stream)
-        a2a(input_tensor, output_tensor, stream)
-        end_event.record(stream)
-        stream.synchronize()
-        elapsed_ms = start_event.elapsed_time(end_event)
-        if i >= warmup:
-            times.append(elapsed_ms)
+        times = []
+        for i in range(warmup + iterations):
+            start_event.record(stream)
+            a2a(input_tensor, output_tensor, stream)
+            end_event.record(stream)
+            stream.synchronize()
+            elapsed_ms = start_event.elapsed_time(end_event)
+            if i >= warmup:
+                times.append(elapsed_ms)
 
-    avg_ms = np.mean(times) if times else 0.0
-    total_bytes = elems_per_pe * world_size * 4
-    bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
+        avg_ms = np.mean(times) if times else 0.0
+        total_bytes = elems_per_pe * world_size * 4
+        bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
 
-    results_dict[rank] = {
-        "avg_ms": avg_ms,
-        "min_ms": np.min(times) if times else 0,
-        "max_ms": np.max(times) if times else 0,
-        "bandwidth_gb_s": bandwidth_gb_s,
-    }
-
-    dist.barrier()
-    dist.destroy_process_group()
-    del a2a
-    shmem.shmem_finalize()
+        results_dict[rank] = {
+            "avg_ms": avg_ms,
+            "min_ms": np.min(times) if times else 0,
+            "max_ms": np.max(times) if times else 0,
+            "bandwidth_gb_s": bandwidth_gb_s,
+        }
+    finally:
+        del a2a
+        _sdma_worker_teardown(shmem)
 
 
 def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterations, warmup):
@@ -861,38 +890,39 @@ def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterat
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ctx = SdmaContext.get()
-    ag = SdmaAllgather(ctx)
-    device = f"cuda:{rank}"
+    ag = None
+    try:
+        ctx = SdmaContext.get()
+        ag = SdmaAllgather(ctx)
+        device = f"cuda:{rank}"
 
-    local = torch.randn(n_elems, dtype=torch.float32, device=device)
+        local = torch.randn(n_elems, dtype=torch.float32, device=device)
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device)
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device)
 
-    times = []
-    for i in range(warmup + iterations):
-        start_event.record(stream)
-        _ = ag(local, stream)
-        end_event.record(stream)
-        stream.synchronize()
-        elapsed_ms = start_event.elapsed_time(end_event)
-        if i >= warmup:
-            times.append(elapsed_ms)
+        times = []
+        for i in range(warmup + iterations):
+            start_event.record(stream)
+            _ = ag(local, stream)
+            end_event.record(stream)
+            stream.synchronize()
+            elapsed_ms = start_event.elapsed_time(end_event)
+            if i >= warmup:
+                times.append(elapsed_ms)
 
-    avg_ms = np.mean(times) if times else 0.0
-    total_bytes = n_elems * 4 * world_size
-    bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
+        avg_ms = np.mean(times) if times else 0.0
+        total_bytes = n_elems * 4 * world_size
+        bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
 
-    results_dict[rank] = {
-        "avg_ms": avg_ms,
-        "bandwidth_gb_s": bandwidth_gb_s,
-    }
-
-    dist.barrier()
-    dist.destroy_process_group()
-    shmem.shmem_finalize()
+        results_dict[rank] = {
+            "avg_ms": avg_ms,
+            "bandwidth_gb_s": bandwidth_gb_s,
+        }
+    finally:
+        del ag
+        _sdma_worker_teardown(shmem)
 
 
 @_requires_sdma_hw
