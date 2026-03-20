@@ -4,12 +4,86 @@
 # See LICENSE for license information.
 ###############################################################################
 
+import glob
+import logging
+import os
+import time
 from dataclasses import dataclass
 
 import pytest
 import torch
 
 DEVICE = "cuda"
+
+logger = logging.getLogger("lumen.test")
+
+
+# ---------------------------------------------------------------------------
+# AITER JIT stale-lock cleanup (session-scoped)
+# ---------------------------------------------------------------------------
+
+
+def _get_aiter_build_dir():
+    """Return the AITER JIT build directory, or None if not determinable."""
+    try:
+        from aiter.jit.core import get_user_jit_dir
+
+        return os.path.join(get_user_jit_dir(), "build")
+    except Exception:
+        return None
+
+
+_LOCK_MAX_AGE_S = int(os.environ.get("LUMEN_AITER_LOCK_MAX_AGE_S", "3600"))
+
+
+def _is_lock_stale(lock_path):
+    """A lock file is stale if older than ``_LOCK_MAX_AGE_S`` (default 1 hour).
+
+    The threshold is deliberately conservative: normal CK kernel compilation
+    takes 2-15 minutes. A lock surviving beyond an hour almost certainly
+    belongs to a process that crashed without calling ``FileBaton.release()``.
+    Override with ``LUMEN_AITER_LOCK_MAX_AGE_S`` env var if needed.
+    """
+    try:
+        mtime = os.path.getmtime(lock_path)
+        return (time.time() - mtime) > _LOCK_MAX_AGE_S
+    except OSError:
+        return False
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_stale_aiter_jit_locks():
+    """Remove stale AITER JIT build lock files that cause indefinite hangs.
+
+    When AITER JIT-compiles a CK kernel, it holds a ``lock_<module>`` file
+    via ``FileBaton``.  If the build process is killed (Ctrl-C, OOM, crash),
+    the lock is never released and subsequent runs block forever in
+    ``FileBaton.wait()``.
+
+    This fixture runs once per session and removes lock files older than
+    ``LUMEN_AITER_LOCK_MAX_AGE_S`` seconds (default 3600 = 1 hour), well
+    beyond any normal CK compilation time.  Set the env var to 0 to disable.
+    """
+    if _LOCK_MAX_AGE_S <= 0:
+        return
+
+    bd_dir = _get_aiter_build_dir()
+    if bd_dir is None or not os.path.isdir(bd_dir):
+        return
+
+    pattern = os.path.join(bd_dir, "lock_*")
+    stale_locks = [p for p in glob.glob(pattern) if _is_lock_stale(p)]
+    for lock_path in stale_locks:
+        try:
+            os.remove(lock_path)
+            logger.warning(
+                "Removed stale AITER JIT lock: %s "
+                "(a previous build likely crashed — this would have caused "
+                "tests to hang indefinitely)",
+                lock_path,
+            )
+        except OSError as exc:
+            logger.debug("Could not remove lock %s: %s", lock_path, exc)
 
 
 # ---------------------------------------------------------------------------

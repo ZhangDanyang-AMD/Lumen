@@ -26,6 +26,30 @@ def _is_aiter_available() -> bool:
 if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
+_ck_jit_warned = False
+
+
+def _warn_ck_jit_if_needed():
+    """Log a one-time warning if CK modules may require JIT compilation."""
+    global _ck_jit_warned
+    if _ck_jit_warned:
+        return
+    try:
+        from aiter.jit.core import get_module
+
+        get_module("module_mha_fwd")
+    except Exception:
+        logger.warning(
+            "AITER CK module not found in JIT cache — the first aiter_csrc call "
+            "may trigger HIP/CK kernel compilation, which can take several minutes. "
+            "To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. "
+            "If the process hangs, check for stale lock files in your AITER JIT "
+            "build directory (typically ~/.aiter/*/build/lock_*)."
+        )
+    finally:
+        _ck_jit_warned = True
+
+
 from lumen.kernels.attention.attention_impl import FIXED_BLOCK_M
 from lumen.kernels.attention.attention_impl import attention_backward as triton_fp8_backward
 from lumen.kernels.attention.attention_impl import attention_forward as triton_fp8_forward
@@ -679,6 +703,7 @@ def attention(
                 grad_quant_type,
             )
 
+        _warn_ck_jit_if_needed()
         try:
             result = flash_attn_func(
                 q,
