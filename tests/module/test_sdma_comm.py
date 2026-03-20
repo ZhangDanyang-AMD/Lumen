@@ -374,6 +374,8 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     comm = None
+    op_fn = None
+    local = None
     try:
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
@@ -388,8 +390,8 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
         stream = torch.cuda.current_stream(device)
 
         op_fn = {
-            "allgather_dim0": lambda c=comm: c.allgather_dim0(local),
-            "allreduce_sum": lambda c=comm: c.allreduce_sum(local),
+            "allgather_dim0": lambda c=comm, t=local: c.allgather_dim0(t),
+            "allreduce_sum": lambda c=comm, t=local: c.allreduce_sum(t),
         }[op_name]
 
         times = []
@@ -407,7 +409,9 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
 
         results_dict[rank] = {"avg_ms": avg_ms, "bandwidth_gb_s": bw}
     finally:
-        del comm
+        op_fn = None
+        local = None
+        comm = None
         _sdma_tp_worker_teardown(shmem)
 
 
