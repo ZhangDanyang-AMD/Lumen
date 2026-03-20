@@ -139,28 +139,13 @@ def _is_aiter_available():
 _AITER = pytest.mark.skipif(not _is_aiter_available(), reason="AITER required")
 
 
-def _warmup_ck_kernels(device, dtype, S, H, D, sm_scale):
-    """Pre-compile aiter CK kernel variants (causal + non-causal).
-
-    Running both variants on a dummy tensor forces the aiter JIT to build
-    and load the ``.so`` files *before* the ring-attention loop.  Without
-    this, concurrent JIT builds across spawned processes can race on shared
-    ``.so`` loading and SIGSEGV.
-
-    ``S`` should match the real local sequence length so that any
-    shape-dependent JIT cache keys are also covered.
-    """
-    from lumen.ops.attention.attention import attention
-
-    dummy = torch.randn(1, S, H, D, dtype=dtype, device=device)
-    with torch.no_grad():
-        attention(dummy, dummy, dummy, softmax_scale=sm_scale, causal=True, return_lse=True)
-        attention(dummy, dummy, dummy, softmax_scale=sm_scale, causal=False, return_lse=True)
-    torch.cuda.synchronize()
-
-
 def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v, sm_scale, port):
-    """Worker function for 2-GPU CP P2P test."""
+    """Worker function for 2-GPU CP P2P test.
+
+    Uses ``aiter_triton`` backend explicitly: CK csrc modules JIT-loaded in
+    ``mp.spawn`` subprocesses SIGSEGV when NCCL is co-active on the same
+    device.  The Triton backend does not have this issue.
+    """
     import torch.distributed as dist
 
     from lumen.ops.attention.attention_with_cp_p2p import attention_cp_p2p
@@ -176,12 +161,11 @@ def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v,
         B, S_total, H, D = global_q.shape
         S_local = S_total // world_size
 
-        _warmup_ck_kernels(device, global_q.dtype, S_local, H, D, sm_scale)
-        dist.barrier()
-
         q_local = global_q[:, rank * S_local : (rank + 1) * S_local].to(device).contiguous()
         k_local = global_k[:, rank * S_local : (rank + 1) * S_local].to(device).contiguous()
         v_local = global_v[:, rank * S_local : (rank + 1) * S_local].to(device).contiguous()
+
+        dist.barrier()
 
         def attn_fn(q_chunk, k_chunk, v_chunk, causal, softmax_scale):
             from lumen.ops.attention.attention import attention
@@ -193,6 +177,7 @@ def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v,
                 softmax_scale=softmax_scale,
                 causal=causal,
                 return_lse=True,
+                backend_type="aiter_triton",
             )
             return out, lse.transpose(1, 2).contiguous()
 

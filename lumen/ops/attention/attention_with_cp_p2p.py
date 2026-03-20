@@ -35,10 +35,9 @@ def _ring_send_recv_kv(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Send KV to next rank and receive from previous rank in the ring.
 
-    GPU synchronization around the P2P ops prevents RCCL/CK race conditions
-    where an in-flight kernel on the default stream corrupts the send buffer
-    before NCCL copies it, or the received buffer is read before the NCCL
-    stream has finished writing it.
+    A stream sync before the P2P ensures that any in-flight compute kernel
+    (attention, contiguous copy) has finished writing the send buffer before
+    RCCL reads it on the NCCL stream.
     """
     next_rank = (cp_rank + 1) % cp_size
     prev_rank = (cp_rank - 1) % cp_size
