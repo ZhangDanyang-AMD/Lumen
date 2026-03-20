@@ -218,6 +218,37 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
 
         cp_group = dist.new_group(list(range(world_size)))
 
+        # ---- sanity: raw SDMA all-to-all vs NCCL all-to-all ----
+        from lumen.ops.attention.attention_with_cp_a2a import (
+            _sdma_a2a_exchange,
+            get_attention_cp_a2a_helper,
+        )
+
+        n = cp_group.size()
+        s = s_local * n
+        helper = get_attention_cp_a2a_helper(b, s, h_q, h_kv, d, d, 1, n)
+        qkv_src = helper.combine_qkv_before_a2a(q, k, v)
+        a2a_nccl = torch.empty_like(qkv_src)
+        a2a_sdma = torch.empty_like(qkv_src)
+        dist.all_to_all_single(a2a_nccl, qkv_src, group=cp_group)
+        torch.cuda.synchronize()
+        dist.barrier()
+        _sdma_a2a_exchange(qkv_src, a2a_sdma)
+        torch.cuda.synchronize()
+        dist.barrier()
+        a2a_match = torch.equal(a2a_nccl, a2a_sdma)
+        if not a2a_match and rank == 0:
+            diff = (a2a_nccl.float() - a2a_sdma.float()).abs()
+            print(
+                f"PE {rank}: RAW A2A MISMATCH  max_diff={diff.max().item():.6f}  "
+                f"nonzero_diffs={diff.nonzero().shape[0]}  "
+                f"nccl_sum={a2a_nccl.float().sum().item():.4f}  "
+                f"sdma_sum={a2a_sdma.float().sum().item():.4f}"
+            )
+        if rank == 0:
+            print(f"PE {rank}: raw a2a bitwise match = {a2a_match}")
+
+        # ---- full attention comparison ----
         out_nccl = AttentionTritonFunctionCPA2A.apply(
             q,
             k,
@@ -259,9 +290,20 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
             True,
         )
 
+        max_diff = (out_nccl - out_sdma).abs().max().item()
         passed = torch.allclose(out_nccl, out_sdma, atol=1e-3, rtol=1e-3)
+        if rank == 0:
+            print(
+                f"PE {rank}: attn max_diff={max_diff:.6f}, "
+                f"out_nccl range=[{out_nccl.min().item():.4f}, {out_nccl.max().item():.4f}], "
+                f"out_sdma range=[{out_sdma.min().item():.4f}, {out_sdma.max().item():.4f}], "
+                f"passed={passed}"
+            )
         results_dict[rank] = passed
     except Exception:
+        import traceback
+
+        traceback.print_exc()
         results_dict[rank] = False
     finally:
         _cp_a2a_worker_teardown(shmem)
