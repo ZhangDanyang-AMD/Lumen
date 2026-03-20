@@ -55,9 +55,14 @@ def _is_lock_stale(lock_path):
 def _cleanup_stale_aiter_jit_locks():
     """Remove stale AITER JIT build lock files that cause indefinite hangs.
 
-    When AITER JIT-compiles a CK kernel, it holds a ``lock_<module>`` file
-    via ``FileBaton``.  If the build process is killed (Ctrl-C, OOM, crash),
-    the lock is never released and subsequent runs block forever in
+    AITER uses two levels of ``FileBaton`` locks during JIT compilation:
+
+    1. ``{bd_dir}/lock_{module}`` — held by ``build_module()`` in ``core.py``
+    2. ``{bd_dir}/{module}/build/lock`` — held by ``_jit_compile()`` in
+       ``cpp_extension.py`` (the inner ninja build lock)
+
+    If either build process is killed (Ctrl-C, OOM, crash), the lock file
+    is never released and subsequent runs block forever in
     ``FileBaton.wait()``.
 
     This fixture runs once per session and removes lock files older than
@@ -71,8 +76,13 @@ def _cleanup_stale_aiter_jit_locks():
     if bd_dir is None or not os.path.isdir(bd_dir):
         return
 
-    pattern = os.path.join(bd_dir, "lock_*")
-    stale_locks = [p for p in glob.glob(pattern) if _is_lock_stale(p)]
+    stale_locks = []
+    for pattern in [
+        os.path.join(bd_dir, "lock_*"),
+        os.path.join(bd_dir, "*", "build", "lock"),
+    ]:
+        stale_locks.extend(p for p in glob.glob(pattern) if _is_lock_stale(p))
+
     for lock_path in stale_locks:
         try:
             os.remove(lock_path)

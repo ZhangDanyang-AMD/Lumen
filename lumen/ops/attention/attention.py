@@ -43,8 +43,8 @@ def _warn_ck_jit_if_needed():
             "AITER CK module not found in JIT cache — the first aiter_csrc call "
             "may trigger HIP/CK kernel compilation, which can take several minutes. "
             "To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. "
-            "If the process hangs, check for stale lock files in your AITER JIT "
-            "build directory (typically ~/.aiter/*/build/lock_*)."
+            "If the process hangs, check for stale lock files: "
+            "find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete"
         )
     finally:
         _ck_jit_warned = True
