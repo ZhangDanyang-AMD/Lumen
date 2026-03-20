@@ -510,7 +510,8 @@ def attention_triton_forward_impl(
         stride_lse_m, stride_lse_h = softmax_lse.stride()
         stride_lse_z = 0
     else:
-        softmax_lse = torch.empty((batch, nheads_q, max_seqlens_q * 2), device=q.device, dtype=torch.float32)
+        _lse_cols = ((max_seqlens_q + FIXED_BLOCK_M - 1) // FIXED_BLOCK_M) * 2 * FIXED_BLOCK_M
+        softmax_lse = torch.empty((batch, nheads_q, _lse_cols), device=q.device, dtype=torch.float32)
         stride_lse_z, stride_lse_h, stride_lse_m = softmax_lse.stride()
 
     if bias is not None:
@@ -638,7 +639,8 @@ def _attention_triton_forward_impl_fake(
         exp_scores = torch.zeros((batch_q, nheads_q, max_seqlen_q, max_seqlen_k), device=q.device, dtype=torch.float32)
     else:
         exp_scores = torch.empty([], device=q.device, dtype=torch.float32)
-    softmax_lse = torch.empty((batch_q, nheads_q, max_seqlen_q * 2), device=q.device, dtype=torch.float32)
+    _lse_cols = ((max_seqlen_q + FIXED_BLOCK_M - 1) // FIXED_BLOCK_M) * 2 * FIXED_BLOCK_M
+    softmax_lse = torch.empty((batch_q, nheads_q, _lse_cols), device=q.device, dtype=torch.float32)
     return o, softmax_lse, exp_scores
 
 
@@ -1339,7 +1341,8 @@ def fake_attention_mxfp8_forward_triton_impl(
         exp_scores = torch.zeros((batch_q, nheads_q, max_seqlen_q, max_seqlen_k), device=q.device, dtype=torch.float32)
     else:
         exp_scores = torch.empty([], device=q.device, dtype=torch.float32)
-    softmax_lse = torch.empty((batch_q, nheads_q, max_seqlen_q * 2), device=q.device, dtype=torch.float32)
+    _lse_cols = ((max_seqlen_q + FIXED_BLOCK_M - 1) // FIXED_BLOCK_M) * 2 * FIXED_BLOCK_M
+    softmax_lse = torch.empty((batch_q, nheads_q, _lse_cols), device=q.device, dtype=torch.float32)
     return o, softmax_lse, exp_scores
 
 
