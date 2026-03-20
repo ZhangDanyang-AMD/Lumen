@@ -6,17 +6,15 @@
 
 """Benchmark 5 — Wgrad delay improves overlap.
 
-Exercises Lumen's ``_DeferredWgrad`` feature from
-``lumen.modules.parallel_linear``:
+Tests **actual Lumen implementations** only:
 
-  * **_DeferredWgrad API**: ``defer(weight, compute_fn)`` stores wgrad
-    closure; ``execute()`` runs it later — overlapping with next-layer
-    forward or communication.
-  * **Pipeline overlap**: Two-layer pipeline where layer-2 dW overlaps
-    with layer-1 dX on a secondary stream.
-  * **Integration test**: Uses Lumen's ``_DeferredWgrad`` class directly.
-  * **gradient_accumulation_fusion**: Tests the ``main_grad.add_`` pattern
-    from ``quantized_linear`` backward.
+  * **_DeferredWgrad API**: ``defer(weight, compute_fn)`` / ``execute()``
+    from ``lumen.modules.parallel_linear``.
+  * **_DeferredWgrad + stream overlap**: Executes the deferred wgrad on a
+    secondary CUDA stream while the main stream does other work — this is
+    how the API is *intended* to be used in a real training loop.
+  * **gradient_accumulation_fusion**: The ``main_grad.add_(dw)`` path inside
+    ``quantized_linear`` backward (``gradient_accumulation_fusion=True``).
 
 Run::
 
@@ -37,10 +35,10 @@ from benchmarks.bench_utils import (
     print_report,
     require_cuda,
 )
-from benchmarks.conftest import CUDA
+from benchmarks.conftest import AITER, CUDA
 
 # ---------------------------------------------------------------------------
-# Dimensions
+# Dimensions (Llama-2 7B style)
 # ---------------------------------------------------------------------------
 M = 4096  # tokens (B * S)
 K = 4096  # hidden_dim
@@ -48,7 +46,7 @@ N = 11008  # FFN intermediate
 
 
 # ---------------------------------------------------------------------------
-# 1. Lumen _DeferredWgrad API
+# 1. Lumen _DeferredWgrad API — basic overhead
 # ---------------------------------------------------------------------------
 
 
@@ -69,14 +67,12 @@ class TestDeferredWgradAPI:
         w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
         grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
-        # Eager: compute dW immediately
         def _eager():
             dw = grad_out.T @ x
             w.grad = dw
 
         r_eager = cuda_timer(_eager, label="eager wgrad (dW = gO^T @ X)")
 
-        # Deferred: store closure, execute later
         dwg = _DeferredWgrad()
 
         def _deferred():
@@ -107,196 +103,269 @@ class TestDeferredWgradAPI:
         print_report("_DeferredWgrad: Defer Only", [r])
         print(f"  Defer overhead: {r.avg_ms:.4f} ms (should be ~0)")
 
+    # Expected: _DeferredWgrad.execute() accumulates into main_grad when it
+    # exists (line 58-59 of parallel_linear.py). After execute(), the weight's
+    # main_grad should contain the computed gradient, and _pending_wgrad should
+    # be cleared. This validates the accumulation path that the distributed
+    # optimizer relies on.
+    def test_main_grad_accumulation(self):
+        """Verify execute() writes to main_grad when present."""
+        from lumen.modules.parallel_linear import _DeferredWgrad
 
-# ---------------------------------------------------------------------------
-# 2. Wgrad overlap with next-layer forward
-# ---------------------------------------------------------------------------
-
-
-@CUDA
-class TestWgradOverlapWithForward:
-    """Simulate deferring wgrad to overlap with the next layer's forward pass."""
-
-    # Expected: Overlapped should be ~1.3-1.8x faster than sequential. In
-    # sequential mode, dW1 and fwd2 execute serially (total = dW1 + fwd2).
-    # In overlapped mode, dW1 runs on wgrad_stream concurrently with fwd2 on
-    # the compute stream, so total ≈ max(dW1, fwd2). The speedup depends on
-    # how well the GPU can parallelize two GEMMs on separate streams (limited
-    # by SM occupancy and memory bandwidth contention).
-    def test_sequential_vs_overlapped(self):
         x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        w1 = torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02
-        w2 = torch.randn(K, N, device="cuda", dtype=torch.bfloat16) * 0.02
+        w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
+        w.main_grad = torch.zeros(N, K, device="cuda", dtype=torch.bfloat16)
         grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
-        wgrad_stream = torch.cuda.Stream()
+        dwg = _DeferredWgrad()
+        dwg.defer(w, lambda: grad_out.T @ x)
 
-        # Sequential: layer-1 dW, then layer-2 forward
-        def _sequential():
-            _ = grad_out.T @ x  # layer-1 dW
-            torch.cuda.synchronize()
-            _ = (x @ w1.T) @ w2.T  # layer-2 forward
-            torch.cuda.synchronize()
+        assert dwg.has_pending
+        dwg.execute()
+        assert not dwg.has_pending
 
-        r_seq = cuda_timer(_sequential, label="sequential (dW1 then fwd2)")
-
-        # Overlapped: layer-1 dW on wgrad_stream, layer-2 forward on compute
-        def _overlapped():
-            with torch.cuda.stream(wgrad_stream):
-                _ = grad_out.T @ x  # layer-1 dW (deferred)
-            _ = (x @ w1.T) @ w2.T  # layer-2 forward (concurrent)
-            wgrad_stream.synchronize()
-
-        r_ovl = cuda_timer(_overlapped, label="overlapped (dW1 || fwd2)")
-
-        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
-        r_ovl.extra["speedup"] = round(speedup, 2)
-        print_report("Wgrad Overlap with Next-Layer Forward", [r_seq, r_ovl])
+        assert w.main_grad.abs().sum() > 0, "main_grad should be non-zero after execute()"
+        print(f"\n  main_grad norm: {w.main_grad.norm().item():.4f}")
 
 
 # ---------------------------------------------------------------------------
-# 3. Two-layer backward pipeline
+# 2. _DeferredWgrad with stream overlap (intended usage pattern)
 # ---------------------------------------------------------------------------
 
 
 @CUDA
-class TestWgradTwoLayerPipeline:
-    """Two-layer pipeline: dX computed eagerly, dW deferred to overlap."""
+class TestDeferredWgradStreamOverlap:
+    """Use _DeferredWgrad.execute() on a secondary stream to overlap with
+    other work on the compute stream — this is the actual usage pattern
+    that produces the overlap benefit in Lumen training.
+    """
 
-    # Expected: Deferred pipeline should show speedup because layer-2's dW
-    # overlaps with layer-1's dX on separate streams. In a real transformer,
-    # dW is the largest GEMM in backward (M*N*K FLOPs) and dominates the
-    # backward time. Deferring it to overlap with the next layer's dX
-    # effectively hides the dW latency, reducing total backward time by
-    # up to the cost of one dW GEMM per layer.
-    def test_pipeline_eager_vs_deferred(self):
-        w1 = torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02
-        w2 = torch.randn(K, N, device="cuda", dtype=torch.bfloat16) * 0.02
+    # Expected: Overlapped should be ~1.3-1.8x faster than sequential because
+    # _DeferredWgrad.execute() (which runs the deferred GEMM) happens on
+    # wgrad_stream concurrently with the next layer's forward on the compute
+    # stream. Total ≈ max(dW, fwd) instead of dW + fwd.
+    def test_overlap_vs_sequential(self):
+        from lumen.modules.parallel_linear import _DeferredWgrad
+
         x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
+        w.main_grad = torch.zeros(N, K, device="cuda", dtype=torch.bfloat16)
+        w_next = torch.randn(K, N, device="cuda", dtype=torch.bfloat16) * 0.02
+        grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
+        dwg = _DeferredWgrad()
         wgrad_stream = torch.cuda.Stream()
 
-        def _eager():
-            # Forward
-            o1 = x @ w1.T  # layer 1 fwd
-            o2 = o1 @ w2.T  # layer 2 fwd
-            g2 = torch.ones_like(o2)
-            # Backward: all in sequence
-            dx2 = g2 @ w2  # layer 2 dX
-            _ = g2.T @ o1  # layer 2 dW
-            _ = dx2 @ w1  # layer 1 dX
-            _ = dx2.T @ x  # layer 1 dW
+        # Sequential: execute deferred wgrad, then next-layer forward
+        def _sequential():
+            w.main_grad.zero_()
+            dwg.defer(w, lambda: grad_out.T @ x)
+            dwg.execute()
+            torch.cuda.synchronize()
+            _ = x @ w_next
             torch.cuda.synchronize()
 
-        def _deferred():
-            # Forward
-            o1 = x @ w1.T
-            o2 = o1 @ w2.T
-            g2 = torch.ones_like(o2)
-            # Layer 2 backward: dX eager, dW deferred
-            dx2 = g2 @ w2
+        r_seq = cuda_timer(_sequential, label="sequential: execute() then fwd")
+
+        # Measure individual components for overlap ratio
+        r_dw = cuda_timer(lambda: grad_out.T @ x, label="dW alone")
+        r_fwd = cuda_timer(lambda: x @ w_next, label="next-layer fwd alone")
+
+        # Overlapped: execute deferred wgrad on wgrad_stream, fwd on compute
+        def _overlapped():
+            w.main_grad.zero_()
+            dwg.defer(w, lambda: grad_out.T @ x)
             with torch.cuda.stream(wgrad_stream):
-                _ = g2.T @ o1  # deferred — overlaps with layer-1 dX
-            # Layer 1 backward: dX on compute stream (concurrent with layer-2 dW)
-            _ = dx2 @ w1
-            wgrad_stream.synchronize()
-            # Layer 1 dW
-            with torch.cuda.stream(wgrad_stream):
-                _ = dx2.T @ x
+                dwg.execute()
+            _ = x @ w_next  # concurrent on default stream
             wgrad_stream.synchronize()
 
-        r_eager = cuda_timer(_eager, label="2-layer eager backward")
-        r_deferred = cuda_timer(_deferred, label="2-layer deferred wgrad")
+        r_ovl = cuda_timer(_overlapped, label="overlapped: execute() || fwd")
+
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        T_parts = r_dw.avg_ms + r_fwd.avg_ms
+        overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        r_ovl.extra["speedup"] = round(speedup, 2)
+        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        print_report(
+            "_DeferredWgrad Stream Overlap",
+            [r_dw, r_fwd, r_seq, r_ovl],
+        )
+        print(f"  Overlap ratio: {overlap_ratio:.3f}")
+
+    # Expected: Running execute() on a secondary stream for each of N layers
+    # in a pipeline should show cumulative speedup. Each layer's deferred dW
+    # overlaps with the next layer's dX, hiding N-1 dW computations from
+    # the critical path. The total time approaches T(all_dX) + T(one_dW)
+    # instead of T(all_dX) + T(all_dW).
+    def test_multi_layer_pipeline(self):
+        from lumen.modules.parallel_linear import _DeferredWgrad
+
+        n_layers = 4
+        weights = [nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)]
+        for w in weights:
+            w.main_grad = torch.zeros_like(w.data)
+
+        x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        grad_outs = [torch.randn(M, N, device="cuda", dtype=torch.bfloat16) for _ in range(n_layers)]
+
+        dwg = _DeferredWgrad()
+        wgrad_stream = torch.cuda.Stream()
+
+        def _eager_pipeline():
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                _ = grad_outs[i] @ weights[i]  # dX
+                weights[i].main_grad.add_(grad_outs[i].T @ x)  # dW
+
+        def _deferred_pipeline():
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                if dwg.has_pending:
+                    with torch.cuda.stream(wgrad_stream):
+                        dwg.execute()
+                _ = grad_outs[i] @ weights[i]  # dX on compute stream
+                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+            with torch.cuda.stream(wgrad_stream):
+                dwg.execute()
+            wgrad_stream.synchronize()
+
+        r_eager = cuda_timer(_eager_pipeline, label=f"{n_layers}-layer eager")
+        r_deferred = cuda_timer(_deferred_pipeline, label=f"{n_layers}-layer deferred")
 
         speedup = r_eager.avg_ms / max(r_deferred.avg_ms, 1e-6)
         r_deferred.extra["speedup"] = round(speedup, 2)
-        print_report("Two-Layer Pipeline: Eager vs Deferred Wgrad", [r_eager, r_deferred])
+        print_report(
+            f"{n_layers}-Layer Pipeline: Eager vs _DeferredWgrad",
+            [r_eager, r_deferred],
+        )
 
 
 # ---------------------------------------------------------------------------
-# 4. Gradient accumulation fusion pattern
+# 3. gradient_accumulation_fusion via quantized_linear backward
 # ---------------------------------------------------------------------------
 
 
 @CUDA
-class TestGradAccumulationFusion:
-    """Test the main_grad.add_ pattern used by quantized_linear backward."""
+@AITER
+class TestGradAccumFusionQuantizedLinear:
+    """Test the gradient_accumulation_fusion flag in Lumen's quantized_linear.
 
-    # Expected: main_grad.add_(dw) should have similar or slightly higher
-    # latency than w.grad = dw because add_ performs a fused read-add-write
-    # while assignment just updates a pointer. However, the real benefit of
-    # gradient_accumulation_fusion is in multi-microbatch training: add_
-    # accumulates gradients in-place without allocating new tensors per
-    # microbatch, saving memory allocation overhead and enabling pipelining.
-    def test_add_vs_assign(self):
-        """Compare w.grad = dw (assign) vs w.main_grad.add_(dw) (accumulate)."""
-        w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
+    When gradient_accumulation_fusion=True, the backward pass of
+    quantized_linear directly does weight.main_grad.add_(grad_weight)
+    instead of returning grad_weight. This avoids a separate accumulation
+    kernel in multi-microbatch training.
+    """
+
+    # Expected: With gradient_accumulation_fusion=True, the backward should
+    # accumulate directly into main_grad (grad_weight returned as None).
+    # With =False, backward returns grad_weight as a separate tensor.
+    # Latency should be similar, but the fused path saves one kernel launch
+    # (the separate .add_ call) and one tensor allocation per microbatch.
+    def test_fused_vs_separate_accumulation(self):
+        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        hidden = K
+        ffn = 1024
+
+        x = torch.randn(M, hidden, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        w = nn.Parameter(torch.randn(ffn, hidden, device="cuda", dtype=torch.bfloat16) * 0.02)
         w.main_grad = torch.zeros_like(w.data)
-        grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
-        x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
 
-        def _assign():
-            dw = grad_out.T @ x
-            w.grad = dw
+        def _without_fusion():
+            x_in = x.detach().requires_grad_(True)
+            out = quantized_linear(
+                x_in,
+                w,
+                scaling_type="none",
+                fp8_dtype=fp8_dtype,
+                gradient_accumulation_fusion=False,
+            )
+            out.sum().backward()
 
-        r_assign = cuda_timer(_assign, label="w.grad = dw (assign)")
+        def _with_fusion():
+            w.main_grad.zero_()
+            x_in = x.detach().requires_grad_(True)
+            out = quantized_linear(
+                x_in,
+                w,
+                scaling_type="none",
+                fp8_dtype=fp8_dtype,
+                gradient_accumulation_fusion=True,
+            )
+            out.sum().backward()
 
-        def _accumulate():
-            dw = grad_out.T @ x
-            w.main_grad.add_(dw)
+        r_no_fuse = cuda_timer(_without_fusion, label="grad_accum_fusion=False")
+        r_fuse = cuda_timer(_with_fusion, label="grad_accum_fusion=True")
 
-        r_accum = cuda_timer(_accumulate, label="w.main_grad.add_(dw) (fused accum)")
+        print_report(
+            "quantized_linear: gradient_accumulation_fusion",
+            [r_no_fuse, r_fuse],
+        )
 
-        print_report("Gradient Accumulation: Assign vs Fused Add", [r_assign, r_accum])
+    # Expected: After backward with gradient_accumulation_fusion=True,
+    # w.grad should be None (not returned) and w.main_grad should contain
+    # the gradient. This verifies the fused path works correctly.
+    def test_fusion_writes_to_main_grad(self):
+        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.quantize.config import _get_float8_e4m3
 
+        fp8_dtype = _get_float8_e4m3()
+        hidden = 256
+        ffn = 512
 
-# ---------------------------------------------------------------------------
-# 5. Wgrad overlap with communication
-# ---------------------------------------------------------------------------
+        x = torch.randn(32, hidden, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        w = nn.Parameter(torch.randn(ffn, hidden, device="cuda", dtype=torch.bfloat16) * 0.02)
+        w.main_grad = torch.zeros(ffn, hidden, device="cuda", dtype=torch.bfloat16)
 
+        out = quantized_linear(
+            x,
+            w,
+            scaling_type="none",
+            fp8_dtype=fp8_dtype,
+            gradient_accumulation_fusion=True,
+        )
+        out.sum().backward()
 
-@CUDA
-class TestWgradOverlapWithComm:
-    """Simulate deferring wgrad to overlap with TP reduce-scatter."""
+        assert w.main_grad.abs().sum() > 0, "main_grad should be non-zero"
+        print(f"\n  main_grad norm after fused backward: {w.main_grad.norm().item():.4f}")
 
-    # Expected: Overlapped should be faster because the deferred dW GEMM runs
-    # on wgrad_stream concurrently with the reduce-scatter (simulated as
-    # buffer copy) on the compute stream. In real TP training, the reduce-scatter
-    # uses the network fabric (SDMA/NCCL) while the dW GEMM uses compute SMs,
-    # so they can run truly in parallel with minimal resource contention.
-    def test_wgrad_comm_overlap(self):
-        x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
-        grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
-        # Simulated comm buffer (reduce-scatter mock)
-        comm_src = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        comm_dst = torch.empty(M // 2, K, device="cuda", dtype=torch.bfloat16)
+    # Expected: With gradient_accumulation_fusion=True under FP8 scaling modes,
+    # the backward should still correctly accumulate into main_grad. FP8
+    # quantization in backward adds quant/dequant steps but the final
+    # main_grad.add_(grad_weight) path should work identically.
+    def test_fusion_with_fp8_scaling(self):
+        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.quantize.config import _get_float8_e4m3
 
-        wgrad_stream = torch.cuda.Stream()
+        fp8_dtype = _get_float8_e4m3()
+        hidden = 256
+        ffn = 512
 
-        # Sequential: dX → dW → reduce-scatter
-        def _sequential():
-            _ = grad_out @ w
-            _ = grad_out.T @ x
-            torch.cuda.synchronize()
-            comm_dst.copy_(comm_src[: M // 2])
-            torch.cuda.synchronize()
+        results: List[BenchResult] = []
+        for scaling in ["none", "delayed", "dynamic"]:
+            x = torch.randn(32, hidden, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+            w = nn.Parameter(torch.randn(ffn, hidden, device="cuda", dtype=torch.bfloat16) * 0.02)
+            w.main_grad = torch.zeros(ffn, hidden, device="cuda", dtype=torch.bfloat16)
 
-        r_seq = cuda_timer(_sequential, label="sequential (dX → dW → RS)")
+            def _run(s=scaling):
+                w.main_grad.zero_()
+                x_in = x.detach().requires_grad_(True)
+                out = quantized_linear(
+                    x_in,
+                    w,
+                    scaling_type=s,
+                    fp8_dtype=fp8_dtype,
+                    gradient_accumulation_fusion=True,
+                )
+                out.sum().backward()
 
-        # Overlapped: dX → defer dW (overlaps with reduce-scatter on wgrad_stream)
-        def _overlapped():
-            _ = grad_out @ w
-            with torch.cuda.stream(wgrad_stream):
-                _ = grad_out.T @ x  # deferred wgrad
-            comm_dst.copy_(comm_src[: M // 2])  # reduce-scatter on compute
-            wgrad_stream.synchronize()
+            r = cuda_timer(_run, label=f"fused backward scaling={scaling}")
+            results.append(r)
 
-        r_ovl = cuda_timer(_overlapped, label="overlapped (dW || RS)")
-
-        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
-        r_ovl.extra["speedup"] = round(speedup, 2)
-        print_report("Wgrad Overlap with Communication", [r_seq, r_ovl])
+        print_report("gradient_accumulation_fusion across FP8 modes", results)
 
 
 # ---------------------------------------------------------------------------
@@ -313,36 +382,39 @@ def main():
 
     x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
     w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
+    w.main_grad = torch.zeros(N, K, device="cuda", dtype=torch.bfloat16)
     grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
 
-    # Eager
+    # 1. Eager vs deferred
     r_eager = cuda_timer(lambda: grad_out.T @ x, label="eager wgrad")
     results.append(r_eager)
 
-    # Deferred via Lumen API
     dwg = _DeferredWgrad()
 
     def _deferred():
+        w.main_grad.zero_()
         dwg.defer(w, lambda: grad_out.T @ x)
         dwg.execute()
 
     r_def = cuda_timer(_deferred, label="Lumen _DeferredWgrad")
     results.append(r_def)
 
-    # Overlap simulation
+    # 2. Stream overlap using _DeferredWgrad
     wgrad_stream = torch.cuda.Stream()
-    w2 = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
+    w_next = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
 
     def _overlapped():
+        w.main_grad.zero_()
+        dwg.defer(w, lambda: grad_out.T @ x)
         with torch.cuda.stream(wgrad_stream):
-            _ = grad_out.T @ x
-        _ = x @ w2.T  # next-layer forward
+            dwg.execute()
+        _ = x @ w_next
         wgrad_stream.synchronize()
 
-    r_ovl = cuda_timer(_overlapped, label="deferred wgrad || next fwd")
+    r_ovl = cuda_timer(_overlapped, label="_DeferredWgrad || next fwd")
     results.append(r_ovl)
 
-    print_report("Lumen Wgrad Delay Overlap", results)
+    print_report("Lumen Wgrad Delay Benchmarks", results)
 
 
 if __name__ == "__main__":

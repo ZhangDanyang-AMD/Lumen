@@ -198,7 +198,6 @@ def _worker_allgather(rank, world_size, port, results_dict):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         ctx = SdmaContext.get()
@@ -238,7 +237,6 @@ def _worker_all2all(rank, world_size, port, results_dict):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     a2a = None
     try:
@@ -287,7 +285,6 @@ def _worker_allreduce(rank, world_size, port, results_dict):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         ctx = SdmaContext.get()
@@ -398,7 +395,6 @@ def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -436,7 +432,6 @@ def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, 
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -479,7 +474,6 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, see
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -517,7 +511,6 @@ def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, 
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -555,7 +548,6 @@ def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -592,7 +584,6 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -637,7 +628,6 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     try:
         device = f"cuda:{rank}"
@@ -816,7 +806,6 @@ def _worker_all2all_perf(rank, world_size, port, results_dict, elems_per_pe, ite
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     ctx = SdmaContext.get()
     a2a = SdmaAll2all(ctx)
@@ -871,7 +860,6 @@ def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterat
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
     torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-    shmem.shmem_torch_process_group_init("default")
 
     ctx = SdmaContext.get()
     ag = SdmaAllgather(ctx)

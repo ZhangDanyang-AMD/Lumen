@@ -507,6 +507,129 @@ class TestFusedNormGEMMPipeline:
 
 
 # ---------------------------------------------------------------------------
+# 6. Kernel-launch count: fused vs unfused (M1 acceptance criterion)
+# ---------------------------------------------------------------------------
+
+
+def _count_kernels(fn, warmup=2, active=1):
+    """Run *fn* under torch.profiler and return the number of GPU kernel launches."""
+    for _ in range(warmup):
+        fn()
+        torch.cuda.synchronize()
+
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CUDA],
+        record_shapes=False,
+        with_stack=False,
+    ) as prof:
+        for _ in range(active):
+            fn()
+            torch.cuda.synchronize()
+
+    kernel_count = sum(
+        1 for evt in prof.key_averages() if evt.device_type == torch.autograd.DeviceType.CUDA and evt.count > 0
+    )
+    return kernel_count, prof.key_averages()
+
+
+@CUDA
+@AITER
+class TestKernelLaunchCount:
+    """Measure actual GPU kernel-launch counts for fused vs unfused paths.
+
+    Directly addresses M1 acceptance: 'Single-GPU benchmarks show measurable
+    kernel-launch reduction.' Uses torch.profiler to count distinct CUDA
+    kernels launched by fused Lumen ops vs decomposed alternatives.
+    """
+
+    # Expected: fused_moe_triton should launch significantly fewer kernels
+    # than the manual per-expert loop. The fused kernel handles all expert
+    # dispatch, permutation, and GEMM in 1-2 kernels; the unfused path
+    # launches fused_topk + NUM_EXPERTS separate GEMMs + fused_unpermute
+    # (at least 10+ kernels for 8 experts).
+    def test_moe_kernel_count(self):
+        from lumen.ops.moe import fused_moe_triton
+        from lumen.ops.moe.fused_routing import fused_topk
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        hidden = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        expert_w = (
+            torch.randn(
+                NUM_EXPERTS,
+                FFN_HIDDEN,
+                HIDDEN,
+                device="cuda",
+                dtype=torch.bfloat16,
+            )
+            * 0.02
+        )
+        logits = torch.randn(B * S, NUM_EXPERTS, device="cuda", dtype=torch.float32)
+        topk_weights, topk_ids = fused_topk(logits, TOP_K)
+        topk_ids_i32 = topk_ids.to(torch.int32)
+
+        def _fused():
+            fused_moe_triton(
+                hidden,
+                expert_w,
+                topk_ids_i32,
+                topk_weights,
+                num_experts=NUM_EXPERTS,
+                k=TOP_K,
+            )
+
+        def _unfused():
+            for eid in range(NUM_EXPERTS):
+                mask = (topk_ids == eid).any(dim=1)
+                if mask.any():
+                    gemm_bf16(hidden[mask], expert_w[eid])
+
+        n_fused, _ = _count_kernels(_fused)
+        n_unfused, _ = _count_kernels(_unfused)
+
+        reduction = n_unfused - n_fused
+        print(f"\n  MoE fused kernels:   {n_fused}")
+        print(f"  MoE unfused kernels: {n_unfused}")
+        print(f"  Kernel reduction:    {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+        assert n_fused < n_unfused, f"Fused ({n_fused}) should use fewer kernels than unfused ({n_unfused})"
+
+    # Expected: LumenGatedMLP fuses gate_proj + up_proj + activation + down_proj
+    # into fewer kernels than doing separate GEMMs + activation. The fused path
+    # should show a measurable reduction in kernel count.
+    def test_gated_mlp_kernel_count(self):
+        from lumen.modules.fused_mlp import LumenGatedMLP
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        mlp = LumenGatedMLP(
+            HIDDEN,
+            FFN_HIDDEN,
+            activation="swiglu",
+            bias=False,
+        ).to(device="cuda", dtype=torch.bfloat16)
+
+        def _fused():
+            mlp(x)
+
+        w_gate = mlp.w_gate.data
+        w_up = mlp.w_up.data
+        w_down = mlp.w_down.data
+
+        def _unfused():
+            gate = gemm_bf16(x, w_gate)
+            up = gemm_bf16(x, w_up)
+            act = torch.nn.functional.silu(gate) * up
+            return gemm_bf16(act, w_down)
+
+        n_fused, _ = _count_kernels(_fused)
+        n_unfused, _ = _count_kernels(_unfused)
+
+        reduction = n_unfused - n_fused
+        print(f"\n  GatedMLP fused kernels:   {n_fused}")
+        print(f"  GatedMLP unfused kernels: {n_unfused}")
+        print(f"  Kernel reduction:         {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 

@@ -6,23 +6,27 @@
 
 """Benchmark 2 — Multi-GPU training achieves target overlap ratio.
 
-Exercises Lumen's TP communication-compute overlap features:
+Exercises Lumen's TP communication-compute overlap features using real
+``LumenColumnParallelLinear`` and ``LumenRowParallelLinear`` modules:
 
-  * **LumenColumnParallelLinear** with ``tp_comm_overlap=True``:
-    SDMA allgather overlapped with GEMM.
-  * **LumenRowParallelLinear** with ``tp_comm_overlap=True``:
-    SDMA reduce-scatter overlapped with GEMM.
-  * **SdmaTpComm** async primitives: allgather_dim0_async,
-    reduce_scatter_dim0_async, allreduce_sum_async.
-  * **NCCL stream-based overlap**: baseline comparison.
+  * **Section 1 — Module-level overlap (single-GPU, mocked comm)**:
+    Instantiates real Lumen parallel linear modules with mocked SdmaTpComm.
+    Compares ``tp_comm_overlap=True`` (``_forward_sdma_overlap_column``:
+    async allgather + local GEMM + wait + remote GEMM) against
+    ``tp_comm_overlap=False`` (sync allgather + full GEMM).
+  * **Section 2 — Multi-GPU NCCL overlap**: Raw NCCL allgather / reduce-scatter
+    overlapped with GEMM on separate streams.
+  * **Section 3 — Multi-GPU SDMA overlap**: ``SdmaTpComm`` async primitives
+    with dedicated hardware DMA engines.
+  * **Section 4 — NCCL vs SDMA comparison**: Direct head-to-head.
 
 The *overlap ratio* is defined as::
 
     overlap_ratio = 1 - (T_overlapped / (T_comm + T_compute))
 
-Run single-GPU simulation::
+Run single-GPU (uses mocked comm, no ``torchrun`` needed)::
 
-    pytest benchmarks/bench_comm_overlap.py -v -s -k Simulation
+    pytest benchmarks/bench_comm_overlap.py -v -s -k Lumen
 
 Run multi-GPU::
 
@@ -32,7 +36,9 @@ Run multi-GPU::
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from typing import List
+from unittest import mock
 
 import pytest
 import torch
@@ -49,106 +55,325 @@ from benchmarks.conftest import CUDA
 # ---------------------------------------------------------------------------
 # Dimensions — Llama-2 7B column-parallel shape
 # ---------------------------------------------------------------------------
-M = 4096  # tokens (B * S)
-K = 4096  # hidden_dim
-N = 11008  # FFN intermediate (sharded by TP)
+B, S = 2, 2048
+H, D = 32, 128
+HIDDEN = H * D  # 4096
+FFN_HIDDEN = 11008
+TP_SIZE = 2
+
+M = B * S  # tokens
+K = HIDDEN  # hidden_dim
+N = FFN_HIDDEN  # FFN intermediate (sharded by TP)
 
 
 # ---------------------------------------------------------------------------
-# 1. Single-GPU overlap simulation (no dist required)
+# Helpers: mock environment for single-GPU Lumen module instantiation
+# ---------------------------------------------------------------------------
+
+_PARALLEL_LINEAR = "lumen.modules.parallel_linear"
+
+_MODULE_PATCHES = {
+    f"{_PARALLEL_LINEAR}._get_tp_group": mock.MagicMock(),
+    f"{_PARALLEL_LINEAR}._pg_size": TP_SIZE,
+    f"{_PARALLEL_LINEAR}._pg_rank": 0,
+    f"{_PARALLEL_LINEAR}._use_sdma_from_args": True,
+    f"{_PARALLEL_LINEAR}._tp_comm_overlap_from_args": False,
+    f"{_PARALLEL_LINEAR}.divide": lambda a, b: a // b,
+    f"{_PARALLEL_LINEAR}._initialize_affine_weight_gpu": None,
+    f"{_PARALLEL_LINEAR}.set_tensor_model_parallel_attributes": None,
+    f"{_PARALLEL_LINEAR}.make_sharded_tensors_for_checkpoint": {},
+    f"{_PARALLEL_LINEAR}.copy_to_tensor_model_parallel_region": lambda x, **kw: x,
+    f"{_PARALLEL_LINEAR}.gather_from_sequence_parallel_region": lambda x, **kw: x,
+    f"{_PARALLEL_LINEAR}.gather_from_tensor_model_parallel_region": lambda x, **kw: x,
+    f"{_PARALLEL_LINEAR}.reduce_from_tensor_model_parallel_region": lambda x, **kw: x,
+    f"{_PARALLEL_LINEAR}.reduce_scatter_to_sequence_parallel_region": lambda x, **kw: x,
+}
+
+
+def _make_config(sequence_parallel=False, lumen_tp_comm_overlap=False):
+    return SimpleNamespace(
+        params_dtype=torch.bfloat16,
+        perform_initialization=False,
+        use_cpu_initialization=False,
+        sequence_parallel=sequence_parallel,
+        tensor_model_parallel_size=TP_SIZE,
+        expert_model_parallel_size=1,
+        lumen_tp_comm_overlap=lumen_tp_comm_overlap,
+    )
+
+
+def _apply_patches():
+    """Return a list of started mock.patch objects (caller must stop them)."""
+    patches = []
+    for target, val in _MODULE_PATCHES.items():
+        if val is None:
+            p = mock.patch(target)
+        elif callable(val) and not isinstance(val, mock.MagicMock):
+            p = mock.patch(target, side_effect=val)
+        elif isinstance(val, (int, dict)):
+            p = mock.patch(target, return_value=val)
+        else:
+            p = mock.patch(target, return_value=val)
+        p.start()
+        patches.append(p)
+    return patches
+
+
+class _MockSdmaComm:
+    """Simulates SdmaTpComm async APIs with real GPU memcpy for realistic latency."""
+
+    def __init__(self, tp_size=TP_SIZE):
+        self._tp_size = tp_size
+        self._stream = torch.cuda.Stream()
+        self._ag_input = None
+        self._ag_output = None
+        self._rs_output = None
+
+    def allgather_dim0(self, tensor):
+        return torch.cat([tensor] * self._tp_size, dim=0)
+
+    def allgather_dim0_async(self, tensor, stream=None):
+        self._ag_input = tensor
+        s = stream or self._stream
+        with torch.cuda.stream(s):
+            self._ag_output = torch.cat([tensor] * self._tp_size, dim=0)
+        return True
+
+    def wait_allgather_dim0(self, stream=None):
+        s = stream or self._stream
+        torch.cuda.current_stream().wait_stream(s)
+        return self._ag_output
+
+    def reduce_scatter_dim0(self, tensor):
+        chunk = tensor.shape[0] // self._tp_size
+        return tensor[:chunk].clone()
+
+    def reduce_scatter_dim0_async(self, tensor, stream=None):
+        s = stream or self._stream
+        chunk = tensor.shape[0] // self._tp_size
+        with torch.cuda.stream(s):
+            self._rs_output = tensor[:chunk].clone()
+        return True
+
+    def wait_reduce_scatter_dim0(self, stream=None):
+        s = stream or self._stream
+        torch.cuda.current_stream().wait_stream(s)
+        return self._rs_output
+
+    def allreduce_sum_async(self, tensor, stream=None):
+        s = stream or self._stream
+        with torch.cuda.stream(s):
+            tensor.div_(self._tp_size)
+        return True
+
+    def wait_allreduce_sum(self, stream=None):
+        s = stream or self._stream
+        torch.cuda.current_stream().wait_stream(s)
+
+
+def _make_column_parallel(overlap: bool, seq_parallel: bool = True):
+    """Instantiate a real LumenColumnParallelLinear with mocked TP env."""
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear
+
+    config = _make_config(sequence_parallel=seq_parallel, lumen_tp_comm_overlap=overlap)
+    m = LumenColumnParallelLinear(
+        K,
+        N,
+        config=config,
+        init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+        bias=False,
+    )
+    torch.nn.init.kaiming_uniform_(m.weight)
+    m.use_sdma = True
+    m.tp_comm_overlap = overlap
+    m.sequence_parallel = seq_parallel
+    m.explicit_expert_comm = False
+    m.tp_size = TP_SIZE
+    m.gather_output = False
+    m._sdma_comm = _MockSdmaComm()
+    m.to(device="cuda", dtype=torch.bfloat16)
+    return m
+
+
+def _make_row_parallel(overlap: bool, seq_parallel: bool = False):
+    """Instantiate a real LumenRowParallelLinear with mocked TP env."""
+    from lumen.modules.parallel_linear import LumenRowParallelLinear
+
+    config = _make_config(sequence_parallel=seq_parallel, lumen_tp_comm_overlap=overlap)
+    m = LumenRowParallelLinear(
+        N // TP_SIZE,
+        K,
+        config=config,
+        init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+        bias=False,
+    )
+    torch.nn.init.kaiming_uniform_(m.weight)
+    m.use_sdma = True
+    m.tp_comm_overlap = overlap
+    m.sequence_parallel = seq_parallel
+    m.explicit_expert_comm = False
+    m.tp_size = TP_SIZE
+    m._sdma_comm = _MockSdmaComm()
+    m.to(device="cuda", dtype=torch.bfloat16)
+    return m
+
+
+# ---------------------------------------------------------------------------
+# 1. Lumen module-level comm-compute overlap (single-GPU, mocked comm)
 # ---------------------------------------------------------------------------
 
 
 @CUDA
-class TestOverlapSimulation:
-    """Single-GPU simulation of comm-compute overlap using CUDA streams.
+class TestLumenColumnParallelOverlap:
+    """Compare LumenColumnParallelLinear with tp_comm_overlap=True vs False.
 
-    Demonstrates the overlap pattern used by LumenColumnParallelLinear:
-    start allgather on SDMA/comm stream, run local-shard GEMM on compute
-    stream, wait for allgather, then GEMM the remaining shards.
+    Uses mocked SdmaTpComm so the test runs on a single GPU. The overlap
+    path (_forward_sdma_overlap_column) launches allgather_dim0_async on
+    a secondary stream, runs local-shard GEMM on the compute stream
+    concurrently, waits for allgather, then GEMMs the remaining shards.
+
+    The non-overlap path (_forward_sdma_pre_gemm) does a synchronous
+    allgather first, then runs one full-input GEMM.
     """
 
-    # Expected: Positive overlap ratio (>0.2). The simulated allgather (memcpy)
-    # runs on comm_stream while the local-shard GEMM runs on compute stream.
-    # Since memcpy uses the DMA engine and GEMM uses compute SMs, they can
-    # run in parallel. The overlap ratio = 1 - T_overlapped/(T_comm+T_compute)
-    # measures time saved vs serial; when comm≈compute, perfect overlap gives
-    # ratio ≈ 0.5; ratio=0 means no overlap.
-    def test_column_parallel_overlap_pattern(self):
-        """Simulate the column-parallel overlap: allgather + local GEMM."""
-        tp_size = 2
-        shard_m = M // tp_size
-        x_local = torch.randn(shard_m, K, device="cuda", dtype=torch.bfloat16)
-        x_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+    @pytest.fixture(autouse=True)
+    def _setup_patches(self):
+        patches = _apply_patches()
+        yield
+        for p in patches:
+            p.stop()
 
-        comm_stream = torch.cuda.Stream()
+    # Expected: The overlap module should be faster or comparable to the
+    # non-overlap module. _forward_sdma_overlap_column overlaps the allgather
+    # with the local-shard GEMM on separate streams, then only GEMMs the
+    # remote shard after allgather completes. Non-overlap does sync allgather
+    # first (blocking), then one full GEMM. With mocked comm (torch.cat on
+    # a secondary stream), the overlap benefit comes from hiding the cat
+    # latency behind the local GEMM.
+    def test_overlap_vs_non_overlap(self):
+        m_overlap = _make_column_parallel(overlap=True)
+        m_no_overlap = _make_column_parallel(overlap=False)
+        m_no_overlap.weight.data.copy_(m_overlap.weight.data)
 
-        # Sequential: gather + full GEMM
-        def _sequential():
-            x_full.copy_(torch.cat([x_local, x_local], dim=0))
-            torch.cuda.synchronize()
-            _ = x_full @ w.T
-            torch.cuda.synchronize()
+        x = torch.randn(B, S, K, device="cuda", dtype=torch.bfloat16)
 
-        r_seq = cuda_timer(_sequential, label="sequential (gather + full GEMM)")
-
-        # Overlapped: local GEMM while "allgather" runs on comm stream
-        def _overlapped():
-            with torch.cuda.stream(comm_stream):
-                x_full.copy_(torch.cat([x_local, x_local], dim=0))
-            _ = x_local @ w.T  # local shard GEMM on compute stream
-            comm_stream.synchronize()
-            _ = x_full[shard_m:] @ w.T  # remaining shards GEMM
-
-        r_ovl = cuda_timer(_overlapped, label="overlapped (local GEMM || gather)")
-
-        # Measure components
-        r_comm = cuda_timer(
-            lambda: x_full.copy_(torch.cat([x_local, x_local], dim=0)),
-            label="comm alone (simulated gather)",
+        r_no_ovl = cuda_timer(
+            lambda: m_no_overlap(x),
+            label="ColumnParallel tp_comm_overlap=False",
         )
-        r_gemm = cuda_timer(lambda: x_full @ w.T, label="GEMM alone (full)")
+        r_ovl = cuda_timer(
+            lambda: m_overlap(x),
+            label="ColumnParallel tp_comm_overlap=True",
+        )
 
-        T_parts = r_comm.avg_ms + r_gemm.avg_ms
-        overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_ovl.extra["speedup"] = round(speedup, 2)
+
+        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
 
-        print_report("Column-Parallel Overlap Simulation", [r_comm, r_gemm, r_seq, r_ovl])
+        print_report("LumenColumnParallelLinear: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
+        print(f"  Speedup from overlap: {speedup:.2f}x")
         print(f"  Overlap ratio: {overlap_ratio:.3f}")
-        assert r_ovl.avg_ms > 0
 
-    # Expected: Overlapped latency < sequential. In row-parallel, the GEMM
-    # produces partial results that need reduce-scatter across TP ranks.
-    # By starting the reduce-scatter on comm_stream immediately after GEMM
-    # completes, we overlap the scatter with any subsequent computation.
-    # The benefit is smaller here because the GEMM must finish before scatter.
-    def test_row_parallel_overlap_pattern(self):
-        """Simulate row-parallel: GEMM + reduce-scatter."""
-        tp_size = 2
-        x = torch.randn(M, K // tp_size, device="cuda", dtype=torch.bfloat16)
-        w = torch.randn(K, K // tp_size, device="cuda", dtype=torch.bfloat16)
-        rs_output = torch.randn(M // tp_size, K, device="cuda", dtype=torch.bfloat16)
+    # Expected: Latency should scale proportionally with sequence length
+    # because GEMM time dominates. The overlap benefit (hiding allgather) is
+    # relatively larger at longer sequences where allgather transfers more data
+    # but GEMM grows quadratically in FLOPs.
+    @pytest.mark.parametrize("seqlen", [512, 1024, 2048, 4096])
+    def test_overlap_seqlen_sweep(self, seqlen):
+        m = _make_column_parallel(overlap=True)
+        x = torch.randn(B, seqlen, K, device="cuda", dtype=torch.bfloat16)
 
-        comm_stream = torch.cuda.Stream()
+        r = cuda_timer(lambda: m(x), label=f"ColumnParallel overlap S={seqlen}")
+        print_report(f"ColumnParallel Overlap S={seqlen}", [r])
+        assert r.avg_ms > 0
 
-        def _sequential():
-            result = x @ w.T
-            torch.cuda.synchronize()
-            rs_output.copy_(result[: M // tp_size])
-            torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_sequential, label="sequential (GEMM + scatter)")
+@CUDA
+class TestLumenRowParallelOverlap:
+    """Compare LumenRowParallelLinear with tp_comm_overlap=True vs False.
 
-        def _overlapped():
-            result = x @ w.T
-            with torch.cuda.stream(comm_stream):
-                rs_output.copy_(result[: M // tp_size])
-            comm_stream.synchronize()
+    Row-parallel overlap uses async reduce-scatter on a secondary stream
+    after GEMM finishes. The "overlap" here means the reduce-scatter runs
+    asynchronously, freeing the compute stream for subsequent layers.
 
-        r_ovl = cuda_timer(_overlapped, label="overlapped (GEMM || scatter)")
+    Non-overlap does a synchronous reduce-scatter that blocks the compute
+    stream until communication completes.
+    """
 
-        print_report("Row-Parallel Overlap Simulation", [r_seq, r_ovl])
+    @pytest.fixture(autouse=True)
+    def _setup_patches(self):
+        patches = _apply_patches()
+        yield
+        for p in patches:
+            p.stop()
+
+    # Expected: Overlap and non-overlap should have similar latency in
+    # isolation (single-layer benchmark) because the row-parallel overlap
+    # still waits for reduce-scatter before returning. The real benefit
+    # appears in multi-layer pipelines where the async reduce-scatter on
+    # the SDMA stream frees the compute stream to start the next layer's
+    # forward pass before communication completes.
+    def test_overlap_vs_non_overlap(self):
+        m_overlap = _make_row_parallel(overlap=True, seq_parallel=True)
+        m_no_overlap = _make_row_parallel(overlap=False, seq_parallel=True)
+        m_no_overlap.weight.data.copy_(m_overlap.weight.data)
+
+        x = torch.randn(M, N // TP_SIZE, device="cuda", dtype=torch.bfloat16)
+
+        r_no_ovl = cuda_timer(
+            lambda: m_no_overlap(x),
+            label="RowParallel tp_comm_overlap=False",
+        )
+        r_ovl = cuda_timer(
+            lambda: m_overlap(x),
+            label="RowParallel tp_comm_overlap=True",
+        )
+
+        diff_pct = (r_ovl.avg_ms - r_no_ovl.avg_ms) / max(r_no_ovl.avg_ms, 1e-6) * 100
+        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
+        r_ovl.extra["diff_vs_sync"] = f"{diff_pct:+.1f}%"
+        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        print_report("LumenRowParallelLinear: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
+        print(f"  Overlap ratio: {overlap_ratio:.3f}")
+
+    # Expected: In a two-layer pipeline (column → row), using overlap on both
+    # modules should be faster than non-overlap because the column-parallel
+    # hides allgather behind local GEMM, and the row-parallel's async
+    # reduce-scatter can overlap with the next layer or post-processing.
+    def test_column_row_pipeline(self):
+        col_ovl = _make_column_parallel(overlap=True)
+        row_ovl = _make_row_parallel(overlap=True, seq_parallel=True)
+        col_no_ovl = _make_column_parallel(overlap=False)
+        row_no_ovl = _make_row_parallel(overlap=False, seq_parallel=True)
+        col_no_ovl.weight.data.copy_(col_ovl.weight.data)
+        row_no_ovl.weight.data.copy_(row_ovl.weight.data)
+
+        x = torch.randn(B, S, K, device="cuda", dtype=torch.bfloat16)
+
+        def _pipeline(col, row):
+            out, _ = col(x)
+            out2d = out.reshape(-1, out.shape[-1])
+            result, _ = row(out2d)
+            return result
+
+        r_no_ovl = cuda_timer(
+            lambda: _pipeline(col_no_ovl, row_no_ovl),
+            label="pipeline tp_comm_overlap=False",
+        )
+        r_ovl = cuda_timer(
+            lambda: _pipeline(col_ovl, row_ovl),
+            label="pipeline tp_comm_overlap=True",
+        )
+
+        speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
+        r_ovl.extra["speedup"] = round(speedup, 2)
+        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        print_report("Column→Row Pipeline: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
+        print(f"  Pipeline speedup from overlap: {speedup:.2f}x")
+        print(f"  Pipeline overlap ratio: {overlap_ratio:.3f}")
 
 
 # ---------------------------------------------------------------------------
@@ -538,34 +763,32 @@ def main():
 
     results: List[BenchResult] = []
 
-    # Single-GPU simulation
-    tp_size = 2
-    shard_m = M // tp_size
-    x_local = torch.randn(shard_m, K, device="cuda", dtype=torch.bfloat16)
-    x_full = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-    w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
-    comm_stream = torch.cuda.Stream()
+    # --- Lumen module-level benchmark (single-GPU, mocked comm) ---
+    patches = _apply_patches()
+    try:
+        col_ovl = _make_column_parallel(overlap=True)
+        col_no_ovl = _make_column_parallel(overlap=False)
+        col_no_ovl.weight.data.copy_(col_ovl.weight.data)
 
-    r_comm = cuda_timer(
-        lambda: x_full.copy_(torch.cat([x_local, x_local], dim=0)),
-        label="simulated allgather",
-    )
-    r_compute = cuda_timer(lambda: x_full @ w.T, label="full GEMM")
+        x = torch.randn(B, S, K, device="cuda", dtype=torch.bfloat16)
 
-    def _ovl():
-        with torch.cuda.stream(comm_stream):
-            x_full.copy_(torch.cat([x_local, x_local], dim=0))
-        _ = x_local @ w.T
-        comm_stream.synchronize()
-        _ = x_full[shard_m:] @ w.T
+        r_no_ovl = cuda_timer(lambda: col_no_ovl(x), label="ColumnParallel overlap=False")
+        r_ovl = cuda_timer(lambda: col_ovl(x), label="ColumnParallel overlap=True")
+        speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_ovl.extra["speedup"] = round(speedup, 2)
+        results.extend([r_no_ovl, r_ovl])
 
-    r_ovl = cuda_timer(_ovl, label="column-parallel overlap")
+        row_ovl = _make_row_parallel(overlap=True, seq_parallel=True)
+        row_no_ovl = _make_row_parallel(overlap=False, seq_parallel=True)
+        row_no_ovl.weight.data.copy_(row_ovl.weight.data)
 
-    T_parts = r_comm.avg_ms + r_compute.avg_ms
-    overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
-    r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
-
-    results = [r_comm, r_compute, r_ovl]
+        x_row = torch.randn(M, N // TP_SIZE, device="cuda", dtype=torch.bfloat16)
+        r_row_no = cuda_timer(lambda: row_no_ovl(x_row), label="RowParallel overlap=False")
+        r_row_ovl = cuda_timer(lambda: row_ovl(x_row), label="RowParallel overlap=True")
+        results.extend([r_row_no, r_row_ovl])
+    finally:
+        for p in patches:
+            p.stop()
 
     is_rank_0 = not dist.is_initialized() or dist.get_rank() == 0
     if is_rank_0:

@@ -309,6 +309,89 @@ class TestFP8ParamSNR:
 
 
 # ---------------------------------------------------------------------------
+# 5. Timed all-gather: BF16 vs FP8 param shards (M2 acceptance criterion)
+# ---------------------------------------------------------------------------
+
+
+def _is_dist_initialized():
+    """Return True if torch.distributed is initialized."""
+    return torch.distributed.is_available() and torch.distributed.is_initialized()
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="CUDA required",
+)
+class TestFP8AllGatherDistributed:
+    """Measure actual all_gather time for BF16 vs FP8 param shards.
+
+    Directly addresses M2 acceptance: 'FP8 param all-gather reduces memory'
+    and 'Compare memory footprint with/without FP8 param all-gather.'
+
+    These tests require ``torchrun --nproc_per_node=N`` to be meaningful.
+    On single-GPU, they fall back to a local simulation that measures the
+    bandwidth difference of gathering larger (BF16) vs smaller (FP8) buffers.
+    """
+
+    # Expected: FP8 all-gather should take roughly half the time of BF16
+    # all-gather because the data volume is halved (1 byte/element vs 2).
+    # All-gather is bandwidth-bound on the interconnect, so halving the
+    # payload directly halves the transfer time (minus fixed latency).
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_allgather_bf16_vs_fp8(self, shape):
+        from lumen.quantize.fp8_params import quantize_param_to_fp8
+
+        weight_bf16 = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
+        fp8_w, _ = quantize_param_to_fp8(weight_bf16)
+
+        if _is_dist_initialized():
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+
+            bf16_shard = weight_bf16.chunk(world_size)[rank].contiguous()
+            fp8_shard = fp8_w.chunk(world_size)[rank].contiguous()
+
+            bf16_gather_list = [torch.empty_like(bf16_shard) for _ in range(world_size)]
+            fp8_gather_list = [torch.empty_like(fp8_shard) for _ in range(world_size)]
+
+            r_bf16 = cuda_timer(
+                lambda: torch.distributed.all_gather(bf16_gather_list, bf16_shard),
+                label=f"all_gather BF16 {shape}",
+            )
+            r_fp8 = cuda_timer(
+                lambda: torch.distributed.all_gather(fp8_gather_list, fp8_shard),
+                label=f"all_gather FP8 {shape}",
+            )
+        else:
+            tp_size = 8
+            bf16_shard = weight_bf16[: shape[0] // tp_size].contiguous()
+            fp8_shard = fp8_w[: shape[0] // tp_size].contiguous()
+
+            bf16_full = torch.empty_like(weight_bf16)
+            fp8_full = torch.empty(shape, device="cuda", dtype=fp8_w.dtype)
+
+            r_bf16 = cuda_timer(
+                lambda: torch.cat([bf16_shard] * tp_size, dim=0, out=bf16_full),
+                label=f"simulated all_gather BF16 {shape}",
+            )
+            r_fp8 = cuda_timer(
+                lambda: torch.cat([fp8_shard] * tp_size, dim=0, out=fp8_full),
+                label=f"simulated all_gather FP8 {shape}",
+            )
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        bf16_bytes = bf16_shard.nelement() * bf16_shard.element_size()
+        fp8_bytes = fp8_shard.nelement() * fp8_shard.element_size()
+        bw_reduction = bf16_bytes / max(fp8_bytes, 1)
+
+        r_fp8.extra["speedup"] = round(speedup, 2)
+        r_fp8.extra["bandwidth_reduction"] = f"{bw_reduction:.1f}x"
+        print_report(f"All-Gather BF16 vs FP8 {shape}", [r_bf16, r_fp8])
+        print(f"  Bandwidth reduction: {bw_reduction:.1f}x")
+        print(f"  Time speedup: {speedup:.2f}x")
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 

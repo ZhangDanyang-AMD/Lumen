@@ -53,6 +53,86 @@ def _make_cos_sin(seqlen: int, rotary_dim: int, device="cuda", dtype=torch.bfloa
     return angles.cos().to(dtype), angles.sin().to(dtype)
 
 
+def _pytorch_rope_neox(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Pure PyTorch NeoX-style RoPE (decomposed into individual ops).
+
+    This is the naive unfused implementation that the AITER Triton kernel
+    replaces. Uses 4+ separate ops: slice, multiply, cat, add.
+    """
+    d = x.shape[-1]
+    d2 = d // 2
+    x1, x2 = x[..., :d2], x[..., d2:]
+    cos_exp = cos[: x.shape[-2], :].unsqueeze(0).unsqueeze(0)
+    sin_exp = sin[: x.shape[-2], :].unsqueeze(0).unsqueeze(0)
+    rotated = torch.cat([-x2, x1], dim=-1)
+    return x * cos_exp.repeat(1, 1, 1, 2)[..., :d] + rotated * sin_exp.repeat(1, 1, 1, 2)[..., :d]
+
+
+# ---------------------------------------------------------------------------
+# 0. Fused AITER RoPE vs naive PyTorch RoPE (M3 acceptance criterion)
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestRoPEFusedVsPyTorch:
+    """Compare Lumen fused AITER RoPE kernel vs decomposed PyTorch ops.
+
+    This directly addresses M3 acceptance: 'Fused RoPE shows latency reduction.'
+    The naive PyTorch implementation uses slice + mul + cat + add (4+ ops /
+    kernel launches); the AITER kernel fuses all of these into a single launch.
+    """
+
+    # Expected: Lumen fused RoPE should be 2-5x faster than the naive PyTorch
+    # decomposition. The PyTorch path launches 4+ kernels (slice, mul, cat, add)
+    # with intermediate tensor allocations; the fused kernel does one read of
+    # cos/sin, one read/write of x, and produces the result in a single pass.
+    @pytest.mark.parametrize("seqlen", [512, 2048, 4096, 8192])
+    def test_fused_vs_pytorch(self, seqlen):
+        from lumen.ops.rope import apply_rotary_pos_emb
+
+        x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r_fused = cuda_timer(
+            lambda: apply_rotary_pos_emb(x, cos, sin),
+            label=f"Lumen fused RoPE S={seqlen}",
+        )
+        r_pytorch = cuda_timer(
+            lambda: _pytorch_rope_neox(x, cos, sin),
+            label=f"PyTorch decomposed RoPE S={seqlen}",
+        )
+
+        speedup = r_pytorch.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup_vs_pytorch"] = round(speedup, 2)
+        print_report(f"Fused vs PyTorch RoPE S={seqlen}", [r_fused, r_pytorch])
+
+    # Expected: Fused Q+K RoPE should be 3-6x faster than applying PyTorch
+    # decomposed RoPE to Q and K separately (8+ kernel launches vs 1).
+    def test_fused_qk_vs_pytorch(self):
+        from lumen.ops.rope import fused_rope
+
+        seqlen = 2048
+        q = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+        cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
+
+        r_fused = cuda_timer(
+            lambda: fused_rope(q, k, cos, sin),
+            label="Lumen fused_rope Q+K",
+        )
+
+        def _pytorch_both():
+            _pytorch_rope_neox(q, cos, sin)
+            _pytorch_rope_neox(k, cos, sin)
+
+        r_pytorch = cuda_timer(_pytorch_both, label="PyTorch RoPE Q + K separate")
+
+        speedup = r_pytorch.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup_vs_pytorch"] = round(speedup, 2)
+        print_report("Fused Q+K vs PyTorch Separate", [r_fused, r_pytorch])
+
+
 # ---------------------------------------------------------------------------
 # 1. Standard 1D RoPE — sequence length sweep
 # ---------------------------------------------------------------------------
@@ -292,15 +372,22 @@ def main():
 
     results: List[BenchResult] = []
 
-    for seqlen in [128, 512, 2048, 4096, 8192]:
+    # Fused vs PyTorch baseline
+    for seqlen in [512, 2048, 4096, 8192]:
         x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
         cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
 
-        r = cuda_timer(
+        r_fused = cuda_timer(
             lambda: apply_rotary_pos_emb(x, cos, sin),
-            label=f"apply_rotary S={seqlen}",
+            label=f"Lumen fused S={seqlen}",
         )
-        results.append(r)
+        r_pytorch = cuda_timer(
+            lambda: _pytorch_rope_neox(x, cos, sin),
+            label=f"PyTorch decomposed S={seqlen}",
+        )
+        speedup = r_pytorch.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup_vs_pytorch"] = round(speedup, 2)
+        results.extend([r_fused, r_pytorch])
 
     # Fused Q+K
     seqlen = 2048
