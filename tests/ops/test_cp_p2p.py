@@ -139,13 +139,24 @@ def _is_aiter_available():
 _AITER = pytest.mark.skipif(not _is_aiter_available(), reason="AITER required")
 
 
+def _warmup_ck_kernels(B, S_local, H, D, dtype, device="cuda:0"):
+    """Pre-JIT CK attention kernels so mp.spawn children hit the cache."""
+    from lumen.ops.attention.attention import attention
+
+    q = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
+    k = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
+    v = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
+    attention(q, k, v, causal=True, return_lse=True)
+    torch.cuda.synchronize()
+    del q, k, v
+
+
 def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v, sm_scale, port):
     """Worker function for 2-GPU CP P2P test.
 
-    Uses ``aiter_triton`` explicitly to avoid CK csrc JIT race conditions
-    in ``mp.spawn`` subprocesses.  The Triton kernel requires
-    ``S_local >= FIXED_BLOCK_M`` (64), so the test sequence length must
-    satisfy this after the CP split.
+    CK kernels are pre-compiled by ``_warmup_ck_kernels`` before spawn,
+    so ``backend_type="auto"`` safely picks the CK csrc path without
+    JIT races across subprocesses.
     """
     import torch.distributed as dist
 
@@ -178,7 +189,7 @@ def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v,
                 softmax_scale=softmax_scale,
                 causal=causal,
                 return_lse=True,
-                backend_type="aiter_triton",
+                backend_type="auto",
             )
             return out, lse.transpose(1, 2).contiguous()
 
@@ -221,6 +232,9 @@ class TestCPP2PDistributed:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("", 0))
             port = s.getsockname()[1]
+
+        S_local = S // 2
+        _warmup_ck_kernels(B, S_local, H, D, dtype=torch.bfloat16)
 
         result_queue = mp.Queue()
         mp.spawn(
