@@ -21,9 +21,25 @@ Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
 """
 
 import os
+import time
 
 import pytest
 import torch
+
+_SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
+
+
+def _sdma_spawn(fn, args, nprocs, join=True):
+    """``mp.spawn`` with a KFD SDMA-queue reclamation cooldown.
+
+    See ``tests/ops/test_sdma.py::_sdma_spawn`` for the full rationale.
+    Override with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
+    """
+    import torch.multiprocessing as mp
+
+    if _SDMA_SPAWN_COOLDOWN_SECS > 0:
+        time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
+    return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
 
 
 def _get_free_port():
@@ -277,11 +293,10 @@ class TestSdmaTpCommDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_allgather_dim0,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for r in range(self.world_size):
             assert results[r], f"PE {r} allgather_dim0 failed"
@@ -292,11 +307,10 @@ class TestSdmaTpCommDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_allreduce,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for r in range(self.world_size):
             assert results[r], f"PE {r} allreduce_sum failed"
@@ -307,11 +321,10 @@ class TestSdmaTpCommDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_reduce_scatter,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for r in range(self.world_size):
             assert results[r], f"PE {r} reduce_scatter_dim0 failed"
@@ -322,11 +335,10 @@ class TestSdmaTpCommDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_allgather_last_dim,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for r in range(self.world_size):
             assert results[r], f"PE {r} allgather_last_dim failed"
@@ -403,11 +415,10 @@ class TestSdmaTpCommPerformance:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_perf,
             args=(self.world_size, port, results, "allgather_dim0", n_elems, 10, 5),
             nprocs=self.world_size,
-            join=True,
         )
         r0 = results[0]
         total_bytes = n_elems * 2 * self.world_size
@@ -423,11 +434,10 @@ class TestSdmaTpCommPerformance:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_tp_perf,
             args=(self.world_size, port, results, "allreduce_sum", n_elems, 10, 5),
             nprocs=self.world_size,
-            join=True,
         )
         r0 = results[0]
         total_bytes = n_elems * 2 * self.world_size

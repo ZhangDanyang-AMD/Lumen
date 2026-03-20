@@ -22,6 +22,7 @@ import functools
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 import torch
@@ -317,6 +318,30 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
+_SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
+
+
+def _sdma_spawn(fn, args, nprocs, join=True):
+    """``mp.spawn`` wrapper with a cooldown for KFD SDMA queue reclamation.
+
+    The SDMA transport creates KFD queues (``hsaKmtCreateQueueExt``) during
+    ``shmem_torch_process_group_init``.  When spawned processes exit, the
+    kernel driver needs a brief window to release those queues before new
+    processes can allocate them on the same SDMA engines.  Running many
+    ``mp.spawn`` calls back-to-back (e.g. parametrized tests) can exhaust
+    the queue pool, causing a hard ``exit(1)`` from the C++ macro that
+    bypasses Python exception handling entirely.
+
+    A short pre-spawn sleep prevents the race.  Override the default 2 s
+    cooldown with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
+    """
+    import torch.multiprocessing as mp
+
+    if _SDMA_SPAWN_COOLDOWN_SECS > 0:
+        time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
+    return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
+
+
 def _sdma_worker_teardown(shmem_mod):
     """Standard teardown for SDMA worker processes.
 
@@ -367,11 +392,10 @@ class TestSdmaDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allgather,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank} allgather verification failed"
@@ -383,11 +407,10 @@ class TestSdmaDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_all2all,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank} all2all verification failed"
@@ -399,11 +422,10 @@ class TestSdmaDistributed:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allreduce,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank} allreduce verification failed"
@@ -706,11 +728,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allgather_vs_nccl,
             args=(self.world_size, port, results, n_elems, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: SdmaAllgather != NCCL (n={n_elems})"
@@ -723,11 +744,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_all2all_vs_nccl,
             args=(self.world_size, port, results, elems_per_pe, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: SdmaAll2all != NCCL (per_pe={elems_per_pe})"
@@ -740,11 +760,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allreduce_vs_nccl,
             args=(self.world_size, port, results, n_elems, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: SdmaAllreduce != NCCL (n={n_elems})"
@@ -756,11 +775,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allreduce_outofplace,
             args=(self.world_size, port, results, 4096, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: SdmaAllreduce outofplace != NCCL"
@@ -773,11 +791,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allgather_max,
             args=(self.world_size, port, results, n_elems, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: sdma_allgather_max != NCCL MAX (n={n_elems})"
@@ -789,11 +806,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allgather_buffer_reuse,
             args=(self.world_size, port, results, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: allgather buffer reuse failed"
@@ -805,11 +821,10 @@ class TestSdmaVsNcclGolden:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_all2all_buffer_reuse,
             args=(self.world_size, port, results, 42),
             nprocs=self.world_size,
-            join=True,
         )
         for rank in range(self.world_size):
             assert results[rank], f"PE {rank}: all2all buffer reuse failed"
@@ -945,11 +960,10 @@ class TestSdmaPerformance:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_all2all_perf,
             args=(self.world_size, port, results, elems_per_pe, 10, 5),
             nprocs=self.world_size,
-            join=True,
         )
         total_bytes = elems_per_pe * self.world_size * 4
         r0 = results[0]
@@ -967,11 +981,10 @@ class TestSdmaPerformance:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_allgather_perf,
             args=(self.world_size, port, results, n_elems, 10, 5),
             nprocs=self.world_size,
-            join=True,
         )
         total_bytes = n_elems * 4 * self.world_size
         r0 = results[0]

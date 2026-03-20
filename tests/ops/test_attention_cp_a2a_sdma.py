@@ -19,6 +19,7 @@ Skip conditions:
 """
 
 import os
+import time
 
 import pytest
 import torch
@@ -51,6 +52,22 @@ def _get_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+
+_SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
+
+
+def _sdma_spawn(fn, args, nprocs, join=True):
+    """``mp.spawn`` with a KFD SDMA-queue reclamation cooldown.
+
+    See ``tests/ops/test_sdma.py::_sdma_spawn`` for the full rationale.
+    Override with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
+    """
+    import torch.multiprocessing as mp
+
+    if _SDMA_SPAWN_COOLDOWN_SECS > 0:
+        time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
+    return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
 
 
 # ===================================================================
@@ -319,11 +336,10 @@ class TestCPA2ASdma:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_cp_a2a_triton_sdma,
             args=(self.world_size, port, results),
             nprocs=self.world_size,
-            join=True,
         )
         for r in range(self.world_size):
             assert results[r], f"PE {r}: SDMA output != NCCL output"
@@ -335,11 +351,10 @@ class TestCPA2ASdma:
         manager = mp.Manager()
         results = manager.dict()
         port = _get_free_port()
-        mp.spawn(
+        _sdma_spawn(
             _worker_cp_a2a_perf_compare,
             args=(self.world_size, port, results, 10, 5),
             nprocs=self.world_size,
-            join=True,
         )
         r0 = results[0]
         speedup = r0["nccl_ms"] / r0["sdma_ms"] if r0["sdma_ms"] > 0 else float("inf")
