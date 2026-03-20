@@ -33,15 +33,25 @@ def _ring_send_recv_kv(
     cp_rank: int,
     cp_size: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Send KV to next rank and receive from previous rank in the ring."""
+    """Send KV to next rank and receive from previous rank in the ring.
+
+    GPU synchronization around the P2P ops prevents RCCL/CK race conditions
+    where an in-flight kernel on the default stream corrupts the send buffer
+    before NCCL copies it, or the received buffer is read before the NCCL
+    stream has finished writing it.
+    """
     next_rank = (cp_rank + 1) % cp_size
     prev_rank = (cp_rank - 1) % cp_size
 
-    recv_k = torch.empty_like(send_k)
-    recv_v = torch.empty_like(send_v)
+    send_k_c = send_k.contiguous()
+    send_v_c = send_v.contiguous()
+    recv_k = torch.empty_like(send_k_c)
+    recv_v = torch.empty_like(send_v_c)
 
-    send_k_op = dist.P2POp(dist.isend, send_k.contiguous(), group=cp_group, group_peer=next_rank)
-    send_v_op = dist.P2POp(dist.isend, send_v.contiguous(), group=cp_group, group_peer=next_rank)
+    torch.cuda.current_stream().synchronize()
+
+    send_k_op = dist.P2POp(dist.isend, send_k_c, group=cp_group, group_peer=next_rank)
+    send_v_op = dist.P2POp(dist.isend, send_v_c, group=cp_group, group_peer=next_rank)
     recv_k_op = dist.P2POp(dist.irecv, recv_k, group=cp_group, group_peer=prev_rank)
     recv_v_op = dist.P2POp(dist.irecv, recv_v, group=cp_group, group_peer=prev_rank)
 
