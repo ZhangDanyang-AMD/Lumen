@@ -114,8 +114,9 @@ def _worker_tp_allgather_dim0(rank, world_size, port, results_dict):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
 
     comm = None
     try:
@@ -160,8 +161,9 @@ def _worker_tp_allreduce(rank, world_size, port, results_dict):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
 
     comm = None
     try:
@@ -202,8 +204,9 @@ def _worker_tp_reduce_scatter(rank, world_size, port, results_dict):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
 
     comm = None
     try:
@@ -246,8 +249,9 @@ def _worker_tp_allgather_last_dim(rank, world_size, port, results_dict):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
 
     comm = None
     try:

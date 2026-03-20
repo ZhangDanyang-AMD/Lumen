@@ -90,7 +90,9 @@ class TestSdmaTpCommAsync:
             mock_ar_instance = mock.MagicMock()
             mock_ar_instance._handle = mock.MagicMock()
             mock_ar_instance._handle.start_async.return_value = True
-            mock_ar_instance.wait_async = mock.MagicMock()
+            mock_ar_instance._handle.wait_async = mock.MagicMock()
+            mock_ar_instance._wire_dtype = torch.float32
+            mock_ar_instance._needs_cast = False
 
             from lumen.modules.sdma_comm import SdmaTpComm
 

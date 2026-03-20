@@ -142,9 +142,10 @@ _AITER = pytest.mark.skipif(not _is_aiter_available(), reason="AITER required")
 def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v, sm_scale, port):
     """Worker function for 2-GPU CP P2P test.
 
-    Uses ``aiter_triton`` backend explicitly: CK csrc modules JIT-loaded in
-    ``mp.spawn`` subprocesses SIGSEGV when NCCL is co-active on the same
-    device.  The Triton backend does not have this issue.
+    Uses ``aiter_triton`` explicitly to avoid CK csrc JIT race conditions
+    in ``mp.spawn`` subprocesses.  The Triton kernel requires
+    ``S_local >= FIXED_BLOCK_M`` (64), so the test sequence length must
+    satisfy this after the CP split.
     """
     import torch.distributed as dist
 
@@ -210,7 +211,7 @@ class TestCPP2PDistributed:
 
         import torch.multiprocessing as mp
 
-        B, S, H, D = 2, 64, 8, 64
+        B, S, H, D = 2, 256, 8, 64
         sm_scale = D**-0.5
         torch.manual_seed(42)
         global_q = torch.randn(B, S, H, D, dtype=torch.bfloat16) * 0.02

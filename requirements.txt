@@ -18,6 +18,7 @@ torchao>=0.8
 # HuggingFace (model/dataset download helpers)
 huggingface_hub>=0.20
 datasets>=2.16
+regex
 
 # Utilities
 numpy>=1.26.0
