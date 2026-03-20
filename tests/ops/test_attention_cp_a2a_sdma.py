@@ -202,6 +202,15 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
         b, s_local, h_q, h_kv, d = 1, 64, 8, 8, 64
         sm_scale = d**-0.5
 
+        # Eagerly initialize SDMA context so shmem_torch_process_group_init
+        # and SDMA queue creation happen in a clean state *before* any
+        # NCCL collectives.  Lazy init inside the second apply() call can
+        # race with pending NCCL work and SIGSEGV on the last GPU.
+        from lumen.ops.sdma import SdmaContext
+
+        SdmaContext.get()
+        dist.barrier()
+
         torch.cuda.manual_seed(42 + rank)
         q = torch.randn(b, s_local, h_q, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
         k = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
@@ -227,6 +236,9 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
             None,
             False,
         )
+
+        torch.cuda.synchronize()
+        dist.barrier()
 
         out_sdma = AttentionTritonFunctionCPA2A.apply(
             q,
@@ -274,6 +286,11 @@ def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations
     )
 
     try:
+        from lumen.ops.sdma import SdmaContext
+
+        SdmaContext.get()
+        dist.barrier()
+
         b, s_local, h_q, h_kv, d = 1, 256, 16, 16, 128
         sm_scale = d**-0.5
         device = f"cuda:{rank}"
@@ -317,6 +334,8 @@ def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations
             return np.mean(times) if times else 0
 
         nccl_ms = _bench(False)
+        torch.cuda.synchronize()
+        dist.barrier()
         sdma_ms = _bench(True)
 
         results_dict[rank] = {"nccl_ms": nccl_ms, "sdma_ms": sdma_ms}
