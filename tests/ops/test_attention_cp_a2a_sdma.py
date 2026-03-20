@@ -189,8 +189,10 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     from lumen.ops.attention.attention_with_cp_a2a import (
         AttentionTritonFunctionCPA2A,
@@ -262,8 +264,10 @@ def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     from lumen.ops.attention.attention_with_cp_a2a import (
         AttentionTritonFunctionCPA2A,
