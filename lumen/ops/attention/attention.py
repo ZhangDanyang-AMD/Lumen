@@ -4,9 +4,12 @@
 # See LICENSE for license information.
 ###############################################################################
 
+import logging
 from typing import Optional
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 from lumen.core.grad_quant import quantize_grad_tensor
 
@@ -699,14 +702,12 @@ def attention(
                     result = (result[0], result[2])
             return result
         except RuntimeError as _aiter_err:
-            import warnings
-
-            warnings.warn(
-                f"AITER flash-attention kernel unavailable for this configuration "
-                f"(q={tuple(q.shape)}, k={tuple(k.shape)}, causal={causal}): "
-                f"{_aiter_err}. Falling back to aiter_triton backend.",
-                RuntimeWarning,
-                stacklevel=2,
+            logger.warning(
+                "attention: aiter csrc rejected " "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _aiter_err,
             )
             return AttentionTritonFunction.apply(
                 q,

@@ -1866,53 +1866,77 @@ def attention_forward(
 
     When *force_triton* is True, csrc branches are skipped unconditionally.
     """
-    # ── non-quantized: try csrc ─────────────────────────────────────
+    # ── non-quantized: try csrc, fall back to triton on rejection ───
     if not force_triton and not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
-        out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
-            q,
-            k,
-            v,
-            dropout_p,
-            softmax_scale,
-            causal,
-            window_size[0],
-            window_size[1],
-            bias,
-            alibi_slopes,
-            True,
-            return_softmax,
-        )
-        q_scale = torch.tensor([1.0], device=q.device)
-        k_scale = torch.tensor([1.0], device=q.device)
-        v_scale = torch.tensor([1.0], device=q.device)
-        p_scale = 1.0
-        return out, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state
+        try:
+            out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size[0],
+                window_size[1],
+                bias,
+                alibi_slopes,
+                True,
+                return_softmax,
+            )
+            q_scale = torch.tensor([1.0], device=q.device)
+            k_scale = torch.tensor([1.0], device=q.device)
+            v_scale = torch.tensor([1.0], device=q.device)
+            p_scale = 1.0
+            return out, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state
+        except RuntimeError as _csrc_err:
+            # Known trigger: CP A2A scatter can produce nheads==1 per rank,
+            # which the CK fmha_fwd kernel rejects.  Safe to fall through
+            # to the Triton path below — numerically equivalent.
+            logger.warning(
+                "attention_forward: aiter csrc rejected " "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _csrc_err,
+            )
 
     # ── FP8 per-tensor csrc (forward-only, inference) ───────────────
     # aiter has a C++ per-tensor FP8 forward but no matching backward,
     # so we only use it when none of the inputs require grad.
     _no_grad_needed = not (q.requires_grad or k.requires_grad or v.requires_grad)
     if not force_triton and use_fp8 and _no_grad_needed and csrc_available("flash_attn_fp8_pertensor_fwd"):
-        fp8_dt = get_f8_fwd_dtype()
-        q_fp8, q_descale = ScalingManager.quantize_per_tensor_fp8(q, fp8_dt)
-        k_fp8, k_descale = ScalingManager.quantize_per_tensor_fp8(k, fp8_dt)
-        v_fp8, v_descale = ScalingManager.quantize_per_tensor_fp8(v, fp8_dt)
-        out, softmax_lse = attention_aiter_csrc_fp8_pertensor_forward_impl(
-            q_fp8,
-            k_fp8,
-            v_fp8,
-            q_descale,
-            k_descale,
-            v_descale,
-            softmax_scale,
-            causal,
-            window_size[0],
-            window_size[1],
-        )
-        exp_scores = torch.empty([], device=q.device, dtype=torch.float32)
-        return (out, softmax_lse, exp_scores, q_fp8, k_fp8, v_fp8, q_descale, k_descale, v_descale, 1.0, None)
+        try:
+            fp8_dt = get_f8_fwd_dtype()
+            q_fp8, q_descale = ScalingManager.quantize_per_tensor_fp8(q, fp8_dt)
+            k_fp8, k_descale = ScalingManager.quantize_per_tensor_fp8(k, fp8_dt)
+            v_fp8, v_descale = ScalingManager.quantize_per_tensor_fp8(v, fp8_dt)
+            out, softmax_lse = attention_aiter_csrc_fp8_pertensor_forward_impl(
+                q_fp8,
+                k_fp8,
+                v_fp8,
+                q_descale,
+                k_descale,
+                v_descale,
+                softmax_scale,
+                causal,
+                window_size[0],
+                window_size[1],
+            )
+            exp_scores = torch.empty([], device=q.device, dtype=torch.float32)
+            return (out, softmax_lse, exp_scores, q_fp8, k_fp8, v_fp8, q_descale, k_descale, v_descale, 1.0, None)
+        except RuntimeError as _csrc_err:
+            logger.warning(
+                "attention_forward: aiter FP8 per-tensor csrc rejected "
+                "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _csrc_err,
+            )
 
     # ── triton per-block fallback (supports both fwd & bwd) ─────────
+    # Reached when: force_triton=True, csrc unavailable, OR csrc raised
+    # RuntimeError for an unsupported config (e.g. nheads==1 after scatter).
     if use_fp8:
         fp8_dt = get_f8_fwd_dtype()
         q, q_scale = ScalingManager.quantize_block_fp8(q, FIXED_BLOCK_M, fp8_dt)
@@ -1977,39 +2001,48 @@ def attention_backward(
 
     When *force_triton* is True, csrc branches are skipped unconditionally.
     """
-    # ── non-quantized: try csrc ─────────────────────────────────────
+    # ── non-quantized: try csrc, fall back to triton on rejection ───
     if not force_triton and not use_fp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
-        dq = torch.empty_like(q)
-        dk = torch.empty_like(k)
-        dv = torch.empty_like(v)
-        attention_aiter_csrc_backward_impl(
-            do,
-            q,
-            k,
-            v,
-            o,
-            softmax_lse,
-            dq,
-            dk,
-            dv,
-            None,
-            dropout_p,
-            sm_scale,
-            causal,
-            window_size[0],
-            window_size[1],
-            bias,
-            alibi_slopes,
-            deterministic,
-            rng_state,
-        )
-        return dq, dk, dv
+        try:
+            dq = torch.empty_like(q)
+            dk = torch.empty_like(k)
+            dv = torch.empty_like(v)
+            attention_aiter_csrc_backward_impl(
+                do,
+                q,
+                k,
+                v,
+                o,
+                softmax_lse,
+                dq,
+                dk,
+                dv,
+                None,
+                dropout_p,
+                sm_scale,
+                causal,
+                window_size[0],
+                window_size[1],
+                bias,
+                alibi_slopes,
+                deterministic,
+                rng_state,
+            )
+            return dq, dk, dv
+        except RuntimeError as _csrc_err:
+            logger.warning(
+                "attention_backward: aiter csrc rejected " "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _csrc_err,
+            )
 
     # ── future: FP8 csrc ────────────────────────────────────────────
     # if use_fp8 and csrc_available("flash_attn_fp8_bwd"):
     #     return _csrc_fp8_backward(...)
 
-    # ── triton fallback ─────────────────────────────────────────────
+    # ── triton fallback (always available for non-ALiBi configs) ────
     if alibi_slopes is not None:
         raise NotImplementedError(
             "ALiBi backward is not supported by the Triton attention kernels. "
@@ -2063,33 +2096,42 @@ def attention_mxfp8_forward(
     Backend priority for non-quantized: csrc → triton.
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
-    # ── non-quantized: try csrc ─────────────────────────────────────
+    # ── non-quantized: try csrc, fall back to triton on rejection ───
     if not use_mxfp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_fwd"):
-        out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
-            q,
-            k,
-            v,
-            dropout_p,
-            softmax_scale,
-            causal,
-            window_size[0],
-            window_size[1],
-            bias,
-            alibi_slopes,
-            True,
-            return_softmax,
-        )
-        q_scale = torch.scalar_tensor(1.0, device=q.device)
-        k_scale = torch.scalar_tensor(1.0, device=q.device)
-        v_scale = torch.scalar_tensor(1.0, device=q.device)
-        p_scale = 127
-        return out, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state
+        try:
+            out, softmax_lse, exp_scores, rng_state = attention_aiter_csrc_forward_impl(
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size[0],
+                window_size[1],
+                bias,
+                alibi_slopes,
+                True,
+                return_softmax,
+            )
+            q_scale = torch.scalar_tensor(1.0, device=q.device)
+            k_scale = torch.scalar_tensor(1.0, device=q.device)
+            v_scale = torch.scalar_tensor(1.0, device=q.device)
+            p_scale = 127
+            return out, softmax_lse, exp_scores, q, k, v, q_scale, k_scale, v_scale, p_scale, rng_state
+        except RuntimeError as _csrc_err:
+            logger.warning(
+                "attention_mxfp8_forward: aiter csrc rejected " "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _csrc_err,
+            )
 
     # ── future: MXFP8 csrc ─────────────────────────────────────────
     # if use_mxfp8 and csrc_available("flash_attn_mxfp8_fwd"):
     #     return _csrc_mxfp8_forward(...)
 
-    # ── triton fallback ─────────────────────────────────────────────
+    # ── triton fallback (only path for MXFP8 until csrc is ready) ──
     assert is_cdna4(), "mxfp8 is only supported by gfx950 and newer version"
     if use_mxfp8:
         fp8_dt = get_f8_fwd_dtype()
@@ -2186,33 +2228,42 @@ def attention_mxfp8_backward(
     Backend priority for non-quantized: csrc → triton.
     Backend priority for MXFP8:         (future csrc mxfp8) → triton mxfp8.
     """
-    # ── non-quantized: try csrc ─────────────────────────────────────
+    # ── non-quantized: try csrc, fall back to triton on rejection ───
     if not use_mxfp8 and _BACKEND_PREF in ("auto", "csrc") and csrc_available("flash_attn_bwd"):
-        dq = torch.empty_like(q)
-        dk = torch.empty_like(k)
-        dv = torch.empty_like(v)
-        attention_aiter_csrc_backward_impl(
-            do,
-            q,
-            k,
-            v,
-            o,
-            softmax_lse,
-            dq,
-            dk,
-            dv,
-            None,
-            dropout_p,
-            sm_scale,
-            causal,
-            window_size[0],
-            window_size[1],
-            bias,
-            alibi_slopes,
-            deterministic,
-            rng_state,
-        )
-        return dq, dk, dv
+        try:
+            dq = torch.empty_like(q)
+            dk = torch.empty_like(k)
+            dv = torch.empty_like(v)
+            attention_aiter_csrc_backward_impl(
+                do,
+                q,
+                k,
+                v,
+                o,
+                softmax_lse,
+                dq,
+                dk,
+                dv,
+                None,
+                dropout_p,
+                sm_scale,
+                causal,
+                window_size[0],
+                window_size[1],
+                bias,
+                alibi_slopes,
+                deterministic,
+                rng_state,
+            )
+            return dq, dk, dv
+        except RuntimeError as _csrc_err:
+            logger.warning(
+                "attention_mxfp8_backward: aiter csrc rejected " "(q=%s, k=%s, causal=%s): %s — falling back to Triton",
+                tuple(q.shape),
+                tuple(k.shape),
+                causal,
+                _csrc_err,
+            )
 
     # ── future: MXFP8 csrc ─────────────────────────────────────────
     # if use_mxfp8 and csrc_available("flash_attn_mxfp8_bwd"):
