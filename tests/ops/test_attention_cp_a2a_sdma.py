@@ -132,6 +132,38 @@ class TestAttentionCPA2AHelper:
 # ===================================================================
 
 
+def _cp_a2a_worker_teardown(shmem_mod):
+    """Standard teardown for CP A2A SDMA worker processes.
+
+    Cleanup order (mirrors mori ccl reference tests):
+    1. CUDA sync — flush outstanding GPU work.
+    2. Barrier — all ranks rendezvous.
+    3. Release the module-level SdmaAll2all cache so C++ handles
+       destruct while shmem is still alive.
+    4. SdmaContext.reset() — clear the singleton reference.
+    5. Barrier — sync after handle destruction.
+    6. shmem_finalize() — release mori symmetric-memory resources.
+    7. Barrier — rendezvous after finalization.
+    8. destroy_process_group() — must be last.
+    """
+    import torch.distributed as dist
+
+    from lumen.ops.attention.attention_with_cp_a2a import reset_sdma_a2a_cache
+    from lumen.ops.sdma import SdmaContext
+
+    torch.cuda.synchronize()
+    if dist.is_initialized():
+        dist.barrier()
+    reset_sdma_a2a_cache()
+    SdmaContext.reset()
+    if dist.is_initialized():
+        dist.barrier()
+    shmem_mod.shmem_finalize()
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
+
+
 def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
     """Worker: run CP A2A triton attention with SDMA, compare to reference."""
     import mori.shmem as shmem
@@ -142,66 +174,66 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
-    shmem.shmem_torch_process_group_init("default")
 
     from lumen.ops.attention.attention_with_cp_a2a import (
         AttentionTritonFunctionCPA2A,
     )
 
-    b, s_local, h_q, h_kv, d = 1, 64, 8, 8, 64
-    sm_scale = d**-0.5
+    try:
+        b, s_local, h_q, h_kv, d = 1, 64, 8, 8, 64
+        sm_scale = d**-0.5
 
-    torch.cuda.manual_seed(42 + rank)
-    q = torch.randn(b, s_local, h_q, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
-    k = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
-    v = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+        torch.cuda.manual_seed(42 + rank)
+        q = torch.randn(b, s_local, h_q, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+        k = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
+        v = torch.randn(b, s_local, h_kv, d, device=f"cuda:{rank}", dtype=torch.bfloat16)
 
-    cp_group = dist.new_group(list(range(world_size)))
+        cp_group = dist.new_group(list(range(world_size)))
 
-    out_nccl = AttentionTritonFunctionCPA2A.apply(
-        q,
-        k,
-        v,
-        0.0,
-        sm_scale,
-        False,
-        (-1, -1),
-        None,
-        None,
-        False,
-        False,
-        False,
-        False,
-        cp_group,
-        None,
-        False,
-    )
+        out_nccl = AttentionTritonFunctionCPA2A.apply(
+            q,
+            k,
+            v,
+            0.0,
+            sm_scale,
+            False,
+            (-1, -1),
+            None,
+            None,
+            False,
+            False,
+            False,
+            False,
+            cp_group,
+            None,
+            False,
+        )
 
-    out_sdma = AttentionTritonFunctionCPA2A.apply(
-        q,
-        k,
-        v,
-        0.0,
-        sm_scale,
-        False,
-        (-1, -1),
-        None,
-        None,
-        False,
-        False,
-        False,
-        False,
-        cp_group,
-        None,
-        True,
-    )
+        out_sdma = AttentionTritonFunctionCPA2A.apply(
+            q,
+            k,
+            v,
+            0.0,
+            sm_scale,
+            False,
+            (-1, -1),
+            None,
+            None,
+            False,
+            False,
+            False,
+            False,
+            cp_group,
+            None,
+            True,
+        )
 
-    passed = torch.allclose(out_nccl, out_sdma, atol=1e-3, rtol=1e-3)
-    results_dict[rank] = passed
-
-    dist.barrier()
-    dist.destroy_process_group()
-    shmem.shmem_finalize()
+        passed = torch.allclose(out_nccl, out_sdma, atol=1e-3, rtol=1e-3)
+        results_dict[rank] = passed
+    except Exception:
+        results_dict[rank] = False
+    finally:
+        _cp_a2a_worker_teardown(shmem)
 
 
 def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations, warmup):
@@ -215,62 +247,60 @@ def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations
     os.environ["MORI_ENABLE_SDMA"] = "1"
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
-    shmem.shmem_torch_process_group_init("default")
 
     from lumen.ops.attention.attention_with_cp_a2a import (
         AttentionTritonFunctionCPA2A,
     )
 
-    b, s_local, h_q, h_kv, d = 1, 256, 16, 16, 128
-    sm_scale = d**-0.5
-    device = f"cuda:{rank}"
-    cp_group = dist.new_group(list(range(world_size)))
+    try:
+        b, s_local, h_q, h_kv, d = 1, 256, 16, 16, 128
+        sm_scale = d**-0.5
+        device = f"cuda:{rank}"
+        cp_group = dist.new_group(list(range(world_size)))
 
-    torch.cuda.manual_seed(42 + rank)
-    q = torch.randn(b, s_local, h_q, d, device=device, dtype=torch.bfloat16)
-    k = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
-    v = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
+        torch.cuda.manual_seed(42 + rank)
+        q = torch.randn(b, s_local, h_q, d, device=device, dtype=torch.bfloat16)
+        k = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
+        v = torch.randn(b, s_local, h_kv, d, device=device, dtype=torch.bfloat16)
 
-    start_ev = torch.cuda.Event(enable_timing=True)
-    end_ev = torch.cuda.Event(enable_timing=True)
-    stream = torch.cuda.current_stream(device)
+        start_ev = torch.cuda.Event(enable_timing=True)
+        end_ev = torch.cuda.Event(enable_timing=True)
+        stream = torch.cuda.current_stream(device)
 
-    def _bench(use_sdma):
-        times = []
-        for i in range(warmup + iterations):
-            start_ev.record(stream)
-            _ = AttentionTritonFunctionCPA2A.apply(
-                q,
-                k,
-                v,
-                0.0,
-                sm_scale,
-                False,
-                (-1, -1),
-                None,
-                None,
-                False,
-                False,
-                False,
-                False,
-                cp_group,
-                None,
-                use_sdma,
-            )
-            end_ev.record(stream)
-            stream.synchronize()
-            if i >= warmup:
-                times.append(start_ev.elapsed_time(end_ev))
-        return np.mean(times) if times else 0
+        def _bench(use_sdma):
+            times = []
+            for i in range(warmup + iterations):
+                start_ev.record(stream)
+                _ = AttentionTritonFunctionCPA2A.apply(
+                    q,
+                    k,
+                    v,
+                    0.0,
+                    sm_scale,
+                    False,
+                    (-1, -1),
+                    None,
+                    None,
+                    False,
+                    False,
+                    False,
+                    False,
+                    cp_group,
+                    None,
+                    use_sdma,
+                )
+                end_ev.record(stream)
+                stream.synchronize()
+                if i >= warmup:
+                    times.append(start_ev.elapsed_time(end_ev))
+            return np.mean(times) if times else 0
 
-    nccl_ms = _bench(False)
-    sdma_ms = _bench(True)
+        nccl_ms = _bench(False)
+        sdma_ms = _bench(True)
 
-    results_dict[rank] = {"nccl_ms": nccl_ms, "sdma_ms": sdma_ms}
-
-    dist.barrier()
-    dist.destroy_process_group()
-    shmem.shmem_finalize()
+        results_dict[rank] = {"nccl_ms": nccl_ms, "sdma_ms": sdma_ms}
+    finally:
+        _cp_a2a_worker_teardown(shmem)
 
 
 @skip_no_sdma

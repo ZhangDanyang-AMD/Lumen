@@ -173,11 +173,19 @@ class SdmaAllgather:
 # ---------------------------------------------------------------------------
 
 
+_SDMA_ALLREDUCE_NATIVE_DTYPES = frozenset({torch.uint32, torch.int32, torch.float16, torch.bfloat16})
+
+
 class SdmaAllreduce:
     """Reusable AllreduceSdma handle with automatic buffer management.
 
     Wraps ``mori.ccl.AllreduceSdma``.  The reduction operation is
     element-wise **SUM** (the only op mori's SDMA kernel supports).
+
+    The mori SDMA allreduce kernel natively supports uint32, int32,
+    float16, and bfloat16.  When ``dtype`` is ``torch.float32``, this
+    wrapper transparently casts to bfloat16 for the reduction and casts
+    the result back to float32.
 
     Args:
         dtype: Element type (default ``torch.float32``).
@@ -189,8 +197,14 @@ class SdmaAllreduce:
         dtype: torch.dtype = torch.float32,
         ctx: Optional[SdmaContext] = None,
     ):
+        if dtype != torch.float32 and dtype not in _SDMA_ALLREDUCE_NATIVE_DTYPES:
+            raise ValueError(
+                f"SdmaAllreduce: unsupported dtype {dtype}. "
+                f"Supported: float32 (via bf16), {sorted(str(d) for d in _SDMA_ALLREDUCE_NATIVE_DTYPES)}"
+            )
         self._ctx = ctx or SdmaContext.get()
-        self._dtype = dtype
+        self._user_dtype = dtype
+        self._wire_dtype = torch.bfloat16 if dtype == torch.float32 else dtype
         self._handle = None
         self._capacity_elems: int = 0
 
@@ -204,7 +218,7 @@ class SdmaAllreduce:
 
         from mori.ccl import AllreduceSdma
 
-        elem_size = torch.tensor([], dtype=self._dtype).element_size()
+        elem_size = torch.tensor([], dtype=self._wire_dtype).element_size()
         input_buf_bytes = n_elems * elem_size
         npes = self._ctx.npes
         output_buf_bytes = npes * (n_elems // npes + 64) * elem_size
@@ -215,16 +229,21 @@ class SdmaAllreduce:
             input_buffer_size=input_buf_bytes,
             output_buffer_size=output_buf_bytes,
             copy_output_to_user=True,
-            dtype=self._dtype,
+            dtype=self._wire_dtype,
         )
         self._capacity_elems = n_elems
         logger.debug(
-            "SdmaAllreduce: (re-)allocated handle for %d elems, dtype=%s " "(PE %d/%d)",
+            "SdmaAllreduce: (re-)allocated handle for %d elems, " "user_dtype=%s wire_dtype=%s (PE %d/%d)",
             n_elems,
-            self._dtype,
+            self._user_dtype,
+            self._wire_dtype,
             self._ctx.my_pe,
             self._ctx.npes,
         )
+
+    @property
+    def _needs_cast(self) -> bool:
+        return self._user_dtype != self._wire_dtype
 
     def inplace(
         self,
@@ -237,8 +256,14 @@ class SdmaAllreduce:
         self._ensure_handle(n_elems)
         if stream is None:
             stream = torch.cuda.current_stream(tensor.device)
-        self._handle.allreduce_inplace(tensor, n_elems, stream)
-        stream.synchronize()
+        if self._needs_cast:
+            buf = tensor.to(self._wire_dtype)
+            self._handle.allreduce_inplace(buf, n_elems, stream)
+            stream.synchronize()
+            tensor.copy_(buf.to(self._user_dtype))
+        else:
+            self._handle.allreduce_inplace(tensor, n_elems, stream)
+            stream.synchronize()
 
     def __call__(
         self,
@@ -252,8 +277,15 @@ class SdmaAllreduce:
         self._ensure_handle(n_elems)
         if stream is None:
             stream = torch.cuda.current_stream(input_tensor.device)
-        self._handle(input_tensor, output_tensor, n_elems, stream)
-        stream.synchronize()
+        if self._needs_cast:
+            buf_in = input_tensor.to(self._wire_dtype)
+            buf_out = torch.empty_like(buf_in)
+            self._handle(buf_in, buf_out, n_elems, stream)
+            stream.synchronize()
+            output_tensor.copy_(buf_out.to(self._user_dtype))
+        else:
+            self._handle(input_tensor, output_tensor, n_elems, stream)
+            stream.synchronize()
 
 
 # ---------------------------------------------------------------------------

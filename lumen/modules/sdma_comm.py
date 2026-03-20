@@ -192,11 +192,25 @@ class _TpSdmaAllgather:
 
 
 class _TpSdmaAllreduce:
-    """Cached ``AllreduceSdma`` handle (SUM) for a specific dtype."""
+    """Cached ``AllreduceSdma`` handle (SUM) for a specific dtype.
+
+    The mori SDMA allreduce kernel natively supports uint32, int32,
+    float16, and bfloat16.  When ``dtype`` is ``torch.float32``, this
+    wrapper transparently casts to bfloat16 for the reduction and casts
+    the result back.
+    """
+
+    _NATIVE_DTYPES = frozenset({torch.uint32, torch.int32, torch.float16, torch.bfloat16})
 
     def __init__(self, ctx: SdmaTpContext, dtype: torch.dtype = torch.float32):
+        if dtype != torch.float32 and dtype not in self._NATIVE_DTYPES:
+            raise ValueError(
+                f"_TpSdmaAllreduce: unsupported dtype {dtype}. "
+                f"Supported: float32 (via bf16), {sorted(str(d) for d in self._NATIVE_DTYPES)}"
+            )
         self._ctx = ctx
-        self._dtype = dtype
+        self._user_dtype = dtype
+        self._wire_dtype = torch.bfloat16 if dtype == torch.float32 else dtype
         self._handle = None
         self._capacity: int = 0
 
@@ -205,7 +219,7 @@ class _TpSdmaAllreduce:
             return
         from mori.ccl import AllreduceSdma
 
-        elem_size = torch.tensor([], dtype=self._dtype).element_size()
+        elem_size = torch.tensor([], dtype=self._wire_dtype).element_size()
         npes = self._ctx.npes
         self._handle = AllreduceSdma(
             self._ctx.my_pe,
@@ -213,23 +227,51 @@ class _TpSdmaAllreduce:
             input_buffer_size=n_elems * elem_size,
             output_buffer_size=npes * (n_elems // npes + 64) * elem_size,
             copy_output_to_user=True,
-            dtype=self._dtype,
+            dtype=self._wire_dtype,
         )
         self._capacity = n_elems
         logger.debug(
-            "_TpSdmaAllreduce: (re)alloc for %d elems, dtype=%s (PE %d/%d)",
+            "_TpSdmaAllreduce: (re)alloc for %d elems, " "user_dtype=%s wire_dtype=%s (PE %d/%d)",
             n_elems,
-            self._dtype,
+            self._user_dtype,
+            self._wire_dtype,
             self._ctx.my_pe,
             self._ctx.npes,
         )
+
+    @property
+    def _needs_cast(self) -> bool:
+        return self._user_dtype != self._wire_dtype
 
     def inplace(self, tensor: torch.Tensor) -> None:
         tensor = tensor.contiguous()
         self._ensure(tensor.numel())
         stream = torch.cuda.current_stream(tensor.device)
-        self._handle.allreduce_inplace(tensor, tensor.numel(), stream)
-        stream.synchronize()
+        if self._needs_cast:
+            buf = tensor.to(self._wire_dtype)
+            self._handle.allreduce_inplace(buf, buf.numel(), stream)
+            stream.synchronize()
+            tensor.copy_(buf.to(self._user_dtype))
+        else:
+            self._handle.allreduce_inplace(tensor, tensor.numel(), stream)
+            stream.synchronize()
+
+    def start_async_inplace(self, tensor: torch.Tensor, stream=None) -> bool:
+        """Start async in-place allreduce.  Caller must call :meth:`wait_async`."""
+        tensor = tensor.contiguous()
+        self._ensure(tensor.numel())
+        if self._needs_cast:
+            self._async_buf = tensor.to(self._wire_dtype)
+            self._async_tensor = tensor
+            return self._handle.start_async_inplace(self._async_buf, self._async_buf.numel(), stream)
+        return self._handle.start_async_inplace(tensor, tensor.numel(), stream)
+
+    def wait_async(self, stream=None) -> None:
+        """Wait for a previously started async allreduce."""
+        self._handle.wait_async(stream)
+        if self._needs_cast and hasattr(self, "_async_buf"):
+            self._async_tensor.copy_(self._async_buf.to(self._user_dtype))
+            del self._async_buf, self._async_tensor
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +374,6 @@ class SdmaTpComm:
 
     def wait_allreduce_sum(self, stream=None) -> None:
         """Wait for async all-reduce to complete."""
-        # For in-place, we need the last-used ar handle; we store it per dtype.
-        # The caller must call wait after start_async on the same tensor.
-        # We use the first dtype's handle as a heuristic - actually we need to track
-        # which handle was used. Store _ar_async_dtype on start.
         dtype = getattr(self, "_ar_async_dtype", None)
         if dtype is None:
             raise RuntimeError("wait_allreduce_sum called without prior allreduce_sum_async")
@@ -344,31 +382,43 @@ class SdmaTpComm:
         del self._ar_async_dtype
 
     def reduce_scatter_dim0_async(self, tensor: torch.Tensor, stream=None) -> bool:
-        """Start async reduce-scatter along dim 0. Call :meth:`wait_reduce_scatter_dim0` to complete."""
+        """Start async reduce-scatter along dim 0.
+
+        Call :meth:`wait_reduce_scatter_dim0` to complete.  The caller
+        must keep *tensor* alive until wait returns (mori holds a raw
+        pointer to the device buffer).
+        """
         tensor = tensor.contiguous()
-        n_elems = tensor.numel()
+        ar = self._get_ar(tensor.dtype)
+        wire_dtype = ar._wire_dtype
+        wire_tensor = tensor.to(wire_dtype) if ar._needs_cast else tensor
+        n_elems = wire_tensor.numel()
         if (
             self._rs_output_buf is None
             or self._rs_output_buf.numel() < n_elems
-            or self._rs_output_buf.device != tensor.device
-            or self._rs_output_buf.dtype != tensor.dtype
+            or self._rs_output_buf.device != wire_tensor.device
+            or self._rs_output_buf.dtype != wire_dtype
         ):
-            self._rs_output_buf = torch.empty_like(tensor)
+            self._rs_output_buf = torch.empty_like(wire_tensor)
         self._rs_async_shape = tensor.shape
-        ar = self._get_ar(tensor.dtype)
-        return ar._handle.start_async(tensor, self._rs_output_buf, n_elems, stream)
+        self._rs_user_dtype = tensor.dtype
+        self._rs_input_buf = wire_tensor
+        return ar._handle.start_async(wire_tensor, self._rs_output_buf, n_elems, stream)
 
     def wait_reduce_scatter_dim0(self, stream=None) -> torch.Tensor:
         """Wait for async reduce-scatter and return ``[S/TP, ...]``."""
         shape = getattr(self, "_rs_async_shape", None)
         if shape is None:
             raise RuntimeError("wait_reduce_scatter_dim0 called without prior reduce_scatter_dim0_async")
-        ar = self._get_ar(self._rs_output_buf.dtype)
-        ar.wait_async(stream)
+        user_dtype = self._rs_user_dtype
+        ar = self._get_ar(user_dtype)
+        ar._handle.wait_async(stream)
         chunk_size = shape[0] // self.npes
         start = self.my_pe * chunk_size
         result = self._rs_output_buf[start : start + chunk_size].contiguous()
-        del self._rs_async_shape
+        if ar._needs_cast:
+            result = result.to(user_dtype)
+        del self._rs_async_shape, self._rs_user_dtype, self._rs_input_buf
         return result
 
     @classmethod

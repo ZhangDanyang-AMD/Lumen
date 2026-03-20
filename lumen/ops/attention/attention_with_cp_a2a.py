@@ -164,6 +164,17 @@ def _sdma_a2a_exchange(src: torch.Tensor, dst: torch.Tensor) -> None:
     handle(src, dst)
 
 
+def reset_sdma_a2a_cache() -> None:
+    """Release the process-level SdmaAll2all handle.
+
+    Must be called before ``SdmaContext.reset()`` / ``shmem_finalize()`` so
+    that the C++ SDMA handle destructor runs while shmem is still alive.
+    """
+    global _sdma_a2a_handle
+    with _sdma_a2a_lock:
+        _sdma_a2a_handle = None
+
+
 # ---------------------------------------------------------------------------
 # Shared A2A communication wrappers
 # ---------------------------------------------------------------------------
