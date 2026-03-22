@@ -635,14 +635,18 @@ class TestDeferredWgradSdmaComm:
         torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k SdmaComm
     """
 
-    @pytest.fixture(autouse=True)
-    def _setup(self):
+    @pytest.fixture(autouse=True, scope="class")
+    def _setup(self, request):
+        from lumen.modules.sdma_comm import SdmaTpComm
+
         os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
-        self.rank = dist.get_rank()
-        self.world = dist.get_world_size()
-        self.device = torch.device(f"cuda:{self.rank}")
+        request.cls.rank = dist.get_rank()
+        request.cls.world = dist.get_world_size()
+        request.cls.device = torch.device(f"cuda:{request.cls.rank}")
+        request.cls.comm = SdmaTpComm(dist.group.WORLD)
         yield
+        torch.cuda.synchronize()
         dist.barrier()
 
     # Expected: SDMA DMA engines are fully independent of compute SMs —
@@ -652,8 +656,8 @@ class TestDeferredWgradSdmaComm:
     # than NCCL because SDMA has no SM contention at all.
     def test_wgrad_overlap_with_sdma_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
+        comm = self.comm
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         w = nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02)
         w.main_grad = torch.zeros(N, K, device=self.device, dtype=torch.bfloat16)
@@ -661,7 +665,6 @@ class TestDeferredWgradSdmaComm:
 
         ar_buf = torch.randn(N, K, device=self.device, dtype=torch.bfloat16)
 
-        comm = SdmaTpComm(dist.group.WORLD)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
@@ -743,7 +746,7 @@ class TestDeferredWgradSdmaComm:
                 comm_label="SDMA AR",
             )
 
-        # Drain all SDMA work before next test creates a new SdmaTpComm
+        # Drain all SDMA async work before next test method
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -752,8 +755,8 @@ class TestDeferredWgradSdmaComm:
     # the DMA engines never contend with the compute SMs running wgrad.
     def test_multi_layer_pipeline_with_sdma_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
+        comm = self.comm
         n_layers = 4
         weights = [
             nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
@@ -764,7 +767,6 @@ class TestDeferredWgradSdmaComm:
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
 
-        comm = SdmaTpComm(dist.group.WORLD)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
@@ -874,20 +876,23 @@ class TestNCCLvsSdmaWgradDelay:
         torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k NCCLvsSdma
     """
 
-    @pytest.fixture(autouse=True)
-    def _setup(self):
+    @pytest.fixture(autouse=True, scope="class")
+    def _setup(self, request):
+        from lumen.modules.sdma_comm import SdmaTpComm
+
         os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
-        self.rank = dist.get_rank()
-        self.world = dist.get_world_size()
-        self.device = torch.device(f"cuda:{self.rank}")
+        request.cls.rank = dist.get_rank()
+        request.cls.world = dist.get_world_size()
+        request.cls.device = torch.device(f"cuda:{request.cls.rank}")
+        request.cls.sdma_comm = SdmaTpComm(dist.group.WORLD)
         yield
+        torch.cuda.synchronize()
         dist.barrier()
 
     def test_single_layer_overlap_comparison(self):
         """Single-layer wgrad + allreduce: NCCL vs SDMA side by side."""
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         w = nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02)
@@ -895,12 +900,11 @@ class TestNCCLvsSdmaWgradDelay:
         grad_out = torch.randn(M, N, device=self.device, dtype=torch.bfloat16)
         ar_buf = torch.randn(N, K, device=self.device, dtype=torch.bfloat16)
 
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma_comm = self.sdma_comm
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup — separate NCCL and SDMA to avoid resource conflicts
         for _ in range(3):
             dist.all_reduce(ar_buf.clone())
             _ = grad_out.T @ x
@@ -1056,11 +1060,14 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL:          {sdma_vs_nccl:.2f}x")
             print()
 
+        torch.cuda.synchronize()
+        dist.barrier()
+
     def test_multi_layer_pipeline_comparison(self):
         """4-layer pipeline: NCCL vs SDMA deferred-wgrad overlap."""
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
+        sdma_comm = self.sdma_comm
         n_layers = 4
         weights = [
             nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
@@ -1071,13 +1078,10 @@ class TestNCCLvsSdmaWgradDelay:
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
 
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup — separate NCCL and SDMA to avoid resource conflicts
-        # between pending NCCL collectives and SDMA handle init.
         for _ in range(3):
             dist.all_reduce(weights[0].data.clone())
             _ = grad_outs[0].T @ x
@@ -1216,6 +1220,9 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL (deferred):  {sdma_vs_nccl:.2f}x")
             print()
 
+        torch.cuda.synchronize()
+        dist.barrier()
+
     @pytest.mark.parametrize(
         "gemm_n",
         [1024, 4096, 7168, 14336, 28672, 57344],
@@ -1230,8 +1237,8 @@ class TestNCCLvsSdmaWgradDelay:
         GEMM runs long enough for SDMA's zero-SM-contention to pay off.
         """
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
+        sdma_comm = self.sdma_comm
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         w = nn.Parameter(
             torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02,
@@ -1240,7 +1247,6 @@ class TestNCCLvsSdmaWgradDelay:
         grad_out = torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16)
         ar_buf = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
 
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
@@ -1317,12 +1323,11 @@ class TestNCCLvsSdmaWgradDelay:
     def test_wgrad_overlap_scaling_summary(self):
         """Run all GEMM sizes and print a single combined summary table."""
         from lumen.modules.parallel_linear import _DeferredWgrad
-        from lumen.modules.sdma_comm import SdmaTpComm
 
+        sdma_comm = self.sdma_comm
         gemm_sizes = [1024, 4096, 7168, 14336, 28672, 57344]
         all_results: List[BenchResult] = []
 
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
