@@ -636,15 +636,30 @@ class TestDeferredWgradSdmaComm:
     """
 
     @pytest.fixture(autouse=True, scope="class")
-    def _setup(self, request):
+    def _sdma_comm(self, request):
         from lumen.modules.sdma_comm import SdmaTpComm
 
         os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         request.cls.rank = dist.get_rank()
         request.cls.world = dist.get_world_size()
-        request.cls.device = torch.device(f"cuda:{request.cls.rank}")
-        request.cls.comm = SdmaTpComm(dist.group.WORLD)
+        device = torch.device(f"cuda:{request.cls.rank}")
+        request.cls.device = device
+
+        torch.cuda.synchronize()
+        dist.barrier()
+        comm = SdmaTpComm(dist.group.WORLD)
+        request.cls.comm = comm
+
+        # Pre-warm the SDMA allreduce handle so that the mori AllreduceSdma
+        # constructor (which does an internal AllGather to exchange buffer
+        # pointers) runs here under controlled synchronization rather than
+        # lazily during the first test method.
+        warmup_buf = torch.zeros(N, K, device=device, dtype=torch.bfloat16)
+        comm.allreduce_sum_inplace(warmup_buf)
+        del warmup_buf
+        torch.cuda.synchronize()
+        dist.barrier()
         yield
         torch.cuda.synchronize()
         dist.barrier()
@@ -877,15 +892,31 @@ class TestNCCLvsSdmaWgradDelay:
     """
 
     @pytest.fixture(autouse=True, scope="class")
-    def _setup(self, request):
+    def _sdma_comm(self, request):
         from lumen.modules.sdma_comm import SdmaTpComm
 
         os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         request.cls.rank = dist.get_rank()
         request.cls.world = dist.get_world_size()
-        request.cls.device = torch.device(f"cuda:{request.cls.rank}")
-        request.cls.sdma_comm = SdmaTpComm(dist.group.WORLD)
+        device = torch.device(f"cuda:{request.cls.rank}")
+        request.cls.device = device
+
+        torch.cuda.synchronize()
+        dist.barrier()
+        comm = SdmaTpComm(dist.group.WORLD)
+        request.cls.sdma_comm = comm
+
+        # Pre-warm the SDMA allreduce handle with the largest buffer any test
+        # in this class will use (gemm_n=57344 in scaling tests).  This triggers
+        # AllreduceSdma construction + internal AllGather under controlled sync,
+        # preventing lazy reallocation mid-test.
+        max_gemm_n = 57344
+        warmup_buf = torch.zeros(max_gemm_n, K, device=device, dtype=torch.bfloat16)
+        comm.allreduce_sum_inplace(warmup_buf)
+        del warmup_buf
+        torch.cuda.synchronize()
+        dist.barrier()
         yield
         torch.cuda.synchronize()
         dist.barrier()
