@@ -936,6 +936,126 @@ class TestFP8ParamE2EDistributed:
                 [r_bf16, r_fp8],
             )
 
+    def test_multi_layer_pipelined_gather_forward(self):
+        """Multi-layer pipeline: overlap allgather(layer i+1) with dequant+GEMM(layer i).
+
+        The single-layer E2E test is sequential (gather→dequant→GEMM), so the
+        dequant overhead is fully exposed and FP8 appears slower than BF16.
+        In real training, layers are processed in sequence. This test pipelines
+        them: while compute processes layer i (dequant+GEMM on compute stream),
+        the comm stream pre-fetches layer i+1's FP8 shard via allgather.
+        The dequant cost is hidden behind the overlapped communication.
+        """
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        n_layers = 4
+        layer_shapes = [
+            (FFN_HIDDEN, HIDDEN),
+            (FFN_HIDDEN, HIDDEN),
+            (HIDDEN, FFN_HIDDEN),
+            (HIDDEN, HIDDEN),
+        ]
+
+        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
+
+        bf16_shards = []
+        fp8_shards = []
+        fp8_scales = []
+        bf16_outs = []
+        fp8_outs = []
+
+        for _ in range(n_layers):
+            for shape in layer_shapes:
+                w = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+                dist.broadcast(w, src=0)
+                fp8_w, sc = quantize_param_to_fp8(w)
+                bf16_shards.append(w.chunk(self.world, dim=0)[self.rank].contiguous())
+                fp8_shards.append(fp8_w.chunk(self.world, dim=0)[self.rank].contiguous())
+                fp8_scales.append(sc)
+                bf16_outs.append(torch.empty_like(w))
+                fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
+
+        N = len(bf16_shards)
+        comm_stream = torch.cuda.Stream(device=self.device)
+
+        # Warmup
+        for i in range(N):
+            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+        torch.cuda.synchronize()
+
+        # BF16 baseline: sequential gather + GEMM per layer
+        def _bf16_sequential():
+            for i in range(N):
+                dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+                torch.nn.functional.linear(x, bf16_outs[i])
+
+        # FP8 sequential: gather + dequant + GEMM per layer (no overlap)
+        def _fp8_sequential():
+            for i in range(N):
+                dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+                w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+                torch.nn.functional.linear(x, w)
+
+        # FP8 pipelined: allgather(i+1) on comm_stream while dequant+GEMM(i)
+        def _fp8_pipelined():
+            dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
+            torch.cuda.synchronize()
+            for i in range(N):
+                if i + 1 < N:
+                    with torch.cuda.stream(comm_stream):
+                        dist.all_gather_into_tensor(fp8_outs[i + 1], fp8_shards[i + 1])
+                w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+                torch.nn.functional.linear(x, w)
+                if i + 1 < N:
+                    torch.cuda.current_stream().wait_stream(comm_stream)
+
+        r_bf16 = cuda_timer(
+            _bf16_sequential,
+            label=f"BF16 sequential {n_layers}L",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_fp8_seq = cuda_timer(
+            _fp8_sequential,
+            label=f"FP8 sequential {n_layers}L",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_fp8_pipe = cuda_timer(
+            _fp8_pipelined,
+            label=f"FP8 pipelined {n_layers}L",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        sp_seq = r_bf16.avg_ms / max(r_fp8_seq.avg_ms, 1e-6)
+        sp_pipe = r_bf16.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
+        pipe_vs_seq = r_fp8_seq.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
+        r_fp8_seq.extra["vs_bf16"] = round(sp_seq, 2)
+        r_fp8_pipe.extra["vs_bf16"] = round(sp_pipe, 2)
+        r_fp8_pipe.extra["vs_fp8_seq"] = round(pipe_vs_seq, 2)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"E2E Pipelined Gather+Forward ({n_layers}L, world={self.world})",
+                [r_bf16, r_fp8_seq, r_fp8_pipe],
+            )
+            saved_ms = r_fp8_seq.avg_ms - r_fp8_pipe.avg_ms
+            print(f"  Pipeline saves {saved_ms:.3f} ms vs FP8 sequential " f"({pipe_vs_seq:.2f}x speedup)")
+            if sp_pipe >= 1.0:
+                print(f"  FP8 pipelined beats BF16: {sp_pipe:.2f}x")
+            else:
+                gap = r_fp8_pipe.avg_ms - r_bf16.avg_ms
+                print(f"  FP8 pipelined still {gap:.3f} ms behind BF16 " f"(dequant overhead not fully hidden)")
+            print()
+
 
 # ---------------------------------------------------------------------------
 # Standalone runner

@@ -191,6 +191,8 @@ class TestFusedMoE:
         from lumen.ops.quantize.linear import gemm_bf16
 
         hidden, expert_w, logits = self._make_moe_inputs()
+        block_size = 32
+        max_token_id = hidden.shape[0] * TOP_K
 
         def _individual_moe():
             weights, indices = fused_topk(logits, TOP_K)
@@ -199,21 +201,29 @@ class TestFusedMoE:
                 indices,
                 weights,
                 NUM_EXPERTS,
+                block_size=block_size,
             )
             expert_out = torch.zeros(
-                hidden.shape[0] * TOP_K,
+                max_token_id,
                 FFN_HIDDEN,
                 device="cuda",
                 dtype=torch.bfloat16,
             )
+            num_blocks = sorted_expert_ids.shape[0]
             for eid in range(NUM_EXPERTS):
-                mask = sorted_expert_ids == eid
-                if mask.any():
-                    token_ids = sorted_ids[mask]
-                    valid_ids = token_ids[token_ids < hidden.shape[0] * TOP_K]
-                    if valid_ids.numel() > 0:
-                        inp = moe_buf[valid_ids]
-                        expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
+                token_ids_list = []
+                for b in range(num_blocks):
+                    if sorted_expert_ids[b].item() != eid:
+                        continue
+                    blk_start = b * block_size
+                    blk_ids = sorted_ids[blk_start : blk_start + block_size]
+                    valid = blk_ids[blk_ids < max_token_id]
+                    if valid.numel() > 0:
+                        token_ids_list.append(valid)
+                if token_ids_list:
+                    valid_ids = torch.cat(token_ids_list)
+                    inp = moe_buf[valid_ids]
+                    expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
             out = fused_unpermute(expert_out, sorted_ids, hidden.shape[0], TOP_K)
             return out
 
