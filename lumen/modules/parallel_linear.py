@@ -10,8 +10,12 @@ These use Megatron's own TP communication primitives (autograd-aware
 all-gather, reduce-scatter, etc.) and route the GEMM through Lumen's
 :func:`~lumen.ops.quantize.linear.quantized_linear`.
 
-When ``scaling_type="none"`` (the default), plain BF16 ``F.linear`` is
-used.  To enable FP8, call :func:`enable_fp8` on the module or set
+When ``scaling_type="none"`` (the default) and ``delay_wgrad=False``,
+plain BF16 ``F.linear`` is used.  When ``delay_wgrad=True``, even BF16
+routes through ``quantized_linear`` (with ``scaling_type="none"``) so
+that the autograd backward can defer wgrad computation.
+
+To enable FP8, call :func:`enable_fp8` on the module or set
 ``scaling_type`` to one of the supported quantization modes.
 """
 
@@ -41,31 +45,60 @@ __all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear", "_DeferredWgra
 
 
 class _DeferredWgrad:
-    """Stores a deferred weight gradient computation."""
+    """Stores and executes deferred weight-gradient computations.
+
+    Used with ``delay_wgrad=True`` in parallel linear modules to split the
+    backward pass into dgrad (immediate) and wgrad (deferred).  The deferred
+    wgrad GEMM can then overlap with the next layer's communication.
+
+    Each ``defer()`` call stores a self-contained closure that computes the
+    wgrad and accumulates it into the correct gradient buffer (``main_grad``
+    or ``weight.grad``).  ``execute()`` runs the pending closure.
+    """
 
     def __init__(self):
-        self._pending_wgrad = None
+        self._pending = None
 
-    def defer(self, weight, compute_fn):
-        """Defer wgrad computation. compute_fn() should return grad_weight."""
-        self._pending_wgrad = (weight, compute_fn)
+    def defer(self, fn_or_weight, compute_fn=None):
+        """Store a deferred wgrad closure.
+
+        Two calling conventions are supported:
+
+        1. ``defer(fn)`` — ``fn()`` is a self-contained closure that
+           computes the weight gradient **and** accumulates it into the
+           correct buffer.  Used by the autograd backward.
+
+        2. ``defer(weight, compute_fn)`` — legacy / benchmark API.
+           ``compute_fn()`` returns the gradient tensor.  ``execute()``
+           will accumulate it into ``weight.main_grad`` or ``weight.grad``.
+        """
+        if compute_fn is not None:
+            weight = fn_or_weight
+
+            # Legacy wrapper: unconditionally targets main_grad when present.
+            # Autograd closures gate on gradient_accumulation_fusion internally.
+            def _wrapped():
+                gw = compute_fn()
+                if hasattr(weight, "main_grad"):
+                    weight.main_grad.add_(gw)
+                elif weight.grad is not None:
+                    weight.grad.add_(gw)
+                else:
+                    weight.grad = gw
+
+            self._pending = _wrapped
+        else:
+            self._pending = fn_or_weight
 
     def execute(self):
-        """Execute any pending wgrad computation."""
-        if self._pending_wgrad is not None:
-            weight, compute_fn = self._pending_wgrad
-            grad_weight = compute_fn()
-            if hasattr(weight, "main_grad"):
-                weight.main_grad.add_(grad_weight)
-            elif weight.grad is not None:
-                weight.grad.add_(grad_weight)
-            else:
-                weight.grad = grad_weight
-            self._pending_wgrad = None
+        """Run the pending wgrad computation, if any."""
+        if self._pending is not None:
+            self._pending()
+            self._pending = None
 
     @property
     def has_pending(self):
-        return self._pending_wgrad is not None
+        return self._pending is not None
 
 
 def _use_sdma_from_args() -> bool:
@@ -117,11 +150,18 @@ def _do_gemm(
     fp8_dtype,
     block_size,
     gradient_accumulation_fusion=False,
+    delay_wgrad=False,
+    deferred_wgrad=None,
 ):
-    """Route to Lumen FP8 GEMM or standard F.linear."""
-    if scaling_type != "none":
-        from lumen.ops.quantize.linear import quantized_linear
+    """Route to Lumen FP8 GEMM or standard F.linear.
 
+    When ``delay_wgrad=True``, always routes through
+    :func:`~lumen.ops.quantize.linear.quantized_linear` (even for BF16)
+    so that the autograd backward can defer the wgrad computation.
+    """
+    from lumen.ops.quantize.linear import quantized_linear
+
+    if scaling_type != "none" or delay_wgrad:
         return quantized_linear(
             input_,
             weight,
@@ -131,6 +171,8 @@ def _do_gemm(
             fp8_dtype=fp8_dtype,
             block_size=block_size,
             gradient_accumulation_fusion=gradient_accumulation_fusion,
+            delay_wgrad=delay_wgrad,
+            deferred_wgrad=deferred_wgrad,
         )
     return F.linear(input_, weight, bias)
 
@@ -313,6 +355,9 @@ class LumenColumnParallelLinear(nn.Module):
                 self.scaling_type,
                 self.fp8_dtype,
                 self.block_size,
+                gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                delay_wgrad=self.delay_wgrad,
+                deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
             )
 
         gather = self.gather_output
@@ -375,6 +420,9 @@ class LumenColumnParallelLinear(nn.Module):
             self.scaling_type,
             self.fp8_dtype,
             self.block_size,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            delay_wgrad=self.delay_wgrad,
+            deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
         )
 
         input_gathered = comm.wait_allgather_dim0(stream=sdma_stream)
@@ -388,6 +436,9 @@ class LumenColumnParallelLinear(nn.Module):
             self.scaling_type,
             self.fp8_dtype,
             self.block_size,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            delay_wgrad=self.delay_wgrad,
+            deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
         )
         output_parallel = torch.cat([out_local, out_remaining], dim=0)
         return output_parallel, self.bias if self.skip_bias_add else None
@@ -419,6 +470,15 @@ class LumenColumnParallelLinear(nn.Module):
 
     def execute_deferred_wgrad(self):
         """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
+
+    def backward_dw(self):
+        """Megatron-compatible API: execute deferred weight gradient.
+
+        Megatron's fine-grained 1F1B scheduler calls ``module.backward_dw()``
+        to run the previously deferred wgrad GEMM.  This is a thin wrapper
+        around :meth:`execute_deferred_wgrad`.
+        """
         self._deferred_wgrad.execute()
 
     def __repr__(self):
@@ -579,6 +639,8 @@ class LumenRowParallelLinear(nn.Module):
             self.fp8_dtype,
             self.block_size,
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            delay_wgrad=self.delay_wgrad,
+            deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
         )
 
         if self.explicit_expert_comm:
@@ -657,6 +719,15 @@ class LumenRowParallelLinear(nn.Module):
 
     def execute_deferred_wgrad(self):
         """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
+
+    def backward_dw(self):
+        """Megatron-compatible API: execute deferred weight gradient.
+
+        Megatron's fine-grained 1F1B scheduler calls ``module.backward_dw()``
+        to run the previously deferred wgrad GEMM.  This is a thin wrapper
+        around :meth:`execute_deferred_wgrad`.
+        """
         self._deferred_wgrad.execute()
 
     def __repr__(self):

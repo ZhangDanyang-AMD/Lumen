@@ -7,14 +7,15 @@
 Tests for deferred weight gradient computation.
 
 Covers:
-  - _DeferredWgrad unit tests (defer, execute, accumulate, main_grad)
-  - Integration with LumenRowParallelLinear (execute_deferred_wgrad API)
-  - Integration with LumenColumnParallelLinear (execute_deferred_wgrad API)
+  - _DeferredWgrad unit tests (defer, execute, closure-based accumulation)
+  - Autograd integration: QuantizedLinearFunction with delay_wgrad=True
+  - Integration with LumenRowParallelLinear / LumenColumnParallelLinear
 """
 
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
 import torch
 
 # =========================================================================
@@ -32,7 +33,10 @@ class TestDeferredWgrad:
         weight.grad = torch.zeros(4, 4)
         grad_val = torch.ones(4, 4)
 
-        dw.defer(weight, lambda: grad_val)
+        def _fn():
+            weight.grad.add_(grad_val)
+
+        dw.defer(_fn)
         assert dw.has_pending
 
         dw.execute()
@@ -47,7 +51,10 @@ class TestDeferredWgrad:
         weight.main_grad = torch.zeros(4, 4)
         grad_val = torch.ones(4, 4) * 2
 
-        dw.defer(weight, lambda: grad_val)
+        def _fn():
+            weight.main_grad.add_(grad_val)
+
+        dw.defer(_fn)
         dw.execute()
         torch.testing.assert_close(weight.main_grad, grad_val)
 
@@ -65,21 +72,12 @@ class TestDeferredWgrad:
         weight = torch.nn.Parameter(torch.randn(4, 4))
         weight.grad = torch.ones(4, 4)
 
-        dw.defer(weight, lambda: torch.ones(4, 4) * 3)
+        def _fn():
+            weight.grad.add_(torch.ones(4, 4) * 3)
+
+        dw.defer(_fn)
         dw.execute()
         torch.testing.assert_close(weight.grad, torch.ones(4, 4) * 4)
-
-    def test_defer_creates_grad_if_none(self):
-        from lumen.modules.parallel_linear import _DeferredWgrad
-
-        dw = _DeferredWgrad()
-        weight = torch.nn.Parameter(torch.randn(4, 4))
-        assert weight.grad is None
-
-        grad_val = torch.ones(4, 4)
-        dw.defer(weight, lambda: grad_val)
-        dw.execute()
-        torch.testing.assert_close(weight.grad, grad_val)
 
     def test_double_defer_overwrites(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
@@ -88,10 +86,164 @@ class TestDeferredWgrad:
         weight = torch.nn.Parameter(torch.randn(4, 4))
         weight.grad = torch.zeros(4, 4)
 
-        dw.defer(weight, lambda: torch.ones(4, 4))
-        dw.defer(weight, lambda: torch.ones(4, 4) * 5)
+        dw.defer(lambda: weight.grad.add_(torch.ones(4, 4)))
+        dw.defer(lambda: weight.grad.add_(torch.ones(4, 4) * 5))
         dw.execute()
         torch.testing.assert_close(weight.grad, torch.ones(4, 4) * 5)
+
+
+# =========================================================================
+# Autograd integration: QuantizedLinearFunction with delay_wgrad
+# =========================================================================
+
+
+class TestQuantizedLinearDeferredWgrad:
+    """Verify that QuantizedLinearFunction correctly defers wgrad."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        self.in_features = 32
+        self.out_features = 16
+        self.batch = 4
+
+    def _run_deferred_vs_eager(self, scaling_type="none"):
+        """Compare deferred wgrad against eager wgrad for numerical correctness."""
+        from lumen.modules.parallel_linear import _DeferredWgrad
+        from lumen.ops.quantize.linear import QuantizedLinearFunction
+
+        torch.manual_seed(42)
+        x = torch.randn(self.batch, self.in_features, requires_grad=True)
+        w_eager = torch.nn.Parameter(torch.randn(self.out_features, self.in_features))
+        w_defer = torch.nn.Parameter(w_eager.data.clone())
+
+        dwg = _DeferredWgrad()
+
+        # --- eager path ---
+        y_eager = QuantizedLinearFunction.apply(
+            x,
+            w_eager,
+            None,
+            None,
+            scaling_type,
+            torch.float8_e4m3fn,
+            128,
+            "weight",
+            True,
+            True,
+            False,  # gradient_accumulation_fusion
+            False,  # delay_wgrad
+            None,  # deferred_wgrad
+        )
+        loss_eager = y_eager.sum()
+        loss_eager.backward()
+
+        # --- deferred path ---
+        x2 = x.detach().clone().requires_grad_(True)
+        y_defer = QuantizedLinearFunction.apply(
+            x2,
+            w_defer,
+            None,
+            None,
+            scaling_type,
+            torch.float8_e4m3fn,
+            128,
+            "weight",
+            True,
+            True,
+            False,  # gradient_accumulation_fusion
+            True,  # delay_wgrad
+            dwg,  # deferred_wgrad
+        )
+        loss_defer = y_defer.sum()
+        loss_defer.backward()
+
+        # dgrad should be computed immediately
+        assert x2.grad is not None
+        torch.testing.assert_close(x2.grad, x.grad, atol=1e-5, rtol=1e-3)
+
+        # wgrad should NOT be computed yet
+        assert w_defer.grad is None
+        assert dwg.has_pending
+
+        # execute deferred wgrad
+        dwg.execute()
+        assert not dwg.has_pending
+        assert w_defer.grad is not None
+        torch.testing.assert_close(w_defer.grad, w_eager.grad, atol=1e-5, rtol=1e-3)
+
+    def test_bf16_deferred_wgrad(self):
+        self._run_deferred_vs_eager(scaling_type="none")
+
+    def test_deferred_wgrad_with_gradient_accumulation_fusion(self):
+        """When gradient_accumulation_fusion=True, wgrad accumulates into main_grad."""
+        from lumen.modules.parallel_linear import _DeferredWgrad
+        from lumen.ops.quantize.linear import QuantizedLinearFunction
+
+        torch.manual_seed(42)
+        x = torch.randn(self.batch, self.in_features, requires_grad=True)
+        w = torch.nn.Parameter(torch.randn(self.out_features, self.in_features))
+        w.main_grad = torch.zeros(self.out_features, self.in_features)
+
+        dwg = _DeferredWgrad()
+
+        y = QuantizedLinearFunction.apply(
+            x,
+            w,
+            None,
+            None,
+            "none",
+            torch.float8_e4m3fn,
+            128,
+            "weight",
+            True,
+            True,
+            True,  # gradient_accumulation_fusion
+            True,  # delay_wgrad
+            dwg,
+        )
+        y.sum().backward()
+
+        assert w.grad is None
+        assert dwg.has_pending
+        assert torch.all(w.main_grad == 0)
+
+        dwg.execute()
+        assert not dwg.has_pending
+        assert w.main_grad.abs().sum() > 0
+
+    def test_deferred_wgrad_creates_grad_when_none(self):
+        """When weight.grad is None and GAF is off, deferred execution creates it."""
+        from lumen.modules.parallel_linear import _DeferredWgrad
+        from lumen.ops.quantize.linear import QuantizedLinearFunction
+
+        torch.manual_seed(42)
+        x = torch.randn(self.batch, self.in_features, requires_grad=True)
+        w = torch.nn.Parameter(torch.randn(self.out_features, self.in_features))
+        assert w.grad is None
+
+        dwg = _DeferredWgrad()
+
+        y = QuantizedLinearFunction.apply(
+            x,
+            w,
+            None,
+            None,
+            "none",
+            torch.float8_e4m3fn,
+            128,
+            "weight",
+            True,
+            True,
+            False,  # gradient_accumulation_fusion
+            True,  # delay_wgrad
+            dwg,
+        )
+        y.sum().backward()
+
+        assert w.grad is None
+        dwg.execute()
+        assert w.grad is not None
+        assert w.grad.abs().sum() > 0
 
 
 # =========================================================================
@@ -154,7 +306,9 @@ class TestDeferredWgradModuleIntegration:
         )
         assert hasattr(m, "_deferred_wgrad")
         assert hasattr(m, "execute_deferred_wgrad")
+        assert hasattr(m, "backward_dw")
         assert callable(m.execute_deferred_wgrad)
+        assert callable(m.backward_dw)
         assert not m._deferred_wgrad.has_pending
 
     @_apply_patches
@@ -170,6 +324,7 @@ class TestDeferredWgradModuleIntegration:
         )
         assert hasattr(m, "_deferred_wgrad")
         assert hasattr(m, "execute_deferred_wgrad")
+        assert hasattr(m, "backward_dw")
 
     @_apply_patches
     def test_execute_deferred_wgrad_noop_when_no_pending(self, *_):
@@ -184,6 +339,7 @@ class TestDeferredWgradModuleIntegration:
             input_is_parallel=True,
         )
         m.execute_deferred_wgrad()  # should not raise
+        m.backward_dw()  # should not raise
 
     @_apply_patches
     def test_manual_defer_and_execute_via_module(self, *_):
@@ -202,9 +358,31 @@ class TestDeferredWgradModuleIntegration:
         m.weight.grad = torch.zeros_like(m.weight)
         grad_val = torch.ones_like(m.weight)
 
-        m._deferred_wgrad.defer(m.weight, lambda: grad_val)
+        m._deferred_wgrad.defer(lambda: m.weight.grad.add_(grad_val))
         assert m._deferred_wgrad.has_pending
 
         m.execute_deferred_wgrad()
+        assert not m._deferred_wgrad.has_pending
+        torch.testing.assert_close(m.weight.grad, grad_val)
+
+    @_apply_patches
+    def test_backward_dw_alias(self, *_):
+        """backward_dw() should behave identically to execute_deferred_wgrad()."""
+        from lumen.modules.parallel_linear import LumenRowParallelLinear
+
+        config = _make_config()
+        m = LumenRowParallelLinear(
+            64,
+            64,
+            config=config,
+            init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
+            input_is_parallel=True,
+        )
+        torch.nn.init.kaiming_uniform_(m.weight)
+        m.weight.grad = torch.zeros_like(m.weight)
+        grad_val = torch.ones_like(m.weight) * 7
+
+        m._deferred_wgrad.defer(lambda: m.weight.grad.add_(grad_val))
+        m.backward_dw()
         assert not m._deferred_wgrad.has_pending
         torch.testing.assert_close(m.weight.grad, grad_val)

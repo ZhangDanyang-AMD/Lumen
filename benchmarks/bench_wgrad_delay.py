@@ -984,7 +984,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         def _sdma_ar():
             buf = ar_buf.clone()
-            sdma_comm.allreduce_sum_inplace(buf)
+            sdma_comm.allreduce_sum_inplace(buf)  # noqa: F821
 
         r_sdma_comm = cuda_timer(
             _sdma_ar,
@@ -1000,7 +1000,7 @@ class TestNCCLvsSdmaWgradDelay:
             dwg.defer(w, lambda: grad_out.T @ x)
             dwg.execute()
             buf = ar_buf.clone()
-            sdma_comm.allreduce_sum_inplace(buf)
+            sdma_comm.allreduce_sum_inplace(buf)  # noqa: F821
 
         r_sdma_seq = cuda_timer(
             _sdma_seq,
@@ -1020,9 +1020,9 @@ class TestNCCLvsSdmaWgradDelay:
             dwg.defer(w, lambda: grad_out.T @ x)
             buf = ar_buf.clone()
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
+            sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)  # noqa: F821
             dwg.execute()
-            sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+            sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_sdma_ovl = cuda_timer(
@@ -1060,6 +1060,7 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL:          {sdma_vs_nccl:.2f}x")
             print()
 
+        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1155,7 +1156,7 @@ class TestNCCLvsSdmaWgradDelay:
                 weights[i].main_grad.zero_()
                 _ = grad_outs[i] @ weights[i]
                 weights[i].main_grad.add_(grad_outs[i].T @ x)
-                sdma_comm.allreduce_sum_inplace(weights[i].main_grad)
+                sdma_comm.allreduce_sum_inplace(weights[i].main_grad)  # noqa: F821
 
         r_eager_sdma = cuda_timer(
             _eager_sdma,
@@ -1178,13 +1179,13 @@ class TestNCCLvsSdmaWgradDelay:
                 if dwg.has_pending:
                     dwg.execute()
                 if pending_ar:
-                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                     torch.cuda.current_stream().wait_stream(sdma_stream)
                 _ = grad_outs[i] @ weights[i]
                 dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
                 if i > 0:
                     sdma_stream.wait_stream(torch.cuda.current_stream())
-                    sdma_comm.allreduce_sum_async(
+                    sdma_comm.allreduce_sum_async(  # noqa: F821
                         weights[i - 1].main_grad,
                         stream=sdma_stream,
                     )
@@ -1192,10 +1193,10 @@ class TestNCCLvsSdmaWgradDelay:
             if dwg.has_pending:
                 dwg.execute()
             if pending_ar:
-                sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
-            sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+            sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_deferred_sdma = cuda_timer(
@@ -1225,6 +1226,7 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL (deferred):  {sdma_vs_nccl:.2f}x")
             print()
 
+        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1351,13 +1353,13 @@ class TestNCCLvsSdmaWgradDelay:
                 if dwg.has_pending:
                     dwg.execute()
                 if pending_ar:
-                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                     torch.cuda.current_stream().wait_stream(sdma_stream)
                 _ = grad_outs[i] @ weights[i]
                 dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
                 if i > 0:
                     sdma_stream.wait_stream(torch.cuda.current_stream())
-                    sdma_comm.allreduce_sum_async(
+                    sdma_comm.allreduce_sum_async(  # noqa: F821
                         weights[i - 1].main_grad,
                         stream=sdma_stream,
                     )
@@ -1365,10 +1367,10 @@ class TestNCCLvsSdmaWgradDelay:
             if dwg.has_pending:
                 dwg.execute()
             if pending_ar:
-                sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
-            sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+            sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_sdma = cuda_timer(
@@ -1400,6 +1402,7 @@ class TestNCCLvsSdmaWgradDelay:
                 [r_wgrad, r_eager, r_nccl, r_sdma],
             )
 
+        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1516,13 +1519,13 @@ class TestNCCLvsSdmaWgradDelay:
                     if dwg.has_pending:
                         dwg.execute()
                     if pending_ar:
-                        sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                        sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                         torch.cuda.current_stream().wait_stream(sdma_stream)
                     _ = grad_outs[i] @ weights[i]
                     dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
                     if i > 0:
                         sdma_stream.wait_stream(torch.cuda.current_stream())
-                        sdma_comm.allreduce_sum_async(
+                        sdma_comm.allreduce_sum_async(  # noqa: F821
                             weights[i - 1].main_grad,
                             stream=sdma_stream,
                         )
@@ -1530,10 +1533,10 @@ class TestNCCLvsSdmaWgradDelay:
                 if dwg.has_pending:
                     dwg.execute()
                 if pending_ar:
-                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                 sdma_stream.wait_stream(torch.cuda.current_stream())
-                sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
-                sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+                sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                 torch.cuda.current_stream().wait_stream(sdma_stream)
 
             r_sdma = cuda_timer(
@@ -1569,6 +1572,10 @@ class TestNCCLvsSdmaWgradDelay:
                 f"4L Wgrad Pipeline Scaling Summary (world={self.world})",
                 all_results,
             )
+
+        del sdma_comm
+        torch.cuda.synchronize()
+        dist.barrier()
 
 
 # ---------------------------------------------------------------------------

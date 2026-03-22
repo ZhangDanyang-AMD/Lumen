@@ -325,6 +325,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
     Supports all 7 scaling modes via ``scaling_type`` parameter.
     Backend selection uses ASM → CK → Triton fallback automatically.
     All backends are AITER implementations.
+
+    When ``delay_wgrad=True``, the backward pass computes only dgrad
+    (input gradient) and defers the wgrad computation to a later
+    ``deferred_wgrad.execute()`` call.  This enables overlapping the
+    deferred wgrad GEMM with the next layer's communication.
     """
 
     @staticmethod
@@ -341,6 +346,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         quantize_activation: bool = True,
         fp8_wgrad: bool = True,
         gradient_accumulation_fusion: bool = False,
+        delay_wgrad: bool = False,
+        deferred_wgrad=None,
     ) -> torch.Tensor:
         # weight is [N, K] — standard PyTorch Linear convention
         if scaling_type == "none":
@@ -349,6 +356,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.has_bias = bias is not None
             ctx.scaling_type = "none"
             ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+            ctx.delay_wgrad = delay_wgrad
+            ctx.deferred_wgrad = deferred_wgrad
             ctx.weight_ref = weight
             return output
 
@@ -371,6 +380,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.fp8_wgrad = True
             ctx.tensor_id = tensor_id
             ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+            ctx.delay_wgrad = delay_wgrad
+            ctx.deferred_wgrad = deferred_wgrad
             ctx.weight_ref = weight
             return output
 
@@ -409,6 +420,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         ctx.fp8_wgrad = fp8_wgrad
         ctx.input_shape = input.shape
         ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+        ctx.delay_wgrad = delay_wgrad
+        ctx.deferred_wgrad = deferred_wgrad
         ctx.weight_ref = weight
         return output
 
@@ -418,7 +431,6 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         if scaling_type == "none":
             input_tensor, weight = ctx.saved_tensors
-            # dgrad: grad @ weight = dispatch(grad, weight^T) since kernel does A @ W^T
             grad_input = dispatch_gemm(
                 grad_output,
                 weight.t().contiguous(),
@@ -426,21 +438,46 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None,
                 "none",
             )
-            # wgrad: grad^T @ input = dispatch(grad^T, input^T) since (grad^T) @ (input^T)^T = grad^T @ input
-            grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-            input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
-            grad_weight = dispatch_gemm(
-                grad_flat.t().contiguous(),
-                input_flat.t().contiguous(),
-                None,
-                None,
-                "none",
-            )
-            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
-                ctx.weight_ref.main_grad.add_(grad_weight)
+
+            if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
+                grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+                input_flat = input_tensor.reshape(-1, input_tensor.shape[-1]).contiguous()
+                w_ref = ctx.weight_ref
+                gaf = ctx.gradient_accumulation_fusion
+
+                def _wgrad_fn():
+                    gw = dispatch_gemm(
+                        grad_flat.t().contiguous(),
+                        input_flat.t().contiguous(),
+                        None,
+                        None,
+                        "none",
+                    )
+                    if gaf and hasattr(w_ref, "main_grad"):
+                        w_ref.main_grad.add_(gw)
+                    elif w_ref.grad is not None:
+                        w_ref.grad.add_(gw)
+                    else:
+                        w_ref.grad = gw
+
+                ctx.deferred_wgrad.defer(_wgrad_fn)
                 grad_weight = None
+            else:
+                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+                input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
+                grad_weight = dispatch_gemm(
+                    grad_flat.t().contiguous(),
+                    input_flat.t().contiguous(),
+                    None,
+                    None,
+                    "none",
+                )
+                if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                    ctx.weight_ref.main_grad.add_(grad_weight)
+                    grad_weight = None
+
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
 
         if not ctx.quantize_activation:
             input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
@@ -452,22 +489,51 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None,
                 "none",
             )
-            grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-            input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
-            grad_weight = dispatch_gemm(
-                grad_flat.t().contiguous(),
-                input_flat.t().contiguous(),
-                None,
-                None,
-                "none",
-            )
-            if ctx.scaling_manager is not None:
-                grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
-            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
-                ctx.weight_ref.main_grad.add_(grad_weight)
+
+            if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
+                grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+                input_flat = input_tensor.reshape(-1, input_tensor.shape[-1]).contiguous()
+                mgr = ctx.scaling_manager
+                w_ref = ctx.weight_ref
+                gaf = ctx.gradient_accumulation_fusion
+
+                def _wgrad_fn():
+                    gw = dispatch_gemm(
+                        grad_flat.t().contiguous(),
+                        input_flat.t().contiguous(),
+                        None,
+                        None,
+                        "none",
+                    )
+                    if mgr is not None:
+                        gw = mgr.quantize_grad(gw)
+                    if gaf and hasattr(w_ref, "main_grad"):
+                        w_ref.main_grad.add_(gw)
+                    elif w_ref.grad is not None:
+                        w_ref.grad.add_(gw)
+                    else:
+                        w_ref.grad = gw
+
+                ctx.deferred_wgrad.defer(_wgrad_fn)
                 grad_weight = None
+            else:
+                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+                input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
+                grad_weight = dispatch_gemm(
+                    grad_flat.t().contiguous(),
+                    input_flat.t().contiguous(),
+                    None,
+                    None,
+                    "none",
+                )
+                if ctx.scaling_manager is not None:
+                    grad_weight = ctx.scaling_manager.quantize_grad(grad_weight)
+                if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                    ctx.weight_ref.main_grad.add_(grad_weight)
+                    grad_weight = None
+
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
+            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
@@ -519,35 +585,78 @@ class QuantizedLinearFunction(torch.autograd.Function):
         _use_fp8_wgrad = (
             ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic") and not _mixed_dtype
         )
-        if _use_fp8_wgrad:
-            grad_weight = dispatch_gemm(
-                grad_fp8.t().contiguous(),
-                input_fp8.t().contiguous(),
-                grad_scale,
-                input_scale,
-                bwd_scaling,
-            )
-        else:
-            grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-            input_bf16 = (input_fp8.float() * input_scale).bfloat16()
-            grad_weight = dispatch_gemm(
-                grad_bf16.t().contiguous(),
-                input_bf16.t().contiguous(),
-                None,
-                None,
-                "none",
-            )
 
-        if mgr is not None:
-            grad_weight = mgr.quantize_grad(grad_weight)
+        if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
+            _use_fp8 = _use_fp8_wgrad
+            _grad_fp8 = grad_fp8
+            _input_fp8 = input_fp8
+            _grad_scale = grad_scale
+            _input_scale = input_scale
+            _bwd_scaling = bwd_scaling
+            _mgr = mgr
+            _w_ref = ctx.weight_ref
+            _gaf = ctx.gradient_accumulation_fusion
 
-        if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
-            ctx.weight_ref.main_grad.add_(grad_weight)
+            def _wgrad_fn():
+                if _use_fp8:
+                    gw = dispatch_gemm(
+                        _grad_fp8.t().contiguous(),
+                        _input_fp8.t().contiguous(),
+                        _grad_scale,
+                        _input_scale,
+                        _bwd_scaling,
+                    )
+                else:
+                    g_bf16 = (_grad_fp8.float() * _grad_scale).bfloat16()
+                    i_bf16 = (_input_fp8.float() * _input_scale).bfloat16()
+                    gw = dispatch_gemm(
+                        g_bf16.t().contiguous(),
+                        i_bf16.t().contiguous(),
+                        None,
+                        None,
+                        "none",
+                    )
+                if _mgr is not None:
+                    gw = _mgr.quantize_grad(gw)
+                if _gaf and hasattr(_w_ref, "main_grad"):
+                    _w_ref.main_grad.add_(gw)
+                elif _w_ref.grad is not None:
+                    _w_ref.grad.add_(gw)
+                else:
+                    _w_ref.grad = gw
+
+            ctx.deferred_wgrad.defer(_wgrad_fn)
             grad_weight = None
+        else:
+            if _use_fp8_wgrad:
+                grad_weight = dispatch_gemm(
+                    grad_fp8.t().contiguous(),
+                    input_fp8.t().contiguous(),
+                    grad_scale,
+                    input_scale,
+                    bwd_scaling,
+                )
+            else:
+                grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+                input_bf16 = (input_fp8.float() * input_scale).bfloat16()
+                grad_weight = dispatch_gemm(
+                    grad_bf16.t().contiguous(),
+                    input_bf16.t().contiguous(),
+                    None,
+                    None,
+                    "none",
+                )
+
+            if mgr is not None:
+                grad_weight = mgr.quantize_grad(grad_weight)
+
+            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                ctx.weight_ref.main_grad.add_(grad_weight)
+                grad_weight = None
 
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
@@ -572,6 +681,8 @@ def quantized_linear(
     quantize_activation: bool = True,
     fp8_wgrad: bool = True,
     gradient_accumulation_fusion: bool = False,
+    delay_wgrad: bool = False,
+    deferred_wgrad=None,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -590,6 +701,9 @@ def quantized_linear(
         tensor_id: Unique identifier for this layer's weight.
         quantize_activation: If ``True``, quantize both input and weight.
         fp8_wgrad: If ``True``, compute weight gradient in FP8.
+        delay_wgrad: If ``True``, defer weight gradient computation.
+        deferred_wgrad: A :class:`~lumen.modules.parallel_linear._DeferredWgrad`
+            instance that collects deferred wgrad closures.
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -615,4 +729,6 @@ def quantized_linear(
         quantize_activation,
         fp8_wgrad,
         gradient_accumulation_fusion,
+        delay_wgrad,
+        deferred_wgrad,
     )
