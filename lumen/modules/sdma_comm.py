@@ -219,6 +219,7 @@ class _TpSdmaAllreduce:
         self._wire_dtype = torch.bfloat16 if dtype == torch.float32 else dtype
         self._handle = None
         self._capacity: int = 0
+        self._async_output_buf: Optional[torch.Tensor] = None
 
     def _ensure(self, n_elems: int) -> None:
         if self._handle is not None and n_elems <= self._capacity:
@@ -236,6 +237,7 @@ class _TpSdmaAllreduce:
             dtype=self._wire_dtype,
         )
         self._capacity = n_elems
+        self._async_output_buf = None
         logger.debug(
             "_TpSdmaAllreduce: (re)alloc for %d elems, " "user_dtype=%s wire_dtype=%s (PE %d/%d)",
             n_elems,
@@ -248,6 +250,20 @@ class _TpSdmaAllreduce:
     @property
     def _needs_cast(self) -> bool:
         return self._user_dtype != self._wire_dtype
+
+    def _ensure_async_output(self, n_elems: int, device: torch.device) -> torch.Tensor:
+        """Return a flat output buffer for async allreduce, reusing when possible."""
+        if (
+            self._async_output_buf is None
+            or self._async_output_buf.numel() < n_elems
+            or self._async_output_buf.device != device
+        ):
+            self._async_output_buf = torch.empty(
+                n_elems,
+                dtype=self._wire_dtype,
+                device=device,
+            )
+        return self._async_output_buf[:n_elems]
 
     def inplace(self, tensor: torch.Tensor) -> None:
         flat = tensor.contiguous().reshape(-1)
@@ -265,30 +281,45 @@ class _TpSdmaAllreduce:
                 tensor.copy_(flat.reshape(tensor.shape))
 
     def start_async_inplace(self, tensor: torch.Tensor, stream=None) -> bool:
-        """Start async in-place allreduce.  Caller must call :meth:`wait_async`."""
+        """Start async in-place allreduce.  Caller must call :meth:`wait_async`.
+
+        Mori's ``AllreduceSdma`` only exposes an out-of-place ``start_async``,
+        so we manage an output buffer internally and copy the result back in
+        :meth:`wait_async`.
+        """
         flat = tensor.contiguous().reshape(-1)
         self._ensure(flat.numel())
+        s = stream if stream is not None else torch.cuda.current_stream(tensor.device)
         self._async_orig_shape = tensor.shape
+        self._async_stream = s
         if self._needs_cast:
-            self._async_buf = flat.to(self._wire_dtype)
+            wire_flat = flat.to(self._wire_dtype)
+            self._async_buf = wire_flat
             self._async_tensor = tensor
-            return self._handle.start_async_inplace(self._async_buf, self._async_buf.numel(), stream)
+            out = self._ensure_async_output(wire_flat.numel(), wire_flat.device)
+            return self._handle.start_async(wire_flat, out, wire_flat.numel(), s)
         self._async_flat = flat
         self._async_tensor = tensor
-        return self._handle.start_async_inplace(flat, flat.numel(), stream)
+        out = self._ensure_async_output(flat.numel(), flat.device)
+        return self._handle.start_async(flat, out, flat.numel(), s)
 
     def wait_async(self, stream=None) -> None:
-        """Wait for a previously started async allreduce."""
-        self._handle.wait_async(stream)
+        """Wait for a previously started async allreduce and copy result back."""
+        s = stream if stream is not None else getattr(self, "_async_stream", None)
+        self._handle.wait_async(s)
+        out = self._async_output_buf
         if self._needs_cast and hasattr(self, "_async_buf"):
-            self._async_tensor.copy_(self._async_buf.to(self._user_dtype).reshape(self._async_orig_shape))
+            n = self._async_buf.numel()
+            self._async_tensor.copy_(out[:n].to(self._user_dtype).reshape(self._async_orig_shape))
             del self._async_buf, self._async_tensor
         elif hasattr(self, "_async_flat"):
-            if not self._async_tensor.is_contiguous():
-                self._async_tensor.copy_(self._async_flat.reshape(self._async_orig_shape))
+            n = self._async_flat.numel()
+            self._async_tensor.copy_(out[:n].reshape(self._async_orig_shape))
             del self._async_flat, self._async_tensor
         if hasattr(self, "_async_orig_shape"):
             del self._async_orig_shape
+        if hasattr(self, "_async_stream"):
+            del self._async_stream
 
 
 # ---------------------------------------------------------------------------

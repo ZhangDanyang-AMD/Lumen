@@ -1,0 +1,237 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 25 items
+Running 25 items in this shard: benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[none], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[delayed], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[dynamic], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[per_token], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[blockwise], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[blockwise2d], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[mxfp8], benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_modes_comparison, benchmarks/bench_kernel_launch.py::TestFusedMoE::test_fused_moe_triton_latency, benchmarks/bench_kernel_launch.py::TestFusedMoE::test_individual_routing_latency, benchmarks/bench_kernel_launch.py::TestFusedMoE::test_fused_vs_individual_comparison, benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_forward_latency, benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_backward_latency, benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_activation_memory, benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_csrc_vs_triton_causal, benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_gqa_backends, benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_sliding_window, benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[512], benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[1024], benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[2048], benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[4096], benchmarks/bench_kernel_launch.py::TestFusedNormGEMMPipeline::test_rmsnorm_plus_gemm_bf16, benchmarks/bench_kernel_launch.py::TestFusedNormGEMMPipeline::test_rmsnorm_plus_fp8_gemm, benchmarks/bench_kernel_launch.py::TestKernelLaunchCount::test_moe_kernel_count, benchmarks/bench_kernel_launch.py::TestKernelLaunchCount::test_gated_mlp_kernel_count
+
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[none]
+========================================================================
+  quantized_linear scaling=none
+========================================================================
+                  quantized_linear scaling=none  avg=   0.497 ms  min=   0.443 ms  max=   0.562 ms  std=  0.033 ms  cv=  6.6%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[delayed]
+========================================================================
+  quantized_linear scaling=delayed
+========================================================================
+               quantized_linear scaling=delayed  avg=   1.351 ms  min=   1.317 ms  max=   1.409 ms  std=  0.026 ms  cv=  1.9%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[dynamic]
+========================================================================
+  quantized_linear scaling=dynamic
+========================================================================
+               quantized_linear scaling=dynamic  avg=   0.955 ms  min=   0.942 ms  max=   1.022 ms  std=  0.017 ms  cv=  1.8%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[per_token]
+========================================================================
+  quantized_linear scaling=per_token
+========================================================================
+             quantized_linear scaling=per_token  avg=   0.590 ms  min=   0.550 ms  max=   0.671 ms  std=  0.036 ms  cv=  6.0%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[blockwise]
+========================================================================
+  quantized_linear scaling=blockwise
+========================================================================
+             quantized_linear scaling=blockwise  avg=   1.260 ms  min=   1.188 ms  max=   1.391 ms  std=  0.055 ms  cv=  4.4%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[blockwise2d]
+========================================================================
+  quantized_linear scaling=blockwise2d
+========================================================================
+           quantized_linear scaling=blockwise2d  avg=   1.216 ms  min=   1.177 ms  max=   1.294 ms  std=  0.034 ms  cv=  2.8%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_mode_latency[mxfp8]
+========================================================================
+  quantized_linear scaling=mxfp8
+========================================================================
+                 quantized_linear scaling=mxfp8  avg=   1.902 ms  min=   1.789 ms  max=   2.731 ms  std=  0.203 ms  cv= 10.7%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestQuantizedLinearScalingModes::test_scaling_modes_comparison
+========================================================================
+  quantized_linear: All Scaling Modes
+========================================================================
+                                   scaling=none  avg=   0.448 ms  min=   0.407 ms  max=   0.484 ms  std=  0.020 ms  cv=  4.4%  [~unstable]
+                                scaling=delayed  avg=   1.261 ms  min=   1.248 ms  max=   1.281 ms  std=  0.007 ms  cv=  0.5%  overhead_vs_bf16=+181.5%
+                                scaling=dynamic  avg=   0.884 ms  min=   0.878 ms  max=   0.894 ms  std=  0.004 ms  cv=  0.5%  overhead_vs_bf16=+97.2%
+                              scaling=per_token  avg=   0.459 ms  min=   0.452 ms  max=   0.468 ms  std=  0.004 ms  cv=  0.8%  overhead_vs_bf16=+2.5%
+                              scaling=blockwise  avg=   1.131 ms  min=   1.106 ms  max=   1.175 ms  std=  0.019 ms  cv=  1.7%  overhead_vs_bf16=+152.4%
+                            scaling=blockwise2d  avg=   1.123 ms  min=   1.106 ms  max=   1.151 ms  std=  0.015 ms  cv=  1.3%  overhead_vs_bf16=+150.7%
+                                  scaling=mxfp8  avg=   1.750 ms  min=   1.722 ms  max=   1.797 ms  std=  0.021 ms  cv=  1.2%  overhead_vs_bf16=+290.5%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFusedMoE::test_fused_moe_triton_latency
+========================================================================
+  Fused MoE (End-to-End)
+========================================================================
+                  fused_moe_triton (end-to-end)  avg=   3.691 ms  min=   3.656 ms  max=   3.773 ms  std=  0.031 ms  cv=  0.9%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFusedMoE::test_individual_routing_latency
+========================================================================
+  MoE: Individual Routing
+========================================================================
+          individual routing + per-expert GEMMs  avg=  46.601 ms  min=  46.320 ms  max=  46.797 ms  std=  0.121 ms  cv=  0.3%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFusedMoE::test_fused_vs_individual_comparison
+========================================================================
+  Fused MoE vs Manual Per-Expert GEMMs
+========================================================================
+                               fused_moe_triton  avg=   3.691 ms  min=   3.642 ms  max=   3.733 ms  std=  0.024 ms  cv=  0.6%  speedup=0.5000
+                        manual per-expert GEMMs  avg=   1.847 ms  min=   1.806 ms  max=   1.877 ms  std=  0.019 ms  cv=  1.0%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_forward_latency
+========================================================================
+  FP8 Activation Store: Forward
+========================================================================
+                 GatedMLP fp8_store=False (fwd)  avg=   1.647 ms  min=   1.587 ms  max=   1.787 ms  std=  0.052 ms  cv=  3.1%  [~unstable]
+                  GatedMLP fp8_store=True (fwd)  avg=   1.594 ms  min=   1.548 ms  max=   1.634 ms  std=  0.025 ms  cv=  1.6%  vs_bf16=-3.2%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_backward_latency
+========================================================================
+  FP8 Activation Store: Forward + Backward
+========================================================================
+             GatedMLP fp8_store=False (fwd+bwd)  avg=   4.427 ms  min=   4.358 ms  max=   4.514 ms  std=  0.044 ms  cv=  1.0%
+              GatedMLP fp8_store=True (fwd+bwd)  avg=   8.043 ms  min=   7.941 ms  max=   8.200 ms  std=  0.082 ms  cv=  1.0%  vs_bf16=+81.7%  speedup=0.5500
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_activation_memory
+  BF16 activation peak delta: 816.00 MiB
+  FP8  activation peak delta: 1.54 GiB
+  Memory reduction: 0.52x
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_csrc_vs_triton_causal [aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co GetFunction: _ZN5aiter26fmha_fwd_hd128_bf16_causalE
+[aiter] hipModuleGetFunction: _ZN5aiter26fmha_fwd_hd128_bf16_causalE Success
+
+========================================================================
+  Attention: CK csrc vs Triton (causal)
+========================================================================
+                  attention causal (aiter_csrc)  avg=   0.105 ms  min=   0.098 ms  max=   0.115 ms  std=  0.004 ms  cv=  4.2%  speedup_vs_triton=6.4600  [~unstable]
+                attention causal (aiter_triton)  avg=   0.676 ms  min=   0.664 ms  max=   0.702 ms  std=  0.010 ms  cv=  1.4%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_gqa_backends
+========================================================================
+  Attention: GQA (32Q/8KV)
+========================================================================
+                     attention GQA (aiter_csrc)  avg=   0.104 ms  min=   0.098 ms  max=   0.117 ms  std=  0.006 ms  cv=  5.6%  speedup_vs_triton=6.3600  [!NOISY]
+                   attention GQA (aiter_triton)  avg=   0.661 ms  min=   0.652 ms  max=   0.679 ms  std=  0.008 ms  cv=  1.2%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_sliding_window
+========================================================================
+  Attention: Sliding Window vs Full
+========================================================================
+                   attention full causal (csrc)  avg=   0.103 ms  min=   0.096 ms  max=   0.116 ms  std=  0.007 ms  cv=  7.0%  [!NOISY]
+             attention window=(256, 256) (csrc)  avg=   0.134 ms  min=   0.130 ms  max=   0.145 ms  std=  0.004 ms  cv=  2.7%  speedup_vs_full=0.7700  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[512]
+========================================================================
+  Attention S=512
+========================================================================
+                 attention S=512 (auto backend)  avg=   0.045 ms  min=   0.041 ms  max=   0.047 ms  std=  0.001 ms  cv=  3.1%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[1024]
+========================================================================
+  Attention S=1024
+========================================================================
+                attention S=1024 (auto backend)  avg=   0.060 ms  min=   0.057 ms  max=   0.062 ms  std=  0.001 ms  cv=  2.5%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[2048]
+========================================================================
+  Attention S=2048
+========================================================================
+                attention S=2048 (auto backend)  avg=   0.103 ms  min=   0.096 ms  max=   0.109 ms  std=  0.005 ms  cv=  4.7%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestAttentionBackends::test_seqlen_sweep[4096]
+========================================================================
+  Attention S=4096
+========================================================================
+                attention S=4096 (auto backend)  avg=   0.356 ms  min=   0.299 ms  max=   0.391 ms  std=  0.020 ms  cv=  5.6%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFusedNormGEMMPipeline::test_rmsnorm_plus_gemm_bf16
+========================================================================
+  Norm + GEMM Pipeline (BF16)
+========================================================================
+                 rmsnorm + gemm_bf16 (separate)  avg=   0.530 ms  min=   0.494 ms  max=   0.633 ms  std=  0.042 ms  cv=  8.0%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestFusedNormGEMMPipeline::test_rmsnorm_plus_fp8_gemm
+========================================================================
+  Norm + FP8 GEMM Pipeline
+========================================================================
+               rmsnorm + quantized_linear(none)  avg=   0.487 ms  min=   0.472 ms  max=   0.509 ms  std=  0.009 ms  cv=  1.8%
+            rmsnorm + quantized_linear(dynamic)  avg=   0.935 ms  min=   0.918 ms  max=   0.994 ms  std=  0.020 ms  cv=  2.1%  [~unstable]
+          rmsnorm + quantized_linear(per_token)  avg=   0.492 ms  min=   0.482 ms  max=   0.502 ms  std=  0.006 ms  cv=  1.1%
+          rmsnorm + quantized_linear(blockwise)  avg=   1.162 ms  min=   1.144 ms  max=   1.204 ms  std=  0.017 ms  cv=  1.5%
+========================================================================
+
+PASSED
+benchmarks/bench_kernel_launch.py::TestKernelLaunchCount::test_moe_kernel_count
+========================================================
+  MoE Kernel Launch Analysis
+========================================================
+  fused_moe_triton:       7 kernels
+  per-expert GEMMs:      11 kernels
+  ─────────────────────────────────
+  Reduction:              4 kernels  (36% fewer)
+========================================================
+PASSED
+benchmarks/bench_kernel_launch.py::TestKernelLaunchCount::test_gated_mlp_kernel_count
+========================================================
+  GatedMLP Kernel Launch Analysis
+========================================================
+  LumenGatedMLP (fused):      4 kernels
+  Manual gate+up+down:        3 kernels
+  ─────────────────────────────────
+  Reduction:                 -1 kernels  (-33% fewer)
+========================================================
+PASSED
+
+=============================== warnings summary ===============================
+benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_backward_latency
+benchmarks/bench_kernel_launch.py::TestFP8ActivationStore::test_activation_memory
+  /opt/venv/lib/python3.10/site-packages/torch/autograd/graph.py:829: UserWarning: aiter::gemm_a16w16: an autograd kernel was not registered to the Autograd key(s) but we are trying to backprop through it. This may lead to silently incorrect behavior. This behavior is deprecated and will be removed in a future version of PyTorch. If your operator is differentiable, please ensure you have registered an autograd kernel to the correct Autograd key (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd). If your operator is not differentiable, or to squash this warning and use the previous behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd. (Triggered internally at /pytorch/torch/csrc/autograd/autograd_not_implemented_fallback.cpp:62.)
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 25 passed, 2 warnings in 9.60s ========================

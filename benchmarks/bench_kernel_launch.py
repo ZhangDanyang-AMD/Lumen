@@ -16,6 +16,8 @@ Exercises Lumen's fused-kernel features that reduce kernel-launch overhead:
     vs ``fp8_activation_store=False``.
   * **Attention backends**: ``aiter_csrc`` vs ``aiter_triton``.
   * **Fused RMSNorm + GEMM pipeline**: norm → quant → GEMM in one flow.
+  * **Fusion latency**: fused RoPE, fused RMSNorm+quant, fused GatedMLP,
+    fused MLP, and full norm+quant+GEMM pipeline vs decomposed equivalents.
 
 Run::
 
@@ -524,7 +526,191 @@ class TestFusedNormGEMMPipeline:
 
 
 # ---------------------------------------------------------------------------
-# 6. Kernel-launch count: fused vs unfused (M1 acceptance criterion)
+# 6. Fusion latency: fused ops vs decomposed equivalents
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestFusionLatency:
+    """Latency comparison of Lumen fused ops vs decomposed equivalents.
+
+    Measures the wall-clock benefit of AITER-backed fused kernels over
+    manually sequenced PyTorch operations for several common pipelines.
+    """
+
+    # Expected: fused_rope dispatches two AITER Triton RoPE kernels (Q, K)
+    # which are individually faster than pure-PyTorch rope math (sin/cos
+    # broadcast multiply + interleave).  Speedup comes from fewer kernel
+    # launches and fused memory passes.
+    def test_fused_rope_vs_manual(self):
+        """Fused RoPE (AITER Triton) vs manual sin/cos rotation."""
+        from lumen.ops.rope import fused_rope
+
+        q = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, H_KV, D, device="cuda", dtype=torch.bfloat16)
+        cos = torch.randn(1, S, 1, D, device="cuda", dtype=torch.bfloat16)
+        sin = torch.randn(1, S, 1, D, device="cuda", dtype=torch.bfloat16)
+
+        def _manual():
+            x1_q, x2_q = q[..., : D // 2], q[..., D // 2 :]
+            rq = torch.cat((-x2_q, x1_q), dim=-1)
+            q_rot = q * cos + rq * sin
+            x1_k, x2_k = k[..., : D // 2], k[..., D // 2 :]
+            rk = torch.cat((-x2_k, x1_k), dim=-1)
+            k_rot = k * cos[:, :, :1, :] + rk * sin[:, :, :1, :]
+            return q_rot, k_rot
+
+        r_manual = cuda_timer(_manual, label="manual RoPE (sin/cos)")
+
+        r_fused = cuda_timer(
+            lambda: fused_rope(q, k, cos.squeeze(0).squeeze(-2), sin.squeeze(0).squeeze(-2)),
+            label="fused_rope (AITER Triton)",
+        )
+
+        speedup = r_manual.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused RoPE vs Manual", [r_manual, r_fused])
+
+    # Expected: rmsnorm_with_quant fuses norm + FP8 quantization into a
+    # single kernel pass (for dynamic/per_token/blockwise modes), avoiding
+    # the extra memory round-trip of writing BF16 normed output then
+    # re-reading it for quantization.
+    def test_fused_rmsnorm_quant_vs_separate(self):
+        """Fused RMSNorm+quant vs separate rmsnorm then manual FP8 cast."""
+        from lumen.ops.normalization.rmsnorm import rmsnorm, rmsnorm_with_quant
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w = torch.ones(HIDDEN, device="cuda", dtype=torch.bfloat16)
+
+        def _separate():
+            normed = rmsnorm(x, w)
+            return normed.to(fp8_dtype)
+
+        r_sep = cuda_timer(_separate, label="rmsnorm + manual cast to FP8")
+
+        results = [r_sep]
+        for mode in ["dynamic", "per_token", "blockwise"]:
+            r = cuda_timer(
+                lambda m=mode: rmsnorm_with_quant(x, w, eps=1e-6, scaling_type=m, fp8_dtype=fp8_dtype),
+                label=f"rmsnorm_with_quant({mode})",
+            )
+            speedup = r_sep.avg_ms / max(r.avg_ms, 1e-6)
+            r.extra["speedup"] = round(speedup, 2)
+            results.append(r)
+
+        print_report("Fused RMSNorm + Quant vs Separate", results)
+
+    # Expected: fused_gated_mlp uses AITER's ff_a16w16_fused_gated kernel
+    # which performs gate_proj, up_proj, SwiGLU activation, and down_proj
+    # in fewer kernel launches than the decomposed path. The fused kernel
+    # also benefits from register-level intermediate reuse.
+    def test_fused_gated_mlp_vs_decomposed(self):
+        """AITER fused_gated_mlp vs manual GEMMs + SwiGLU."""
+        from lumen.ops.mlp.fused_mlp import fused_gated_mlp
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w_gate = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_up = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_down = torch.randn(HIDDEN, FFN_HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+
+        def _decomposed():
+            gate = gemm_bf16(x, w_gate)
+            up = gemm_bf16(x, w_up)
+            act = torch.nn.functional.silu(gate) * up
+            return gemm_bf16(act, w_down)
+
+        r_decomposed = cuda_timer(_decomposed, label="manual gate+up+silu+down")
+
+        r_fused = cuda_timer(
+            lambda: fused_gated_mlp(x, w_up, w_gate, w_down, activation="swiglu"),
+            label="fused_gated_mlp (AITER)",
+        )
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused GatedMLP vs Decomposed", [r_decomposed, r_fused])
+
+    # Expected: fused_mlp uses AITER's ff_a16w16_fused_ungated kernel
+    # to combine up_proj + activation + down_proj.  The benefit is smaller
+    # than gated MLP because there are fewer intermediate tensors.
+    def test_fused_mlp_vs_decomposed(self):
+        """AITER fused_mlp vs manual GEMMs + GELU."""
+        from lumen.ops.mlp.fused_mlp import fused_mlp
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w_up = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_down = torch.randn(HIDDEN, FFN_HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+
+        def _decomposed():
+            up = gemm_bf16(x, w_up)
+            act = torch.nn.functional.gelu(up)
+            return gemm_bf16(act, w_down)
+
+        r_decomposed = cuda_timer(_decomposed, label="manual up+gelu+down")
+
+        r_fused = cuda_timer(
+            lambda: fused_mlp(x, w_up, w_down, activation="gelu"),
+            label="fused_mlp (AITER)",
+        )
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused MLP vs Decomposed", [r_decomposed, r_fused])
+
+    # Expected: The full transformer-block pre-norm pipeline (RMSNorm →
+    # FP8 quant → GEMM) benefits from norm+quant fusion that eliminates
+    # one global memory round-trip.  Comparing the end-to-end latency
+    # of the fused pipeline against the decomposed version.
+    def test_norm_quant_gemm_pipeline(self):
+        """Full pipeline: RMSNorm → FP8 quant → GEMM (fused vs decomposed)."""
+        from lumen.ops.normalization.rmsnorm import rmsnorm, rmsnorm_with_quant
+        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        norm_w = torch.ones(HIDDEN, device="cuda", dtype=torch.bfloat16)
+        gemm_w = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
+
+        def _decomposed():
+            normed = rmsnorm(x, norm_w)
+            return quantized_linear(normed, gemm_w, scaling_type="dynamic", fp8_dtype=fp8_dtype)
+
+        r_decomposed = cuda_timer(_decomposed, label="rmsnorm → quantized_linear (separate)")
+
+        def _fused():
+            normed_fp8 = rmsnorm_with_quant(
+                x,
+                norm_w,
+                eps=1e-6,
+                scaling_type="dynamic",
+                fp8_dtype=fp8_dtype,
+            )
+            if isinstance(normed_fp8, tuple):
+                normed_fp8, scale = normed_fp8
+                return quantized_linear(
+                    normed_fp8,
+                    gemm_w,
+                    scaling_type="dynamic",
+                    fp8_dtype=fp8_dtype,
+                    x_scale=scale,
+                )
+            return quantized_linear(normed_fp8, gemm_w, scaling_type="dynamic", fp8_dtype=fp8_dtype)
+
+        r_fused = cuda_timer(_fused, label="rmsnorm_with_quant → quantized_linear (fused)")
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Norm+Quant+GEMM Pipeline: Fused vs Decomposed", [r_decomposed, r_fused])
+
+
+# ---------------------------------------------------------------------------
+# 7. Kernel-launch count: fused vs unfused (M1 acceptance criterion)
 # ---------------------------------------------------------------------------
 
 

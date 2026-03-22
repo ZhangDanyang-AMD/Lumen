@@ -189,16 +189,14 @@ def apply_rotary_pos_emb_2d(
     assert _probe_aiter_triton_rope_2d(), "AITER Triton rope_fwd_2d is required but not available."
 
     rope_fwd_2d = _get_aiter_rope_fwd_2d()
-    img_h = torch.tensor(img_height, dtype=torch.int32, device=x.device)
-    img_w = torch.tensor(img_width, dtype=torch.int32, device=x.device)
     out = rope_fwd_2d(
         x,
         cos_h,
         sin_h,
         cos_w,
         sin_w,
-        img_h,
-        img_w,
+        int(img_height),
+        int(img_width),
         NEOX_STYLE,  # rotate_style
         True,  # reuse_freqs_front_part
         False,  # nope_first

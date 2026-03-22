@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore", message=".*will be removed in.*megatron-core.*
 warnings.filterwarnings("ignore", message=".*megatron.core.transformer.custom_layers.*")
 warnings.filterwarnings("ignore", message=".*No device id is provided via.*init_process_group.*")
 warnings.filterwarnings("ignore", message=".*destroy_process_group.*was not called.*")
+warnings.filterwarnings("ignore", message=".*an autograd kernel was not registered to the Autograd key.*")
 
 try:
     import aiter  # noqa: F401
