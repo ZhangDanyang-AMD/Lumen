@@ -1014,6 +1014,7 @@ class TestNCCLvsSdmaWgradDelay:
         # Ensure synchronous SDMA ops complete before starting async path
         torch.cuda.synchronize()
         dist.barrier()
+        sdma_comm.reset_allreduce_flags()  # noqa: F821
 
         def _sdma_ovl():
             w.main_grad.zero_()
@@ -1170,6 +1171,7 @@ class TestNCCLvsSdmaWgradDelay:
         # Drain synchronous SDMA ops before starting async pipeline
         torch.cuda.synchronize()
         dist.barrier()
+        sdma_comm.reset_allreduce_flags()  # noqa: F821
 
         # Deferred SDMA pipeline
         def _deferred_sdma():
@@ -1344,6 +1346,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         torch.cuda.synchronize()
         dist.barrier()
+        sdma_comm.reset_allreduce_flags()
 
         # ── SDMA deferred pipeline ──
         def _deferred_sdma():
@@ -1510,6 +1513,7 @@ class TestNCCLvsSdmaWgradDelay:
 
             torch.cuda.synchronize()
             dist.barrier()
+            sdma_comm.reset_allreduce_flags()  # noqa: F821
 
             # ── SDMA deferred pipeline ──
             def _deferred_sdma(weights=weights, grad_outs=grad_outs, x=x):

@@ -321,6 +321,11 @@ class _TpSdmaAllreduce:
         if hasattr(self, "_async_stream"):
             del self._async_stream
 
+    def reset_flags(self) -> None:
+        """Reset SDMA synchronization flags on the underlying handle."""
+        if self._handle is not None:
+            self._handle.reset_flags()
+
 
 # ---------------------------------------------------------------------------
 # SdmaTpComm — high-level TP communication manager
@@ -356,6 +361,15 @@ class SdmaTpComm:
         if dtype not in self._ar_handles:
             self._ar_handles[dtype] = _TpSdmaAllreduce(self._ctx, dtype)
         return self._ar_handles[dtype]
+
+    def reset_allreduce_flags(self) -> None:
+        """Reset SDMA flags on all cached allreduce handles.
+
+        Call between switching from synchronous to asynchronous allreduce
+        on the same handle to avoid stale flag state.
+        """
+        for ar in self._ar_handles.values():
+            ar.reset_flags()
 
     # -- Primitives --
 
