@@ -882,11 +882,14 @@ class TestNCCLvsSdmaWgradDelay:
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup both backends
+        # Warmup — separate NCCL and SDMA to avoid resource conflicts
         for _ in range(3):
             dist.all_reduce(ar_buf.clone())
-            sdma_comm.allreduce_sum(ar_buf.clone())
             _ = grad_out.T @ x
+        torch.cuda.synchronize()
+        dist.barrier()
+        for _ in range(3):
+            sdma_comm.allreduce_sum(ar_buf.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1055,11 +1058,15 @@ class TestNCCLvsSdmaWgradDelay:
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup
+        # Warmup — separate NCCL and SDMA to avoid resource conflicts
+        # between pending NCCL collectives and SDMA handle init.
         for _ in range(3):
             dist.all_reduce(weights[0].data.clone())
-            sdma_comm.allreduce_sum(weights[0].data.clone())
             _ = grad_outs[0].T @ x
+        torch.cuda.synchronize()
+        dist.barrier()
+        for _ in range(3):
+            sdma_comm.allreduce_sum(weights[0].data.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
