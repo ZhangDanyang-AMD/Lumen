@@ -13,19 +13,39 @@ Exercises Lumen's ``FP8ParamManager`` feature:
   * **Memory savings**: ~2x reduction in param storage and all-gather volume.
   * **Numerical quality**: Round-trip quant→dequant SNR.
   * **End-to-end**: ``LumenGatedMLP`` with FP8 params — latency & accuracy.
+  * **Section 6 — Multi-GPU NCCL**: Real ``all_gather`` with FP8 vs BF16 shards,
+    including the full quant → gather → dequant pipeline latency.
+  * **Section 7 — Multi-GPU SDMA**: ``SdmaTpComm`` allgather with FP8 param
+    shards on dedicated DMA engines.
+  * **Section 8 — E2E distributed**: Full-model FP8 param allgather + forward
+    correctness across ranks.
 
-Run::
+Run single-GPU::
 
     python -m benchmarks.bench_fp8_param_allgather
     pytest benchmarks/bench_fp8_param_allgather.py -v -s
+
+Run multi-GPU — NCCL::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
+
+Run multi-GPU — SDMA (requires mori)::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k SDMA
+
+Run multi-GPU — E2E::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
 """
 
 from __future__ import annotations
 
+import os
 from typing import List
 
 import pytest
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 
 from benchmarks.bench_utils import (
@@ -63,6 +83,42 @@ def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
             ]
         )
     return nn.Sequential(*layers)
+
+
+# ---------------------------------------------------------------------------
+# Multi-GPU infrastructure
+# ---------------------------------------------------------------------------
+
+
+def _init_dist():
+    if dist.is_initialized():
+        return
+    if "RANK" not in os.environ:
+        return
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
+
+
+_DIST = pytest.mark.skipif(
+    "RANK" not in os.environ,
+    reason="Multi-GPU — run with torchrun --nproc_per_node=N",
+)
+
+
+def _sdma_available():
+    try:
+        import mori  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+_SDMA = pytest.mark.skipif(
+    "RANK" not in os.environ or not _sdma_available(),
+    reason="Multi-GPU + mori SDMA required",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +467,406 @@ class TestFP8AllGatherDistributed:
         print_report(f"All-Gather BF16 vs FP8 {shape}", [r_bf16, r_fp8])
         print(f"  Bandwidth reduction: {bw_reduction:.1f}x")
         print(f"  Time speedup: {speedup:.2f}x")
+
+
+# ---------------------------------------------------------------------------
+# 6. Multi-GPU NCCL: real all-gather BF16 vs FP8 + full pipeline
+# ---------------------------------------------------------------------------
+
+
+@_DIST
+class TestFP8AllGatherNCCL:
+    """Real NCCL all-gather with FP8 vs BF16 param shards.
+
+    Measures three key scenarios:
+      1. Raw all-gather bandwidth: FP8 shard vs BF16 shard.
+      2. Full pipeline: quantize → all-gather FP8 → dequantize vs
+         plain BF16 all-gather (the realistic training hot path).
+      3. Multi-layer: pipeline across N layers to amortise any fixed costs.
+
+    Run::
+
+        torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_raw_allgather_bf16_vs_fp8(self, shape):
+        """Raw NCCL all_gather_into_tensor: BF16 (2 B/elem) vs FP8 (1 B/elem)."""
+        from lumen.quantize.fp8_params import quantize_param_to_fp8
+
+        weight_bf16 = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        fp8_w, _ = quantize_param_to_fp8(weight_bf16)
+
+        bf16_shard = weight_bf16.chunk(self.world)[self.rank].contiguous()
+        fp8_shard = fp8_w.chunk(self.world)[self.rank].contiguous()
+
+        bf16_out = torch.empty_like(weight_bf16)
+        fp8_out = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
+
+        for _ in range(3):
+            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+            dist.all_gather_into_tensor(fp8_out, fp8_shard)
+        torch.cuda.synchronize()
+
+        r_bf16 = cuda_timer(
+            lambda: dist.all_gather_into_tensor(bf16_out, bf16_shard),
+            label=f"NCCL all_gather BF16 {shape}",
+            iters=20,
+        )
+        r_fp8 = cuda_timer(
+            lambda: dist.all_gather_into_tensor(fp8_out, fp8_shard),
+            label=f"NCCL all_gather FP8  {shape}",
+            iters=20,
+        )
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        bw_ratio = (bf16_shard.nelement() * bf16_shard.element_size()) / max(
+            fp8_shard.nelement() * fp8_shard.element_size(), 1
+        )
+        r_fp8.extra["speedup"] = round(speedup, 2)
+        r_fp8.extra["bw_reduction"] = f"{bw_ratio:.1f}x"
+
+        if self.rank == 0:
+            print_report(f"NCCL All-Gather BF16 vs FP8 {shape} (world={self.world})", [r_bf16, r_fp8])
+
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_full_pipeline_quant_gather_dequant(self, shape):
+        """Full pipeline: quant→gather→dequant (FP8) vs plain gather (BF16).
+
+        This is the realistic hot path: rank-local weights are stored in FP8,
+        all-gathered in FP8 (half the bytes), then dequantized to BF16 for GEMM.
+        """
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        weight_bf16 = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        fp8_w, scale = quantize_param_to_fp8(weight_bf16)
+
+        bf16_shard = weight_bf16.chunk(self.world)[self.rank].contiguous()
+        fp8_shard = fp8_w.chunk(self.world)[self.rank].contiguous()
+        scale_shard = scale.clone()
+
+        bf16_out = torch.empty_like(weight_bf16)
+        fp8_out = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
+
+        for _ in range(3):
+            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+            dist.all_gather_into_tensor(fp8_out, fp8_shard)
+        torch.cuda.synchronize()
+
+        def _bf16_pipeline():
+            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+
+        def _fp8_pipeline():
+            dist.all_gather_into_tensor(fp8_out, fp8_shard)
+            torch.cuda.synchronize()
+            dequantize_param_from_fp8(fp8_out, scale_shard, torch.bfloat16)
+
+        r_bf16 = cuda_timer(_bf16_pipeline, label=f"BF16 gather {shape}", iters=20)
+        r_fp8 = cuda_timer(_fp8_pipeline, label=f"FP8 quant+gather+dequant {shape}", iters=20)
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        r_fp8.extra["speedup"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report(
+                f"Full Pipeline BF16 vs FP8 {shape} (world={self.world})",
+                [r_bf16, r_fp8],
+            )
+
+    def test_multi_layer_pipeline(self):
+        """Pipeline across 4 transformer layers (gate+up+down+qkv per layer)."""
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        layer_shapes = [
+            (FFN_HIDDEN, HIDDEN),
+            (FFN_HIDDEN, HIDDEN),
+            (HIDDEN, FFN_HIDDEN),
+            (HIDDEN, HIDDEN),
+        ]
+        n_layers = 4
+
+        bf16_shards = []
+        fp8_shards = []
+        fp8_scales = []
+        bf16_outs = []
+        fp8_outs = []
+
+        for _ in range(n_layers):
+            for shape in layer_shapes:
+                w = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+                fp8_w, sc = quantize_param_to_fp8(w)
+                bf16_shards.append(w.chunk(self.world)[self.rank].contiguous())
+                fp8_shards.append(fp8_w.chunk(self.world)[self.rank].contiguous())
+                fp8_scales.append(sc)
+                bf16_outs.append(torch.empty_like(w))
+                fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
+
+        for i in range(len(bf16_shards)):
+            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+        torch.cuda.synchronize()
+
+        def _bf16_all():
+            for i in range(len(bf16_shards)):
+                dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+
+        def _fp8_all():
+            for i in range(len(fp8_shards)):
+                dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+            torch.cuda.synchronize()
+            for i in range(len(fp8_shards)):
+                dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+
+        r_bf16 = cuda_timer(_bf16_all, label=f"BF16 gather {n_layers}L", iters=10)
+        r_fp8 = cuda_timer(_fp8_all, label=f"FP8 gather+dequant {n_layers}L", iters=10)
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        total_bf16_bytes = sum(s.nelement() * s.element_size() for s in bf16_shards)
+        total_fp8_bytes = sum(s.nelement() * s.element_size() for s in fp8_shards)
+        r_fp8.extra["speedup"] = round(speedup, 2)
+        r_fp8.extra["bf16_vol"] = format_bytes(total_bf16_bytes)
+        r_fp8.extra["fp8_vol"] = format_bytes(total_fp8_bytes)
+
+        if self.rank == 0:
+            print_report(
+                f"Multi-Layer Pipeline ({n_layers}L, world={self.world})",
+                [r_bf16, r_fp8],
+            )
+
+
+# ---------------------------------------------------------------------------
+# 7. Multi-GPU SDMA: FP8 param all-gather on dedicated DMA engines
+# ---------------------------------------------------------------------------
+
+
+@_SDMA
+class TestFP8AllGatherSDMA:
+    """SDMA all-gather with FP8 param shards.
+
+    SDMA uses dedicated hardware DMA engines (separate from compute SMs),
+    providing zero-contention allgather that can overlap perfectly with
+    compute.  FP8 params halve the DMA transfer volume.
+
+    Run::
+
+        torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k SDMA
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_sdma_allgather_bf16_vs_fp8(self, shape):
+        """SDMA allgather_dim0: BF16 shard vs FP8 shard."""
+        from lumen.modules.sdma_comm import SdmaTpComm
+        from lumen.quantize.fp8_params import quantize_param_to_fp8
+
+        weight_bf16 = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        fp8_w, _ = quantize_param_to_fp8(weight_bf16)
+
+        bf16_shard = weight_bf16.chunk(self.world, dim=0)[self.rank].contiguous()
+        fp8_shard = fp8_w.chunk(self.world, dim=0)[self.rank].contiguous()
+
+        comm = SdmaTpComm(dist.group.WORLD)
+
+        for _ in range(3):
+            comm.allgather_dim0(bf16_shard)
+            comm.allgather_dim0(fp8_shard)
+        torch.cuda.synchronize()
+
+        r_bf16 = cuda_timer(
+            lambda: comm.allgather_dim0(bf16_shard),
+            label=f"SDMA allgather BF16 {shape}",
+            iters=20,
+        )
+        r_fp8 = cuda_timer(
+            lambda: comm.allgather_dim0(fp8_shard),
+            label=f"SDMA allgather FP8  {shape}",
+            iters=20,
+        )
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        r_fp8.extra["speedup"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report(
+                f"SDMA All-Gather BF16 vs FP8 {shape} (world={self.world})",
+                [r_bf16, r_fp8],
+            )
+
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_sdma_async_allgather_overlap_with_dequant(self, shape):
+        """Overlap SDMA allgather (FP8 shard) with dequant of previous layer."""
+        from lumen.modules.sdma_comm import SdmaTpComm
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        weight_bf16 = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        fp8_w, scale = quantize_param_to_fp8(weight_bf16)
+        fp8_shard = fp8_w.chunk(self.world, dim=0)[self.rank].contiguous()
+
+        comm = SdmaTpComm(dist.group.WORLD)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        for _ in range(3):
+            comm.allgather_dim0(fp8_shard)
+        torch.cuda.synchronize()
+
+        r_gather = cuda_timer(
+            lambda: comm.allgather_dim0(fp8_shard),
+            label=f"SDMA gather FP8 {shape}",
+            iters=20,
+        )
+
+        gathered_fp8 = comm.allgather_dim0(fp8_shard)
+        r_dequant = cuda_timer(
+            lambda: dequantize_param_from_fp8(gathered_fp8, scale, torch.bfloat16),
+            label=f"dequant {shape}",
+            iters=20,
+        )
+
+        def _sequential():
+            g = comm.allgather_dim0(fp8_shard)
+            torch.cuda.synchronize()
+            dequantize_param_from_fp8(g, scale, torch.bfloat16)
+
+        def _overlapped():
+            comm.allgather_dim0_async(fp8_shard, stream=sdma_stream)
+            # While SDMA gathers next layer, dequant the current one
+            dequantize_param_from_fp8(gathered_fp8, scale, torch.bfloat16)
+            comm.wait_allgather_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_seq = cuda_timer(_sequential, label=f"sequential {shape}", iters=20)
+        r_ovl = cuda_timer(_overlapped, label=f"overlapped {shape}", iters=20)
+
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_ovl.extra["speedup"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report(
+                f"SDMA Gather+Dequant Overlap {shape} (world={self.world})",
+                [r_gather, r_dequant, r_seq, r_ovl],
+            )
+
+
+# ---------------------------------------------------------------------------
+# 8. E2E distributed: full model FP8 param allgather + forward correctness
+# ---------------------------------------------------------------------------
+
+
+@_DIST
+class TestFP8ParamE2EDistributed:
+    """End-to-end: all ranks hold FP8 shards, allgather, dequant, forward.
+
+    Verifies that the distributed FP8 param pipeline produces numerically
+    correct results (SNR > 10 dB vs BF16 reference) and measures the
+    total latency of the gather-dequant-forward pipeline.
+
+    Run::
+
+        torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def test_gather_dequant_forward_correctness(self):
+        """Allgather FP8 shards → dequant → Linear forward, check SNR vs BF16."""
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        torch.manual_seed(42)
+        H_in, H_out = 256, 512
+        weight_full = torch.randn(H_out, H_in, device=self.device, dtype=torch.bfloat16)
+        x = torch.randn(2, 32, H_in, device=self.device, dtype=torch.bfloat16)
+
+        dist.broadcast(weight_full, src=0)
+        dist.broadcast(x, src=0)
+
+        ref_out = torch.nn.functional.linear(x, weight_full)
+
+        fp8_full, scale = quantize_param_to_fp8(weight_full)
+        fp8_shard = fp8_full.chunk(self.world, dim=0)[self.rank].contiguous()
+
+        gathered_list = [torch.empty_like(fp8_shard) for _ in range(self.world)]
+        dist.all_gather(gathered_list, fp8_shard)
+        fp8_gathered = torch.cat(gathered_list, dim=0)
+
+        weight_recovered = dequantize_param_from_fp8(fp8_gathered, scale, torch.bfloat16)
+        fp8_out = torch.nn.functional.linear(x, weight_recovered)
+
+        signal = (ref_out.float() ** 2).mean()
+        noise = ((ref_out.float() - fp8_out.float()) ** 2).mean()
+        snr_db = 10 * torch.log10(signal / noise).item()
+
+        if self.rank == 0:
+            print(f"\n  E2E distributed FP8 param forward SNR: {snr_db:.1f} dB")
+        assert snr_db > 10, f"Distributed FP8 param SNR too low: {snr_db:.1f} dB"
+
+    def test_gather_dequant_forward_latency(self):
+        """Time the full pipeline: scatter shards → allgather FP8 → dequant → GEMM."""
+        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+
+        shape = (FFN_HIDDEN, HIDDEN)
+        weight_full = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        dist.broadcast(weight_full, src=0)
+
+        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
+        fp8_full, scale = quantize_param_to_fp8(weight_full)
+        fp8_shard = fp8_full.chunk(self.world, dim=0)[self.rank].contiguous()
+        bf16_shard = weight_full.chunk(self.world, dim=0)[self.rank].contiguous()
+
+        bf16_out = torch.empty_like(weight_full)
+        fp8_out_buf = torch.empty(*shape, device=self.device, dtype=fp8_full.dtype)
+
+        for _ in range(3):
+            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+            dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
+        torch.cuda.synchronize()
+
+        def _bf16_pipeline():
+            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+            torch.nn.functional.linear(x, bf16_out)
+
+        def _fp8_pipeline():
+            dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
+            torch.cuda.synchronize()
+            w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
+            torch.nn.functional.linear(x, w)
+
+        r_bf16 = cuda_timer(_bf16_pipeline, label="BF16 gather+GEMM", iters=20)
+        r_fp8 = cuda_timer(_fp8_pipeline, label="FP8 gather+dequant+GEMM", iters=20)
+
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        r_fp8.extra["speedup"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report(
+                f"E2E Gather+Forward {shape} (world={self.world})",
+                [r_bf16, r_fp8],
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -249,34 +249,45 @@ class _TpSdmaAllreduce:
         return self._user_dtype != self._wire_dtype
 
     def inplace(self, tensor: torch.Tensor) -> None:
-        tensor = tensor.contiguous()
-        self._ensure(tensor.numel())
+        flat = tensor.contiguous().reshape(-1)
+        self._ensure(flat.numel())
         stream = torch.cuda.current_stream(tensor.device)
         if self._needs_cast:
-            buf = tensor.to(self._wire_dtype)
+            buf = flat.to(self._wire_dtype)
             self._handle.allreduce_inplace(buf, buf.numel(), stream)
             stream.synchronize()
-            tensor.copy_(buf.to(self._user_dtype))
+            tensor.copy_(buf.to(self._user_dtype).reshape(tensor.shape))
         else:
-            self._handle.allreduce_inplace(tensor, tensor.numel(), stream)
+            self._handle.allreduce_inplace(flat, flat.numel(), stream)
             stream.synchronize()
+            if not tensor.is_contiguous():
+                tensor.copy_(flat.reshape(tensor.shape))
 
     def start_async_inplace(self, tensor: torch.Tensor, stream=None) -> bool:
         """Start async in-place allreduce.  Caller must call :meth:`wait_async`."""
-        tensor = tensor.contiguous()
-        self._ensure(tensor.numel())
+        flat = tensor.contiguous().reshape(-1)
+        self._ensure(flat.numel())
+        self._async_orig_shape = tensor.shape
         if self._needs_cast:
-            self._async_buf = tensor.to(self._wire_dtype)
+            self._async_buf = flat.to(self._wire_dtype)
             self._async_tensor = tensor
             return self._handle.start_async_inplace(self._async_buf, self._async_buf.numel(), stream)
-        return self._handle.start_async_inplace(tensor, tensor.numel(), stream)
+        self._async_flat = flat
+        self._async_tensor = tensor
+        return self._handle.start_async_inplace(flat, flat.numel(), stream)
 
     def wait_async(self, stream=None) -> None:
         """Wait for a previously started async allreduce."""
         self._handle.wait_async(stream)
         if self._needs_cast and hasattr(self, "_async_buf"):
-            self._async_tensor.copy_(self._async_buf.to(self._user_dtype))
+            self._async_tensor.copy_(self._async_buf.to(self._user_dtype).reshape(self._async_orig_shape))
             del self._async_buf, self._async_tensor
+        elif hasattr(self, "_async_flat"):
+            if not self._async_tensor.is_contiguous():
+                self._async_tensor.copy_(self._async_flat.reshape(self._async_orig_shape))
+            del self._async_flat, self._async_tensor
+        if hasattr(self, "_async_orig_shape"):
+            del self._async_orig_shape
 
 
 # ---------------------------------------------------------------------------
