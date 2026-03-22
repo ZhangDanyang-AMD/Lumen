@@ -26,6 +26,7 @@ Supported primitives (each mirrors the corresponding Megatron mapping):
 """
 
 import logging
+from math import prod
 from typing import Optional
 
 import torch
@@ -408,18 +409,20 @@ class SdmaTpComm:
         ar = self._get_ar(tensor.dtype)
         wire_dtype = ar._wire_dtype
         wire_tensor = tensor.to(wire_dtype) if ar._needs_cast else tensor
-        n_elems = wire_tensor.numel()
+        flat_wire = wire_tensor.reshape(-1)
+        n_elems = flat_wire.numel()
+        ar._ensure(n_elems)
         if (
             self._rs_output_buf is None
             or self._rs_output_buf.numel() < n_elems
-            or self._rs_output_buf.device != wire_tensor.device
+            or self._rs_output_buf.device != flat_wire.device
             or self._rs_output_buf.dtype != wire_dtype
         ):
-            self._rs_output_buf = torch.empty_like(wire_tensor)
+            self._rs_output_buf = torch.empty(n_elems, dtype=wire_dtype, device=flat_wire.device)
         self._rs_async_shape = tensor.shape
         self._rs_user_dtype = tensor.dtype
         self._rs_input_buf = wire_tensor
-        return ar._handle.start_async(wire_tensor, self._rs_output_buf, n_elems, stream)
+        return ar._handle.start_async(flat_wire, self._rs_output_buf, n_elems, stream)
 
     def wait_reduce_scatter_dim0(self, stream=None) -> torch.Tensor:
         """Wait for async reduce-scatter and return ``[S/TP, ...]``."""
@@ -429,9 +432,10 @@ class SdmaTpComm:
         user_dtype = self._rs_user_dtype
         ar = self._get_ar(user_dtype)
         ar._handle.wait_async(stream)
+        full = self._rs_output_buf[: prod(shape)].reshape(shape)
         chunk_size = shape[0] // self.npes
         start = self.my_pe * chunk_size
-        result = self._rs_output_buf[start : start + chunk_size].contiguous()
+        result = full[start : start + chunk_size].contiguous()
         if ar._needs_cast:
             result = result.to(user_dtype)
         del self._rs_async_shape, self._rs_user_dtype, self._rs_input_buf
