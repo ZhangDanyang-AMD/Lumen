@@ -363,7 +363,7 @@ class LumenColumnParallelLinear(nn.Module):
         compute_stream = torch.cuda.current_stream(input_.device)
 
         input_parallel = input_.contiguous()
-        seq_local = input_parallel.shape[1]
+        local_dim0 = input_parallel.shape[0]
         comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
 
         gemm_bias = self.bias if not self.skip_bias_add else None
@@ -381,7 +381,7 @@ class LumenColumnParallelLinear(nn.Module):
         compute_stream.wait_stream(sdma_stream)
 
         out_remaining = _do_gemm(
-            input_gathered[:, seq_local:, :],
+            input_gathered[local_dim0:, ...],
             weight,
             None,
             self.scaling_manager,
@@ -389,7 +389,7 @@ class LumenColumnParallelLinear(nn.Module):
             self.fp8_dtype,
             self.block_size,
         )
-        output_parallel = torch.cat([out_local, out_remaining], dim=1)
+        output_parallel = torch.cat([out_local, out_remaining], dim=0)
         return output_parallel, self.bias if self.skip_bias_add else None
 
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
