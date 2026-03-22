@@ -181,6 +181,8 @@ class TestRoPE1D:
             lambda: apply_rotary_pos_emb(x, cos, sin, interleaved=True),
             label="RoPE GPT-J (interleaved=True)",
         )
+        diff = (r_gptj.avg_ms - r_neox.avg_ms) / max(r_neox.avg_ms, 1e-6) * 100
+        r_gptj.extra["vs_neox"] = f"{diff:+.1f}%"
         print_report("RoPE: NeoX vs GPT-J Style", [r_neox, r_gptj])
 
 
@@ -343,6 +345,19 @@ class TestRoPEDtype:
     # bandwidth. Any difference reflects register-level instruction throughput
     # differences (e.g., bfloat16 may have slightly different FMA latency on
     # some AMD architectures).
+    @pytest.fixture()
+    def _dtype_baseline(self):
+        """Collect results for cross-dtype comparison."""
+        self._dtype_results = {}
+        yield
+        if len(self._dtype_results) >= 2:
+            dtypes = sorted(self._dtype_results.keys(), key=str)
+            baseline = self._dtype_results[dtypes[0]]
+            for dt in dtypes[1:]:
+                r = self._dtype_results[dt]
+                diff = (r.avg_ms - baseline.avg_ms) / max(baseline.avg_ms, 1e-6) * 100
+                r.extra[f"vs_{dtypes[0]}"] = f"{diff:+.1f}%"
+
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_dtype_latency(self, dtype):
         from lumen.ops.rope import apply_rotary_pos_emb
@@ -396,15 +411,21 @@ def main():
     cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
     results.append(cuda_timer(lambda: fused_rope(q, k, cos, sin), label="fused_rope Q+K S=2048"))
 
-    # GQA variants
+    # GQA variants — run MHA baseline first, then compare
+    gqa_results = []
+    k_mha = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
+    r_mha = cuda_timer(lambda: fused_rope(q, k_mha, cos, sin), label=f"fused_rope MHA H_kv={H}")
+    gqa_results.append(r_mha)
     for h_kv in [1, 4, 8]:
         k_gqa = torch.randn(B, h_kv, seqlen, D, device="cuda", dtype=torch.bfloat16)
-        results.append(
-            cuda_timer(
-                lambda: fused_rope(q, k_gqa, cos, sin),
-                label=f"fused_rope GQA H_kv={h_kv}",
-            )
+        r = cuda_timer(
+            lambda: fused_rope(q, k_gqa, cos, sin),
+            label=f"fused_rope GQA H_kv={h_kv}",
         )
+        diff = (r.avg_ms - r_mha.avg_ms) / max(r_mha.avg_ms, 1e-6) * 100
+        r.extra["vs_MHA"] = f"{diff:+.1f}%"
+        gqa_results.append(r)
+    results.extend(gqa_results)
 
     print_report("Lumen RoPE Fusion Benchmarks", results)
 

@@ -65,6 +65,7 @@ import torch.distributed as dist
 from benchmarks.bench_utils import (
     BenchResult,
     cuda_timer,
+    print_overlap_summary,
     print_report,
     require_cuda,
 )
@@ -284,15 +285,14 @@ class TestLumenColumnParallelOverlap:
             label="ColumnParallel tp_comm_overlap=True",
         )
 
-        speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
-        r_ovl.extra["speedup"] = round(speedup, 2)
-
-        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
-        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        latency_ratio = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_ovl.extra["latency_ratio"] = round(latency_ratio, 2)
 
         print_report("LumenColumnParallelLinear: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
-        print(f"  Speedup from overlap: {speedup:.2f}x")
-        print(f"  Overlap ratio: {overlap_ratio:.3f}")
+        print(f"  Latency ratio (non-overlap / overlap): {latency_ratio:.2f}x")
+        print()
+        print("  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.")
+        print("  Overlap path has extra stream sync + 2 GEMMs overhead.")
 
     # Expected: Latency should scale proportionally with sequence length
     # because GEMM time dominates. The overlap benefit (hiding allgather) is
@@ -350,11 +350,12 @@ class TestLumenRowParallelOverlap:
         )
 
         diff_pct = (r_ovl.avg_ms - r_no_ovl.avg_ms) / max(r_no_ovl.avg_ms, 1e-6) * 100
-        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
         r_ovl.extra["diff_vs_sync"] = f"{diff_pct:+.1f}%"
-        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
         print_report("LumenRowParallelLinear: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
-        print(f"  Overlap ratio: {overlap_ratio:.3f}")
+        print(f"  Diff vs sync: {diff_pct:+.1f}%")
+        print()
+        print("  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,")
+        print("  not in single-layer isolation (async RS still waits before returning).")
 
     # Expected: In a two-layer pipeline (column → row), using overlap on both
     # modules should be faster than non-overlap because the column-parallel
@@ -386,12 +387,9 @@ class TestLumenRowParallelOverlap:
         )
 
         speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
-        overlap_ratio = 1 - (r_ovl.avg_ms / max(r_no_ovl.avg_ms, 1e-6))
         r_ovl.extra["speedup"] = round(speedup, 2)
-        r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
         print_report("Column→Row Pipeline: Overlap vs Non-Overlap", [r_no_ovl, r_ovl])
-        print(f"  Pipeline speedup from overlap: {speedup:.2f}x")
-        print(f"  Pipeline overlap ratio: {overlap_ratio:.3f}")
+        print(f"  Pipeline speedup: {speedup:.2f}x")
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +408,10 @@ def _init_dist():
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
+    dist.init_process_group(
+        backend="cpu:gloo,cuda:nccl",
+        device_id=torch.device(f"cuda:{local_rank}"),
+    )
 
 
 def _distributed_allgather(tensor, group=None):
@@ -482,7 +483,9 @@ class TestNCCLColumnParallelOverlap:
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
             print_report(
@@ -494,7 +497,14 @@ class TestNCCLColumnParallelOverlap:
                     r_ovl,
                 ],
             )
-            print(f"  Overlap ratio: {overlap_ratio:.3f}")
+            print_overlap_summary(
+                t_compute=r_compute.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="GEMM",
+                comm_label="allgather",
+            )
 
 
 @_DIST
@@ -534,6 +544,14 @@ class TestNCCLRowParallelOverlap:
         r_comm = cuda_timer(lambda: self._reduce_scatter(gemm_output), label="reduce_scatter", iters=10)
         r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
 
+        def _seq():
+            self._reduce_scatter(gemm_output)
+            torch.cuda.synchronize()
+            _ = x @ w.T
+            torch.cuda.synchronize()
+
+        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+
         def _ovl():
             with torch.cuda.stream(comm_stream):
                 self._reduce_scatter(gemm_output)
@@ -544,7 +562,9 @@ class TestNCCLRowParallelOverlap:
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
             print_report(
@@ -552,8 +572,17 @@ class TestNCCLRowParallelOverlap:
                 [
                     r_comm,
                     r_compute,
+                    r_seq,
                     r_ovl,
                 ],
+            )
+            print_overlap_summary(
+                t_compute=r_compute.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="GEMM",
+                comm_label="reduce_scatter",
             )
 
 
@@ -580,6 +609,7 @@ class TestSdmaColumnOverlap:
 
     @pytest.fixture(autouse=True)
     def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
@@ -611,6 +641,14 @@ class TestSdmaColumnOverlap:
         r_comm = cuda_timer(lambda: comm.allgather_dim0(x_local), label="SDMA allgather", iters=10)
         r_compute = cuda_timer(lambda: x_local @ w.T, label="GEMM", iters=10)
 
+        def _seq():
+            comm.allgather_dim0(x_local)
+            torch.cuda.synchronize()
+            _ = x_local @ w.T
+            torch.cuda.synchronize()
+
+        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+
         def _sdma_overlap():
             comm.allgather_dim0_async(x_local, stream=sdma_stream)
             _ = x_local @ w.T
@@ -621,7 +659,9 @@ class TestSdmaColumnOverlap:
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
             print_report(
@@ -629,10 +669,18 @@ class TestSdmaColumnOverlap:
                 [
                     r_comm,
                     r_compute,
+                    r_seq,
                     r_ovl,
                 ],
             )
-            print(f"  SDMA overlap ratio: {overlap_ratio:.3f}")
+            print_overlap_summary(
+                t_compute=r_compute.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="GEMM",
+                comm_label="SDMA AG",
+            )
 
 
 @pytest.mark.skipif(
@@ -644,6 +692,7 @@ class TestSdmaRowOverlap:
 
     @pytest.fixture(autouse=True)
     def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
@@ -678,6 +727,14 @@ class TestSdmaRowOverlap:
         )
         r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
 
+        def _seq():
+            comm.reduce_scatter_dim0(gemm_output)
+            torch.cuda.synchronize()
+            _ = x @ w.T
+            torch.cuda.synchronize()
+
+        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+
         def _sdma_rs_overlap():
             with torch.cuda.stream(sdma_stream):
                 comm.reduce_scatter_dim0_async(gemm_output, stream=sdma_stream)
@@ -689,7 +746,9 @@ class TestSdmaRowOverlap:
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
+        speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
+        r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
             print_report(
@@ -697,8 +756,17 @@ class TestSdmaRowOverlap:
                 [
                     r_comm,
                     r_compute,
+                    r_seq,
                     r_ovl,
                 ],
+            )
+            print_overlap_summary(
+                t_compute=r_compute.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="GEMM",
+                comm_label="SDMA RS",
             )
 
 
@@ -716,6 +784,7 @@ class TestNCCLvsSdma:
 
     @pytest.fixture(autouse=True)
     def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
@@ -780,6 +849,9 @@ def main():
     _init_dist()
 
     results: List[BenchResult] = []
+    col_speedup = float("nan")
+    row_speedup = float("nan")
+    row_diff = 0.0
 
     # --- Lumen module-level benchmark (single-GPU, mocked comm) ---
     patches = _apply_patches()
@@ -792,8 +864,8 @@ def main():
 
         r_no_ovl = cuda_timer(lambda: col_no_ovl(x), label="ColumnParallel overlap=False")
         r_ovl = cuda_timer(lambda: col_ovl(x), label="ColumnParallel overlap=True")
-        speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
-        r_ovl.extra["speedup"] = round(speedup, 2)
+        col_speedup = r_no_ovl.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_ovl.extra["speedup"] = round(col_speedup, 2)
         results.extend([r_no_ovl, r_ovl])
 
         row_ovl = _make_row_parallel(overlap=True, seq_parallel=True)
@@ -803,6 +875,10 @@ def main():
         x_row = torch.randn(M, N // TP_SIZE, device="cuda", dtype=torch.bfloat16)
         r_row_no = cuda_timer(lambda: row_no_ovl(x_row), label="RowParallel overlap=False")
         r_row_ovl = cuda_timer(lambda: row_ovl(x_row), label="RowParallel overlap=True")
+        row_speedup = r_row_no.avg_ms / max(r_row_ovl.avg_ms, 1e-6)
+        row_diff = (r_row_ovl.avg_ms - r_row_no.avg_ms) / max(r_row_no.avg_ms, 1e-6) * 100
+        r_row_ovl.extra["speedup"] = round(row_speedup, 2)
+        r_row_ovl.extra["diff_vs_sync"] = f"{row_diff:+.1f}%"
         results.extend([r_row_no, r_row_ovl])
     finally:
         for p in patches:
@@ -811,6 +887,12 @@ def main():
     is_rank_0 = not dist.is_initialized() or dist.get_rank() == 0
     if is_rank_0:
         print_report("Lumen TP Comm-Compute Overlap", results)
+        print(f"  ColumnParallel speedup: {col_speedup:.2f}x")
+        print(f"  RowParallel    speedup: {row_speedup:.2f}x  (diff: {row_diff:+.1f}%)")
+        print()
+        print("  NOTE: Section 1 uses mocked comm (torch.cat ≈ 0 ms).")
+        print("  Real overlap benefits require NCCL/SDMA — see Sections 2-4.")
+        print()
 
     if _is_distributed():
         torch.cuda.synchronize()

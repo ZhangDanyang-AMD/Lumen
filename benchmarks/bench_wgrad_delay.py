@@ -343,15 +343,10 @@ def _init_dist():
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _cleanup_dist():
-    """Ensure NCCL process group is destroyed on exit to avoid SIGSEGV."""
-    yield
-    if dist.is_initialized():
-        dist.destroy_process_group()
+    dist.init_process_group(
+        backend="cpu:gloo,cuda:nccl",
+        device_id=torch.device(f"cuda:{local_rank}"),
+    )
 
 
 _DIST = pytest.mark.skipif(
@@ -597,6 +592,7 @@ class TestDeferredWgradSdmaComm:
 
     @pytest.fixture(autouse=True)
     def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()

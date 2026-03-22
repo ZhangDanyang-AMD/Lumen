@@ -10,6 +10,7 @@ import warnings
 
 import pytest
 import torch
+import torch.distributed as dist
 
 # ---------------------------------------------------------------------------
 # Suppress noisy third-party warnings (Megatron-LM, Apex, PyTorch dist)
@@ -32,3 +33,11 @@ AITER = pytest.mark.skipif(
     not torch.cuda.is_available() or not _HAS_AITER,
     reason="CUDA + AITER required for benchmarks",
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_dist():
+    """Ensure NCCL process group is destroyed on exit to avoid SIGSEGV."""
+    yield
+    if dist.is_initialized():
+        dist.destroy_process_group()

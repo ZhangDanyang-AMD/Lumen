@@ -93,10 +93,16 @@ class TestFP8ParamManagerCompression:
         total_fp8 = fp8_bytes + scale_overhead
         ratio = bf16_bytes / total_fp8
 
-        print(f"\n  Single layer ({n_quant} tensors quantized)")
-        print(f"  BF16: {format_bytes(bf16_bytes)}")
-        print(f"  FP8:  {format_bytes(total_fp8)}")
-        print(f"  Compression: {ratio:.2f}x")
+        sep = "=" * 52
+        print(f"\n{sep}")
+        print(f"  FP8 Param Compression — 1 layer ({n_quant} tensors)")
+        print(sep)
+        print(f"  BF16 params:   {format_bytes(bf16_bytes):>10s}")
+        print(f"  FP8  params:   {format_bytes(total_fp8):>10s}")
+        print("  ──────────────────────────────")
+        print(f"  Compression:   {ratio:.2f}x")
+        print(f"  Saved:         {format_bytes(bf16_bytes - total_fp8):>10s}")
+        print(sep)
         assert ratio > 1.9, f"Expected ~2x, got {ratio:.2f}x"
 
     # Expected: Same ~2x compression as single layer, confirming that
@@ -115,9 +121,18 @@ class TestFP8ParamManagerCompression:
         fp8_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
         saved = mgr.memory_savings_bytes(model)
 
-        ratio = bf16_bytes / (fp8_bytes + n_quant * 4)
-        print(f"\n  4-layer stack: {n_quant} tensors, {ratio:.2f}x compression")
-        print(f"  Estimated savings: {format_bytes(saved)}")
+        total_fp8 = fp8_bytes + n_quant * 4
+        ratio = bf16_bytes / total_fp8
+        sep = "=" * 52
+        print(f"\n{sep}")
+        print(f"  FP8 Param Compression — 4 layers ({n_quant} tensors)")
+        print(sep)
+        print(f"  BF16 params:   {format_bytes(bf16_bytes):>10s}")
+        print(f"  FP8  params:   {format_bytes(total_fp8):>10s}")
+        print("  ──────────────────────────────")
+        print(f"  Compression:   {ratio:.2f}x")
+        print(f"  Saved:         {format_bytes(saved):>10s}")
+        print(sep)
         assert ratio > 1.9
 
 
@@ -234,10 +249,17 @@ class TestFP8AllgatherBandwidth:
             total_fp8 += (numel * 1 + 4) * N_LAYERS  # 1 byte data + 4 bytes scale
 
         ratio = total_bf16 / total_fp8
-        print(f"\n  Simulated {N_LAYERS}-layer 7B all-gather volume:")
-        print(f"  BF16: {format_bytes(total_bf16)}")
-        print(f"  FP8:  {format_bytes(total_fp8)}")
-        print(f"  Bandwidth reduction: {ratio:.2f}x")
+        saved = total_bf16 - total_fp8
+        sep = "=" * 52
+        print(f"\n{sep}")
+        print(f"  All-Gather Volume — {N_LAYERS}-layer 7B model")
+        print(sep)
+        print(f"  BF16 volume:   {format_bytes(total_bf16):>10s}")
+        print(f"  FP8  volume:   {format_bytes(total_fp8):>10s}")
+        print("  ──────────────────────────────")
+        print(f"  BW reduction:  {ratio:.2f}x")
+        print(f"  Saved/step:    {format_bytes(saved):>10s}")
+        print(sep)
         assert ratio > 1.9
 
 
@@ -421,14 +443,18 @@ def main():
     mgr = FP8ParamManager()
     n_quant = mgr.quantize_params(model)
     fp8_bytes = sum(p.nelement() * p.element_size() for p in model.parameters())
+    total_fp8 = fp8_bytes + n_quant * 4
+    ratio = bf16_bytes / total_fp8
 
     r_mem = BenchResult(name="4-layer BF16→FP8 compression", avg_ms=0)
     r_mem.extra["bf16"] = format_bytes(bf16_bytes)
-    r_mem.extra["fp8"] = format_bytes(fp8_bytes)
-    r_mem.extra["ratio"] = round(bf16_bytes / (fp8_bytes + n_quant * 4), 2)
+    r_mem.extra["fp8"] = format_bytes(total_fp8)
+    r_mem.extra["ratio"] = round(ratio, 2)
     results.append(r_mem)
 
     print_report("Lumen FP8 Param All-Gather", results)
+    print(f"  Compression: {ratio:.2f}x  ({n_quant} tensors, saved {format_bytes(bf16_bytes - total_fp8)})")
+    print()
 
 
 if __name__ == "__main__":

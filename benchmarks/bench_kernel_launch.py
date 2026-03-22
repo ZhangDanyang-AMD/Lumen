@@ -292,6 +292,8 @@ class TestFP8ActivationStore:
         r_bf16 = cuda_timer(lambda: mlp_bf16(x), label="GatedMLP fp8_store=False (fwd)")
         r_fp8 = cuda_timer(lambda: mlp_fp8(x), label="GatedMLP fp8_store=True (fwd)")
 
+        overhead = (r_fp8.avg_ms - r_bf16.avg_ms) / max(r_bf16.avg_ms, 1e-6) * 100
+        r_fp8.extra["vs_bf16"] = f"{overhead:+.1f}%"
         print_report("FP8 Activation Store: Forward", [r_bf16, r_fp8])
 
     # Expected: Backward pass with fp8_activation_store=True should be faster
@@ -314,6 +316,10 @@ class TestFP8ActivationStore:
         r_bf16 = cuda_timer(lambda: _fwd_bwd(mlp_bf16, x_bf16), label="GatedMLP fp8_store=False (fwd+bwd)")
         r_fp8 = cuda_timer(lambda: _fwd_bwd(mlp_fp8, x_fp8), label="GatedMLP fp8_store=True (fwd+bwd)")
 
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        overhead = (r_fp8.avg_ms - r_bf16.avg_ms) / max(r_bf16.avg_ms, 1e-6) * 100
+        r_fp8.extra["vs_bf16"] = f"{overhead:+.1f}%"
+        r_fp8.extra["speedup"] = round(speedup, 2)
         print_report("FP8 Activation Store: Forward + Backward", [r_bf16, r_fp8])
 
     # Expected: ~1.5-2x memory reduction for activations saved during forward.
@@ -405,6 +411,8 @@ class TestAttentionBackends:
             lambda: attention(q, k, v, causal=True, backend_type="aiter_triton"),
             label="attention GQA (aiter_triton)",
         )
+        speedup = r_triton.avg_ms / max(r_csrc.avg_ms, 1e-6)
+        r_csrc.extra["speedup_vs_triton"] = round(speedup, 2)
         print_report("Attention: GQA (32Q/8KV)", [r_csrc, r_triton])
 
     # Expected: Sliding window (256 tokens) should be faster than full causal
@@ -587,9 +595,16 @@ class TestKernelLaunchCount:
         n_unfused, _ = _count_kernels(_unfused)
 
         reduction = n_unfused - n_fused
-        print(f"\n  MoE fused kernels:   {n_fused}")
-        print(f"  MoE unfused kernels: {n_unfused}")
-        print(f"  Kernel reduction:    {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+        pct = reduction / max(n_unfused, 1) * 100
+        sep = "=" * 56
+        print(f"\n{sep}")
+        print("  MoE Kernel Launch Analysis")
+        print(sep)
+        print(f"  fused_moe_triton:     {n_fused:3d} kernels")
+        print(f"  per-expert GEMMs:     {n_unfused:3d} kernels")
+        print("  ─────────────────────────────────")
+        print(f"  Reduction:            {reduction:3d} kernels  ({pct:.0f}% fewer)")
+        print(sep)
         assert n_fused < n_unfused, f"Fused ({n_fused}) should use fewer kernels than unfused ({n_unfused})"
 
     # Expected: LumenGatedMLP fuses gate_proj + up_proj + activation + down_proj
@@ -624,9 +639,16 @@ class TestKernelLaunchCount:
         n_unfused, _ = _count_kernels(_unfused)
 
         reduction = n_unfused - n_fused
-        print(f"\n  GatedMLP fused kernels:   {n_fused}")
-        print(f"  GatedMLP unfused kernels: {n_unfused}")
-        print(f"  Kernel reduction:         {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+        pct = reduction / max(n_unfused, 1) * 100
+        sep = "=" * 56
+        print(f"\n{sep}")
+        print("  GatedMLP Kernel Launch Analysis")
+        print(sep)
+        print(f"  LumenGatedMLP (fused):    {n_fused:3d} kernels")
+        print(f"  Manual gate+up+down:      {n_unfused:3d} kernels")
+        print("  ─────────────────────────────────")
+        print(f"  Reduction:                {reduction:3d} kernels  ({pct:.0f}% fewer)")
+        print(sep)
 
 
 # ---------------------------------------------------------------------------
@@ -651,32 +673,48 @@ def main():
     # FP8 scaling modes
     x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
     w = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
+    bf16_ms = None
     for mode in ["none", "delayed", "dynamic", "per_token", "blockwise", "mxfp8"]:
         r = cuda_timer(
             lambda m=mode: quantized_linear(x, w, scaling_type=m, fp8_dtype=fp8_dtype),
             label=f"quantized_linear({mode})",
         )
+        if mode == "none":
+            bf16_ms = r.avg_ms
+        elif bf16_ms is not None:
+            overhead = (r.avg_ms - bf16_ms) / max(bf16_ms, 1e-6) * 100
+            r.extra["vs_bf16"] = f"{overhead:+.1f}%"
         results.append(r)
 
     # Attention backends
     q = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
     k = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
     v = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
+    attn_results = []
     for be in ["aiter_csrc", "aiter_triton"]:
         r = cuda_timer(
             lambda b=be: attention(q, k, v, causal=True, backend_type=b),
             label=f"attention causal ({be})",
         )
-        results.append(r)
+        attn_results.append(r)
+    if len(attn_results) == 2:
+        speedup = attn_results[1].avg_ms / max(attn_results[0].avg_ms, 1e-6)
+        attn_results[0].extra["speedup_vs_triton"] = round(speedup, 2)
+    results.extend(attn_results)
 
     # GatedMLP fp8 activation store
+    mlp_results = []
     for fp8_store in [False, True]:
         mlp = LumenGatedMLP(HIDDEN, FFN_HIDDEN, activation="swiglu", bias=False, fp8_activation_store=fp8_store).to(
             device="cuda", dtype=torch.bfloat16
         )
         x_mlp = torch.randn(B, S, HIDDEN, device="cuda", dtype=torch.bfloat16)
         r = cuda_timer(lambda: mlp(x_mlp), label=f"GatedMLP fp8_store={fp8_store}")
-        results.append(r)
+        mlp_results.append(r)
+    if len(mlp_results) == 2:
+        overhead = (mlp_results[1].avg_ms - mlp_results[0].avg_ms) / max(mlp_results[0].avg_ms, 1e-6) * 100
+        mlp_results[1].extra["vs_bf16"] = f"{overhead:+.1f}%"
+    results.extend(mlp_results)
 
     # Fused MoE
     hidden = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
