@@ -560,6 +560,7 @@ def enable_fp8_for_parallel_linear(
     block_size=None,
     fp8_mha=False,
     gradient_accumulation_fusion=False,
+    delay_wgrad=False,
 ):
     """Enable FP8 GEMM on all Lumen parallel linear modules in the model.
 
@@ -567,6 +568,12 @@ def enable_fp8_for_parallel_linear(
     attached to each ``LumenDotProductAttention`` (or MLA variant) so that
     QKV projection, dot-product attention and output projection share the
     same FP8 scale context within a single MHA block.
+
+    When *delay_wgrad* is True, backward passes compute only dgrad
+    immediately and defer wgrad to a later ``backward_dw()`` call.
+
+    When *gradient_accumulation_fusion* is True, weight gradients
+    accumulate directly into ``param.main_grad``.
     """
     from lumen.modules.attention_megatron import LumenDotProductAttention
     from lumen.modules.attention_mla import LumenDotProductAttentionMLA
@@ -587,6 +594,8 @@ def enable_fp8_for_parallel_linear(
             )
             if hasattr(module, "gradient_accumulation_fusion"):
                 module.gradient_accumulation_fusion = gradient_accumulation_fusion
+            if hasattr(module, "delay_wgrad"):
+                module.delay_wgrad = delay_wgrad
             count += 1
 
     if fp8_mha:
@@ -728,6 +737,130 @@ def apply_fp8_training(model: GPTModel, args) -> None:
     )
 
 
+def _find_scaling_manager(model):
+    """Retrieve the ScalingManager from quant-patched modules."""
+    for module in model.modules():
+        sm = getattr(module, "_quant_manager", None)
+        if sm is not None:
+            return sm
+    return None
+
+
+def _enable_lumen_fp8_checkpoint(scaling_manager):
+    """Monkey-patch tensor_parallel.checkpoint to preserve FP8 scaling state."""
+    import megatron.core.tensor_parallel as tp_module
+    import megatron.core.tensor_parallel.random as tp_random
+
+    from lumen.utils.checkpoint import _FP8ScalingContext
+
+    if hasattr(tp_module, "_lumen_fp8_checkpoint_patched"):
+        return
+
+    _original = tp_random.checkpoint
+
+    def _patched(function, distribute_saved_activations, *args):
+        ctx = _FP8ScalingContext()
+        ctx.save(scaling_manager)
+        orig_fn = function
+
+        def wrapped(*a, **kw):
+            ctx.restore(scaling_manager)
+            return orig_fn(*a, **kw)
+
+        return _original(wrapped, distribute_saved_activations, *args)
+
+    tp_random.checkpoint = _patched
+    tp_module.checkpoint = _patched
+    tp_module._lumen_fp8_checkpoint_patched = True
+    tp_module._lumen_fp8_checkpoint_original = _original
+    print_rank_0("> FP8-aware activation checkpointing enabled (Lumen)")
+
+
+def apply_lumen_pre_quant(model: GPTModel, args) -> None:
+    """Phase 1: Set module attributes BEFORE quant.enable() captures them."""
+    from lumen.modules.grouped_linear import LumenGroupedLinear
+    from lumen.modules.layernorm_linear import LumenLayerNormLinear
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+
+    delay_wgrad = getattr(args, "lumen_delay_wgrad", False)
+    gaf = getattr(args, "lumen_gradient_accumulation_fusion", False)
+    fp8_act_store = getattr(args, "lumen_fp8_activation_store", False)
+
+    if not delay_wgrad and not gaf and not fp8_act_store:
+        return
+
+    lumen_linear_types = (
+        LumenColumnParallelLinear,
+        LumenRowParallelLinear,
+        LumenLayerNormLinear,
+        LumenGroupedLinear,
+    )
+
+    count = 0
+    for module in model.modules():
+        if isinstance(module, lumen_linear_types):
+            if delay_wgrad and hasattr(module, "delay_wgrad"):
+                module.delay_wgrad = delay_wgrad
+            if gaf and hasattr(module, "gradient_accumulation_fusion"):
+                module.gradient_accumulation_fusion = gaf
+            if fp8_act_store:
+                module.fp8_activation_store = True
+            count += 1
+
+    if count > 0:
+        opts = []
+        if delay_wgrad:
+            opts.append("delay_wgrad")
+        if gaf:
+            opts.append("gradient_accumulation_fusion")
+        if fp8_act_store:
+            opts.append("fp8_activation_store")
+        print_rank_0(f"> Lumen pre-quant optimizations ({', '.join(opts)}) applied to {count} modules")
+
+
+apply_lumen_optimizations = apply_lumen_pre_quant
+
+
+def apply_lumen_post_quant(model: GPTModel, args) -> None:
+    """Phase 2: Features requiring ScalingManager (created by quant.enable)."""
+    fp8_ckpt = getattr(args, "lumen_fp8_checkpoint", False)
+    fp8_param = getattr(args, "lumen_fp8_param_gather", False)
+
+    sm = _find_scaling_manager(model) if (fp8_ckpt or fp8_param) else None
+
+    if fp8_ckpt:
+        if sm is not None:
+            _enable_lumen_fp8_checkpoint(sm)
+        else:
+            print_rank_0("> WARNING: --lumen-fp8-checkpoint requires FP8 quantization (--linear-fp8)")
+
+    if fp8_param:
+        if sm is not None:
+            sm.enable_fp8_params(model)
+            print_rank_0(f"> FP8 param gather enabled ({sm.num_fp8_params} params registered)")
+        else:
+            print_rank_0("> WARNING: --lumen-fp8-param-gather requires FP8 quantization (--linear-fp8)")
+
+
+def get_cpu_offload_context(args):
+    """Return CPU offload context manager (no-op if disabled)."""
+    from lumen.utils.cpu_offload import lumen_cpu_offload_context
+
+    enabled = getattr(args, "lumen_cpu_offload", False)
+    return lumen_cpu_offload_context(enabled=enabled)
+
+
+def register_fp8_param_optimizer_hook(model, optimizer):
+    """Register optimizer post-step hook for FP8 param staleness marking.
+
+    Must be called AFTER optimizer creation (outside model_provider).
+    """
+    sm = _find_scaling_manager(model)
+    if sm is not None and sm.num_fp8_params > 0:
+        sm.register_fp8_optimizer_hook(optimizer)
+        print_rank_0("> FP8 param optimizer hook registered")
+
+
 # ---------------------------------------------------------------------------
 # Synthetic warmup + FP8 state reset
 # ---------------------------------------------------------------------------
@@ -861,7 +994,8 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
         timers("batch-generator").stop()
 
         with stimer:
-            output_tensor = model(tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask)
+            with get_cpu_offload_context(args):
+                output_tensor = model(tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask)
 
         return output_tensor, partial(loss_fn, loss_mask, model=model)
 
