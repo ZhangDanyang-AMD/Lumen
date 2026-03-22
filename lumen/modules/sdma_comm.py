@@ -43,11 +43,15 @@ class SdmaTpContext:
 
     _instance: Optional["SdmaTpContext"] = None
 
+    _group_registered: bool = False
+
     def __init__(self, tp_group: torch.distributed.ProcessGroup):
         import mori.shmem as shmem
 
         group_name = "lumen_tp"
-        torch._C._distributed_c10d._register_process_group(group_name, tp_group)
+        if not SdmaTpContext._group_registered:
+            torch._C._distributed_c10d._register_process_group(group_name, tp_group)
+            SdmaTpContext._group_registered = True
         shmem.shmem_torch_process_group_init(group_name)
         self.my_pe: int = shmem.shmem_mype()
         self.npes: int = shmem.shmem_npes()
@@ -63,6 +67,7 @@ class SdmaTpContext:
     @classmethod
     def reset(cls) -> None:
         cls._instance = None
+        cls._group_registered = False
 
 
 # ---------------------------------------------------------------------------

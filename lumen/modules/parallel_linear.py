@@ -583,12 +583,7 @@ class LumenRowParallelLinear(nn.Module):
 
         if self.explicit_expert_comm:
             output_ = output_parallel
-        elif (
-            self.use_sdma
-            and self.tp_size > 1
-            and self.tp_comm_overlap
-            and (self.sequence_parallel or not self.sequence_parallel)
-        ):
+        elif self.use_sdma and self.tp_size > 1 and self.tp_comm_overlap:
             output_ = self._forward_sdma_overlap_row(output_parallel)
         elif self.use_sdma and self.tp_size > 1:
             output_ = self._forward_sdma_post_gemm(output_parallel)

@@ -1,3 +1,9 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests/ops"]
+filterwarnings = [
+    "ignore:.*Aiter backend is selected for fused RoPE.*:UserWarning",
+    "ignore:.*will be removed in.*megatron-core.*:DeprecationWarning",
+    "ignore:.*megatron.core.transformer.custom_layers.*:DeprecationWarning",
+    "ignore:.*No device id is provided via.*init_process_group.*:UserWarning",
+]

@@ -6,8 +6,19 @@
 
 """Shared pytest fixtures and markers for benchmarks."""
 
+import warnings
+
 import pytest
 import torch
+
+# ---------------------------------------------------------------------------
+# Suppress noisy third-party warnings (Megatron-LM, Apex, PyTorch dist)
+# ---------------------------------------------------------------------------
+warnings.filterwarnings("ignore", message=".*Aiter backend is selected for fused RoPE.*")
+warnings.filterwarnings("ignore", message=".*will be removed in.*megatron-core.*")
+warnings.filterwarnings("ignore", message=".*megatron.core.transformer.custom_layers.*")
+warnings.filterwarnings("ignore", message=".*No device id is provided via.*init_process_group.*")
+warnings.filterwarnings("ignore", message=".*destroy_process_group.*was not called.*")
 
 try:
     import aiter  # noqa: F401

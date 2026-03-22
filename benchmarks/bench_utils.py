@@ -177,6 +177,50 @@ def print_report(title: str, results: List[BenchResult]) -> None:
     print()
 
 
+def print_overlap_summary(
+    *,
+    t_compute: float,
+    t_comm: float,
+    t_seq: float,
+    t_ovl: float,
+    compute_label: str = "compute",
+    comm_label: str = "comm",
+) -> None:
+    """Print a visual overlap analysis after print_report().
+
+    Displays a bar chart showing how compute and comm contribute to total
+    time, plus key metrics: hidden time, overlap efficiency, and speedup.
+    """
+    hidden_ms = t_seq - t_ovl
+    speedup = t_seq / max(t_ovl, 1e-6)
+    overlap_ratio = 1 - (t_ovl / max(t_compute + t_comm, 1e-6))
+    pct_hidden = hidden_ms / max(t_compute, 1e-6) * 100
+
+    # Visual bar: scale to 40 chars
+    bar_width = 40
+    scale = bar_width / max(t_seq, 1e-6)
+
+    comp_bar = int(t_compute * scale)
+    comm_bar = int(t_comm * scale)
+    ovl_bar = int(t_ovl * scale)
+
+    print(f"  ┌── Sequential ({'─' * (bar_width - 14)})┐")
+    print(f"  │ {'█' * comp_bar}{'░' * (bar_width - comp_bar)} │ {compute_label}: {t_compute:.3f} ms")
+    print(f"  │ {'▓' * comm_bar}{'░' * (bar_width - comm_bar)} │ {comm_label}: {t_comm:.3f} ms")
+    print(f"  │ total = {t_seq:.3f} ms{' ' * max(bar_width - 20, 1)}│")
+    print(f"  ├── Overlapped ({'─' * (bar_width - 14)})┤")
+    print(f"  │ {'▓' * ovl_bar}{'░' * (bar_width - ovl_bar)} │ {t_ovl:.3f} ms")
+    print(f"  └{'─' * bar_width}─┘")
+    print()
+    print(
+        f"  Hidden {compute_label}: {hidden_ms:.3f} / {t_compute:.3f} ms "
+        f"({pct_hidden:.0f}% of {compute_label} hidden)"
+    )
+    print(f"  Overlap ratio:  {overlap_ratio:.3f}")
+    print(f"  Speedup:        {speedup:.2f}x")
+    print()
+
+
 def dump_json(results: List[BenchResult], path: str) -> None:
     """Write results to a JSON file for CI integration."""
     data = []

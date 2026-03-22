@@ -28,9 +28,27 @@ Run single-GPU (uses mocked comm, no ``torchrun`` needed)::
 
     pytest benchmarks/bench_comm_overlap.py -v -s -k Lumen
 
-Run multi-GPU::
+Run multi-GPU (Section 1 standalone — mocked comm, prints summary table)::
 
     torchrun --nproc_per_node=2 -m benchmarks.bench_comm_overlap
+
+Run multi-GPU NCCL overlap (Section 2 — real NCCL allgather/reduce-scatter)::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s -k NCCL
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_comm_overlap.py -v -s -k NCCL
+
+Run multi-GPU SDMA overlap (Section 3 — requires mori, uses hardware DMA)::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s -k Sdma
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_comm_overlap.py -v -s -k Sdma
+
+Run NCCL vs SDMA head-to-head (Section 4 — requires mori)::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s -k NCCLvsSdma
+
+Run all multi-GPU tests together::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s
 """
 
 from __future__ import annotations
@@ -390,9 +408,9 @@ def _init_dist():
         return
     if "RANK" not in os.environ:
         return
-    dist.init_process_group(backend="nccl")
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
 
 
 def _distributed_allgather(tensor, group=None):
@@ -795,7 +813,9 @@ def main():
         print_report("Lumen TP Comm-Compute Overlap", results)
 
     if _is_distributed():
-        dist.barrier()
+        torch.cuda.synchronize()
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        dist.barrier(device_ids=[local_rank])
         dist.destroy_process_group()
 
 

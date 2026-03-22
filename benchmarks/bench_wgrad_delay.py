@@ -52,6 +52,7 @@ import torch.nn as nn
 from benchmarks.bench_utils import (
     BenchResult,
     cuda_timer,
+    print_overlap_summary,
     print_report,
     require_cuda,
 )
@@ -273,8 +274,14 @@ class TestDeferredWgradStreamOverlap:
             "_DeferredWgrad + Simulated Comm Overlap",
             [r_dw, r_comm, r_seq, r_ovl],
         )
-        print(f"  Overlap ratio: {overlap_ratio:.3f}  (> 0.3 expected)")
-        print(f"  Speedup vs sequential: {speedup:.2f}x")
+        print_overlap_summary(
+            t_compute=r_dw.avg_ms,
+            t_comm=r_comm.avg_ms,
+            t_seq=r_seq.avg_ms,
+            t_ovl=r_ovl.avg_ms,
+            compute_label="wgrad",
+            comm_label="sim comm",
+        )
 
     # Expected: Running execute() on a secondary stream for each of N layers
     # in a pipeline should show cumulative speedup. Each layer's deferred dW
@@ -334,9 +341,17 @@ def _init_dist():
         return
     if "RANK" not in os.environ:
         return
-    dist.init_process_group(backend="nccl")
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_dist():
+    """Ensure NCCL process group is destroyed on exit to avoid SIGSEGV."""
+    yield
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
 _DIST = pytest.mark.skipif(
@@ -370,11 +385,14 @@ class TestDeferredWgradRealComm:
         yield
         dist.barrier()
 
-    # Expected: overlap_ratio > 0.3, speedup > 1.3x. The wgrad GEMM
-    # (grad_out^T @ x, running on compute SMs) executes concurrently with
-    # NCCL allreduce (running on NIC/RDMA hardware). Since they use
-    # completely different hardware resources, total time ≈ max(T_wgrad,
-    # T_allreduce) instead of T_wgrad + T_allreduce.
+    # Expected: The wgrad GEMM (grad_out^T @ x, on compute SMs) runs
+    # concurrently with NCCL allreduce (on NIC/RDMA hardware).
+    # Total time ≈ max(T_wgrad, T_allreduce) instead of their sum.
+    # When allreduce >> wgrad (common with small TP-local matrices),
+    # the overlap_ratio formula yields a low value because the hidden
+    # wgrad is a small fraction of T_total. The key metric is:
+    #   speedup = T_seq / T_ovl  (should be > 1.0)
+    #   hidden_ms = T_seq - T_ovl  (should be close to T_wgrad)
     def test_wgrad_overlap_with_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
@@ -445,13 +463,18 @@ class TestDeferredWgradRealComm:
                 f"_DeferredWgrad + Real NCCL AllReduce (world={self.world})",
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
-            print(f"  Overlap ratio: {overlap_ratio:.3f}  (> 0.3 expected)")
-            print(f"  Speedup vs sequential: {speedup:.2f}x")
+            print_overlap_summary(
+                t_compute=r_wgrad.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="wgrad",
+                comm_label="allreduce",
+            )
 
-    # Expected: In a 4-layer pipeline, the cumulative speedup from
-    # overlapping each layer's deferred wgrad with the allreduce of the
-    # previous layer's gradient should yield speedup > 1.5x compared to
-    # sequential execution. Each layer hides one wgrad behind one allreduce.
+    # Expected: In a 4-layer pipeline, each layer's deferred wgrad overlaps
+    # with the allreduce of the previous layer's gradient. Cumulative
+    # savings ≈ N × T_wgrad (all wgrads hidden behind allreduces).
     def test_multi_layer_pipeline_with_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
@@ -524,12 +547,16 @@ class TestDeferredWgradRealComm:
         speedup = r_eager.avg_ms / max(r_deferred.avg_ms, 1e-6)
         r_deferred.extra["speedup"] = round(speedup, 2)
 
+        saved_ms = r_eager.avg_ms - r_deferred.avg_ms
+
         if self.rank == 0:
             print_report(
                 f"{n_layers}-Layer Pipeline: Eager vs Deferred + AllReduce (world={self.world})",
                 [r_eager, r_deferred],
             )
-            print(f"  Speedup: {speedup:.2f}x")
+            print(f"  Speedup:  {speedup:.2f}x")
+            print(f"  Saved:    {saved_ms:.3f} ms  " f"(≈ {n_layers} × {saved_ms / n_layers:.3f} ms per layer)")
+            print()
 
 
 # ---------------------------------------------------------------------------
@@ -577,11 +604,11 @@ class TestDeferredWgradSdmaComm:
         yield
         dist.barrier()
 
-    # Expected: overlap_ratio > 0.5 (higher than NCCL). SDMA DMA engines
-    # are fully independent of compute SMs — the wgrad GEMM and SDMA
-    # allreduce share zero hardware resources. This is the best-case
-    # overlap scenario and the primary justification for Lumen's SDMA
-    # integration (vs relying solely on NCCL).
+    # Expected: SDMA DMA engines are fully independent of compute SMs —
+    # the wgrad GEMM and SDMA allreduce share zero hardware resources.
+    # When allreduce >> wgrad, overlap_ratio stays low (same formula
+    # limitation as NCCL), but hidden_ms / T_wgrad should be higher
+    # than NCCL because SDMA has no SM contention at all.
     def test_wgrad_overlap_with_sdma_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
@@ -646,8 +673,14 @@ class TestDeferredWgradSdmaComm:
                 f"_DeferredWgrad + SDMA AllReduce (world={self.world})",
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
-            print(f"  Overlap ratio: {overlap_ratio:.3f}  (> 0.5 expected)")
-            print(f"  Speedup vs sequential: {speedup:.2f}x")
+            print_overlap_summary(
+                t_compute=r_wgrad.avg_ms,
+                t_comm=r_comm.avg_ms,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_ovl.avg_ms,
+                compute_label="wgrad",
+                comm_label="SDMA AR",
+            )
 
     # Expected: In a 4-layer pipeline, SDMA overlap should yield higher
     # speedup than NCCL (compare with TestDeferredWgradRealComm) because
@@ -728,12 +761,16 @@ class TestDeferredWgradSdmaComm:
         speedup = r_eager.avg_ms / max(r_deferred.avg_ms, 1e-6)
         r_deferred.extra["speedup"] = round(speedup, 2)
 
+        saved_ms = r_eager.avg_ms - r_deferred.avg_ms
+
         if self.rank == 0:
             print_report(
                 f"{n_layers}-Layer Pipeline: Eager vs Deferred + SDMA AR (world={self.world})",
                 [r_eager, r_deferred],
             )
-            print(f"  Speedup: {speedup:.2f}x")
+            print(f"  Speedup:  {speedup:.2f}x")
+            print(f"  Saved:    {saved_ms:.3f} ms  " f"(≈ {n_layers} × {saved_ms / n_layers:.3f} ms per layer)")
+            print()
 
 
 # ---------------------------------------------------------------------------
