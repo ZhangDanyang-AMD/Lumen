@@ -34,19 +34,11 @@ class _FP8ScalingContext:
 
         state = {}
         if hasattr(scaling_manager, "amax_history"):
-            state["amax_history"] = (
-                {k: v.clone() for k, v in scaling_manager.amax_history.items()}
-                if isinstance(scaling_manager.amax_history, dict)
-                else scaling_manager.amax_history.clone()
-            )
-        if hasattr(scaling_manager, "scale"):
-            state["scale"] = (
-                {k: v.clone() for k, v in scaling_manager.scale.items()}
-                if isinstance(scaling_manager.scale, dict)
-                else scaling_manager.scale.clone()
-            )
-        if hasattr(scaling_manager, "step"):
-            state["step"] = scaling_manager.step
+            state["amax_history"] = {k: [t.clone() for t in v] for k, v in scaling_manager.amax_history.items()}
+        if hasattr(scaling_manager, "scale_cache"):
+            state["scale_cache"] = {
+                k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in scaling_manager.scale_cache.items()
+            }
         self._saved_state = state
 
     def restore(self, scaling_manager):
@@ -56,19 +48,15 @@ class _FP8ScalingContext:
 
         state = self._saved_state
         if "amax_history" in state and hasattr(scaling_manager, "amax_history"):
-            if isinstance(state["amax_history"], dict):
-                for k, v in state["amax_history"].items():
-                    if k in scaling_manager.amax_history:
-                        scaling_manager.amax_history[k].copy_(v)
-            else:
-                scaling_manager.amax_history.copy_(state["amax_history"])
-        if "scale" in state and hasattr(scaling_manager, "scale"):
-            if isinstance(state["scale"], dict):
-                for k, v in state["scale"].items():
-                    if k in scaling_manager.scale:
-                        scaling_manager.scale[k].copy_(v)
-            else:
-                scaling_manager.scale.copy_(state["scale"])
+            scaling_manager.amax_history.clear()
+            for k, saved_deque_list in state["amax_history"].items():
+                live = scaling_manager.amax_history[k]
+                for t in saved_deque_list:
+                    live.append(t.clone())
+        if "scale_cache" in state and hasattr(scaling_manager, "scale_cache"):
+            scaling_manager.scale_cache = {
+                k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in state["scale_cache"].items()
+            }
 
 
 @contextmanager

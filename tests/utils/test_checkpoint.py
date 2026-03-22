@@ -4,8 +4,10 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
+from collections import defaultdict, deque
 from types import SimpleNamespace
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -16,30 +18,63 @@ from lumen.utils.checkpoint import (
 )
 
 
+def _make_mock_sm(maxlen=16):
+    """Create a mock with same state shape as real ScalingManager."""
+    sm = SimpleNamespace()
+    sm.amax_history = defaultdict(lambda: deque(maxlen=maxlen))
+    sm.scale_cache = {}
+    return sm
+
+
 class TestFP8ScalingContext:
 
-    def test_save_restore_none(self):
+    def test_save_restore_preserves_amax_deque(self):
+        sm = _make_mock_sm()
+        sm.amax_history["layer1.weight"].append(torch.tensor(3.14))
+        sm.amax_history["layer1.weight"].append(torch.tensor(2.71))
+        sm.scale_cache["layer1.weight"] = torch.tensor(0.5)
+
+        ctx = _FP8ScalingContext()
+        ctx.save(sm)
+
+        # Mutate: simulate checkpointed region
+        sm.amax_history["layer1.weight"].append(torch.tensor(999.0))
+        sm.amax_history["new_layer"].append(torch.tensor(42.0))
+        sm.scale_cache["layer1.weight"] = torch.tensor(0.99)
+        sm.scale_cache["new_key"] = torch.tensor(1.0)
+
+        ctx.restore(sm)
+
+        # amax_history should be back to snapshot (2 entries, no new_layer)
+        assert len(sm.amax_history["layer1.weight"]) == 2
+        assert sm.amax_history["layer1.weight"][0].item() == pytest.approx(3.14)
+        assert sm.amax_history["layer1.weight"][1].item() == pytest.approx(2.71)
+        assert "new_layer" not in sm.amax_history
+
+        # scale_cache fully replaced
+        assert sm.scale_cache["layer1.weight"].item() == pytest.approx(0.5)
+        assert "new_key" not in sm.scale_cache
+
+    def test_save_restore_none_manager_is_noop(self):
         ctx = _FP8ScalingContext()
         ctx.save(None)
-        ctx.restore(None)
+        ctx.restore(None)  # should not raise
 
-    def test_save_restore_dict_state(self):
-        mgr = SimpleNamespace(
-            amax_history={"w": torch.tensor([1.0, 2.0])},
-            scale={"w": torch.tensor([0.5])},
-            step=10,
-        )
+    def test_restore_clones_tensors(self):
+        """Restored tensors are independent from snapshot."""
+        sm = _make_mock_sm()
+        sm.amax_history["w"].append(torch.tensor(1.0))
+
         ctx = _FP8ScalingContext()
-        ctx.save(mgr)
+        ctx.save(sm)
+        ctx.restore(sm)
 
-        # Modify state
-        mgr.amax_history["w"].fill_(99.0)
-        mgr.scale["w"].fill_(99.0)
+        # Mutate after restore — should not affect saved state
+        sm.amax_history["w"][0].fill_(999.0)
 
-        # Restore should bring back original values
-        ctx.restore(mgr)
-        torch.testing.assert_close(mgr.amax_history["w"], torch.tensor([1.0, 2.0]))
-        torch.testing.assert_close(mgr.scale["w"], torch.tensor([0.5]))
+        # Re-restore should give original value
+        ctx.restore(sm)
+        assert sm.amax_history["w"][0].item() == pytest.approx(1.0)
 
 
 class TestLumenCheckpoint:
@@ -72,10 +107,9 @@ class TestLumenCheckpoint:
         torch.testing.assert_close(grad_ckpt, grad_direct)
 
     def test_checkpoint_with_scaling_manager(self):
-        mgr = SimpleNamespace(
-            amax_history={"w": torch.tensor([1.0])},
-            scale={"w": torch.tensor([0.5])},
-        )
+        mgr = _make_mock_sm()
+        mgr.amax_history["w"].append(torch.tensor(1.0))
+        mgr.scale_cache["w"] = torch.tensor(0.5)
 
         layer = nn.Linear(16, 16)
         x = torch.randn(4, 16, requires_grad=True)
