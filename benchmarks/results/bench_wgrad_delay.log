@@ -1,0 +1,483 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 15 items / 9 deselected / 6 selected
+Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce [Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+
+========================================================================
+  _DeferredWgrad + Real NCCL AllReduce (world=8)
+========================================================================
+                               wgrad GEMM alone  avg=   0.460 ms  min=   0.444 ms  max=   0.482 ms  std=  0.012 ms  cv=  2.6%  [~unstable]
+                                allreduce alone  avg=   0.665 ms  min=   0.662 ms  max=   0.669 ms  std=  0.002 ms  cv=  0.3%
+               sequential: wgrad then allreduce  avg=   1.202 ms  min=   1.178 ms  max=   1.222 ms  std=  0.014 ms  cv=  1.1%
+                 overlapped: wgrad || allreduce  avg=   1.204 ms  min=   1.173 ms  max=   1.232 ms  std=  0.017 ms  cv=  1.4%  speedup=1.0000  overlap_ratio=-0.0700
+========================================================================
+
+
+  _DeferredWgrad + Real NCCL AllReduce (world=8)
+  ┌──────────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+  │ Name                             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├──────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+  │ wgrad GEMM alone                 │    0.460 │    0.444 │    0.462 │    0.478 │    0.482 │    2.6 │  ~                                │
+  │ allreduce alone                  │    0.665 │    0.662 │    0.664 │    0.669 │    0.669 │    0.3 │                                   │
+  │ sequential: wgrad then allreduce │    1.202 │    1.178 │    1.204 │    1.222 │    1.222 │    1.1 │                                   │
+  │ overlapped: wgrad || allreduce   │    1.204 │    1.173 │    1.206 │    1.227 │    1.232 │    1.4 │ speedup=1.00, overlap_ratio=-0.07 │
+  └──────────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.460 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░ │ allreduce: 0.665 ms
+  │ total = 1.202 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.204 ms
+  └─────────────────────────────────────────┘
+
+  Hidden wgrad: -0.001 / 0.460 ms (-0% of wgrad hidden)
+  Overlap ratio:  -0.070
+  Speedup:        1.00x
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+========================================================================
+  4-Layer Pipeline: Eager vs Deferred + AllReduce (world=8)
+========================================================================
+PASSED                        4-layer eager+allreduce  avg=   5.861 ms  min=   5.792 ms  max=   5.922 ms  std=  0.038 ms  cv=  0.7%
+                     4-layer deferred+allreduce  avg=   4.957 ms  min=   4.931 ms  max=   4.996 ms  std=  0.020 ms  cv=  0.4%  speedup=1.1800
+========================================================================
+
+
+  4-Layer Pipeline: Eager vs Deferred + AllReduce (world=8)
+  ┌────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name                       │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+PASSED  │ 4-layer eager+allreduce    │    5.861 │    5.792 │    5.858 │    5.913 │    5.922 │    0.7 │              │
+  │ 4-layer deferred+allreduce │    4.957 │    4.931 │    4.955 │    4.991 │    4.996 │    0.4 │ speedup=1.18 │
+  └────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+  Speedup:  1.18x
+  Saved:    0.904 ms  (≈ 4 × 0.226 ms per layer)
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce rank 0 RDMA devices: None
+rank 6 rankInNode 6 select no device
+rank 0 rankInNode 0 select no device
+rank 5 rankInNode 5 select no device
+rank 7 rankInNode 7 select no device
+rank 2 rankInNode 2 select no device
+rank 3 rankInNode 3 select no device
+rank 1 rankInNode 1 select no device
+rank 4 rankInNode 4 select no device
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f1bc4880000
+  Flags: 64 bytes at 0x7f74a3c80000
+  Barrier: 128 bytes at 0x7f162e400000
+  Barrier: 128 bytes at 0x7f6f59a00000
+  Output transit buffer: 112.00 MB at 0x7f6f4c800000
+  Output transit buffer: 112.00 MB at 0x7f1625400000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7fae1c280000
+  Barrier: 128 bytes at 0x7fa8f5a00000
+  Output transit buffer: 112.00 MB at 0x7fa8e8800000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ee4a5080000
+  Barrier: 128 bytes at 0x7edf70400000
+  Output transit buffer: 112.00 MB at 0x7edf63000000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7efd74280000
+  Flags: 64 bytes at 0x7edd60280000
+  Barrier: 128 bytes at 0x7ef80ce00000
+  Barrier: 128 bytes at 0x7ed7b9e00000
+  Output transit buffer: 112.00 MB at 0x7ed7acc00000
+  Output transit buffer: 112.00 MB at 0x7ef7ffc00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f5814280000
+  Barrier: 128 bytes at 0x7f52b3c00000
+  Output transit buffer: 112.00 MB at 0x7f52aac00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f5d50280000
+  Barrier: 128 bytes at 0x7f57f2400000
+  Output transit buffer: 112.00 MB at 0x7f57e9400000
+
+========================================================================
+  _DeferredWgrad + SDMA AllReduce (world=8)
+========================================================================
+                               wgrad GEMM alone  avg=   0.457 ms  min=   0.442 ms  max=   0.481 ms  std=  0.011 ms  cv=  2.3%  [~unstable]
+                           SDMA allreduce alone  avg=   0.675 ms  min=   0.671 ms  max=   0.680 ms  std=  0.002 ms  cv=  0.3%
+                 sequential: wgrad then SDMA AR  avg=   1.222 ms  min=   1.193 ms  max=   1.244 ms  std=  0.014 ms  cv=  1.1%
+                   overlapped: wgrad || SDMA AR  avg=   1.154 ms  min=   1.137 ms  max=   1.176 ms  std=  0.013 ms  cv=  1.1%  speedup=1.0600  overlap_ratio=-0.0190
+========================================================================
+
+
+  _DeferredWgrad + SDMA AllReduce (world=8)
+  ┌────────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+  │ Name                           │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+  │ wgrad GEMM alone               │    0.457 │    0.442 │    0.461 │    0.475 │    0.481 │    2.3 │  ~                                │
+  │ SDMA allreduce alone           │    0.675 │    0.671 │    0.675 │    0.678 │    0.680 │    0.3 │                                   │
+  │ sequential: wgrad then SDMA AR │    1.222 │    1.193 │    1.223 │    1.242 │    1.244 │    1.1 │                                   │
+  │ overlapped: wgrad || SDMA AR   │    1.154 │    1.137 │    1.153 │    1.175 │    1.176 │    1.1 │ speedup=1.06, overlap_ratio=-0.02 │
+  └────────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ██████████████░░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.457 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░ │ SDMA AR: 0.675 ms
+  │ total = 1.222 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ │ 1.154 ms
+  └─────────────────────────────────────────┘
+
+  Hidden wgrad: 0.068 / 0.457 ms (15% of wgrad hidden)
+  Overlap ratio:  -0.019
+  Speedup:        1.06x
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 7
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f162e400000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7f162a800000
+  Flags: 64 bytes at 0x7f6f59a00000
+  Barrier: 128 bytes at 0x7f6f51c00000
+  Output transit buffer: 112.00 MB at 0x7f15e1a00000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7f6f08c00000
+  Flags: 64 bytes at 0x7edf70400000
+  Barrier: 128 bytes at 0x7edf68400000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ef80ce00000
+  Barrier: 128 bytes at 0x7ef805000000
+  Output transit buffer: 112.00 MB at 0x7edf1ea00000
+  Output transit buffer: 112.00 MB at 0x7ef7baa00000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7fa8f5a00000
+  Flags: 64 bytes at 0x7ed7b9e00000
+  Barrier: 128 bytes at 0x7fa8edc00000
+  Barrier: 128 bytes at 0x7ed7b2000000
+  Output transit buffer: 112.00 MB at 0x7fa8a4c00000
+  Output transit buffer: 112.00 MB at 0x7ed768c00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f52b3c00000
+  Barrier: 128 bytes at 0x7f52b0000000
+  Output transit buffer: 112.00 MB at 0x7f5266a00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f57f2400000
+  Barrier: 128 bytes at 0x7f57ee800000
+  Output transit buffer: 112.00 MB at 0x7f57a5a00000
+
+========================================================================
+  4-Layer Pipeline: Eager vs Deferred + SDMA AR (world=8)
+========================================================================
+                          4-layer eager+SDMA AR  avg=   5.879 ms  min=   5.805 ms  max=   5.938 ms  std=  0.040 ms  cv=  0.7%
+                       4-layer deferred+SDMA AR  avg=   5.717 ms  min=   5.076 ms  max=   6.254 ms  std=  0.367 ms  cv=  6.4%  speedup=1.0300  [!NOISY]
+========================================================================
+
+
+  4-Layer Pipeline: Eager vs Deferred + SDMA AR (world=8)
+  ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ 4-layer eager+SDMA AR    │    5.879 │    5.805 │    5.877 │    5.935 │    5.938 │    0.7 │              │
+  │ 4-layer deferred+SDMA AR │    5.717 │    5.076 │    5.754 │    6.228 │    6.254 │    6.4 │ speedup=1.03 *│
+  └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+  Speedup:  1.03x
+  Saved:    0.162 ms  (≈ 4 × 0.040 ms per layer)
+
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7fa8f5a00000
+  Barrier: 128 bytes at 0x7fa8ab400000
+  Output transit buffer: 112.00 MB at 0x7fa863a00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f52b3c00000
+  Barrier: 128 bytes at 0x7f526da00000
+  Flags: 64 bytes at 0x7ed7b9e00000
+  Barrier: 128 bytes at 0x7ed76f800000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7f5225800000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7ed727a00000
+  Flags: 64 bytes at 0x7f162e400000
+  Flags: 64 bytes at 0x7f6f59a00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7f6f0f400000
+  Barrier: 128 bytes at 0x7f15e8200000
+  Flags: 64 bytes at 0x7f57f2400000
+  Barrier: 128 bytes at 0x7f57ac200000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ef80ce00000
+  Output transit buffer: 112.00 MB at 0x7f6ec7a00000
+  Barrier: 128 bytes at 0x7ef7c8e00000
+  Output transit buffer: 112.00 MB at 0x7f15a0800000
+  Output transit buffer: 112.00 MB at 0x7f5764800000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7edf70400000
+  Barrier: 128 bytes at 0x7edf2c200000
+  Output transit buffer: 112.00 MB at 0x7ef779800000
+  Output transit buffer: 112.00 MB at 0x7ededd800000
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 1
+
+========================================================================
+  NCCL vs SDMA Wgrad-Delay Overlap (world=8)
+========================================================================
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 5
+                               wgrad GEMM alone  avg=   0.465 ms  min=   0.445 ms  max=   0.491 ms  std=  0.012 ms  cv=  2.7%  [~unstable]
+                           NCCL allreduce alone  avg=   0.665 ms  min=   0.661 ms  max=   0.668 ms  std=  0.002 ms  cv=  0.3%
+                                NCCL sequential  avg=   1.202 ms  min=   1.183 ms  max=   1.222 ms  std=  0.012 ms  cv=  1.0%
+                                NCCL overlapped  avg=   1.212 ms  min=   1.190 ms  max=   1.237 ms  std=  0.012 ms  cv=  1.0%  speedup=0.9900  overlap=-0.0720
+                           SDMA allreduce alone  avg=   0.673 ms  min=   0.671 ms  max=   0.685 ms  std=  0.003 ms  cv=  0.5%
+                                SDMA sequential  avg=   1.219 ms  min=   1.201 ms  max=   1.252 ms  std=  0.013 ms  cv=  1.1%
+                                SDMA overlapped  avg=   1.171 ms  min=   1.155 ms  max=   1.205 ms  std=  0.012 ms  cv=  1.0%  speedup=1.0400  overlap=-0.0280
+========================================================================
+
+
+  NCCL vs SDMA Wgrad-Delay Overlap (world=8)
+  ┌──────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬─────────────────────────────┐
+  │ Name                 │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                      │
+  ├──────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼─────────────────────────────┤
+  │ wgrad GEMM alone     │    0.465 │    0.445 │    0.463 │    0.481 │    0.491 │    2.7 │  ~                          │
+  │ NCCL allreduce alone │    0.665 │    0.661 │    0.665 │    0.668 │    0.668 │    0.3 │                             │
+  │ NCCL sequential      │    1.202 │    1.183 │    1.202 │    1.222 │    1.222 │    1.0 │                             │
+  │ NCCL overlapped      │    1.212 │    1.190 │    1.210 │    1.236 │    1.237 │    1.0 │ speedup=0.99, overlap=-0.07 │
+  │ SDMA allreduce alone │    0.673 │    0.671 │    0.672 │    0.677 │    0.685 │    0.5 │                             │
+  │ SDMA sequential      │    1.219 │    1.201 │    1.221 │    1.250 │    1.252 │    1.1 │                             │
+  │ SDMA overlapped      │    1.171 │    1.155 │    1.169 │    1.195 │    1.205 │    1.0 │ speedup=1.04, overlap=-0.03 │
+  └──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴─────────────────────────────┘
+
+  NCCL overlap speedup:  0.99x
+  SDMA overlap speedup:  1.04x
+  SDMA vs NCCL:          1.03x
+
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f6f59a00000
+  Barrier: 128 bytes at 0x7f6ecea00000
+  Output transit buffer: 112.00 MB at 0x7f6e86800000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f162e400000
+  Barrier: 128 bytes at 0x7f15a7800000
+  Output transit buffer: 112.00 MB at 0x7f155f600000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ef80ce00000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7ef7bc000000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7edf70400000
+  Barrier: 128 bytes at 0x7edf1f400000
+  Flags: 64 bytes at 0x7fa8f5a00000
+  Barrier: 128 bytes at 0x7fa86aa00000
+  Output transit buffer: 112.00 MB at 0x7ef738600000
+  Output transit buffer: 112.00 MB at 0x7ede9c600000
+  Output transit buffer: 112.00 MB at 0x7fa822800000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ed7b9e00000
+  Barrier: 128 bytes at 0x7ed768e00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7ed6e6800000
+  Flags: 64 bytes at 0x7f52b3c00000
+  Flags: 64 bytes at 0x7f57f2400000
+  Barrier: 128 bytes at 0x7f5267000000
+  Barrier: 128 bytes at 0x7f576b800000
+  Output transit buffer: 112.00 MB at 0x7f51e4600000
+  Output transit buffer: 112.00 MB at 0x7f5723600000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 3
+
+========================================================================AllreduceSdma destroyed: PE 1
+
+  NCCL vs SDMA 4-Layer Wgrad Pipeline (world=8)
+========================================================================
+AllreduceSdma destroyed: PE 2
+                                  4L eager NCCL  avg=   5.860 ms  min=   5.835 ms  max=   5.888 ms  std=  0.016 ms  cv=  0.3%
+                               4L deferred NCCL  avg=   4.978 ms  min=   4.941 ms  max=   5.028 ms  std=  0.028 ms  cv=  0.6%  speedup=1.1800
+AllreduceSdma destroyed: PE 5
+                                  4L eager SDMA  avg=   5.877 ms  min=   5.829 ms  max=   5.939 ms  std=  0.032 ms  cv=  0.5%
+                               4L deferred SDMA  avg=   5.982 ms  min=   5.351 ms  max=   6.440 ms  std=  0.257 ms  cv=  4.3%  speedup=0.9800  [~unstable]
+========================================================================
+
+
+  NCCL vs SDMA 4-Layer Wgrad Pipeline (world=8)
+  ┌──────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├──────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ 4L eager NCCL    │    5.860 │    5.835 │    5.860 │    5.886 │    5.888 │    0.3 │              │
+  │ 4L deferred NCCL │    4.978 │    4.941 │    4.973 │    5.027 │    5.028 │    0.6 │ speedup=1.18 │
+  │ 4L eager SDMA    │    5.877 │    5.829 │    5.875 │    5.927 │    5.939 │    0.5 │              │
+  │ 4L deferred SDMA │    5.982 │    5.351 │    6.073 │    6.279 │    6.440 │    4.3 │ speedup=0.98 ~│
+  └──────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+  NCCL:  speedup=1.18x  saved=0.882 ms
+  SDMA:  speedup=0.98x  saved=-0.105 ms
+  SDMA vs NCCL (deferred):  0.83x
+
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+======================= 6 passed, 9 deselected in 11.43s =======================
+
+
+======================= 6 passed, 9 deselected in 11.64s =======================
+
+
+======================= 6 passed, 9 deselected in 11.51s =======================
+
+
+======================= 6 passed, 9 deselected in 11.55s =======================
+
+
+======================= 6 passed, 9 deselected in 11.54s =======================
+
+
+======================= 6 passed, 9 deselected in 12.03s =======================
+
+
+======================= 6 passed, 9 deselected in 11.58s =======================
+
+
+======================= 6 passed, 9 deselected in 11.66s =======================

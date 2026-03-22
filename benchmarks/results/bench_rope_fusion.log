@@ -1,0 +1,226 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 24 items
+Running 24 items in this shard: benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[512], benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[2048], benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[4096], benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[8192], benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_qk_vs_pytorch, benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[128], benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[512], benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[2048], benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[4096], benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[8192], benchmarks/bench_rope_fusion.py::TestRoPE1D::test_neox_vs_gptj, benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[512], benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[2048], benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[4096], benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[1], benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[4], benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[8], benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[32], benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size0], benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size1], benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size2], benchmarks/bench_rope_fusion.py::TestRoPE3D::test_3d_rope, benchmarks/bench_rope_fusion.py::TestRoPEDtype::test_dtype_latency[dtype0], benchmarks/bench_rope_fusion.py::TestRoPEDtype::test_dtype_latency[dtype1]
+
+benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[512]
+========================================================================
+  Fused vs PyTorch RoPE S=512
+========================================================================
+                         Lumen fused RoPE S=512  avg=   0.071 ms  min=   0.067 ms  max=   0.078 ms  std=  0.003 ms  cv=  4.6%  speedup_vs_pytorch=1.0400  [~unstable]
+                  PyTorch decomposed RoPE S=512  avg=   0.074 ms  min=   0.071 ms  max=   0.097 ms  std=  0.006 ms  cv=  8.4%  [!NOISY]
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[2048]
+========================================================================
+  Fused vs PyTorch RoPE S=2048
+========================================================================
+                        Lumen fused RoPE S=2048  avg=   0.109 ms  min=   0.106 ms  max=   0.123 ms  std=  0.004 ms  cv=  3.4%  speedup_vs_pytorch=1.3700  [~unstable]
+                 PyTorch decomposed RoPE S=2048  avg=   0.149 ms  min=   0.147 ms  max=   0.155 ms  std=  0.002 ms  cv=  1.6%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[4096]
+========================================================================
+  Fused vs PyTorch RoPE S=4096
+========================================================================
+                        Lumen fused RoPE S=4096  avg=   0.174 ms  min=   0.169 ms  max=   0.178 ms  std=  0.003 ms  cv=  1.6%  speedup_vs_pytorch=1.5000
+                 PyTorch decomposed RoPE S=4096  avg=   0.261 ms  min=   0.255 ms  max=   0.266 ms  std=  0.004 ms  cv=  1.4%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_vs_pytorch[8192]
+========================================================================
+  Fused vs PyTorch RoPE S=8192
+========================================================================
+                        Lumen fused RoPE S=8192  avg=   0.316 ms  min=   0.309 ms  max=   0.329 ms  std=  0.006 ms  cv=  1.7%  speedup_vs_pytorch=1.5400
+                 PyTorch decomposed RoPE S=8192  avg=   0.488 ms  min=   0.475 ms  max=   0.505 ms  std=  0.009 ms  cv=  1.8%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEFusedVsPyTorch::test_fused_qk_vs_pytorch
+========================================================================
+  Fused Q+K vs PyTorch Separate
+========================================================================
+                           Lumen fused_rope Q+K  avg=   0.204 ms  min=   0.198 ms  max=   0.227 ms  std=  0.006 ms  cv=  3.2%  speedup_vs_pytorch=1.3700  [~unstable]
+                    PyTorch RoPE Q + K separate  avg=   0.279 ms  min=   0.274 ms  max=   0.287 ms  std=  0.003 ms  cv=  1.0%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[128]
+========================================================================
+  RoPE 1D S=128
+========================================================================
+                              Lumen fused S=128  avg=   0.066 ms  min=   0.059 ms  max=   0.072 ms  std=  0.003 ms  cv=  4.4%  speedup=0.9300  [~unstable]
+                       PyTorch decomposed S=128  avg=   0.062 ms  min=   0.059 ms  max=   0.071 ms  std=  0.003 ms  cv=  4.4%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[512]
+========================================================================
+  RoPE 1D S=512
+========================================================================
+                              Lumen fused S=512  avg=   0.069 ms  min=   0.067 ms  max=   0.073 ms  std=  0.001 ms  cv=  2.1%  speedup=1.0200  [~unstable]
+                       PyTorch decomposed S=512  avg=   0.071 ms  min=   0.069 ms  max=   0.075 ms  std=  0.001 ms  cv=  1.9%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[2048]
+========================================================================
+  RoPE 1D S=2048
+========================================================================
+                             Lumen fused S=2048  avg=   0.105 ms  min=   0.103 ms  max=   0.110 ms  std=  0.002 ms  cv=  1.7%  speedup=1.3700
+                      PyTorch decomposed S=2048  avg=   0.145 ms  min=   0.142 ms  max=   0.149 ms  std=  0.002 ms  cv=  1.2%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[4096]
+========================================================================
+  RoPE 1D S=4096
+========================================================================
+                             Lumen fused S=4096  avg=   0.171 ms  min=   0.168 ms  max=   0.178 ms  std=  0.002 ms  cv=  1.3%  speedup=1.5100
+                      PyTorch decomposed S=4096  avg=   0.258 ms  min=   0.250 ms  max=   0.263 ms  std=  0.003 ms  cv=  1.2%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_seqlen_sweep[8192]
+========================================================================
+  RoPE 1D S=8192
+========================================================================
+                             Lumen fused S=8192  avg=   0.316 ms  min=   0.306 ms  max=   0.333 ms  std=  0.009 ms  cv=  2.8%  speedup=1.5500  [~unstable]
+                      PyTorch decomposed S=8192  avg=   0.490 ms  min=   0.476 ms  max=   0.516 ms  std=  0.010 ms  cv=  2.0%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE1D::test_neox_vs_gptj
+========================================================================
+  RoPE: NeoX vs GPT-J Style
+========================================================================
+                  RoPE NeoX (interleaved=False)  avg=   0.105 ms  min=   0.103 ms  max=   0.113 ms  std=  0.003 ms  cv=  2.5%  [~unstable]
+                  RoPE GPT-J (interleaved=True)  avg=   0.146 ms  min=   0.144 ms  max=   0.154 ms  std=  0.002 ms  cv=  1.5%  vs_neox=+39.0%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[512]
+========================================================================
+  Fused vs PyTorch Q+K S=512
+========================================================================
+                          Lumen fused Q+K S=512  avg=   0.126 ms  min=   0.112 ms  max=   0.141 ms  std=  0.008 ms  cv=  6.1%  speedup=0.9700  [!NOISY]
+                         PyTorch RoPE Q+K S=512  avg=   0.122 ms  min=   0.119 ms  max=   0.125 ms  std=  0.001 ms  cv=  1.0%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[2048]
+========================================================================
+  Fused vs PyTorch Q+K S=2048
+========================================================================
+                         Lumen fused Q+K S=2048  avg=   0.196 ms  min=   0.193 ms  max=   0.203 ms  std=  0.003 ms  cv=  1.5%  speedup=1.4000
+                        PyTorch RoPE Q+K S=2048  avg=   0.275 ms  min=   0.266 ms  max=   0.278 ms  std=  0.003 ms  cv=  0.9%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestFusedRoPEQK::test_fused_qk[4096]
+========================================================================
+  Fused vs PyTorch Q+K S=4096
+========================================================================
+                         Lumen fused Q+K S=4096  avg=   0.329 ms  min=   0.324 ms  max=   0.342 ms  std=  0.005 ms  cv=  1.6%  speedup=1.5200
+                        PyTorch RoPE Q+K S=4096  avg=   0.499 ms  min=   0.493 ms  max=   0.508 ms  std=  0.005 ms  cv=  1.0%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[1]
+========================================================================
+  RoPE GQA H_kv=1
+========================================================================
+                  Lumen fused GQA H_q=32 H_kv=1  avg=   0.132 ms  min=   0.128 ms  max=   0.138 ms  std=  0.003 ms  cv=  2.0%  speedup=1.3100  [~unstable]
+                        PyTorch RoPE Q(32)+K(1)  avg=   0.173 ms  min=   0.171 ms  max=   0.174 ms  std=  0.001 ms  cv=  0.4%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[4]
+========================================================================
+  RoPE GQA H_kv=4
+========================================================================
+                  Lumen fused GQA H_q=32 H_kv=4  avg=   0.136 ms  min=   0.134 ms  max=   0.141 ms  std=  0.002 ms  cv=  1.6%  speedup=1.3300
+                        PyTorch RoPE Q(32)+K(4)  avg=   0.182 ms  min=   0.181 ms  max=   0.185 ms  std=  0.001 ms  cv=  0.6%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[8]
+========================================================================
+  RoPE GQA H_kv=8
+========================================================================
+                  Lumen fused GQA H_q=32 H_kv=8  avg=   0.144 ms  min=   0.143 ms  max=   0.152 ms  std=  0.002 ms  cv=  1.4%  speedup=1.3700
+                        PyTorch RoPE Q(32)+K(8)  avg=   0.197 ms  min=   0.195 ms  max=   0.204 ms  std=  0.002 ms  cv=  0.9%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEGQA::test_gqa_head_configs[32]
+========================================================================
+  RoPE GQA H_kv=32
+========================================================================
+                 Lumen fused GQA H_q=32 H_kv=32  avg=   0.194 ms  min=   0.192 ms  max=   0.197 ms  std=  0.002 ms  cv=  0.8%  speedup=1.4100
+                       PyTorch RoPE Q(32)+K(32)  avg=   0.274 ms  min=   0.272 ms  max=   0.278 ms  std=  0.001 ms  cv=  0.5%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size0]
+========================================================================
+  RoPE 2D 8x8
+========================================================================
+                             Lumen fused 2D 8x8  avg=   0.037 ms  min=   0.034 ms  max=   0.046 ms  std=  0.002 ms  cv=  6.4%  speedup=2.3500  [!NOISY]
+                      PyTorch decomposed 2D 8x8  avg=   0.088 ms  min=   0.085 ms  max=   0.092 ms  std=  0.002 ms  cv=  1.9%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size1]
+========================================================================
+  RoPE 2D 16x16
+========================================================================
+                           Lumen fused 2D 16x16  avg=   0.040 ms  min=   0.035 ms  max=   0.044 ms  std=  0.002 ms  cv=  4.3%  speedup=2.2000  [~unstable]
+                    PyTorch decomposed 2D 16x16  avg=   0.089 ms  min=   0.086 ms  max=   0.094 ms  std=  0.002 ms  cv=  2.2%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE2D::test_2d_rope_sizes[img_size2]
+========================================================================
+  RoPE 2D 32x32
+========================================================================
+                           Lumen fused 2D 32x32  avg=   0.074 ms  min=   0.072 ms  max=   0.079 ms  std=  0.001 ms  cv=  2.0%  speedup=1.2000
+                    PyTorch decomposed 2D 32x32  avg=   0.088 ms  min=   0.086 ms  max=   0.091 ms  std=  0.001 ms  cv=  1.6%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPE3D::test_3d_rope
+========================================================================
+  RoPE 3D 4x8x8
+========================================================================
+                           Lumen fused 3D 4x8x8  avg=   0.060 ms  min=   0.055 ms  max=   0.077 ms  std=  0.005 ms  cv=  8.2%  speedup=0.8400  [!NOISY]
+                    PyTorch decomposed 3D 4x8x8  avg=   0.050 ms  min=   0.048 ms  max=   0.056 ms  std=  0.002 ms  cv=  3.8%  [~unstable]
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEDtype::test_dtype_latency[dtype0]
+========================================================================
+  RoPE dtype=torch.float16
+========================================================================
+                RoPE S=2048 dtype=torch.float16  avg=   0.096 ms  min=   0.092 ms  max=   0.097 ms  std=  0.001 ms  cv=  1.5%
+========================================================================
+
+PASSED
+benchmarks/bench_rope_fusion.py::TestRoPEDtype::test_dtype_latency[dtype1]
+========================================================================
+  RoPE dtype=torch.bfloat16
+========================================================================
+               RoPE S=2048 dtype=torch.bfloat16  avg=   0.105 ms  min=   0.102 ms  max=   0.107 ms  std=  0.001 ms  cv=  1.1%
+========================================================================
+
+PASSED
+
+============================== 24 passed in 0.77s ==============================
