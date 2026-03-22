@@ -4,81 +4,66 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
+import pytest
 import torch
-import torch.nn as nn
+
+from lumen.utils.cpu_offload import CPUOffloadManager, lumen_cpu_offload_context
 
 
 class TestCPUOffloadManager:
 
-    def test_construction(self):
-        from lumen.utils.cpu_offload import CPUOffloadManager
-
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_pack_returns_cpu_for_cuda_tensor(self):
         mgr = CPUOffloadManager(enabled=True)
-        assert mgr.enabled
-        assert mgr.pin_memory
+        t = torch.randn(64, 64, device="cuda")
+        packed = mgr._pack(t)
+        assert not packed.is_cuda
+        assert packed.is_pinned()
+        assert mgr.memory_saved_bytes == 64 * 64 * 4
 
-    def test_register_hooks(self):
-        from lumen.utils.cpu_offload import CPUOffloadManager
-
-        model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 4))
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_pack_skips_tiny_tensors(self):
         mgr = CPUOffloadManager(enabled=True)
-        count = mgr.register_hooks(model)
-        assert count >= 2  # at least the two linear layers
+        tiny = torch.randn(4, device="cuda")  # 16 bytes
+        packed = mgr._pack(tiny)
+        assert packed.is_cuda
+        assert mgr.memory_saved_bytes == 0
 
-    def test_register_hooks_disabled(self):
-        from lumen.utils.cpu_offload import CPUOffloadManager
-
-        model = nn.Sequential(nn.Linear(8, 16))
-        mgr = CPUOffloadManager(enabled=False)
-        count = mgr.register_hooks(model)
-        assert count == 0
-
-    def test_remove_hooks(self):
-        from lumen.utils.cpu_offload import CPUOffloadManager
-
-        model = nn.Sequential(nn.Linear(8, 16))
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_pack_skips_cpu_tensors(self):
         mgr = CPUOffloadManager(enabled=True)
-        mgr.register_hooks(model)
-        mgr.remove_hooks()
-        assert len(mgr._hooks) == 0
+        t = torch.randn(64, 64)
+        packed = mgr._pack(t)
+        assert packed is t
 
-    def test_memory_saved_initial(self):
-        from lumen.utils.cpu_offload import CPUOffloadManager
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_unpack_returns_cuda_tensor(self):
+        mgr = CPUOffloadManager(enabled=True)
+        t = torch.randn(64, 64, device="cuda")
+        packed = mgr._pack(t)
+        unpacked = mgr._unpack(packed)
+        assert unpacked.is_cuda
+        assert torch.allclose(t, unpacked)
 
-        mgr = CPUOffloadManager()
-        assert mgr.memory_saved_bytes() == 0
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+    def test_context_produces_correct_gradients(self):
+        """Full forward+backward through context."""
+        model = torch.nn.Linear(256, 128).cuda()
+        x = torch.randn(32, 256, device="cuda", requires_grad=True)
 
+        # Reference
+        out_ref = model(x)
+        loss_ref = out_ref.sum()
+        loss_ref.backward()
+        grad_ref = x.grad.clone()
+        x.grad = None
 
-class TestCPUOffloadContext:
-
-    def test_context_manager(self):
-        from lumen.utils.cpu_offload import lumen_cpu_offload_context
-
-        model = nn.Sequential(nn.Linear(8, 4))
-        x = torch.randn(2, 8)
-
-        with lumen_cpu_offload_context(model, enabled=True):
+        # With offload
+        with lumen_cpu_offload_context(enabled=True) as mgr:
             out = model(x)
-            assert out.shape == (2, 4)
+            loss = out.sum()
+        loss.backward()
+        grad_offload = x.grad.clone()
 
-    def test_disabled_context(self):
-        from lumen.utils.cpu_offload import lumen_cpu_offload_context
-
-        model = nn.Sequential(nn.Linear(8, 4))
-        x = torch.randn(2, 8)
-
-        with lumen_cpu_offload_context(model, enabled=False):
-            out = model(x)
-            assert out.shape == (2, 4)
-
-    def test_hooks_cleaned_up(self):
-        from lumen.utils.cpu_offload import lumen_cpu_offload_context
-
-        model = nn.Sequential(nn.Linear(8, 4))
-
-        with lumen_cpu_offload_context(model, enabled=True) as mgr:
-            hook_count = len(mgr._hooks)
-            assert hook_count > 0
-
-        # After context, hooks should be removed
-        assert len(mgr._hooks) == 0
+        assert torch.allclose(grad_ref, grad_offload)
+        assert mgr.memory_saved_bytes > 0
