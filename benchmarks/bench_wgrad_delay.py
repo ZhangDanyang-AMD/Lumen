@@ -952,6 +952,9 @@ class TestNCCLvsSdmaWgradDelay:
         r_nccl_ovl.extra["overlap"] = round(nccl_overlap, 3)
 
         # ── SDMA ──────────────────────────────────────────────
+        # Drain all NCCL work before switching to SDMA backend
+        torch.cuda.synchronize()
+        dist.barrier()
 
         def _sdma_ar():
             buf = ar_buf.clone()
@@ -981,6 +984,10 @@ class TestNCCLvsSdmaWgradDelay:
             trim_pct=_TRIM,
             dist_barrier=True,
         )
+
+        # Ensure synchronous SDMA ops complete before starting async path
+        torch.cuda.synchronize()
+        dist.barrier()
 
         def _sdma_ovl():
             w.main_grad.zero_()
@@ -1104,6 +1111,10 @@ class TestNCCLvsSdmaWgradDelay:
         nccl_speedup = r_eager_nccl.avg_ms / max(r_deferred_nccl.avg_ms, 1e-6)
         r_deferred_nccl.extra["speedup"] = round(nccl_speedup, 2)
 
+        # Drain all GPU work before switching to SDMA
+        torch.cuda.synchronize()
+        dist.barrier()
+
         # Eager baseline (identical for SDMA)
         def _eager_sdma():
             for i in range(n_layers):
@@ -1120,6 +1131,10 @@ class TestNCCLvsSdmaWgradDelay:
             trim_pct=_TRIM,
             dist_barrier=True,
         )
+
+        # Drain synchronous SDMA ops before starting async pipeline
+        torch.cuda.synchronize()
+        dist.barrier()
 
         # Deferred SDMA pipeline
         def _deferred_sdma():

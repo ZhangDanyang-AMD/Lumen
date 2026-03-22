@@ -692,14 +692,7 @@ class TestFusionLatency:
                 fp8_dtype=fp8_dtype,
             )
             if isinstance(normed_fp8, tuple):
-                normed_fp8, scale = normed_fp8
-                return quantized_linear(
-                    normed_fp8,
-                    gemm_w,
-                    scaling_type="dynamic",
-                    fp8_dtype=fp8_dtype,
-                    x_scale=scale,
-                )
+                normed_fp8, _scale = normed_fp8
             return quantized_linear(normed_fp8, gemm_w, scaling_type="dynamic", fp8_dtype=fp8_dtype)
 
         r_fused = cuda_timer(_fused, label="rmsnorm_with_quant → quantized_linear (fused)")
