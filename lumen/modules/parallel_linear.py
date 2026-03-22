@@ -51,16 +51,17 @@ class _DeferredWgrad:
     backward pass into dgrad (immediate) and wgrad (deferred).  The deferred
     wgrad GEMM can then overlap with the next layer's communication.
 
-    Each ``defer()`` call stores a self-contained closure that computes the
-    wgrad and accumulates it into the correct gradient buffer (``main_grad``
-    or ``weight.grad``).  ``execute()`` runs the pending closure.
+    Supports queuing multiple closures so that modules with multiple GEMMs
+    per forward (e.g. ``LumenGroupedLinear`` with per-expert loops) can
+    defer all wgrads safely.  ``execute()`` runs all queued closures in
+    FIFO order.
     """
 
     def __init__(self):
-        self._pending = None
+        self._queue = []
 
     def defer(self, fn_or_weight, compute_fn=None):
-        """Store a deferred wgrad closure.
+        """Enqueue a deferred wgrad closure.
 
         Two calling conventions are supported:
 
@@ -86,19 +87,19 @@ class _DeferredWgrad:
                 else:
                     weight.grad = gw
 
-            self._pending = _wrapped
+            self._queue.append(_wrapped)
         else:
-            self._pending = fn_or_weight
+            self._queue.append(fn_or_weight)
 
     def execute(self):
-        """Run the pending wgrad computation, if any."""
-        if self._pending is not None:
-            self._pending()
-            self._pending = None
+        """Run all queued wgrad computations in FIFO order."""
+        for fn in self._queue:
+            fn()
+        self._queue.clear()
 
     @property
     def has_pending(self):
-        return self._pending is not None
+        return len(self._queue) > 0
 
 
 def _use_sdma_from_args() -> bool:
@@ -243,6 +244,7 @@ class LumenColumnParallelLinear(nn.Module):
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
+        self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
 
         # Weight allocation
@@ -551,6 +553,7 @@ class LumenRowParallelLinear(nn.Module):
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
+        self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
 
         # Weight

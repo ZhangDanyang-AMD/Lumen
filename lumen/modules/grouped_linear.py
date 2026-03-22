@@ -22,7 +22,7 @@ from megatron.core.tensor_parallel.utils import divide
 from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
-from lumen.modules.parallel_linear import _get_tp_group, _pg_size
+from lumen.modules.parallel_linear import _DeferredWgrad, _get_tp_group, _pg_size
 
 __all__ = [
     "LumenGroupedLinear",
@@ -83,6 +83,10 @@ class LumenGroupedLinear(nn.Module):
         self.scaling_manager = None
         self.fp8_dtype = torch.float8_e4m3fn
         self.block_size = 128
+        self.gradient_accumulation_fusion = False
+        self.delay_wgrad = False
+        self.fp8_activation_store = False
+        self._deferred_wgrad = _DeferredWgrad()
 
         # Per-expert weights
         self.weights = nn.ParameterList(
@@ -141,24 +145,24 @@ class LumenGroupedLinear(nn.Module):
             if count == 0:
                 continue
             xi = x[offset : offset + count]
-            if self.scaling_type != "none":
+            bias_i = None if self.skip_bias_add else (self.biases[i] if self.biases else None)
+            if self.scaling_type != "none" or self.delay_wgrad:
                 from lumen.ops.quantize.linear import quantized_linear
 
                 yi = quantized_linear(
                     xi,
                     self.weights[i],
-                    None if self.skip_bias_add else (self.biases[i] if self.biases else None),
+                    bias_i,
                     scaling_manager=self.scaling_manager,
                     scaling_type=self.scaling_type,
                     fp8_dtype=self.fp8_dtype,
                     block_size=self.block_size,
+                    gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                    delay_wgrad=self.delay_wgrad,
+                    deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
                 )
             else:
-                yi = F.linear(
-                    xi,
-                    self.weights[i],
-                    None if self.skip_bias_add else (self.biases[i] if self.biases else None),
-                )
+                yi = F.linear(xi, self.weights[i], bias_i)
             outputs.append(yi)
             offset += count
 
@@ -192,6 +196,14 @@ class LumenGroupedLinear(nn.Module):
 
     def get_extra_state(self):
         return None
+
+    def execute_deferred_wgrad(self):
+        """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
+
+    def backward_dw(self):
+        """Megatron-compatible API: execute deferred weight gradient."""
+        self._deferred_wgrad.execute()
 
 
 class LumenColumnParallelGroupedLinear(LumenGroupedLinear):

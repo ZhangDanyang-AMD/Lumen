@@ -32,6 +32,7 @@ from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from torch.nn.parameter import Parameter
 
 from lumen.modules.parallel_linear import (
+    _DeferredWgrad,
     _do_gemm,
     _get_tp_group,
     _pg_rank,
@@ -117,6 +118,10 @@ class LumenLayerNormLinear(nn.Module):
         self.scaling_manager = None
         self.fp8_dtype = torch.float8_e4m3fn
         self.block_size = 128
+        self.gradient_accumulation_fusion = False
+        self.delay_wgrad = False
+        self.fp8_activation_store = False
+        self._deferred_wgrad = _DeferredWgrad()
 
         # Linear weight [output_size_per_partition, input_size]
         if getattr(config, "use_cpu_initialization", False):
@@ -231,6 +236,9 @@ class LumenLayerNormLinear(nn.Module):
             self.scaling_type,
             self.fp8_dtype,
             self.block_size,
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            delay_wgrad=self.delay_wgrad,
+            deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
         )
 
         output_bias = self.bias if self.skip_bias_add else None
@@ -260,6 +268,14 @@ class LumenLayerNormLinear(nn.Module):
 
     def get_extra_state(self):
         return None
+
+    def execute_deferred_wgrad(self):
+        """Execute any deferred weight gradient computation."""
+        self._deferred_wgrad.execute()
+
+    def backward_dw(self):
+        """Megatron-compatible API: execute deferred weight gradient."""
+        self._deferred_wgrad.execute()
 
     def __repr__(self):
         norm = "RMSNorm" if self.use_rmsnorm else "LayerNorm"
