@@ -54,6 +54,7 @@ from benchmarks.bench_utils import (
     cuda_timer,
     print_overlap_summary,
     print_report,
+    print_report_with_table,
     require_cuda,
 )
 from benchmarks.conftest import AITER, CUDA
@@ -64,6 +65,11 @@ from benchmarks.conftest import AITER, CUDA
 M = 4096  # tokens (B * S)
 K = 4096  # hidden_dim
 N = 14336  # FFN intermediate
+
+# Timing parameters — overridable via LUMEN_BENCH_WARMUP / LUMEN_BENCH_ITERS
+_WARMUP = 10
+_ITERS = 30
+_TRIM = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +238,7 @@ class TestDeferredWgradStreamOverlap:
         comm_stream = torch.cuda.Stream()
 
         # Calibrate: measure wgrad GEMM latency, then set sleep to ~same duration
-        r_dw = cuda_timer(lambda: grad_out.T @ x, label="dW alone", iters=10)
+        r_dw = cuda_timer(lambda: grad_out.T @ x, label="dW alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM)
         dw_ns = int(r_dw.avg_ms * 1e6)
         # _sleep() takes GPU clock cycles; approximate 1 ns ≈ 1-2 cycles at ~1.5 GHz
         sleep_cycles = max(dw_ns * 2, 100_000)
@@ -240,7 +246,9 @@ class TestDeferredWgradStreamOverlap:
         r_comm = cuda_timer(
             lambda: torch.cuda._sleep(sleep_cycles),
             label="simulated comm (sleep)",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
         )
 
         # Sequential: wgrad then comm
@@ -252,7 +260,9 @@ class TestDeferredWgradStreamOverlap:
             torch.cuda._sleep(sleep_cycles)
             torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_sequential, label="sequential: wgrad then comm", iters=10)
+        r_seq = cuda_timer(
+            _sequential, label="sequential: wgrad then comm", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM
+        )
 
         # Overlapped: wgrad on default stream, comm on comm_stream
         def _overlapped():
@@ -263,7 +273,7 @@ class TestDeferredWgradStreamOverlap:
             dwg.execute()
             torch.cuda.current_stream().wait_stream(comm_stream)
 
-        r_ovl = cuda_timer(_overlapped, label="overlapped: wgrad || comm", iters=10)
+        r_ovl = cuda_timer(_overlapped, label="overlapped: wgrad || comm", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM)
 
         T_parts = r_dw.avg_ms + r_comm.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -413,14 +423,18 @@ class TestDeferredWgradRealComm:
         r_wgrad = cuda_timer(
             lambda: grad_out.T @ x,
             label="wgrad GEMM alone",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
         )
 
         def _allreduce():
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
-        r_comm = cuda_timer(_allreduce, label="allreduce alone", iters=10, dist_barrier=True)
+        r_comm = cuda_timer(
+            _allreduce, label="allreduce alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
 
         # Sequential: wgrad then allreduce
         def _sequential():
@@ -430,7 +444,14 @@ class TestDeferredWgradRealComm:
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
-        r_seq = cuda_timer(_sequential, label="sequential: wgrad then allreduce", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _sequential,
+            label="sequential: wgrad then allreduce",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         # Overlapped: allreduce on comm_stream, wgrad on default stream
         def _overlapped():
@@ -442,7 +463,14 @@ class TestDeferredWgradRealComm:
             dwg.execute()
             torch.cuda.current_stream().wait_stream(comm_stream)
 
-        r_ovl = cuda_timer(_overlapped, label="overlapped: wgrad || allreduce", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _overlapped,
+            label="overlapped: wgrad || allreduce",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_wgrad.avg_ms + r_comm.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -451,7 +479,7 @@ class TestDeferredWgradRealComm:
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"_DeferredWgrad + Real NCCL AllReduce (world={self.world})",
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
@@ -498,7 +526,14 @@ class TestDeferredWgradRealComm:
                 weights[i].main_grad.add_(grad_outs[i].T @ x)  # dW
                 dist.all_reduce(weights[i].main_grad)
 
-        r_eager = cuda_timer(_eager, label=f"{n_layers}-layer eager+allreduce", iters=10, dist_barrier=True)
+        r_eager = cuda_timer(
+            _eager,
+            label=f"{n_layers}-layer eager+allreduce",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         # Deferred: overlap wgrad with allreduce of previous layer
         def _deferred():
@@ -529,7 +564,9 @@ class TestDeferredWgradRealComm:
         r_deferred = cuda_timer(
             _deferred,
             label=f"{n_layers}-layer deferred+allreduce",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
 
@@ -539,7 +576,7 @@ class TestDeferredWgradRealComm:
         saved_ms = r_eager.avg_ms - r_deferred.avg_ms
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"{n_layers}-Layer Pipeline: Eager vs Deferred + AllReduce (world={self.world})",
                 [r_eager, r_deferred],
             )
@@ -621,13 +658,17 @@ class TestDeferredWgradSdmaComm:
         torch.cuda.synchronize()
         dist.barrier()
 
-        r_wgrad = cuda_timer(lambda: grad_out.T @ x, label="wgrad GEMM alone", iters=10)
+        r_wgrad = cuda_timer(
+            lambda: grad_out.T @ x, label="wgrad GEMM alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM
+        )
 
         def _sdma_ar():
             buf = ar_buf.clone()
             comm.allreduce_sum_inplace(buf)
 
-        r_comm = cuda_timer(_sdma_ar, label="SDMA allreduce alone", iters=10, dist_barrier=True)
+        r_comm = cuda_timer(
+            _sdma_ar, label="SDMA allreduce alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
 
         # Sequential: wgrad then SDMA allreduce
         def _sequential():
@@ -637,7 +678,14 @@ class TestDeferredWgradSdmaComm:
             buf = ar_buf.clone()
             comm.allreduce_sum_inplace(buf)
 
-        r_seq = cuda_timer(_sequential, label="sequential: wgrad then SDMA AR", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _sequential,
+            label="sequential: wgrad then SDMA AR",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         # Overlapped: SDMA allreduce async on sdma_stream, wgrad on default
         def _overlapped():
@@ -649,7 +697,14 @@ class TestDeferredWgradSdmaComm:
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
-        r_ovl = cuda_timer(_overlapped, label="overlapped: wgrad || SDMA AR", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _overlapped,
+            label="overlapped: wgrad || SDMA AR",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_wgrad.avg_ms + r_comm.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -658,7 +713,7 @@ class TestDeferredWgradSdmaComm:
         r_ovl.extra["overlap_ratio"] = round(overlap_ratio, 3)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"_DeferredWgrad + SDMA AllReduce (world={self.world})",
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
@@ -707,7 +762,14 @@ class TestDeferredWgradSdmaComm:
                 weights[i].main_grad.add_(grad_outs[i].T @ x)  # dW
                 comm.allreduce_sum_inplace(weights[i].main_grad)
 
-        r_eager = cuda_timer(_eager, label=f"{n_layers}-layer eager+SDMA AR", iters=10, dist_barrier=True)
+        r_eager = cuda_timer(
+            _eager,
+            label=f"{n_layers}-layer eager+SDMA AR",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         # Deferred: overlap wgrad with SDMA allreduce of previous layer
         def _deferred():
@@ -741,7 +803,9 @@ class TestDeferredWgradSdmaComm:
         r_deferred = cuda_timer(
             _deferred,
             label=f"{n_layers}-layer deferred+SDMA AR",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
 
@@ -751,7 +815,7 @@ class TestDeferredWgradSdmaComm:
         saved_ms = r_eager.avg_ms - r_deferred.avg_ms
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"{n_layers}-Layer Pipeline: Eager vs Deferred + SDMA AR (world={self.world})",
                 [r_eager, r_deferred],
             )
@@ -920,11 +984,13 @@ def main():
 
     # 2. Stream overlap: wgrad || simulated comm (shows true overlap)
     comm_stream = torch.cuda.Stream()
-    r_dw = cuda_timer(lambda: grad_out.T @ x, label="dW alone", iters=10)
+    r_dw = cuda_timer(lambda: grad_out.T @ x, label="dW alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM)
     dw_ns = int(r_dw.avg_ms * 1e6)
     sleep_cycles = max(dw_ns * 2, 100_000)
 
-    r_comm = cuda_timer(lambda: torch.cuda._sleep(sleep_cycles), label="simulated comm", iters=10)
+    r_comm = cuda_timer(
+        lambda: torch.cuda._sleep(sleep_cycles), label="simulated comm", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM
+    )
 
     def _seq_comm():
         w.main_grad.zero_()
@@ -934,7 +1000,7 @@ def main():
         torch.cuda._sleep(sleep_cycles)
         torch.cuda.synchronize()
 
-    r_seq = cuda_timer(_seq_comm, label="sequential: wgrad then comm", iters=10)
+    r_seq = cuda_timer(_seq_comm, label="sequential: wgrad then comm", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM)
 
     def _ovl_comm():
         w.main_grad.zero_()
@@ -944,7 +1010,7 @@ def main():
         dwg.execute()
         torch.cuda.current_stream().wait_stream(comm_stream)
 
-    r_ovl = cuda_timer(_ovl_comm, label="_DeferredWgrad || comm", iters=10)
+    r_ovl = cuda_timer(_ovl_comm, label="_DeferredWgrad || comm", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM)
 
     T_parts = r_dw.avg_ms + r_comm.avg_ms
     overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))

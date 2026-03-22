@@ -53,6 +53,8 @@ from benchmarks.bench_utils import (
     cuda_timer,
     format_bytes,
     print_report,
+    print_report_with_table,
+    print_table,
     require_cuda,
 )
 from benchmarks.conftest import CUDA
@@ -63,6 +65,11 @@ from benchmarks.conftest import CUDA
 HIDDEN = 4096
 FFN_HIDDEN = 14336
 N_LAYERS = 32
+
+# Timing parameters — overridable via LUMEN_BENCH_WARMUP / LUMEN_BENCH_ITERS
+_WARMUP = 10
+_ITERS = 30
+_TRIM = 10.0
 
 
 def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
@@ -520,13 +527,17 @@ class TestFP8AllGatherNCCL:
         r_bf16 = cuda_timer(
             lambda: dist.all_gather_into_tensor(bf16_out, bf16_shard),
             label=f"NCCL all_gather BF16 {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
         r_fp8 = cuda_timer(
             lambda: dist.all_gather_into_tensor(fp8_out, fp8_shard),
             label=f"NCCL all_gather FP8  {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
 
@@ -538,7 +549,7 @@ class TestFP8AllGatherNCCL:
         r_fp8.extra["bw_reduction"] = f"{bw_ratio:.1f}x"
 
         if self.rank == 0:
-            print_report(f"NCCL All-Gather BF16 vs FP8 {shape} (world={self.world})", [r_bf16, r_fp8])
+            print_report_with_table(f"NCCL All-Gather BF16 vs FP8 {shape} (world={self.world})", [r_bf16, r_fp8])
 
     @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
     def test_full_pipeline_quant_gather_dequant(self, shape):
@@ -571,14 +582,28 @@ class TestFP8AllGatherNCCL:
             dist.all_gather_into_tensor(fp8_out, fp8_shard)
             dequantize_param_from_fp8(fp8_out, scale_shard, torch.bfloat16)
 
-        r_bf16 = cuda_timer(_bf16_pipeline, label=f"BF16 gather {shape}", iters=20, dist_barrier=True)
-        r_fp8 = cuda_timer(_fp8_pipeline, label=f"FP8 quant+gather+dequant {shape}", iters=20, dist_barrier=True)
+        r_bf16 = cuda_timer(
+            _bf16_pipeline,
+            label=f"BF16 gather {shape}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_fp8 = cuda_timer(
+            _fp8_pipeline,
+            label=f"FP8 quant+gather+dequant {shape}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         r_fp8.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"Full Pipeline BF16 vs FP8 {shape} (world={self.world})",
                 [r_bf16, r_fp8],
             )
@@ -626,8 +651,17 @@ class TestFP8AllGatherNCCL:
             for i in range(len(fp8_shards)):
                 dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
 
-        r_bf16 = cuda_timer(_bf16_all, label=f"BF16 gather {n_layers}L", iters=10, dist_barrier=True)
-        r_fp8 = cuda_timer(_fp8_all, label=f"FP8 gather+dequant {n_layers}L", iters=10, dist_barrier=True)
+        r_bf16 = cuda_timer(
+            _bf16_all, label=f"BF16 gather {n_layers}L", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
+        r_fp8 = cuda_timer(
+            _fp8_all,
+            label=f"FP8 gather+dequant {n_layers}L",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         total_bf16_bytes = sum(s.nelement() * s.element_size() for s in bf16_shards)
@@ -637,7 +671,7 @@ class TestFP8AllGatherNCCL:
         r_fp8.extra["fp8_vol"] = format_bytes(total_fp8_bytes)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"Multi-Layer Pipeline ({n_layers}L, world={self.world})",
                 [r_bf16, r_fp8],
             )
@@ -693,13 +727,17 @@ class TestFP8AllGatherSDMA:
         r_bf16 = cuda_timer(
             lambda: comm.allgather_dim0(bf16_shard),
             label=f"SDMA allgather BF16 {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
         r_fp8 = cuda_timer(
             lambda: comm.allgather_dim0(fp8_shard),
             label=f"SDMA allgather FP8  {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
 
@@ -707,7 +745,7 @@ class TestFP8AllGatherSDMA:
         r_fp8.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"SDMA All-Gather BF16 vs FP8 {shape} (world={self.world})",
                 [r_bf16, r_fp8],
             )
@@ -733,7 +771,9 @@ class TestFP8AllGatherSDMA:
         r_gather = cuda_timer(
             lambda: comm.allgather_dim0(fp8_shard),
             label=f"SDMA gather FP8 {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
 
@@ -741,7 +781,9 @@ class TestFP8AllGatherSDMA:
         r_dequant = cuda_timer(
             lambda: dequantize_param_from_fp8(gathered_fp8, scale, torch.bfloat16),
             label=f"dequant {shape}",
-            iters=20,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
         )
 
         def _sequential():
@@ -754,14 +796,18 @@ class TestFP8AllGatherSDMA:
             comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_seq = cuda_timer(_sequential, label=f"sequential {shape}", iters=20, dist_barrier=True)
-        r_ovl = cuda_timer(_overlapped, label=f"overlapped {shape}", iters=20, dist_barrier=True)
+        r_seq = cuda_timer(
+            _sequential, label=f"sequential {shape}", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
+        r_ovl = cuda_timer(
+            _overlapped, label=f"overlapped {shape}", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
 
         speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"SDMA Gather+Dequant Overlap {shape} (world={self.world})",
                 [r_gather, r_dequant, r_seq, r_ovl],
             )
@@ -856,14 +902,23 @@ class TestFP8ParamE2EDistributed:
             w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
             torch.nn.functional.linear(x, w)
 
-        r_bf16 = cuda_timer(_bf16_pipeline, label="BF16 gather+GEMM", iters=20, dist_barrier=True)
-        r_fp8 = cuda_timer(_fp8_pipeline, label="FP8 gather+dequant+GEMM", iters=20, dist_barrier=True)
+        r_bf16 = cuda_timer(
+            _bf16_pipeline, label="BF16 gather+GEMM", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        )
+        r_fp8 = cuda_timer(
+            _fp8_pipeline,
+            label="FP8 gather+dequant+GEMM",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         r_fp8.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"E2E Gather+Forward {shape} (world={self.world})",
                 [r_bf16, r_fp8],
             )
@@ -909,6 +964,7 @@ def main():
     results.append(r_mem)
 
     print_report("Lumen FP8 Param All-Gather", results)
+    print_table("Summary Table", results)
     print(f"  Compression: {ratio:.2f}x  ({n_quant} tensors, saved {format_bytes(bf16_bytes - total_fp8)})")
     print()
 

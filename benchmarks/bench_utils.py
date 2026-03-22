@@ -4,13 +4,24 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Shared utilities for Lumen benchmarks."""
+"""Shared utilities for Lumen benchmarks.
+
+Environment variables that control benchmark behaviour:
+
+    LUMEN_BENCH_WARMUP   – override default warmup iterations  (default: per-call)
+    LUMEN_BENCH_ITERS    – override default timing iterations   (default: per-call)
+    LUMEN_BENCH_TRIM_PCT – percentage of outliers to trim from both tails
+                           e.g. 10 trims the lowest 10 % and highest 10 %
+                           (default: 0, no trimming)
+"""
 
 from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
+import statistics
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Generator, List, Optional
@@ -51,6 +62,10 @@ class BenchResult:
     avg_ms: float
     min_ms: float = 0.0
     max_ms: float = 0.0
+    std_ms: float = 0.0
+    median_ms: float = 0.0
+    p95_ms: float = 0.0
+    cv_pct: float = 0.0
     iters: int = 0
     extra: Dict[str, object] = field(default_factory=dict)
 
@@ -58,12 +73,58 @@ class BenchResult:
         s = f"{self.name:>45s}  avg={self.avg_ms:8.3f} ms"
         if self.min_ms > 0:
             s += f"  min={self.min_ms:8.3f} ms  max={self.max_ms:8.3f} ms"
+        if self.std_ms > 0:
+            s += f"  std={self.std_ms:7.3f} ms  cv={self.cv_pct:5.1f}%"
         for k, v in self.extra.items():
             if isinstance(v, float):
                 s += f"  {k}={v:.4f}"
             else:
                 s += f"  {k}={v}"
         return s
+
+
+def _env_int(name: str, default: Optional[int]) -> Optional[int]:
+    val = os.environ.get(name)
+    if val is not None:
+        return int(val)
+    return default
+
+
+def _env_float(name: str, default: float) -> float:
+    val = os.environ.get(name)
+    if val is not None:
+        return float(val)
+    return default
+
+
+def _trim(times: List[float], pct: float) -> List[float]:
+    """Remove *pct* % of samples from both tails."""
+    if pct <= 0 or len(times) < 4:
+        return times
+    n = max(1, int(len(times) * pct / 100))
+    s = sorted(times)
+    return s[n : len(s) - n]
+
+
+def _build_result(label: str, times: List[float], raw_iters: int) -> BenchResult:
+    """Build a :class:`BenchResult` from a list of per-iteration times."""
+    avg = statistics.mean(times)
+    med = statistics.median(times)
+    std = statistics.stdev(times) if len(times) >= 2 else 0.0
+    cv = (std / avg * 100) if avg > 0 else 0.0
+    s = sorted(times)
+    p95_idx = min(int(math.ceil(0.95 * len(s))) - 1, len(s) - 1)
+    return BenchResult(
+        name=label or "unnamed",
+        avg_ms=avg,
+        min_ms=s[0],
+        max_ms=s[-1],
+        std_ms=std,
+        median_ms=med,
+        p95_ms=s[p95_idx],
+        cv_pct=cv,
+        iters=raw_iters,
+    )
 
 
 def cuda_timer(
@@ -73,17 +134,25 @@ def cuda_timer(
     label: str = "",
     sync_before: bool = True,
     dist_barrier: bool = False,
+    trim_pct: Optional[float] = None,
 ) -> BenchResult:
     """Time *fn* on GPU using CUDA events.
 
     Args:
+        warmup: Warmup iterations (overridden by ``LUMEN_BENCH_WARMUP``).
+        iters: Timed iterations (overridden by ``LUMEN_BENCH_ITERS``).
         dist_barrier: If True, call ``dist.barrier()`` before each iteration
-            to align all ranks. Essential for benchmarks that include
-            collective operations (allgather, reduce_scatter, etc.) —
-            without this, rank drift inflates measured latency on 4+ GPUs.
+            to align all ranks.  Essential for benchmarks that include
+            collective operations (allgather, reduce_scatter, etc.).
+        trim_pct: Percentage of outliers to trim from both tails before
+            computing statistics.  Overridden by ``LUMEN_BENCH_TRIM_PCT``.
 
-    Returns a :class:`BenchResult` with average, min, and max latencies.
+    Returns a :class:`BenchResult` with avg / min / max / std / median / p95.
     """
+    warmup = _env_int("LUMEN_BENCH_WARMUP", warmup) or warmup
+    iters = _env_int("LUMEN_BENCH_ITERS", iters) or iters
+    trim = _env_float("LUMEN_BENCH_TRIM_PCT", trim_pct if trim_pct is not None else 0.0)
+
     if dist_barrier:
         import torch.distributed as dist
 
@@ -106,14 +175,8 @@ def cuda_timer(
         torch.cuda.synchronize()
         times.append(start.elapsed_time(end))
 
-    avg = sum(times) / len(times)
-    return BenchResult(
-        name=label or "unnamed",
-        avg_ms=avg,
-        min_ms=min(times),
-        max_ms=max(times),
-        iters=iters,
-    )
+    trimmed = _trim(times, trim)
+    return _build_result(label, trimmed, iters)
 
 
 def cuda_timer_batch(
@@ -126,6 +189,9 @@ def cuda_timer_batch(
 
     Useful when per-iteration event overhead matters (very fast kernels).
     """
+    warmup = _env_int("LUMEN_BENCH_WARMUP", warmup) or warmup
+    iters = _env_int("LUMEN_BENCH_ITERS", iters) or iters
+
     for _ in range(warmup):
         fn()
     torch.cuda.synchronize()
@@ -138,9 +204,10 @@ def cuda_timer_batch(
     end.record()
     torch.cuda.synchronize()
     total_ms = start.elapsed_time(end)
+    avg = total_ms / iters
     return BenchResult(
         name=label or "unnamed",
-        avg_ms=total_ms / iters,
+        avg_ms=avg,
         iters=iters,
     )
 
@@ -179,6 +246,14 @@ def format_bytes(n: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _stability_tag(cv: float) -> str:
+    if cv <= 2.0:
+        return ""
+    if cv <= 5.0:
+        return "  [~unstable]"
+    return "  [!NOISY]"
+
+
 def print_report(title: str, results: List[BenchResult]) -> None:
     """Pretty-print a table of benchmark results."""
     sep = "=" * 72
@@ -186,9 +261,16 @@ def print_report(title: str, results: List[BenchResult]) -> None:
     print(f"  {title}")
     print(sep)
     for r in results:
-        print(f"  {r}")
+        tag = _stability_tag(r.cv_pct) if r.cv_pct > 0 else ""
+        print(f"  {r}{tag}")
     print(sep)
     print()
+
+
+def print_report_with_table(title: str, results: List[BenchResult]) -> None:
+    """Print both the detailed report and a summary table."""
+    print_report(title, results)
+    print_table(title, results)
 
 
 def print_overlap_summary(
@@ -235,11 +317,158 @@ def print_overlap_summary(
     print()
 
 
+def print_table(title: str, results: List[BenchResult]) -> None:
+    """Print a summary table of all results, suitable for pasting into docs.
+
+    Output looks like::
+
+        ┌─────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────┐
+        │ Name                        │ Avg (ms) │ Min (ms) │ Med (ms) │ P95 (ms) │ Max (ms) │ CV (%) │ Extras   │
+        ├─────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────┤
+        │ allgather alone             │    0.621 │    0.580 │    0.605 │    0.700 │    0.710 │    5.2 │          │
+        └─────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────┘
+    """
+    if not results:
+        return
+
+    def _fmt_extras(r: BenchResult) -> str:
+        parts = []
+        for k, v in r.extra.items():
+            if isinstance(v, float):
+                parts.append(f"{k}={v:.2f}")
+            else:
+                parts.append(f"{k}={v}")
+        return ", ".join(parts)
+
+    name_w = max(len(r.name) for r in results)
+    name_w = max(name_w, 4) + 2
+    extras = [_fmt_extras(r) for r in results]
+    extra_w = max((len(e) for e in extras), default=0)
+    extra_w = max(extra_w, 6) + 2
+
+    num_w = 10
+
+    def _col(s: str, w: int) -> str:
+        return f" {s:<{w - 1}}"
+
+    def _num(v: float, w: int = num_w) -> str:
+        return f" {v:>{w - 2}.3f} "
+
+    def _pct(v: float, w: int = 8) -> str:
+        return f" {v:>{w - 2}.1f} "
+
+    sep_parts = [
+        "─" * name_w,
+        "─" * num_w,
+        "─" * num_w,
+        "─" * num_w,
+        "─" * num_w,
+        "─" * num_w,
+        "─" * 8,
+        "─" * extra_w,
+    ]
+
+    top = "┌" + "┬".join(sep_parts) + "┐"
+    mid = "├" + "┼".join(sep_parts) + "┤"
+    bot = "└" + "┴".join(sep_parts) + "┘"
+
+    header = (
+        "│"
+        + _col("Name", name_w)
+        + "│"
+        + _col("Avg(ms)", num_w)
+        + "│"
+        + _col("Min(ms)", num_w)
+        + "│"
+        + _col("Med(ms)", num_w)
+        + "│"
+        + _col("P95(ms)", num_w)
+        + "│"
+        + _col("Max(ms)", num_w)
+        + "│"
+        + _col("CV(%)", 8)
+        + "│"
+        + _col("Extras", extra_w)
+        + "│"
+    )
+
+    print(f"\n  {title}")
+    print(f"  {top}")
+    print(f"  {header}")
+    print(f"  {mid}")
+    for r, ext in zip(results, extras):
+        tag = " *" if r.cv_pct > 5 else " ~" if r.cv_pct > 2 else ""
+        row = (
+            "│"
+            + _col(r.name, name_w)
+            + "│"
+            + _num(r.avg_ms)
+            + "│"
+            + _num(r.min_ms)
+            + "│"
+            + _num(r.median_ms)
+            + "│"
+            + _num(r.p95_ms)
+            + "│"
+            + _num(r.max_ms)
+            + "│"
+            + _pct(r.cv_pct)
+            + "│"
+            + _col(ext + tag, extra_w)
+            + "│"
+        )
+        print(f"  {row}")
+    print(f"  {bot}")
+    print()
+
+
+def dump_csv(results: List[BenchResult], path: str) -> None:
+    """Write results to a CSV file for spreadsheet import."""
+    import csv
+
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        extra_keys: List[str] = []
+        for r in results:
+            for k in r.extra:
+                if k not in extra_keys:
+                    extra_keys.append(k)
+        writer.writerow(
+            ["name", "avg_ms", "min_ms", "median_ms", "p95_ms", "max_ms", "std_ms", "cv_pct", "iters"] + extra_keys
+        )
+        for r in results:
+            row = [
+                r.name,
+                f"{r.avg_ms:.4f}",
+                f"{r.min_ms:.4f}",
+                f"{r.median_ms:.4f}",
+                f"{r.p95_ms:.4f}",
+                f"{r.max_ms:.4f}",
+                f"{r.std_ms:.4f}",
+                f"{r.cv_pct:.2f}",
+                str(r.iters),
+            ]
+            for k in extra_keys:
+                v = r.extra.get(k, "")
+                row.append(f"{v:.4f}" if isinstance(v, float) else str(v))
+            writer.writerow(row)
+
+
 def dump_json(results: List[BenchResult], path: str) -> None:
     """Write results to a JSON file for CI integration."""
     data = []
     for r in results:
-        d = {"name": r.name, "avg_ms": r.avg_ms, "iters": r.iters}
+        d = {
+            "name": r.name,
+            "avg_ms": round(r.avg_ms, 4),
+            "min_ms": round(r.min_ms, 4),
+            "max_ms": round(r.max_ms, 4),
+            "std_ms": round(r.std_ms, 4),
+            "median_ms": round(r.median_ms, 4),
+            "p95_ms": round(r.p95_ms, 4),
+            "cv_pct": round(r.cv_pct, 2),
+            "iters": r.iters,
+        }
         d.update(r.extra)
         data.append(d)
     with open(path, "w") as f:

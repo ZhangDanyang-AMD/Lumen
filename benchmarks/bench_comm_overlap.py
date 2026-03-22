@@ -67,6 +67,8 @@ from benchmarks.bench_utils import (
     cuda_timer,
     print_overlap_summary,
     print_report,
+    print_report_with_table,
+    print_table,
     require_cuda,
 )
 from benchmarks.conftest import CUDA
@@ -83,6 +85,11 @@ TP_SIZE = 2
 M = B * S  # tokens
 K = HIDDEN  # hidden_dim
 N = FFN_HIDDEN  # FFN intermediate (sharded by TP)
+
+# Timing parameters — overridable via LUMEN_BENCH_WARMUP / LUMEN_BENCH_ITERS
+_WARMUP = 10
+_ITERS = 30
+_TRIM = 10.0  # trim 10% outliers from both tails
 
 
 # ---------------------------------------------------------------------------
@@ -459,16 +466,31 @@ class TestNCCLColumnParallelOverlap:
         r_comm = cuda_timer(
             lambda: _distributed_allgather(x_local),
             label="allgather alone",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
-        r_compute = cuda_timer(lambda: x_local @ w.T, label="GEMM alone", iters=10)
+        r_compute = cuda_timer(
+            lambda: x_local @ w.T,
+            label="GEMM alone",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
 
         def _seq():
             gathered = _distributed_allgather(x_local)
             _ = gathered @ w.T
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _seq,
+            label="sequential",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         def _ovl():
             with torch.cuda.stream(comm_stream):
@@ -476,7 +498,14 @@ class TestNCCLColumnParallelOverlap:
             _ = x_local @ w.T
             comm_stream.synchronize()
 
-        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _ovl,
+            label="overlapped",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -485,14 +514,9 @@ class TestNCCLColumnParallelOverlap:
         r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"NCCL Column-Parallel Overlap (world={self.world})",
-                [
-                    r_comm,
-                    r_compute,
-                    r_seq,
-                    r_ovl,
-                ],
+                [r_comm, r_compute, r_seq, r_ovl],
             )
             print_overlap_summary(
                 t_compute=r_compute.avg_ms,
@@ -541,16 +565,31 @@ class TestNCCLRowParallelOverlap:
         r_comm = cuda_timer(
             lambda: self._reduce_scatter(gemm_output),
             label="reduce_scatter",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
-        r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
+        r_compute = cuda_timer(
+            lambda: x @ w.T,
+            label="GEMM",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
 
         def _seq():
             self._reduce_scatter(gemm_output)
             _ = x @ w.T
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _seq,
+            label="sequential",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         def _ovl():
             with torch.cuda.stream(comm_stream):
@@ -558,7 +597,14 @@ class TestNCCLRowParallelOverlap:
             _ = x @ w.T
             comm_stream.synchronize()
 
-        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _ovl,
+            label="overlapped",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -567,14 +613,9 @@ class TestNCCLRowParallelOverlap:
         r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"NCCL Row-Parallel Overlap (world={self.world})",
-                [
-                    r_comm,
-                    r_compute,
-                    r_seq,
-                    r_ovl,
-                ],
+                [r_comm, r_compute, r_seq, r_ovl],
             )
             print_overlap_summary(
                 t_compute=r_compute.avg_ms,
@@ -641,16 +682,31 @@ class TestSdmaColumnOverlap:
         r_comm = cuda_timer(
             lambda: comm.allgather_dim0(x_local),
             label="SDMA allgather",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
-        r_compute = cuda_timer(lambda: x_local @ w.T, label="GEMM", iters=10)
+        r_compute = cuda_timer(
+            lambda: x_local @ w.T,
+            label="GEMM",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
 
         def _seq():
             comm.allgather_dim0(x_local)
             _ = x_local @ w.T
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _seq,
+            label="sequential",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         def _sdma_overlap():
             comm.allgather_dim0_async(x_local, stream=sdma_stream)
@@ -658,7 +714,14 @@ class TestSdmaColumnOverlap:
             _ = comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_ovl = cuda_timer(_sdma_overlap, label="SDMA overlap", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _sdma_overlap,
+            label="SDMA overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -667,14 +730,9 @@ class TestSdmaColumnOverlap:
         r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"SDMA Column-Parallel Overlap (world={self.world})",
-                [
-                    r_comm,
-                    r_compute,
-                    r_seq,
-                    r_ovl,
-                ],
+                [r_comm, r_compute, r_seq, r_ovl],
             )
             print_overlap_summary(
                 t_compute=r_compute.avg_ms,
@@ -726,16 +784,31 @@ class TestSdmaRowOverlap:
         r_comm = cuda_timer(
             lambda: comm.reduce_scatter_dim0(gemm_output),
             label="SDMA reduce_scatter",
-            iters=10,
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
             dist_barrier=True,
         )
-        r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
+        r_compute = cuda_timer(
+            lambda: x @ w.T,
+            label="GEMM",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
 
         def _seq():
             comm.reduce_scatter_dim0(gemm_output)
             _ = x @ w.T
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
+        r_seq = cuda_timer(
+            _seq,
+            label="sequential",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         def _sdma_rs_overlap():
             with torch.cuda.stream(sdma_stream):
@@ -744,7 +817,14 @@ class TestSdmaRowOverlap:
             comm.wait_reduce_scatter_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_ovl = cuda_timer(_sdma_rs_overlap, label="SDMA RS overlap", iters=10, dist_barrier=True)
+        r_ovl = cuda_timer(
+            _sdma_rs_overlap,
+            label="SDMA RS overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -753,14 +833,9 @@ class TestSdmaRowOverlap:
         r_ovl.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(
+            print_report_with_table(
                 f"SDMA Row-Parallel Overlap (world={self.world})",
-                [
-                    r_comm,
-                    r_compute,
-                    r_seq,
-                    r_ovl,
-                ],
+                [r_comm, r_compute, r_seq, r_ovl],
             )
             print_overlap_summary(
                 t_compute=r_compute.avg_ms,
@@ -823,7 +898,14 @@ class TestNCCLvsSdma:
             _ = x_local @ w.T
             comm_stream.synchronize()
 
-        r_nccl = cuda_timer(_nccl, label="NCCL overlap", iters=10, dist_barrier=True)
+        r_nccl = cuda_timer(
+            _nccl,
+            label="NCCL overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         # SDMA overlap
         def _sdma():
@@ -832,13 +914,20 @@ class TestNCCLvsSdma:
             comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_sdma = cuda_timer(_sdma, label="SDMA overlap", iters=10, dist_barrier=True)
+        r_sdma = cuda_timer(
+            _sdma,
+            label="SDMA overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
         r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
 
         if self.rank == 0:
-            print_report(f"NCCL vs SDMA Overlap (world={self.world})", [r_nccl, r_sdma])
+            print_report_with_table(f"NCCL vs SDMA Overlap (world={self.world})", [r_nccl, r_sdma])
 
 
 # ---------------------------------------------------------------------------
@@ -889,6 +978,7 @@ def main():
     is_rank_0 = not dist.is_initialized() or dist.get_rank() == 0
     if is_rank_0:
         print_report("Lumen TP Comm-Compute Overlap", results)
+        print_table("Summary Table", results)
         print(f"  ColumnParallel speedup: {col_speedup:.2f}x")
         print(f"  RowParallel    speedup: {row_speedup:.2f}x  (diff: {row_diff:+.1f}%)")
         print()
