@@ -1,0 +1,2833 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048], benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096], benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap, benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline, benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap, benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap, benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.546 ms  min=   0.484 ms  max=   0.673 ms
+            ColumnParallel tp_comm_overlap=True  avg=   0.624 ms  min=   0.582 ms  max=   0.722 ms  latency_ratio=0.8700
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.87x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   0.244 ms  min=   0.230 ms  max=   0.256 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   0.331 ms  min=   0.300 ms  max=   0.377 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   0.597 ms  min=   0.560 ms  max=   0.677 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   1.139 ms  min=   1.074 ms  max=   1.343 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   0.209 ms  min=   0.192 ms  max=   0.225 ms
+               RowParallel tp_comm_overlap=True  avg=   0.291 ms  min=   0.204 ms  max=   1.661 ms  diff_vs_sync=+38.9%
+========================================================================
+
+  Diff vs sync: +38.9%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   0.921 ms  min=   0.869 ms  max=   1.074 ms
+                  pipeline tp_comm_overlap=True  avg=   0.967 ms  min=   0.944 ms  max=   1.011 ms  speedup=0.9500
+========================================================================
+
+  Pipeline speedup: 0.95x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.546 ms  min=   0.477 ms  max=   0.652 ms
+            ColumnParallel tp_comm_overlap=True  avg=   0.620 ms  min=   0.585 ms  max=   0.727 ms  latency_ratio=0.8800
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.88x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   0.240 ms  min=   0.231 ms  max=   0.251 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   0.335 ms  min=   0.317 ms  max=   0.371 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   0.608 ms  min=   0.566 ms  max=   0.700 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   1.135 ms  min=   1.099 ms  max=   1.181 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   0.205 ms  min=   0.188 ms  max=   0.213 ms
+               RowParallel tp_comm_overlap=True  avg=   0.214 ms  min=   0.209 ms  max=   0.224 ms  diff_vs_sync=+4.6%
+========================================================================
+
+  Diff vs sync: +4.6%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   0.909 ms  min=   0.879 ms  max=   1.001 ms
+                  pipeline tp_comm_overlap=True  avg=   0.976 ms  min=   0.956 ms  max=   1.027 ms  speedup=0.9300
+========================================================================
+
+  Pipeline speedup: 0.93x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.548 ms  min=   0.485 ms  max=   0.670 ms
+            ColumnParallel tp_comm_overlap=True  avg=   0.618 ms  min=   0.580 ms  max=   0.724 ms  latency_ratio=0.8900
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.89x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   0.240 ms  min=   0.229 ms  max=   0.257 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   0.337 ms  min=   0.308 ms  max=   0.373 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   0.619 ms  min=   0.514 ms  max=   1.053 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   1.176 ms  min=   1.039 ms  max=   1.721 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   0.220 ms  min=   0.179 ms  max=   0.635 ms
+               RowParallel tp_comm_overlap=True  avg=   0.328 ms  min=   0.202 ms  max=   2.395 ms  diff_vs_sync=+48.6%
+========================================================================
+
+  Diff vs sync: +48.6%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   1.057 ms  min=   0.777 ms  max=   3.024 ms
+                  pipeline tp_comm_overlap=True  avg=   1.026 ms  min=   0.909 ms  max=   1.494 ms  speedup=1.0300
+========================================================================
+
+  Pipeline speedup: 1.03x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.641 ms  min=   0.484 ms  max=   2.046 ms
+            ColumnParallel tp_comm_overlap=True  avg=   1.878 ms  min=   1.023 ms  max=   4.052 ms  latency_ratio=0.3400
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.34x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.907 ms  min=   0.473 ms  max=   1.747 ms
+            ColumnParallel tp_comm_overlap=True  avg=   1.398 ms  min=   0.955 ms  max=   2.477 ms  latency_ratio=0.6500
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.65x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   1.030 ms  min=   0.537 ms  max=   1.611 ms
+            ColumnParallel tp_comm_overlap=True  avg=   1.395 ms  min=   0.672 ms  max=   3.256 ms  latency_ratio=0.7400
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.74x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   1.187 ms  min=   0.401 ms  max=   3.708 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   1.344 ms  min=   0.512 ms  max=   2.160 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   0.864 ms  min=   0.519 ms  max=   2.261 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   1.437 ms  min=   0.736 ms  max=   2.151 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   1.000 ms  min=   0.667 ms  max=   2.326 ms
+            ColumnParallel tp_comm_overlap=True  avg=   1.212 ms  min=   0.833 ms  max=   2.066 ms  latency_ratio=0.8200
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.82x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   1.006 ms  min=   0.436 ms  max=   1.931 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   2.392 ms  min=   1.045 ms  max=  12.783 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   2.025 ms  min=   1.081 ms  max=  12.377 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   1.636 ms  min=   0.774 ms  max=   2.931 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   3.632 ms  min=   0.765 ms  max=  23.004 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  LumenColumnParallelLinear: Overlap vs Non-Overlap
+========================================================================
+           ColumnParallel tp_comm_overlap=False  avg=   0.926 ms  min=   0.654 ms  max=   1.588 ms
+            ColumnParallel tp_comm_overlap=True  avg=   2.114 ms  min=   0.541 ms  max=   5.071 ms  latency_ratio=0.4400
+========================================================================
+
+  Latency ratio (non-overlap / overlap): 0.44x
+
+  NOTE: Mocked comm (torch.cat ≈ 0 ms) — ratio < 1.0 is expected.
+  Overlap path has extra stream sync + 2 GEMMs overhead.
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[512]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   2.143 ms  min=   0.411 ms  max=  18.693 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+========================================================================
+  ColumnParallel Overlap S=512
+========================================================================
+                   ColumnParallel overlap S=512  avg=   0.376 ms  min=   0.242 ms  max=   0.639 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[1024]
+========================================================================
+  ColumnParallel Overlap S=1024
+========================================================================
+                  ColumnParallel overlap S=1024  avg=   1.588 ms  min=   0.507 ms  max=  11.547 ms
+========================================================================
+
+
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   4.706 ms  min=   2.185 ms  max=  13.692 ms
+========================================================================
+
+PASSEDPASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[2048]
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   5.036 ms  min=   1.143 ms  max=  24.289 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   3.518 ms  min=   0.612 ms  max=  23.561 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   4.619 ms  min=   0.930 ms  max=  13.914 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   1.146 ms  min=   0.338 ms  max=  11.429 ms
+               RowParallel tp_comm_overlap=True  avg=   2.149 ms  min=   0.640 ms  max=  12.420 ms  diff_vs_sync=+87.5%
+========================================================================
+
+  Diff vs sync: +87.5%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   2.872 ms  min=   1.260 ms  max=  12.336 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  ColumnParallel Overlap S=2048
+========================================================================
+                  ColumnParallel overlap S=2048  avg=   4.538 ms  min=   1.066 ms  max=  16.314 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenColumnParallelOverlap::test_overlap_seqlen_sweep[4096]
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   3.303 ms  min=   1.451 ms  max=  12.960 ms
+========================================================================
+
+
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   1.605 ms  min=   0.343 ms  max=  11.873 ms
+               RowParallel tp_comm_overlap=True  avg=   3.097 ms  min=   0.774 ms  max=  13.122 ms  diff_vs_sync=+93.0%
+========================================================================
+
+  Diff vs sync: +93.0%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSEDPASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   0.941 ms  min=   0.226 ms  max=   1.551 ms
+               RowParallel tp_comm_overlap=True  avg=   1.464 ms  min=   0.532 ms  max=  11.340 ms  diff_vs_sync=+55.6%
+========================================================================
+
+  Diff vs sync: +55.6%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   0.994 ms  min=   0.505 ms  max=   2.879 ms
+               RowParallel tp_comm_overlap=True  avg=   2.056 ms  min=   1.055 ms  max=  11.877 ms  diff_vs_sync=+106.8%
+========================================================================
+
+  Diff vs sync: +106.8%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  ColumnParallel Overlap S=4096
+========================================================================
+                  ColumnParallel overlap S=4096  avg=   5.846 ms  min=   2.512 ms  max=  14.480 ms
+========================================================================
+
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_overlap_vs_non_overlap
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   3.038 ms  min=   1.112 ms  max=  12.530 ms
+                  pipeline tp_comm_overlap=True  avg=   3.713 ms  min=   1.571 ms  max=  13.833 ms  speedup=0.8200
+========================================================================
+
+  Pipeline speedup: 0.82x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   3.409 ms  min=   1.124 ms  max=  13.851 ms
+                  pipeline tp_comm_overlap=True  avg=   6.145 ms  min=   0.942 ms  max=  15.405 ms  speedup=0.5500
+========================================================================
+
+  Pipeline speedup: 0.55x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  LumenRowParallelLinear: Overlap vs Non-Overlap
+========================================================================
+              RowParallel tp_comm_overlap=False  avg=   2.113 ms  min=   0.332 ms  max=  12.691 ms
+               RowParallel tp_comm_overlap=True  avg=   1.982 ms  min=   0.578 ms  max=  12.266 ms  diff_vs_sync=-6.2%
+========================================================================
+
+  Diff vs sync: -6.2%
+
+  NOTE: Row-parallel overlap benefit appears in multi-layer pipelines,
+  not in single-layer isolation (async RS still waits before returning).
+PASSED
+benchmarks/bench_comm_overlap.py::TestLumenRowParallelOverlap::test_column_row_pipeline
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   3.639 ms  min=   1.537 ms  max=  13.812 ms
+                  pipeline tp_comm_overlap=True  avg=   2.293 ms  min=   0.968 ms  max=  12.881 ms  speedup=1.5900
+========================================================================
+
+  Pipeline speedup: 1.59x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   4.644 ms  min=   1.323 ms  max=  14.969 ms
+                  pipeline tp_comm_overlap=True  avg=   6.229 ms  min=   1.917 ms  max=  15.541 ms  speedup=0.7500
+========================================================================
+
+  Pipeline speedup: 0.75x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap
+========================================================================
+  Column→Row Pipeline: Overlap vs Non-Overlap
+========================================================================
+                 pipeline tp_comm_overlap=False  avg=   2.169 ms  min=   0.775 ms  max=  12.452 ms
+                  pipeline tp_comm_overlap=True  avg=   2.214 ms  min=   0.897 ms  max=  12.200 ms  speedup=0.9800
+========================================================================
+
+  Pipeline speedup: 0.98x
+PASSED
+benchmarks/bench_comm_overlap.py::TestNCCLColumnParallelOverlap::test_allgather_gemm_overlap [Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+
+========================================================================
+  NCCL Column-Parallel Overlap (world=8)
+========================================================================
+                                allgather alone  avg=   0.227 ms  min=   0.211 ms  max=   0.291 ms
+                                     GEMM alone  avg=   0.033 ms  min=   0.032 ms  max=   0.035 ms
+                                     sequential  avg=   1.520 ms  min=   0.370 ms  max=  11.788 ms
+                                     overlapped  avg=   0.265 ms  min=   0.260 ms  max=   0.274 ms  overlap_ratio=-0.0210  speedup=5.7300
+========================================================================
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.033 ms
+  │ ▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ allgather: 0.227 ms
+  │ total = 1.520 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ 0.265 ms
+  └─────────────────────────────────────────┘
+
+  Hidden GEMM: 1.255 / 0.033 ms (3801% of GEMM hidden)
+  Overlap ratio:  -0.021
+  Speedup:        5.73x
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLRowParallelOverlap::test_reduce_scatter_gemm_overlap
+========================================================================
+  NCCL Row-Parallel Overlap (world=8)
+========================================================================
+                                 reduce_scatter  avg=   0.170 ms  min=   0.163 ms  max=   0.181 ms
+                                           GEMM  avg=   0.037 ms  min=   0.036 ms  max=   0.038 ms
+                                     sequential  avg=   0.247 ms  min=   0.240 ms  max=   0.258 ms
+                                     overlapped  avg=   0.210 ms  min=   0.206 ms  max=   0.216 ms  overlap_ratio=-0.0110  speedup=1.1800
+========================================================================
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.037 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░ │ reduce_scatter: 0.170 ms
+  │ total = 0.247 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░ │ 0.210 ms
+  └─────────────────────────────────────────┘
+
+  Hidden GEMM: 0.037 / 0.037 ms (98% of GEMM hidden)
+  Overlap ratio:  -0.011
+  Speedup:        1.18x
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap
+
+benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap benchmarks/bench_comm_overlap.py::TestSdmaColumnOverlap::test_sdma_allgather_gemm_overlap rank 0 RDMA devices: None
+rank 6 rankInNode 6 select no device
+rank 3 rankInNode 3 select no device
+rank 2 rankInNode 2 select no device
+rank 0 rankInNode 0 select no device
+rank 7 rankInNode 7 select no device
+rank 4 rankInNode 4 select no device
+rank 1 rankInNode 1 select no device
+rank 5 rankInNode 5 select no device
+AllgatherSdma initialized: PE 4 of 8
+  Flags allocated: 64 bytes at 0x7edb38a80000
+  Input transit buffer: 4.00 MB at 0x7ed621800000
+  Output transit buffer: 32.00 MB at 0x7ed617400000
+AllgatherSdma initialized: PE 5 of 8
+  Flags allocated: 64 bytes at 0x7f5e25880000
+  Input transit buffer: 4.00 MB at 0x7f594a400000
+  Output transit buffer: 32.00 MB at 0x7f5944800000
+AllgatherSdma initialized: PE 3 of 8
+AllgatherSdma initialized: PE 7 of 8
+  Flags allocated: 64 bytes at 0x7f10d0280000
+  Flags allocated: 64 bytes at 0x7fb2b0280000
+  Input transit buffer: 4.00 MB at 0x7f0bb9400000
+AllgatherSdma initialized: PE 2 of 8
+  Input transit buffer: 4.00 MB at 0x7fad7a400000
+  Output transit buffer: 32.00 MB at 0x7f0baf400000
+  Flags allocated: 64 bytes at 0x7fb6b0a80000
+  Output transit buffer: 32.00 MB at 0x7fad74800000
+  Input transit buffer: 4.00 MB at 0x7fb1cd400000
+AllgatherSdma initialized: PE 1 of 8
+  Output transit buffer: 32.00 MB at 0x7fb1c3400000
+  Flags allocated: 64 bytes at 0x7f8898280000
+AllgatherSdma initialized: PE 6 of 8
+  Input transit buffer: 4.00 MB at 0x7f83bac00000
+  Flags allocated: 64 bytes at 0x7ec664480000
+  Output transit buffer: 32.00 MB at 0x7f83b5000000
+  Input transit buffer: 4.00 MB at 0x7ec146c00000
+  Output transit buffer: 32.00 MB at 0x7ec141000000
+AllgatherSdma initialized: PE 0 of 8
+  Flags allocated: 64 bytes at 0x7ed391080000
+  Input transit buffer: 4.00 MB at 0x7ecedf000000
+  Output transit buffer: 32.00 MB at 0x7eced9400000
+PE 6: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Async PUT operation started successfully
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 0: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 6: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 2: Async Allgather completed in 0.099093 seconds
+PE 4: Async Allgather completed in 0.099147 seconds
+PE 1: Async Allgather completed in 0.099009 seconds
+PE 6: Async Allgather completed in 0.099185 seconds
+PE 7: Async Allgather completed in 0.099017 seconds
+PE 3: Async Allgather completed in 0.099033 seconds
+PE 5: Async Allgather completed in 0.099090 seconds
+PE 0: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.099126 seconds
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Async PUT operation started successfully
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 7: Starting async AllGATHER (PUT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 0: Launching async PUT kernel...
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+  Grid size: 32768, Block size: 256
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 0: Async PUT operation started successfully
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 7: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 4: Async Allgather completed in 0.000275 seconds
+PE 1: Async Allgather completed in 0.000270 seconds
+PE 7: Async Allgather completed in 0.000235 seconds
+PE 6: Async Allgather completed in 0.000275 seconds
+PE 2: Async Allgather completed in 0.000281 seconds
+PE 0: Async Allgather completed in 0.000225 seconds
+PE 3: Async Allgather completed in 0.000253 seconds
+PE 5: Async Allgather completed in 0.000273 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 2: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 6: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 1: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Async Allgather completed in 0.000253 seconds
+PE 2: Async Allgather completed in 0.000255 seconds
+PE 4: Async Allgather completed in 0.000257 seconds
+PE 0: Async Allgather completed in 0.000256 seconds
+PE 1: Async Allgather completed in 0.000256 seconds
+PE 3: Async Allgather completed in 0.000251 seconds
+PE 7: Async Allgather completed in 0.000256 seconds
+PE 5: Async Allgather completed in 0.000252 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 4: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 0: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 1: Async Allgather completed in 0.000259 seconds
+PE 4: Async Allgather completed in 0.000263 seconds
+PE 5: Async Allgather completed in 0.000258 seconds
+PE 0: Async Allgather completed in 0.000261 seconds
+PE 2: Async Allgather completed in 0.000264 seconds
+PE 7: Async Allgather completed in 0.000261 seconds
+PE 3: Async Allgather completed in 0.000261 seconds
+PE 6: Async Allgather completed in 0.000263 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000252 seconds
+PE 0: Async Allgather completed in 0.000255 seconds
+PE 2: Async Allgather completed in 0.000257 seconds
+PE 6: Async Allgather completed in 0.000254 seconds
+PE 4: Async Allgather completed in 0.000262 seconds
+PE 7: Async Allgather completed in 0.000259 seconds
+PE 5: Async Allgather completed in 0.000263 seconds
+PE 1: Async Allgather completed in 0.000265 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 1: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+PE 4: Waiting for async Allgather completion (WAIT phase)
+  Grid size: 32768, Block size: 256
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Async Allgather completed in 0.000267 seconds
+PE 1: Async Allgather completed in 0.000253 seconds
+PE 6: Async Allgather completed in 0.000258 seconds
+PE 5: Async Allgather completed in 0.000262 seconds
+PE 7: Async Allgather completed in 0.000248 seconds
+PE 0: Async Allgather completed in 0.000252 seconds
+PE 3: Async Allgather completed in 0.000254 seconds
+PE 2: Async Allgather completed in 0.000269 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+PE 2: Starting async AllGATHER (PUT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 2: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+PE 5: Async PUT operation started successfully
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 0: Async PUT operation started successfully
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 2: Async Allgather completed in 0.000249 seconds
+PE 1: Async Allgather completed in 0.000258 seconds
+PE 3: Async Allgather completed in 0.000247 seconds
+PE 6: Async Allgather completed in 0.000255 seconds
+PE 4: Async Allgather completed in 0.000267 seconds
+PE 0: Async Allgather completed in 0.000254 seconds
+PE 5: Async Allgather completed in 0.000264 seconds
+PE 7: Async Allgather completed in 0.000260 seconds
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 6: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+PE 2: Async PUT operation started successfully
+PE 5: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 5: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 7: Async PUT operation started successfully
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 1: Async Allgather completed in 0.000263 seconds
+PE 0: Async Allgather completed in 0.000255 seconds
+PE 7: Async Allgather completed in 0.000256 seconds
+PE 6: Async Allgather completed in 0.000267 seconds
+PE 2: Async Allgather completed in 0.000275 seconds
+PE 5: Async Allgather completed in 0.000264 seconds
+PE 3: Async Allgather completed in 0.000272 seconds
+PE 4: Async Allgather completed in 0.000269 seconds
+PE 1: Starting async AllGATHER (PUT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 4: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000239 seconds
+PE 0: Async Allgather completed in 0.000250 seconds
+PE 2: Async Allgather completed in 0.000245 seconds
+PE 4: Async Allgather completed in 0.000250 seconds
+PE 5: Async Allgather completed in 0.000249 seconds
+PE 7: Async Allgather completed in 0.000255 seconds
+PE 1: Async Allgather completed in 0.000256 seconds
+PE 6: Async Allgather completed in 0.000250 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 2: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 0: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 1: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000253 seconds
+PE 0: Async Allgather completed in 0.000253 seconds
+PE 2: Async Allgather completed in 0.000254 seconds
+PE 1: Async Allgather completed in 0.000248 seconds
+PE 4: Async Allgather completed in 0.000262 seconds
+PE 5: Async Allgather completed in 0.000259 seconds
+PE 7: Async Allgather completed in 0.000254 seconds
+PE 6: Async Allgather completed in 0.000258 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 6: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 2: Async Allgather completed in 0.000251 seconds
+PE 5: Async Allgather completed in 0.000255 seconds
+PE 0: Async Allgather completed in 0.000257 seconds
+PE 1: Async Allgather completed in 0.000256 seconds
+PE 3: Async Allgather completed in 0.000257 seconds
+PE 6: Async Allgather completed in 0.000260 seconds
+PE 4: Async Allgather completed in 0.000262 seconds
+PE 7: Async Allgather completed in 0.000262 seconds
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 2: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 6: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000248 seconds
+PE 3: Async Allgather completed in 0.000239 seconds
+PE 4: Async Allgather completed in 0.000255 seconds
+PE 7: Async Allgather completed in 0.000245 seconds
+PE 1: Async Allgather completed in 0.000252 seconds
+PE 2: Async Allgather completed in 0.000254 seconds
+PE 5: Async Allgather completed in 0.000260 seconds
+PE 6: Async Allgather completed in 0.000255 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+PE 0: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 7: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+PE 6: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 6: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Async Allgather completed in 0.000242 seconds
+PE 2: Async Allgather completed in 0.000246 seconds
+PE 5: Async Allgather completed in 0.000246 seconds
+PE 1: Async Allgather completed in 0.000249 seconds
+PE 0: Async Allgather completed in 0.000255 seconds
+PE 3: Async Allgather completed in 0.000260 seconds
+PE 4: Async Allgather completed in 0.000262 seconds
+PE 7: Async Allgather completed in 0.000253 seconds
+PE 6: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 4: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+PE 1: Launching async PUT kernel...
+PE 2: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 1: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000255 seconds
+PE 2: Async Allgather completed in 0.000260 seconds
+PE 1: Async Allgather completed in 0.000257 seconds
+PE 3: Async Allgather completed in 0.000252 seconds
+PE 7: Async Allgather completed in 0.000250 seconds
+PE 4: Async Allgather completed in 0.000261 seconds
+PE 6: Async Allgather completed in 0.000264 seconds
+PE 5: Async Allgather completed in 0.000264 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 1: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 6: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 5: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000252 seconds
+PE 2: Async Allgather completed in 0.000254 seconds
+PE 3: Async Allgather completed in 0.000249 seconds
+PE 6: Async Allgather completed in 0.000252 seconds
+PE 4: Async Allgather completed in 0.000258 seconds
+PE 1: Async Allgather completed in 0.000257 seconds
+PE 5: Async Allgather completed in 0.000251 seconds
+PE 7: Async Allgather completed in 0.000255 seconds
+AllgatherSdma destroyed: PE 4
+AllgatherSdma destroyed: PE 2
+AllgatherSdma destroyed: PE 6
+AllgatherSdma destroyed: PE 3
+AllgatherSdma destroyed: PE 5
+AllgatherSdma destroyed: PE 1
+
+========================================================================AllgatherSdma destroyed: PE 7
+
+  SDMA Column-Parallel Overlap (world=8)
+========================================================================
+                                 SDMA allgather  avg=   0.133 ms  min=   0.130 ms  max=   0.137 ms
+                                           GEMM  avg=   0.035 ms  min=   0.033 ms  max=   0.037 ms
+                                     sequential  avg=   0.184 ms  min=   0.180 ms  max=   0.191 ms
+                                   SDMA overlap  avg=   0.281 ms  min=   0.274 ms  max=   0.288 ms  overlap_ratio=-0.6790  speedup=0.6600
+========================================================================
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ███████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.035 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░ │ SDMA AG: 0.133 ms
+  │ total = 0.184 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 0.281 ms
+  └─────────────────────────────────────────┘
+
+  Hidden GEMM: -0.097 / 0.035 ms (-280% of GEMM hidden)
+  Overlap ratio:  -0.679
+  Speedup:        0.66x
+
+AllgatherSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap
+
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap
+benchmarks/bench_comm_overlap.py::TestSdmaRowOverlap::test_sdma_reduce_scatter_overlap AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ed621c00000
+  Flags: 64 bytes at 0x7fb1cd800000
+  Barrier: 128 bytes at 0x7ed617c00000
+  Flags: 64 bytes at 0x7f83bb000000
+  Barrier: 128 bytes at 0x7fb1c3c00000
+  Barrier: 128 bytes at 0x7f83b5800000
+  Output transit buffer: 32.00 MB at 0x7ed5fae00000
+  Output transit buffer: 32.00 MB at 0x7f8397a00000
+  Output transit buffer: 32.00 MB at 0x7fb1a6a00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7fad7a800000
+  Barrier: 128 bytes at 0x7fad75000000
+  Output transit buffer: 32.00 MB at 0x7fad57a00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0bb9800000
+  Barrier: 128 bytes at 0x7f0bafc00000
+  Output transit buffer: 32.00 MB at 0x7f0b92a00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ec147000000
+  Barrier: 128 bytes at 0x7ec141800000
+  Output transit buffer: 32.00 MB at 0x7ec123a00000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f594a800000
+  Barrier: 128 bytes at 0x7f5945000000
+  Output transit buffer: 32.00 MB at 0x7f5927a00000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7ecedf400000
+  Barrier: 128 bytes at 0x7eced9c00000
+  Output transit buffer: 32.00 MB at 0x7ecebc800000
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 4
+
+========================================================================
+  SDMA Row-Parallel Overlap (world=8)
+========================================================================
+AllreduceSdma destroyed: PE 7
+                            SDMA reduce_scatter  avg=   0.236 ms  min=   0.234 ms  max=   0.240 ms
+                                           GEMM  avg=   0.037 ms  min=   0.034 ms  max=   0.041 ms
+                                     sequential  avg=   0.292 ms  min=   0.287 ms  max=   0.299 ms
+                                SDMA RS overlap  avg=   0.269 ms  min=   0.264 ms  max=   0.280 ms  overlap_ratio=0.0160  speedup=1.0800
+========================================================================
+
+  ┌── Sequential (──────────────────────────)┐
+  │ █████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.037 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░ │ SDMA RS: 0.236 ms
+  │ total = 0.292 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░ │ 0.269 ms
+  └─────────────────────────────────────────┘
+
+  Hidden GEMM: 0.023 / 0.037 ms (61% of GEMM hidden)
+  Overlap ratio:  0.016
+  Speedup:        1.08x
+
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap
+benchmarks/bench_comm_overlap.py::TestNCCLvsSdma::test_nccl_vs_sdma_allgather_overlap AllgatherSdma initialized: PE 4 of 8
+  Flags allocated: 64 bytes at 0x7ed621c00000
+AllgatherSdma initialized: PE 5 of 8
+  Flags allocated: 64 bytes at 0x7f594a800000
+  Input transit buffer: 4.00 MB at 0x7ed5fb200000
+  Output transit buffer: 32.00 MB at 0x7ed5e0800000
+  Input transit buffer: 4.00 MB at 0x7f5927e00000
+  Output transit buffer: 32.00 MB at 0x7f590d800000
+AllgatherSdma initialized: PE 3 of 8
+AllgatherSdma initialized: PE 2 of 8
+AllgatherSdma initialized: PE 6 of 8
+  Flags allocated: 64 bytes at 0x7fad7a800000
+AllgatherSdma initialized: PE 0 of 8
+  Flags allocated: 64 bytes at 0x7ecedf400000
+  Flags allocated: 64 bytes at 0x7fb1cd800000
+  Flags allocated: 64 bytes at 0x7ec147000000
+  Input transit buffer: 4.00 MB at 0x7ecebcc00000
+  Input transit buffer: 4.00 MB at 0x7fad57e00000
+  Output transit buffer: 32.00 MB at 0x7ecea4400000
+  Input transit buffer: 4.00 MB at 0x7fb1a6e00000
+  Output transit buffer: 32.00 MB at 0x7fad3d800000
+  Input transit buffer: 4.00 MB at 0x7ec123e00000
+  Output transit buffer: 32.00 MB at 0x7fb18c400000
+  Output transit buffer: 32.00 MB at 0x7ec109e00000
+AllgatherSdma initialized: PE 7 of 8
+  Flags allocated: 64 bytes at 0x7f0bb9800000
+  Input transit buffer: 4.00 MB at 0x7f0b92e00000
+  Output transit buffer: 32.00 MB at 0x7f0b78400000
+AllgatherSdma initialized: PE 1 of 8
+  Flags allocated: 64 bytes at 0x7f83bb000000
+  Input transit buffer: 4.00 MB at 0x7f8397e00000
+  Output transit buffer: 32.00 MB at 0x7f837de00000
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 2: Async Allgather completed in 0.003416 seconds
+PE 5: Async Allgather completed in 0.003486 seconds
+PE 4: Async Allgather completed in 0.003501 seconds
+PE 6: Async Allgather completed in 0.003491 seconds
+PE 7: Async Allgather completed in 0.003364 seconds
+PE 1: Async Allgather completed in 0.003378 seconds
+PE 0: Async Allgather completed in 0.003455 seconds
+PE 3: Async Allgather completed in 0.003439 seconds
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+PE 4: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 4: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Async PUT operation started successfully
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 6: Async Allgather completed in 0.000249 seconds
+PE 2: Async Allgather completed in 0.000258 seconds
+PE 0: Async Allgather completed in 0.000251 seconds
+PE 4: Async Allgather completed in 0.000260 seconds
+PE 5: Async Allgather completed in 0.000262 seconds
+PE 3: Async Allgather completed in 0.000253 seconds
+PE 7: Async Allgather completed in 0.000231 seconds
+PE 1: Async Allgather completed in 0.000259 seconds
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000250 seconds
+PE 3: Async Allgather completed in 0.000245 seconds
+PE 1: Async Allgather completed in 0.000244 seconds
+PE 2: Async Allgather completed in 0.000253 seconds
+PE 6: Async Allgather completed in 0.000254 seconds
+PE 4: Async Allgather completed in 0.000251 seconds
+PE 5: Async Allgather completed in 0.000249 seconds
+PE 7: Async Allgather completed in 0.000248 seconds
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 2: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 3: Async PUT operation started successfully
+PE 7: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 0: Async PUT operation started successfully
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000243 seconds
+PE 3: Async Allgather completed in 0.000245 seconds
+PE 1: Async Allgather completed in 0.000244 seconds
+PE 4: Async Allgather completed in 0.000243 seconds
+PE 2: Async Allgather completed in 0.000244 seconds
+PE 7: Async Allgather completed in 0.000241 seconds
+PE 5: Async Allgather completed in 0.000243 seconds
+PE 6: Async Allgather completed in 0.000245 seconds
+PE 0: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 3: Launching async PUT kernel...
+PE 4: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 2: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+PE 0: Async PUT operation started successfully
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+PE 3: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+PE 1: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000242 seconds
+PE 1: Async Allgather completed in 0.000241 seconds
+PE 2: Async Allgather completed in 0.000242 seconds
+PE 6: Async Allgather completed in 0.000238 seconds
+PE 3: Async Allgather completed in 0.000244 seconds
+PE 4: Async Allgather completed in 0.000244 seconds
+PE 7: Async Allgather completed in 0.000240 seconds
+PE 5: Async Allgather completed in 0.000241 seconds
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 2: Async PUT operation started successfully
+PE 0: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+PE 1: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 0: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000248 seconds
+PE 3: Async Allgather completed in 0.000243 seconds
+PE 2: Async Allgather completed in 0.000257 seconds
+PE 5: Async Allgather completed in 0.000253 seconds
+PE 6: Async Allgather completed in 0.000253 seconds
+PE 4: Async Allgather completed in 0.000256 seconds
+PE 1: Async Allgather completed in 0.000253 seconds
+PE 7: Async Allgather completed in 0.000231 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 5: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 7: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 2: Async PUT operation started successfully
+PE 5: Launching async PUT kernel...
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 1: Async Allgather completed in 0.000234 seconds
+PE 2: Async Allgather completed in 0.000244 seconds
+PE 5: Async Allgather completed in 0.000234 seconds
+PE 4: Async Allgather completed in 0.000249 seconds
+PE 0: Async Allgather completed in 0.000246 seconds
+PE 3: Async Allgather completed in 0.000249 seconds
+PE 7: Async Allgather completed in 0.000238 seconds
+PE 6: Async Allgather completed in 0.000246 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+PE 1: Starting async AllGATHER (PUT phase)
+PE 5: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+PE 3: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 7: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 2: Async Allgather completed in 0.000260 seconds
+PE 3: Async Allgather completed in 0.000257 seconds
+PE 0: Async Allgather completed in 0.000260 seconds
+PE 1: Async Allgather completed in 0.000257 seconds
+PE 4: Async Allgather completed in 0.000268 seconds
+PE 5: Async Allgather completed in 0.000262 seconds
+PE 6: Async Allgather completed in 0.000250 seconds
+PE 7: Async Allgather completed in 0.000256 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Launching async PUT kernel...
+PE 0: Async PUT operation started successfully
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 5: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 3: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 5: Launching async PUT kernel...
+PE 6: Launching async PUT kernel...
+PE 7: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 0: Async Allgather completed in 0.000253 seconds
+PE 3: Async Allgather completed in 0.000253 seconds
+PE 2: Async Allgather completed in 0.000256 seconds
+PE 1: Async Allgather completed in 0.000257 seconds
+PE 4: Async Allgather completed in 0.000259 seconds
+PE 7: Async Allgather completed in 0.000247 seconds
+PE 5: Async Allgather completed in 0.000256 seconds
+PE 6: Async Allgather completed in 0.000252 seconds
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+PE 0: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 4: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+PE 2: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 6: Async PUT operation started successfully
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000239 seconds
+PE 1: Async Allgather completed in 0.000236 seconds
+PE 5: Async Allgather completed in 0.000233 seconds
+PE 2: Async Allgather completed in 0.000239 seconds
+PE 0: Async Allgather completed in 0.000244 seconds
+PE 6: Async Allgather completed in 0.000238 seconds
+PE 7: Async Allgather completed in 0.000242 seconds
+PE 4: Async Allgather completed in 0.000240 seconds
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+PE 1: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 6: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 3: Async PUT operation started successfully
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 7: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000242 seconds
+PE 0: Async Allgather completed in 0.000248 seconds
+PE 4: Async Allgather completed in 0.000249 seconds
+PE 1: Async Allgather completed in 0.000250 seconds
+PE 7: Async Allgather completed in 0.000240 seconds
+PE 5: Async Allgather completed in 0.000256 seconds
+PE 6: Async Allgather completed in 0.000245 seconds
+PE 2: Async Allgather completed in 0.000253 seconds
+PE 5: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+PE 0: Launching async PUT kernel...
+PE 3: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 7: Starting async AllGATHER (PUT phase)
+PE 4: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 6: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 4: Launching async PUT kernel...
+PE 0: Async PUT operation started successfully
+PE 2: Launching async PUT kernel...
+PE 5: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 7: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 6: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 1: Async Allgather completed in 0.000256 seconds
+PE 2: Async Allgather completed in 0.000254 seconds
+PE 0: Async Allgather completed in 0.000260 seconds
+PE 3: Async Allgather completed in 0.000259 seconds
+PE 4: Async Allgather completed in 0.000257 seconds
+PE 5: Async Allgather completed in 0.000263 seconds
+PE 6: Async Allgather completed in 0.000253 seconds
+PE 7: Async Allgather completed in 0.000256 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 2: Launching async PUT kernel...
+PE 1: Starting async AllGATHER (PUT phase)
+PE 0: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 4: Async PUT operation started successfully
+PE 5: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+PE 6: Launching async PUT kernel...
+PE 1: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 2: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 6: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 3: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 5: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 2: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 4: Async Allgather completed in 0.000257 seconds
+PE 2: Async Allgather completed in 0.000255 seconds
+PE 1: Async Allgather completed in 0.000254 seconds
+PE 0: Async Allgather completed in 0.000254 seconds
+PE 3: Async Allgather completed in 0.000257 seconds
+PE 5: Async Allgather completed in 0.000256 seconds
+PE 6: Async Allgather completed in 0.000255 seconds
+PE 7: Async Allgather completed in 0.000249 seconds
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 2: Starting async AllGATHER (PUT phase)
+PE 6: Starting async AllGATHER (PUT phase)
+PE 4: Async PUT operation started successfully
+PE 6: Launching async PUT kernel...
+PE 0: Starting async AllGATHER (PUT phase)
+PE 1: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+PE 5: Starting async AllGATHER (PUT phase)
+PE 3: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 3: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+PE 7: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 1: Async PUT operation started successfully
+PE 0: Async PUT operation started successfully
+PE 2: Async PUT operation started successfully
+PE 5: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 3: Async PUT operation started successfully
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 6: Async Allgather completed in 0.000262 seconds
+PE 4: Async Allgather completed in 0.000269 seconds
+PE 0: Async Allgather completed in 0.000262 seconds
+PE 5: Async Allgather completed in 0.000258 seconds
+PE 7: Async Allgather completed in 0.000257 seconds
+PE 1: Async Allgather completed in 0.000267 seconds
+PE 3: Async Allgather completed in 0.000263 seconds
+PE 2: Async Allgather completed in 0.000272 seconds
+PE 6: Starting async AllGATHER (PUT phase)
+PE 6: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 4: Starting async AllGATHER (PUT phase)
+PE 4: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 0: Starting async AllGATHER (PUT phase)
+PE 0: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 6: Async PUT operation started successfully
+PE 4: Async PUT operation started successfully
+PE 5: Starting async AllGATHER (PUT phase)
+PE 5: Launching async PUT kernel...
+  Grid size: 32768, Block size: 256
+PE 1: Starting async AllGATHER (PUT phase)
+PE 0: Async PUT operation started successfully
+PE 3: Starting async AllGATHER (PUT phase)
+PE 2: Starting async AllGATHER (PUT phase)
+PE 1: Launching async PUT kernel...
+PE 7: Starting async AllGATHER (PUT phase)
+PE 7: Launching async PUT kernel...
+PE 2: Launching async PUT kernel...
+PE 3: Launching async PUT kernel...
+PE 5: Async PUT operation started successfully
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+  Grid size: 32768, Block size: 256
+PE 6: Waiting for async Allgather completion (WAIT phase)
+PE 4: Waiting for async Allgather completion (WAIT phase)
+PE 2: Async PUT operation started successfully
+PE 1: Async PUT operation started successfully
+PE 7: Async PUT operation started successfully
+PE 0: Waiting for async Allgather completion (WAIT phase)
+PE 3: Async PUT operation started successfully
+PE 6: Synchronizing to ensure PUT kernel completion
+PE 4: Synchronizing to ensure PUT kernel completion
+PE 0: Synchronizing to ensure PUT kernel completion
+PE 5: Waiting for async Allgather completion (WAIT phase)
+PE 5: Synchronizing to ensure PUT kernel completion
+PE 2: Waiting for async Allgather completion (WAIT phase)
+PE 1: Waiting for async Allgather completion (WAIT phase)
+PE 3: Waiting for async Allgather completion (WAIT phase)
+PE 7: Waiting for async Allgather completion (WAIT phase)
+PE 2: Synchronizing to ensure PUT kernel completion
+PE 1: Synchronizing to ensure PUT kernel completion
+PE 3: Synchronizing to ensure PUT kernel completion
+PE 7: Synchronizing to ensure PUT kernel completion
+PE 0: Copying results to user output buffer
+PE 3: Copying results to user output buffer
+PE 1: Copying results to user output buffer
+PE 2: Copying results to user output buffer
+PE 5: Copying results to user output buffer
+PE 7: Copying results to user output buffer
+PE 6: Copying results to user output buffer
+PE 4: Copying results to user output buffer
+PE 3: Async Allgather completed in 0.000240 seconds
+PE 1: Async Allgather completed in 0.000244 seconds
+PE 0: Async Allgather completed in 0.000249 seconds
+PE 5: Async Allgather completed in 0.000247 seconds
+PE 2: Async Allgather completed in 0.000245 seconds
+PE 7: Async Allgather completed in 0.000244 seconds
+PE 4: Async Allgather completed in 0.000257 seconds
+PE 6: Async Allgather completed in 0.000260 seconds
+AllgatherSdma destroyed: PE 5
+AllgatherSdma destroyed: PE 4
+AllgatherSdma destroyed: PE 1
+AllgatherSdma destroyed: PE 2
+AllgatherSdma destroyed: PE 6
+AllgatherSdma destroyed: PE 3
+
+========================================================================
+  NCCL vs SDMA Overlap (world=8)
+========================================================================
+AllgatherSdma destroyed: PE 7
+                                   NCCL overlap  avg=  10.195 ms  min=   0.267 ms  max=  98.770 ms
+                                   SDMA overlap  avg=   0.279 ms  min=   0.270 ms  max=   0.288 ms  speedup_vs_nccl=36.5400
+========================================================================
+
+AllgatherSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+============================= 12 passed in 11.94s ==============================
+
+
+============================= 12 passed in 11.98s ==============================
+
+
+============================= 12 passed in 12.03s ==============================
+
+
+============================= 12 passed in 12.03s ==============================
+
+
+============================= 12 passed in 12.08s ==============================
+
+
+============================= 12 passed in 12.86s ==============================
+
+
+============================= 12 passed in 12.26s ==============================
+
+
+============================= 12 passed in 12.81s ==============================

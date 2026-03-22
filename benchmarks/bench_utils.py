@@ -72,18 +72,32 @@ def cuda_timer(
     iters: int = 20,
     label: str = "",
     sync_before: bool = True,
+    dist_barrier: bool = False,
 ) -> BenchResult:
     """Time *fn* on GPU using CUDA events.
 
+    Args:
+        dist_barrier: If True, call ``dist.barrier()`` before each iteration
+            to align all ranks. Essential for benchmarks that include
+            collective operations (allgather, reduce_scatter, etc.) —
+            without this, rank drift inflates measured latency on 4+ GPUs.
+
     Returns a :class:`BenchResult` with average, min, and max latencies.
     """
+    if dist_barrier:
+        import torch.distributed as dist
+
     for _ in range(warmup):
+        if dist_barrier:
+            dist.barrier()
         fn()
     if sync_before:
         torch.cuda.synchronize()
 
     times: List[float] = []
     for _ in range(iters):
+        if dist_barrier:
+            dist.barrier()
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()

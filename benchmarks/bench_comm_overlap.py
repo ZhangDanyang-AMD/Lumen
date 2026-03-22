@@ -460,26 +460,23 @@ class TestNCCLColumnParallelOverlap:
             lambda: _distributed_allgather(x_local),
             label="allgather alone",
             iters=10,
+            dist_barrier=True,
         )
         r_compute = cuda_timer(lambda: x_local @ w.T, label="GEMM alone", iters=10)
 
         def _seq():
             gathered = _distributed_allgather(x_local)
-            torch.cuda.synchronize()
             _ = gathered @ w.T
-            torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
 
-        # Overlapped: allgather on comm_stream while local GEMM runs.
-        # gathered result intentionally unused — measuring overlap latency.
         def _ovl():
             with torch.cuda.stream(comm_stream):
                 _distributed_allgather(x_local)
             _ = x_local @ w.T
             comm_stream.synchronize()
 
-        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10)
+        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10, dist_barrier=True)
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -541,16 +538,19 @@ class TestNCCLRowParallelOverlap:
             self._reduce_scatter(gemm_output)
         torch.cuda.synchronize()
 
-        r_comm = cuda_timer(lambda: self._reduce_scatter(gemm_output), label="reduce_scatter", iters=10)
+        r_comm = cuda_timer(
+            lambda: self._reduce_scatter(gemm_output),
+            label="reduce_scatter",
+            iters=10,
+            dist_barrier=True,
+        )
         r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
 
         def _seq():
             self._reduce_scatter(gemm_output)
-            torch.cuda.synchronize()
             _ = x @ w.T
-            torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
 
         def _ovl():
             with torch.cuda.stream(comm_stream):
@@ -558,7 +558,7 @@ class TestNCCLRowParallelOverlap:
             _ = x @ w.T
             comm_stream.synchronize()
 
-        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10)
+        r_ovl = cuda_timer(_ovl, label="overlapped", iters=10, dist_barrier=True)
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -638,16 +638,19 @@ class TestSdmaColumnOverlap:
             comm.allgather_dim0(x_local)
         torch.cuda.synchronize()
 
-        r_comm = cuda_timer(lambda: comm.allgather_dim0(x_local), label="SDMA allgather", iters=10)
+        r_comm = cuda_timer(
+            lambda: comm.allgather_dim0(x_local),
+            label="SDMA allgather",
+            iters=10,
+            dist_barrier=True,
+        )
         r_compute = cuda_timer(lambda: x_local @ w.T, label="GEMM", iters=10)
 
         def _seq():
             comm.allgather_dim0(x_local)
-            torch.cuda.synchronize()
             _ = x_local @ w.T
-            torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
 
         def _sdma_overlap():
             comm.allgather_dim0_async(x_local, stream=sdma_stream)
@@ -655,7 +658,7 @@ class TestSdmaColumnOverlap:
             _ = comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_ovl = cuda_timer(_sdma_overlap, label="SDMA overlap", iters=10)
+        r_ovl = cuda_timer(_sdma_overlap, label="SDMA overlap", iters=10, dist_barrier=True)
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -724,16 +727,15 @@ class TestSdmaRowOverlap:
             lambda: comm.reduce_scatter_dim0(gemm_output),
             label="SDMA reduce_scatter",
             iters=10,
+            dist_barrier=True,
         )
         r_compute = cuda_timer(lambda: x @ w.T, label="GEMM", iters=10)
 
         def _seq():
             comm.reduce_scatter_dim0(gemm_output)
-            torch.cuda.synchronize()
             _ = x @ w.T
-            torch.cuda.synchronize()
 
-        r_seq = cuda_timer(_seq, label="sequential", iters=10)
+        r_seq = cuda_timer(_seq, label="sequential", iters=10, dist_barrier=True)
 
         def _sdma_rs_overlap():
             with torch.cuda.stream(sdma_stream):
@@ -742,7 +744,7 @@ class TestSdmaRowOverlap:
             comm.wait_reduce_scatter_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_ovl = cuda_timer(_sdma_rs_overlap, label="SDMA RS overlap", iters=10)
+        r_ovl = cuda_timer(_sdma_rs_overlap, label="SDMA RS overlap", iters=10, dist_barrier=True)
 
         T_parts = r_comm.avg_ms + r_compute.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
@@ -821,7 +823,7 @@ class TestNCCLvsSdma:
             _ = x_local @ w.T
             comm_stream.synchronize()
 
-        r_nccl = cuda_timer(_nccl, label="NCCL overlap", iters=10)
+        r_nccl = cuda_timer(_nccl, label="NCCL overlap", iters=10, dist_barrier=True)
 
         # SDMA overlap
         def _sdma():
@@ -830,7 +832,7 @@ class TestNCCLvsSdma:
             comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_sdma = cuda_timer(_sdma, label="SDMA overlap", iters=10)
+        r_sdma = cuda_timer(_sdma, label="SDMA overlap", iters=10, dist_barrier=True)
 
         speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
         r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)

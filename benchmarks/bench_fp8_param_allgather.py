@@ -521,11 +521,13 @@ class TestFP8AllGatherNCCL:
             lambda: dist.all_gather_into_tensor(bf16_out, bf16_shard),
             label=f"NCCL all_gather BF16 {shape}",
             iters=20,
+            dist_barrier=True,
         )
         r_fp8 = cuda_timer(
             lambda: dist.all_gather_into_tensor(fp8_out, fp8_shard),
             label=f"NCCL all_gather FP8  {shape}",
             iters=20,
+            dist_barrier=True,
         )
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
@@ -567,11 +569,10 @@ class TestFP8AllGatherNCCL:
 
         def _fp8_pipeline():
             dist.all_gather_into_tensor(fp8_out, fp8_shard)
-            torch.cuda.synchronize()
             dequantize_param_from_fp8(fp8_out, scale_shard, torch.bfloat16)
 
-        r_bf16 = cuda_timer(_bf16_pipeline, label=f"BF16 gather {shape}", iters=20)
-        r_fp8 = cuda_timer(_fp8_pipeline, label=f"FP8 quant+gather+dequant {shape}", iters=20)
+        r_bf16 = cuda_timer(_bf16_pipeline, label=f"BF16 gather {shape}", iters=20, dist_barrier=True)
+        r_fp8 = cuda_timer(_fp8_pipeline, label=f"FP8 quant+gather+dequant {shape}", iters=20, dist_barrier=True)
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         r_fp8.extra["speedup"] = round(speedup, 2)
@@ -622,12 +623,11 @@ class TestFP8AllGatherNCCL:
         def _fp8_all():
             for i in range(len(fp8_shards)):
                 dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-            torch.cuda.synchronize()
             for i in range(len(fp8_shards)):
                 dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
 
-        r_bf16 = cuda_timer(_bf16_all, label=f"BF16 gather {n_layers}L", iters=10)
-        r_fp8 = cuda_timer(_fp8_all, label=f"FP8 gather+dequant {n_layers}L", iters=10)
+        r_bf16 = cuda_timer(_bf16_all, label=f"BF16 gather {n_layers}L", iters=10, dist_barrier=True)
+        r_fp8 = cuda_timer(_fp8_all, label=f"FP8 gather+dequant {n_layers}L", iters=10, dist_barrier=True)
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         total_bf16_bytes = sum(s.nelement() * s.element_size() for s in bf16_shards)
@@ -694,11 +694,13 @@ class TestFP8AllGatherSDMA:
             lambda: comm.allgather_dim0(bf16_shard),
             label=f"SDMA allgather BF16 {shape}",
             iters=20,
+            dist_barrier=True,
         )
         r_fp8 = cuda_timer(
             lambda: comm.allgather_dim0(fp8_shard),
             label=f"SDMA allgather FP8  {shape}",
             iters=20,
+            dist_barrier=True,
         )
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
@@ -732,6 +734,7 @@ class TestFP8AllGatherSDMA:
             lambda: comm.allgather_dim0(fp8_shard),
             label=f"SDMA gather FP8 {shape}",
             iters=20,
+            dist_barrier=True,
         )
 
         gathered_fp8 = comm.allgather_dim0(fp8_shard)
@@ -743,18 +746,16 @@ class TestFP8AllGatherSDMA:
 
         def _sequential():
             g = comm.allgather_dim0(fp8_shard)
-            torch.cuda.synchronize()
             dequantize_param_from_fp8(g, scale, torch.bfloat16)
 
         def _overlapped():
             comm.allgather_dim0_async(fp8_shard, stream=sdma_stream)
-            # While SDMA gathers next layer, dequant the current one
             dequantize_param_from_fp8(gathered_fp8, scale, torch.bfloat16)
             comm.wait_allgather_dim0(stream=sdma_stream)
             compute_stream.wait_stream(sdma_stream)
 
-        r_seq = cuda_timer(_sequential, label=f"sequential {shape}", iters=20)
-        r_ovl = cuda_timer(_overlapped, label=f"overlapped {shape}", iters=20)
+        r_seq = cuda_timer(_sequential, label=f"sequential {shape}", iters=20, dist_barrier=True)
+        r_ovl = cuda_timer(_overlapped, label=f"overlapped {shape}", iters=20, dist_barrier=True)
 
         speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["speedup"] = round(speedup, 2)
@@ -852,12 +853,11 @@ class TestFP8ParamE2EDistributed:
 
         def _fp8_pipeline():
             dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
-            torch.cuda.synchronize()
             w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
             torch.nn.functional.linear(x, w)
 
-        r_bf16 = cuda_timer(_bf16_pipeline, label="BF16 gather+GEMM", iters=20)
-        r_fp8 = cuda_timer(_fp8_pipeline, label="FP8 gather+dequant+GEMM", iters=20)
+        r_bf16 = cuda_timer(_bf16_pipeline, label="BF16 gather+GEMM", iters=20, dist_barrier=True)
+        r_fp8 = cuda_timer(_fp8_pipeline, label="FP8 gather+dequant+GEMM", iters=20, dist_barrier=True)
 
         speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         r_fp8.extra["speedup"] = round(speedup, 2)
