@@ -956,13 +956,12 @@ class TestFP8ParamE2EDistributed:
             (HIDDEN, HIDDEN),
         ]
 
-        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
-
         bf16_shards = []
         fp8_shards = []
         fp8_scales = []
         bf16_outs = []
         fp8_outs = []
+        xs = []
 
         for _ in range(n_layers):
             for shape in layer_shapes:
@@ -974,6 +973,8 @@ class TestFP8ParamE2EDistributed:
                 fp8_scales.append(sc)
                 bf16_outs.append(torch.empty_like(w))
                 fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
+                in_features = shape[1]
+                xs.append(torch.randn(2, 2048, in_features, device=self.device, dtype=torch.bfloat16))
 
         N = len(bf16_shards)
         comm_stream = torch.cuda.Stream(device=self.device)
@@ -988,14 +989,14 @@ class TestFP8ParamE2EDistributed:
         def _bf16_sequential():
             for i in range(N):
                 dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-                torch.nn.functional.linear(x, bf16_outs[i])
+                torch.nn.functional.linear(xs[i], bf16_outs[i])
 
         # FP8 sequential: gather + dequant + GEMM per layer (no overlap)
         def _fp8_sequential():
             for i in range(N):
                 dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
                 w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-                torch.nn.functional.linear(x, w)
+                torch.nn.functional.linear(xs[i], w)
 
         # FP8 pipelined: allgather(i+1) on comm_stream while dequant+GEMM(i)
         def _fp8_pipelined():
@@ -1006,7 +1007,7 @@ class TestFP8ParamE2EDistributed:
                     with torch.cuda.stream(comm_stream):
                         dist.all_gather_into_tensor(fp8_outs[i + 1], fp8_shards[i + 1])
                 w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-                torch.nn.functional.linear(x, w)
+                torch.nn.functional.linear(xs[i], w)
                 if i + 1 < N:
                     torch.cuda.current_stream().wait_stream(comm_stream)
 
