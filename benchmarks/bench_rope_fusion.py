@@ -269,7 +269,7 @@ class TestRoPE2D:
     # dimensions in a single kernel launch. Latency should scale with spatial
     # resolution (H*W). The fused kernel avoids the 2 separate 1D RoPE calls
     # and the intermediate reshape that a naive 2D implementation would need.
-    @pytest.mark.parametrize("img_size", [(14, 14), (16, 16), (32, 32)])
+    @pytest.mark.parametrize("img_size", [(8, 8), (16, 16), (32, 32)])
     def test_2d_rope_sizes(self, img_size):
         from lumen.ops.rope import apply_rotary_pos_emb_2d
 
