@@ -1234,59 +1234,73 @@ class TestNCCLvsSdmaWgradDelay:
         ids=lambda n: f"N={n}",
     )
     def test_wgrad_overlap_scaling(self, gemm_n):
-        """Sweep wgrad GEMM size to find where SDMA overlap outperforms NCCL.
+        """4-layer pipeline sweep: vary gemm_n to measure effective overlap.
 
-        Keeps the allreduce buffer at (gemm_n, K) and varies gemm_n to
-        control the wgrad compute load.  Small gemm_n → tiny GEMM where
-        SDMA control-plane overhead dominates; large gemm_n → the wgrad
-        GEMM runs long enough for SDMA's zero-SM-contention to pay off.
+        Uses a realistic 4-layer deferred-wgrad pipeline where layer i's
+        allreduce overlaps with layer i+1's wgrad GEMM.  This captures the
+        true pipeline benefit that single-layer overlap tests miss.
+
+        Each layer executes forward GEMM + deferred wgrad to match the
+        workload profile of ``test_multi_layer_pipeline_comparison``.
         """
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
+        n_layers = 4
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm(dist.group.WORLD)
+
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        w = nn.Parameter(
-            torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02,
-        )
-        w.main_grad = torch.zeros(gemm_n, K, device=self.device, dtype=torch.bfloat16)
-        grad_out = torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16)
-        ar_buf = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+        weights = [
+            nn.Parameter(torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02)
+            for _ in range(n_layers)
+        ]
+        for w_i in weights:
+            w_i.main_grad = torch.zeros_like(w_i.data)
+        grad_outs = [torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
         for _ in range(3):
-            dist.all_reduce(ar_buf.clone())
-            sdma_comm.allreduce_sum(ar_buf.clone())
-            _ = grad_out.T @ x
+            dist.all_reduce(weights[0].data.clone())
+            _ = grad_outs[0].T @ x
+        torch.cuda.synchronize()
+        dist.barrier()
+        for _ in range(3):
+            sdma_comm.allreduce_sum(weights[0].data.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
+        # ── wgrad-only baseline (theoretical lower bound) ──
+        def _wgrad_only():
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                _ = grad_outs[i] @ weights[i]
+                weights[i].main_grad.add_(grad_outs[i].T @ x)
+
         r_wgrad = cuda_timer(
-            lambda: grad_out.T @ x,
-            label=f"wgrad N={gemm_n}",
+            _wgrad_only,
+            label=f"4L wgrad N={gemm_n}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
+            dist_barrier=True,
         )
 
-        # ── NCCL overlapped ──
-        def _nccl_ovl():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            with torch.cuda.stream(nccl_stream):
-                buf = ar_buf.clone()
-                dist.all_reduce(buf)
-            dwg.execute()
-            torch.cuda.current_stream().wait_stream(nccl_stream)
+        # ── eager baseline (sequential fwd + wgrad + allreduce) ──
+        def _eager():
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                _ = grad_outs[i] @ weights[i]
+                weights[i].main_grad.add_(grad_outs[i].T @ x)
+                dist.all_reduce(weights[i].main_grad)
 
-        r_nccl = cuda_timer(
-            _nccl_ovl,
-            label=f"NCCL ovl N={gemm_n}",
+        r_eager = cuda_timer(
+            _eager,
+            label=f"4L eager N={gemm_n}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1296,44 +1310,105 @@ class TestNCCLvsSdmaWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
 
-        # ── SDMA overlapped ──
-        def _sdma_ovl():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            buf = ar_buf.clone()
+        # ── NCCL deferred pipeline ──
+        def _deferred_nccl():
+            pending_ar = None
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                if dwg.has_pending:
+                    dwg.execute()
+                if pending_ar is not None:
+                    torch.cuda.current_stream().wait_stream(nccl_stream)
+                _ = grad_outs[i] @ weights[i]
+                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                if i > 0:
+                    with torch.cuda.stream(nccl_stream):
+                        dist.all_reduce(weights[i - 1].main_grad)
+                    pending_ar = i - 1
+            if dwg.has_pending:
+                dwg.execute()
+            with torch.cuda.stream(nccl_stream):
+                dist.all_reduce(weights[-1].main_grad)
+            torch.cuda.current_stream().wait_stream(nccl_stream)
+
+        r_nccl = cuda_timer(
+            _deferred_nccl,
+            label=f"4L NCCL N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        torch.cuda.synchronize()
+        dist.barrier()
+
+        # ── SDMA deferred pipeline ──
+        def _deferred_sdma():
+            pending_ar = False
+            for i in range(n_layers):
+                weights[i].main_grad.zero_()
+                if dwg.has_pending:
+                    dwg.execute()
+                if pending_ar:
+                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                    torch.cuda.current_stream().wait_stream(sdma_stream)
+                _ = grad_outs[i] @ weights[i]
+                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                if i > 0:
+                    sdma_stream.wait_stream(torch.cuda.current_stream())
+                    sdma_comm.allreduce_sum_async(
+                        weights[i - 1].main_grad,
+                        stream=sdma_stream,
+                    )
+                    pending_ar = True
+            if dwg.has_pending:
+                dwg.execute()
+            if pending_ar:
+                sdma_comm.wait_allreduce_sum(stream=sdma_stream)
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
-            dwg.execute()
+            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_sdma = cuda_timer(
-            _sdma_ovl,
-            label=f"SDMA ovl N={gemm_n}",
+            _deferred_sdma,
+            label=f"4L SDMA N={gemm_n}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
+        nccl_speedup = r_eager.avg_ms / max(r_nccl.avg_ms, 1e-6)
+        sdma_speedup = r_eager.avg_ms / max(r_sdma.avg_ms, 1e-6)
         sdma_vs_nccl = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        ar_total = r_eager.avg_ms - r_wgrad.avg_ms
+        nccl_hidden = r_eager.avg_ms - r_nccl.avg_ms
+        sdma_hidden = r_eager.avg_ms - r_sdma.avg_ms
+
+        r_wgrad.extra["flops"] = f"{n_layers * 2 * M * K * gemm_n / 1e9:.1f}G"
+        r_nccl.extra["speedup"] = round(nccl_speedup, 2)
+        r_nccl.extra["ovl_eff"] = f"{nccl_hidden / max(ar_total, 1e-6) * 100:.0f}%"
+        r_sdma.extra["speedup"] = round(sdma_speedup, 2)
+        r_sdma.extra["ovl_eff"] = f"{sdma_hidden / max(ar_total, 1e-6) * 100:.0f}%"
         r_sdma.extra["vs_nccl"] = round(sdma_vs_nccl, 2)
-        r_wgrad.extra["flops"] = f"{2 * M * K * gemm_n / 1e9:.1f}G"
 
         if self.rank == 0:
             print_report_with_table(
-                f"Wgrad Overlap Scaling N={gemm_n} (world={self.world})",
-                [r_wgrad, r_nccl, r_sdma],
+                f"4L Wgrad Pipeline N={gemm_n} (world={self.world})",
+                [r_wgrad, r_eager, r_nccl, r_sdma],
             )
 
         torch.cuda.synchronize()
         dist.barrier()
 
     def test_wgrad_overlap_scaling_summary(self):
-        """Run all GEMM sizes and print a single combined summary table."""
+        """All GEMM sizes in a single 4-layer pipeline summary table."""
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
+        n_layers = 4
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm(dist.group.WORLD)
@@ -1346,31 +1421,83 @@ class TestNCCLvsSdmaWgradDelay:
 
         for gemm_n in gemm_sizes:
             x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-            w = nn.Parameter(
-                torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02,
-            )
-            w.main_grad = torch.zeros(gemm_n, K, device=self.device, dtype=torch.bfloat16)
-            grad_out = torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16)
-            ar_buf = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+            weights = [
+                nn.Parameter(torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02)
+                for _ in range(n_layers)
+            ]
+            for w_i in weights:
+                w_i.main_grad = torch.zeros_like(w_i.data)
+            grad_outs = [torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
 
             for _ in range(3):
-                dist.all_reduce(ar_buf.clone())
-                sdma_comm.allreduce_sum(ar_buf.clone())
-                _ = grad_out.T @ x
+                dist.all_reduce(weights[0].data.clone())
+                _ = grad_outs[0].T @ x
+            torch.cuda.synchronize()
+            dist.barrier()
+            for _ in range(3):
+                sdma_comm.allreduce_sum(weights[0].data.clone())
             torch.cuda.synchronize()
             dist.barrier()
 
-            def _nccl_ovl():
-                w.main_grad.zero_()
-                dwg.defer(w, lambda: grad_out.T @ x)
+            # ── wgrad-only (for overlap efficiency calculation) ──
+            def _wgrad_only(weights=weights, grad_outs=grad_outs, x=x):
+                for i in range(n_layers):
+                    weights[i].main_grad.zero_()
+                    _ = grad_outs[i] @ weights[i]
+                    weights[i].main_grad.add_(grad_outs[i].T @ x)
+
+            r_wgrad = cuda_timer(
+                _wgrad_only,
+                label=f"wgrad N={gemm_n}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+
+            # ── eager baseline ──
+            def _eager(weights=weights, grad_outs=grad_outs, x=x):
+                for i in range(n_layers):
+                    weights[i].main_grad.zero_()
+                    _ = grad_outs[i] @ weights[i]
+                    weights[i].main_grad.add_(grad_outs[i].T @ x)
+                    dist.all_reduce(weights[i].main_grad)
+
+            r_eager = cuda_timer(
+                _eager,
+                label=f"eager N={gemm_n}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+
+            torch.cuda.synchronize()
+            dist.barrier()
+
+            # ── NCCL deferred pipeline ──
+            def _deferred_nccl(weights=weights, grad_outs=grad_outs, x=x):
+                pending_ar = None
+                for i in range(n_layers):
+                    weights[i].main_grad.zero_()
+                    if dwg.has_pending:
+                        dwg.execute()
+                    if pending_ar is not None:
+                        torch.cuda.current_stream().wait_stream(nccl_stream)
+                    _ = grad_outs[i] @ weights[i]
+                    dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                    if i > 0:
+                        with torch.cuda.stream(nccl_stream):
+                            dist.all_reduce(weights[i - 1].main_grad)
+                        pending_ar = i - 1
+                if dwg.has_pending:
+                    dwg.execute()
                 with torch.cuda.stream(nccl_stream):
-                    buf = ar_buf.clone()
-                    dist.all_reduce(buf)
-                dwg.execute()
+                    dist.all_reduce(weights[-1].main_grad)
                 torch.cuda.current_stream().wait_stream(nccl_stream)
 
             r_nccl = cuda_timer(
-                _nccl_ovl,
+                _deferred_nccl,
                 label=f"NCCL N={gemm_n}",
                 warmup=_WARMUP,
                 iters=_ITERS,
@@ -1381,18 +1508,36 @@ class TestNCCLvsSdmaWgradDelay:
             torch.cuda.synchronize()
             dist.barrier()
 
-            def _sdma_ovl():
-                w.main_grad.zero_()
-                dwg.defer(w, lambda: grad_out.T @ x)
-                buf = ar_buf.clone()
+            # ── SDMA deferred pipeline ──
+            def _deferred_sdma(weights=weights, grad_outs=grad_outs, x=x):
+                pending_ar = False
+                for i in range(n_layers):
+                    weights[i].main_grad.zero_()
+                    if dwg.has_pending:
+                        dwg.execute()
+                    if pending_ar:
+                        sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+                        torch.cuda.current_stream().wait_stream(sdma_stream)
+                    _ = grad_outs[i] @ weights[i]
+                    dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                    if i > 0:
+                        sdma_stream.wait_stream(torch.cuda.current_stream())
+                        sdma_comm.allreduce_sum_async(
+                            weights[i - 1].main_grad,
+                            stream=sdma_stream,
+                        )
+                        pending_ar = True
+                if dwg.has_pending:
+                    dwg.execute()
+                if pending_ar:
+                    sdma_comm.wait_allreduce_sum(stream=sdma_stream)
                 sdma_stream.wait_stream(torch.cuda.current_stream())
-                sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
-                dwg.execute()
+                sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)
                 torch.cuda.current_stream().wait_stream(sdma_stream)
 
             r_sdma = cuda_timer(
-                _sdma_ovl,
+                _deferred_sdma,
                 label=f"SDMA N={gemm_n}",
                 warmup=_WARMUP,
                 iters=_ITERS,
@@ -1400,8 +1545,18 @@ class TestNCCLvsSdmaWgradDelay:
                 dist_barrier=True,
             )
 
+            nccl_speedup = r_eager.avg_ms / max(r_nccl.avg_ms, 1e-6)
+            sdma_speedup = r_eager.avg_ms / max(r_sdma.avg_ms, 1e-6)
             sdma_vs_nccl = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+            ar_total = r_eager.avg_ms - r_wgrad.avg_ms
+            nccl_hidden = r_eager.avg_ms - r_nccl.avg_ms
+            sdma_hidden = r_eager.avg_ms - r_sdma.avg_ms
+
+            r_nccl.extra["speedup"] = f"{nccl_speedup:.2f}x"
+            r_nccl.extra["ovl_eff"] = f"{nccl_hidden / max(ar_total, 1e-6) * 100:.0f}%"
             r_nccl.extra["vs_sdma"] = f"{1 / max(sdma_vs_nccl, 1e-6):.2f}x"
+            r_sdma.extra["speedup"] = f"{sdma_speedup:.2f}x"
+            r_sdma.extra["ovl_eff"] = f"{sdma_hidden / max(ar_total, 1e-6) * 100:.0f}%"
             r_sdma.extra["vs_nccl"] = f"{sdma_vs_nccl:.2f}x"
 
             all_results.extend([r_nccl, r_sdma])
@@ -1411,7 +1566,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         if self.rank == 0:
             print_report_with_table(
-                f"Wgrad Overlap Scaling Summary (world={self.world})",
+                f"4L Wgrad Pipeline Scaling Summary (world={self.world})",
                 all_results,
             )
 

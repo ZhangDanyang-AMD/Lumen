@@ -5,8 +5,48 @@ hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspa
 rootdir: /workspace/Lumen
 configfile: pyproject.toml
 plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
 
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
 platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
@@ -17,83 +57,43 @@ configfile: pyproject.toml
 plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
 collecting ... ============================= test session starts ==============================
 platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
+============================= test session starts ==============================
 platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
 cachedir: .pytest_cache
 hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
 rootdir: /workspace/Lumen
 configfile: pyproject.toml
 plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
+collecting ... cachedir: .pytest_cache
 hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
 rootdir: /workspace/Lumen
 configfile: pyproject.toml
 plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
-collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+collecting ... collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
 
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+collected 21 items / 9 deselected / 12 selected
+Running 12 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344], benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
 
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /opt/venv/bin/python
-collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, xdist-3.3.1, flakefinder-1.1.0, xdoctest-1.1.0, cpp-2.3.0, shard-0.1.2, hypothesis-5.35.1, rerunfailures-14.0
-collecting ... collected 15 items / 9 deselected / 6 selected
-Running 6 items in this shard: benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison, benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce [Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_with_allreduce [Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
 [Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
 [Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
 [Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank [Gloo] Rank 6 is connected to 77 peer ranks.  is connected to Expected number of connected peer ranks is : 77 peer ranks. Expected number of connected peer ranks is : 7
+
 
 ========================================================================
   _DeferredWgrad + Real NCCL AllReduce (world=8)
 ========================================================================
-                               wgrad GEMM alone  avg=   0.460 ms  min=   0.444 ms  max=   0.482 ms  std=  0.012 ms  cv=  2.6%  [~unstable]
-                                allreduce alone  avg=   0.665 ms  min=   0.662 ms  max=   0.669 ms  std=  0.002 ms  cv=  0.3%
-               sequential: wgrad then allreduce  avg=   1.202 ms  min=   1.178 ms  max=   1.222 ms  std=  0.014 ms  cv=  1.1%
-                 overlapped: wgrad || allreduce  avg=   1.204 ms  min=   1.173 ms  max=   1.232 ms  std=  0.017 ms  cv=  1.4%  speedup=1.0000  overlap_ratio=-0.0700
+                               wgrad GEMM alone  avg=   0.461 ms  min=   0.446 ms  max=   0.479 ms  std=  0.011 ms  cv=  2.3%  [~unstable]
+                                allreduce alone  avg=   0.664 ms  min=   0.660 ms  max=   0.671 ms  std=  0.002 ms  cv=  0.4%
+               sequential: wgrad then allreduce  avg=   1.214 ms  min=   1.197 ms  max=   1.243 ms  std=  0.012 ms  cv=  1.0%
+                 overlapped: wgrad || allreduce  avg=   1.224 ms  min=   1.201 ms  max=   1.259 ms  std=  0.015 ms  cv=  1.2%  speedup=0.9900  overlap_ratio=-0.0880
 ========================================================================
 
 
@@ -101,38 +101,38 @@ benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_wgrad_overlap_w
   ┌──────────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name                             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├──────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ wgrad GEMM alone                 │    0.460 │    0.444 │    0.462 │    0.478 │    0.482 │    2.6 │  ~                                │
-  │ allreduce alone                  │    0.665 │    0.662 │    0.664 │    0.669 │    0.669 │    0.3 │                                   │
-  │ sequential: wgrad then allreduce │    1.202 │    1.178 │    1.204 │    1.222 │    1.222 │    1.1 │                                   │
-  │ overlapped: wgrad || allreduce   │    1.204 │    1.173 │    1.206 │    1.227 │    1.232 │    1.4 │ speedup=1.00, overlap_ratio=-0.07 │
+  │ wgrad GEMM alone                 │    0.461 │    0.446 │    0.462 │    0.477 │    0.479 │    2.3 │  ~                                │
+  │ allreduce alone                  │    0.664 │    0.660 │    0.664 │    0.669 │    0.671 │    0.4 │                                   │
+  │ sequential: wgrad then allreduce │    1.214 │    1.197 │    1.213 │    1.230 │    1.243 │    1.0 │                                   │
+  │ overlapped: wgrad || allreduce   │    1.224 │    1.201 │    1.223 │    1.254 │    1.259 │    1.2 │ speedup=0.99, overlap_ratio=-0.09 │
   └──────────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
 
   ┌── Sequential (──────────────────────────)┐
-  │ ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.460 ms
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░ │ allreduce: 0.665 ms
-  │ total = 1.202 ms                    │
+  │ ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.461 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░ │ allreduce: 0.664 ms
+  │ total = 1.214 ms                    │
   ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.204 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.224 ms
   └─────────────────────────────────────────┘
 
-  Hidden wgrad: -0.001 / 0.460 ms (-0% of wgrad hidden)
-  Overlap ratio:  -0.070
-  Speedup:        1.00x
+  Hidden wgrad: -0.010 / 0.461 ms (-2% of wgrad hidden)
+  Overlap ratio:  -0.088
+  Speedup:        0.99x
 
 PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
-
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradRealComm::test_multi_layer_pipeline_with_allreduce
 ========================================================================
   4-Layer Pipeline: Eager vs Deferred + AllReduce (world=8)
 ========================================================================
-PASSED                        4-layer eager+allreduce  avg=   5.861 ms  min=   5.792 ms  max=   5.922 ms  std=  0.038 ms  cv=  0.7%
-                     4-layer deferred+allreduce  avg=   4.957 ms  min=   4.931 ms  max=   4.996 ms  std=  0.020 ms  cv=  0.4%  speedup=1.1800
+                        4-layer eager+allreduce  avg=   5.869 ms  min=   5.823 ms  max=   5.909 ms  std=  0.025 ms  cv=  0.4%
+                     4-layer deferred+allreduce  avg=   4.960 ms  min=   4.930 ms  max=   4.986 ms  std=  0.016 ms  cv=  0.3%  speedup=1.1800
 ========================================================================
 
 
@@ -140,70 +140,70 @@ PASSED                        4-layer eager+allreduce  avg=   5.861 ms  min=   5
   ┌────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name                       │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-PASSED  │ 4-layer eager+allreduce    │    5.861 │    5.792 │    5.858 │    5.913 │    5.922 │    0.7 │              │
-  │ 4-layer deferred+allreduce │    4.957 │    4.931 │    4.955 │    4.991 │    4.996 │    0.4 │ speedup=1.18 │
+  │ 4-layer eager+allreduce    │    5.869 │    5.823 │    5.871 │    5.908 │    5.909 │    0.4 │              │
+  │ 4-layer deferred+allreduce │    4.960 │    4.930 │    4.958 │    4.982 │    4.986 │    0.3 │ speedup=1.18 │
   └────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
   Speedup:  1.18x
-  Saved:    0.904 ms  (≈ 4 × 0.226 ms per layer)
+  Saved:    0.909 ms  (≈ 4 × 0.227 ms per layer)
 
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 
+benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce
 benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_wgrad_overlap_with_sdma_allreduce rank 0 RDMA devices: None
+rank 2 rankInNode 2 select no device
 rank 6 rankInNode 6 select no device
-rank 0 rankInNode 0 select no device
+rank 4 rankInNode 4 select no device
+rank 1 rankInNode 1 select no device
+rank 3 rankInNode 3 select no device
 rank 5 rankInNode 5 select no device
 rank 7 rankInNode 7 select no device
-rank 2 rankInNode 2 select no device
-rank 3 rankInNode 3 select no device
-rank 1 rankInNode 1 select no device
-rank 4 rankInNode 4 select no device
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f1bc4880000
-  Flags: 64 bytes at 0x7f74a3c80000
-  Barrier: 128 bytes at 0x7f162e400000
-  Barrier: 128 bytes at 0x7f6f59a00000
-  Output transit buffer: 112.00 MB at 0x7f6f4c800000
-  Output transit buffer: 112.00 MB at 0x7f1625400000
+rank 0 rankInNode 0 select no device
 AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7fae1c280000
-  Barrier: 128 bytes at 0x7fa8f5a00000
-  Output transit buffer: 112.00 MB at 0x7fa8e8800000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ee4a5080000
-  Barrier: 128 bytes at 0x7edf70400000
-  Output transit buffer: 112.00 MB at 0x7edf63000000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7efd74280000
-  Flags: 64 bytes at 0x7edd60280000
-  Barrier: 128 bytes at 0x7ef80ce00000
-  Barrier: 128 bytes at 0x7ed7b9e00000
-  Output transit buffer: 112.00 MB at 0x7ed7acc00000
-  Output transit buffer: 112.00 MB at 0x7ef7ffc00000
+  Flags: 64 bytes at 0x7f8974480000
+  Barrier: 128 bytes at 0x7f844c800000
+  Output transit buffer: 112.00 MB at 0x7f843f400000
 AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f5814280000
-  Barrier: 128 bytes at 0x7f52b3c00000
-  Output transit buffer: 112.00 MB at 0x7f52aac00000
+  Flags: 64 bytes at 0x7ee328280000
+  Barrier: 128 bytes at 0x7eddf1200000
+  Output transit buffer: 112.00 MB at 0x7edde4000000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
 AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f5d50280000
-  Barrier: 128 bytes at 0x7f57f2400000
-  Output transit buffer: 112.00 MB at 0x7f57e9400000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f06b4480000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2674280000
+  Barrier: 128 bytes at 0x7f0106c00000
+  Flags: 64 bytes at 0x7f3a80480000
+  Barrier: 128 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f34e2000000
+  Flags: 64 bytes at 0x7f8933c80000
+  Barrier: 128 bytes at 0x7f83e9a00000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7f00fdc00000
+  Output transit buffer: 112.00 MB at 0x7f20d7c00000
+  Output transit buffer: 112.00 MB at 0x7f34d9000000
+  Flags: 64 bytes at 0x7f274d080000
+  Output transit buffer: 112.00 MB at 0x7f83dc800000
+  Barrier: 128 bytes at 0x7f2206800000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f31f0880000
+  Barrier: 128 bytes at 0x7f2c78a00000
+  Output transit buffer: 112.00 MB at 0x7f21fd800000
+  Output transit buffer: 112.00 MB at 0x7f2c6b800000
 
 ========================================================================
   _DeferredWgrad + SDMA AllReduce (world=8)
 ========================================================================
-                               wgrad GEMM alone  avg=   0.457 ms  min=   0.442 ms  max=   0.481 ms  std=  0.011 ms  cv=  2.3%  [~unstable]
-                           SDMA allreduce alone  avg=   0.675 ms  min=   0.671 ms  max=   0.680 ms  std=  0.002 ms  cv=  0.3%
-                 sequential: wgrad then SDMA AR  avg=   1.222 ms  min=   1.193 ms  max=   1.244 ms  std=  0.014 ms  cv=  1.1%
-                   overlapped: wgrad || SDMA AR  avg=   1.154 ms  min=   1.137 ms  max=   1.176 ms  std=  0.013 ms  cv=  1.1%  speedup=1.0600  overlap_ratio=-0.0190
+                               wgrad GEMM alone  avg=   0.456 ms  min=   0.441 ms  max=   0.467 ms  std=  0.008 ms  cv=  1.8%
+                           NCCL allreduce alone  avg=   0.662 ms  min=   0.660 ms  max=   0.666 ms  std=  0.002 ms  cv=  0.3%
+                 sequential: wgrad then NCCL AR  avg=   1.212 ms  min=   1.194 ms  max=   1.235 ms  std=  0.012 ms  cv=  1.0%
+                   overlapped: wgrad || SDMA AR  avg=   1.241 ms  min=   1.218 ms  max=   1.267 ms  std=  0.014 ms  cv=  1.1%  speedup=0.9800  overlap_ratio=-0.1100
 ========================================================================
 
 
@@ -211,158 +211,103 @@ AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
   ┌────────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name                           │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ wgrad GEMM alone               │    0.457 │    0.442 │    0.461 │    0.475 │    0.481 │    2.3 │  ~                                │
-  │ SDMA allreduce alone           │    0.675 │    0.671 │    0.675 │    0.678 │    0.680 │    0.3 │                                   │
-  │ sequential: wgrad then SDMA AR │    1.222 │    1.193 │    1.223 │    1.242 │    1.244 │    1.1 │                                   │
-  │ overlapped: wgrad || SDMA AR   │    1.154 │    1.137 │    1.153 │    1.175 │    1.176 │    1.1 │ speedup=1.06, overlap_ratio=-0.02 │
+  │ wgrad GEMM alone               │    0.456 │    0.441 │    0.460 │    0.466 │    0.467 │    1.8 │                                   │
+  │ NCCL allreduce alone           │    0.662 │    0.660 │    0.662 │    0.665 │    0.666 │    0.3 │                                   │
+  │ sequential: wgrad then NCCL AR │    1.212 │    1.194 │    1.210 │    1.233 │    1.235 │    1.0 │                                   │
+  │ overlapped: wgrad || SDMA AR   │    1.241 │    1.218 │    1.241 │    1.264 │    1.267 │    1.1 │ speedup=0.98, overlap_ratio=-0.11 │
   └────────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
 
   ┌── Sequential (──────────────────────────)┐
-  │ ██████████████░░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.457 ms
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░ │ SDMA AR: 0.675 ms
-  │ total = 1.222 ms                    │
+  │ ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │ wgrad: 0.456 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░ │ SDMA AR: 0.662 ms
+  │ total = 1.212 ms                    │
   ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ │ 1.154 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.241 ms
   └─────────────────────────────────────────┘
 
-  Hidden wgrad: 0.068 / 0.457 ms (15% of wgrad hidden)
-  Overlap ratio:  -0.019
-  Speedup:        1.06x
+  Hidden wgrad: -0.029 / 0.456 ms (-6% of wgrad hidden)
+  Overlap ratio:  -0.110
+  Speedup:        0.98x
 
+
+========================================================================
+  4-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR (world=8)
+========================================================================
+                   4-layer sequential (NCCL AR)  avg=   5.858 ms  min=   5.837 ms  max=   5.890 ms  std=  0.017 ms  cv=  0.3%
+                       4-layer deferred+SDMA AR  avg=   6.062 ms  min=   5.940 ms  max=   6.106 ms  std=  0.038 ms  cv=  0.6%  speedup=0.9700
+========================================================================
+
+
+  4-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR (world=8)
+  ┌──────────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name                         │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├──────────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ 4-layer sequential (NCCL AR) │    5.858 │    5.837 │    5.854 │    5.886 │    5.890 │    0.3 │              │
+  │ 4-layer deferred+SDMA AR     │    6.062 │    5.940 │    6.070 │    6.103 │    6.106 │    0.6 │ speedup=0.97 │
+  └──────────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+  Speedup:  0.97x
+  Saved:    -0.205 ms  (≈ 4 × -0.051 ms per layer)
+
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 3
 AllreduceSdma destroyed: PE 2
 AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 0
 AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 7
 PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce
 
-benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce benchmarks/bench_wgrad_delay.py::TestDeferredWgradSdmaComm::test_multi_layer_pipeline_with_sdma_allreduce AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f162e400000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Barrier: 128 bytes at 0x7f162a800000
-  Flags: 64 bytes at 0x7f6f59a00000
-  Barrier: 128 bytes at 0x7f6f51c00000
-  Output transit buffer: 112.00 MB at 0x7f15e1a00000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Output transit buffer: 112.00 MB at 0x7f6f08c00000
-  Flags: 64 bytes at 0x7edf70400000
-  Barrier: 128 bytes at 0x7edf68400000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ef80ce00000
-  Barrier: 128 bytes at 0x7ef805000000
-  Output transit buffer: 112.00 MB at 0x7edf1ea00000
-  Output transit buffer: 112.00 MB at 0x7ef7baa00000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7fa8f5a00000
-  Flags: 64 bytes at 0x7ed7b9e00000
-  Barrier: 128 bytes at 0x7fa8edc00000
-  Barrier: 128 bytes at 0x7ed7b2000000
-  Output transit buffer: 112.00 MB at 0x7fa8a4c00000
-  Output transit buffer: 112.00 MB at 0x7ed768c00000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f52b3c00000
-  Barrier: 128 bytes at 0x7f52b0000000
-  Output transit buffer: 112.00 MB at 0x7f5266a00000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f57f2400000
-  Barrier: 128 bytes at 0x7f57ee800000
-  Output transit buffer: 112.00 MB at 0x7f57a5a00000
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
 
-========================================================================
-  4-Layer Pipeline: Eager vs Deferred + SDMA AR (world=8)
-========================================================================
-                          4-layer eager+SDMA AR  avg=   5.879 ms  min=   5.805 ms  max=   5.938 ms  std=  0.040 ms  cv=  0.7%
-                       4-layer deferred+SDMA AR  avg=   5.717 ms  min=   5.076 ms  max=   6.254 ms  std=  0.367 ms  cv=  6.4%  speedup=1.0300  [!NOISY]
-========================================================================
-
-
-  4-Layer Pipeline: Eager vs Deferred + SDMA AR (world=8)
-  ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
-  │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
-  ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ 4-layer eager+SDMA AR    │    5.879 │    5.805 │    5.877 │    5.935 │    5.938 │    0.7 │              │
-  │ 4-layer deferred+SDMA AR │    5.717 │    5.076 │    5.754 │    6.228 │    6.254 │    6.4 │ speedup=1.03 *│
-  └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
-
-  Speedup:  1.03x
-  Saved:    0.162 ms  (≈ 4 × 0.040 ms per layer)
-
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
-
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_single_layer_overlap_comparison AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7fa8f5a00000
-  Barrier: 128 bytes at 0x7fa8ab400000
-  Output transit buffer: 112.00 MB at 0x7fa863a00000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8444800000
+  Output transit buffer: 112.00 MB at 0x7f83d7000000
 AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f52b3c00000
-  Barrier: 128 bytes at 0x7f526da00000
-  Flags: 64 bytes at 0x7ed7b9e00000
-  Barrier: 128 bytes at 0x7ed76f800000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-  Output transit buffer: 112.00 MB at 0x7f5225800000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Output transit buffer: 112.00 MB at 0x7ed727a00000
-  Flags: 64 bytes at 0x7f162e400000
-  Flags: 64 bytes at 0x7f6f59a00000
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f34de400000
+  Output transit buffer: 112.00 MB at 0x7f3472000000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edde9400000
+  Output transit buffer: 112.00 MB at 0x7edd7b000000
 AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
-  Barrier: 128 bytes at 0x7f6f0f400000
-  Barrier: 128 bytes at 0x7f15e8200000
-  Flags: 64 bytes at 0x7f57f2400000
-  Barrier: 128 bytes at 0x7f57ac200000
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f20dd000000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7f206f000000
+  Flags: 64 bytes at 0x7f83e9a00000
+  Barrier: 128 bytes at 0x7f83e1c00000
+  Output transit buffer: 112.00 MB at 0x7f8375200000
 AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ef80ce00000
-  Output transit buffer: 112.00 MB at 0x7f6ec7a00000
-  Barrier: 128 bytes at 0x7ef7c8e00000
-  Output transit buffer: 112.00 MB at 0x7f15a0800000
-  Output transit buffer: 112.00 MB at 0x7f5764800000
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f2202c00000
+  Output transit buffer: 112.00 MB at 0x7f2196600000
 AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7edf70400000
-  Barrier: 128 bytes at 0x7edf2c200000
-  Output transit buffer: 112.00 MB at 0x7ef779800000
-  Output transit buffer: 112.00 MB at 0x7ededd800000
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2c70c00000
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f0103000000
+  Output transit buffer: 112.00 MB at 0x7f0096a00000
+  Output transit buffer: 112.00 MB at 0x7f2c03000000
 
 ========================================================================
   NCCL vs SDMA Wgrad-Delay Overlap (world=8)
 ========================================================================
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 5
-                               wgrad GEMM alone  avg=   0.465 ms  min=   0.445 ms  max=   0.491 ms  std=  0.012 ms  cv=  2.7%  [~unstable]
-                           NCCL allreduce alone  avg=   0.665 ms  min=   0.661 ms  max=   0.668 ms  std=  0.002 ms  cv=  0.3%
-                                NCCL sequential  avg=   1.202 ms  min=   1.183 ms  max=   1.222 ms  std=  0.012 ms  cv=  1.0%
-                                NCCL overlapped  avg=   1.212 ms  min=   1.190 ms  max=   1.237 ms  std=  0.012 ms  cv=  1.0%  speedup=0.9900  overlap=-0.0720
-                           SDMA allreduce alone  avg=   0.673 ms  min=   0.671 ms  max=   0.685 ms  std=  0.003 ms  cv=  0.5%
-                                SDMA sequential  avg=   1.219 ms  min=   1.201 ms  max=   1.252 ms  std=  0.013 ms  cv=  1.1%
-                                SDMA overlapped  avg=   1.171 ms  min=   1.155 ms  max=   1.205 ms  std=  0.012 ms  cv=  1.0%  speedup=1.0400  overlap=-0.0280
+                               wgrad GEMM alone  avg=   0.469 ms  min=   0.454 ms  max=   0.495 ms  std=  0.011 ms  cv=  2.4%  [~unstable]
+                           NCCL allreduce alone  avg=   0.662 ms  min=   0.658 ms  max=   0.666 ms  std=  0.002 ms  cv=  0.3%
+                                NCCL sequential  avg=   1.208 ms  min=   1.185 ms  max=   1.221 ms  std=  0.010 ms  cv=  0.8%
+                                NCCL overlapped  avg=   1.161 ms  min=   1.120 ms  max=   1.181 ms  std=  0.014 ms  cv=  1.2%  speedup=1.0400  overlap=-0.0260
+                           SDMA allreduce alone  avg=   0.677 ms  min=   0.674 ms  max=   0.681 ms  std=  0.002 ms  cv=  0.3%
+                                SDMA sequential  avg=   1.226 ms  min=   1.208 ms  max=   1.250 ms  std=  0.011 ms  cv=  0.9%
+                                SDMA overlapped  avg=   1.274 ms  min=   1.248 ms  max=   1.302 ms  std=  0.016 ms  cv=  1.3%  speedup=0.9600  overlap=-0.1110
 ========================================================================
 
 
@@ -370,75 +315,75 @@ AllreduceSdma destroyed: PE 5
   ┌──────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬─────────────────────────────┐
   │ Name                 │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                      │
   ├──────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼─────────────────────────────┤
-  │ wgrad GEMM alone     │    0.465 │    0.445 │    0.463 │    0.481 │    0.491 │    2.7 │  ~                          │
-  │ NCCL allreduce alone │    0.665 │    0.661 │    0.665 │    0.668 │    0.668 │    0.3 │                             │
-  │ NCCL sequential      │    1.202 │    1.183 │    1.202 │    1.222 │    1.222 │    1.0 │                             │
-  │ NCCL overlapped      │    1.212 │    1.190 │    1.210 │    1.236 │    1.237 │    1.0 │ speedup=0.99, overlap=-0.07 │
-  │ SDMA allreduce alone │    0.673 │    0.671 │    0.672 │    0.677 │    0.685 │    0.5 │                             │
-  │ SDMA sequential      │    1.219 │    1.201 │    1.221 │    1.250 │    1.252 │    1.1 │                             │
-  │ SDMA overlapped      │    1.171 │    1.155 │    1.169 │    1.195 │    1.205 │    1.0 │ speedup=1.04, overlap=-0.03 │
+  │ wgrad GEMM alone     │    0.469 │    0.454 │    0.473 │    0.486 │    0.495 │    2.4 │  ~                          │
+  │ NCCL allreduce alone │    0.662 │    0.658 │    0.662 │    0.666 │    0.666 │    0.3 │                             │
+  │ NCCL sequential      │    1.208 │    1.185 │    1.210 │    1.220 │    1.221 │    0.8 │                             │
+  │ NCCL overlapped      │    1.161 │    1.120 │    1.162 │    1.180 │    1.181 │    1.2 │ speedup=1.04, overlap=-0.03 │
+  │ SDMA allreduce alone │    0.677 │    0.674 │    0.677 │    0.680 │    0.681 │    0.3 │                             │
+  │ SDMA sequential      │    1.226 │    1.208 │    1.226 │    1.241 │    1.250 │    0.9 │                             │
+  │ SDMA overlapped      │    1.274 │    1.248 │    1.273 │    1.296 │    1.302 │    1.3 │ speedup=0.96, overlap=-0.11 │
   └──────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴─────────────────────────────┘
 
-  NCCL overlap speedup:  0.99x
-  SDMA overlap speedup:  1.04x
-  SDMA vs NCCL:          1.03x
+  NCCL overlap speedup:  1.04x
+  SDMA overlap speedup:  0.96x
+  SDMA vs NCCL:          0.91x
 
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
 AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 4
 PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
 
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
 benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
-benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f6f59a00000
-  Barrier: 128 bytes at 0x7f6ecea00000
-  Output transit buffer: 112.00 MB at 0x7f6e86800000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f162e400000
-  Barrier: 128 bytes at 0x7f15a7800000
-  Output transit buffer: 112.00 MB at 0x7f155f600000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ef80ce00000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Barrier: 128 bytes at 0x7ef7bc000000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7edf70400000
-  Barrier: 128 bytes at 0x7edf1f400000
-  Flags: 64 bytes at 0x7fa8f5a00000
-  Barrier: 128 bytes at 0x7fa86aa00000
-  Output transit buffer: 112.00 MB at 0x7ef738600000
-  Output transit buffer: 112.00 MB at 0x7ede9c600000
-  Output transit buffer: 112.00 MB at 0x7fa822800000
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_multi_layer_pipeline_comparison AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8440000000
+  Output transit buffer: 112.00 MB at 0x7f83d7000000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
 AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ed7b9e00000
-  Barrier: 128 bytes at 0x7ed768e00000
+  Flags: 64 bytes at 0x7f83e9a00000
 AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7f83dd400000
+  Flags: 64 bytes at 0x7f34e2000000
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f20d8800000
+  Output transit buffer: 112.00 MB at 0x7f8334000000
+  Barrier: 128 bytes at 0x7f34d9c00000
+  Output transit buffer: 112.00 MB at 0x7f206f000000
+  Output transit buffer: 112.00 MB at 0x7f3430e00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f00fe800000
+  Output transit buffer: 112.00 MB at 0x7f0055800000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f21fe400000
+  Output transit buffer: 112.00 MB at 0x7f2155400000
 AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
-  Output transit buffer: 112.00 MB at 0x7ed6e6800000
-  Flags: 64 bytes at 0x7f52b3c00000
-  Flags: 64 bytes at 0x7f57f2400000
-  Barrier: 128 bytes at 0x7f5267000000
-  Barrier: 128 bytes at 0x7f576b800000
-  Output transit buffer: 112.00 MB at 0x7f51e4600000
-  Output transit buffer: 112.00 MB at 0x7f5723600000
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 3
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edde4c00000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7edd7b000000
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2c6c400000
+  Output transit buffer: 112.00 MB at 0x7f2c03000000
 
-========================================================================AllreduceSdma destroyed: PE 1
-
+========================================================================
   NCCL vs SDMA 4-Layer Wgrad Pipeline (world=8)
 ========================================================================
-AllreduceSdma destroyed: PE 2
-                                  4L eager NCCL  avg=   5.860 ms  min=   5.835 ms  max=   5.888 ms  std=  0.016 ms  cv=  0.3%
-                               4L deferred NCCL  avg=   4.978 ms  min=   4.941 ms  max=   5.028 ms  std=  0.028 ms  cv=  0.6%  speedup=1.1800
-AllreduceSdma destroyed: PE 5
-                                  4L eager SDMA  avg=   5.877 ms  min=   5.829 ms  max=   5.939 ms  std=  0.032 ms  cv=  0.5%
-                               4L deferred SDMA  avg=   5.982 ms  min=   5.351 ms  max=   6.440 ms  std=  0.257 ms  cv=  4.3%  speedup=0.9800  [~unstable]
+                                  4L eager NCCL  avg=   5.879 ms  min=   5.815 ms  max=   5.925 ms  std=  0.032 ms  cv=  0.5%
+                               4L deferred NCCL  avg=   4.966 ms  min=   4.942 ms  max=   5.002 ms  std=  0.016 ms  cv=  0.3%  speedup=1.1800
+                                  4L eager SDMA  avg=   5.865 ms  min=   5.837 ms  max=   5.898 ms  std=  0.019 ms  cv=  0.3%
+                               4L deferred SDMA  avg=   6.065 ms  min=   5.928 ms  max=   6.132 ms  std=  0.057 ms  cv=  0.9%  speedup=0.9700
 ========================================================================
 
 
@@ -446,38 +391,732 @@ AllreduceSdma destroyed: PE 5
   ┌──────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├──────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ 4L eager NCCL    │    5.860 │    5.835 │    5.860 │    5.886 │    5.888 │    0.3 │              │
-  │ 4L deferred NCCL │    4.978 │    4.941 │    4.973 │    5.027 │    5.028 │    0.6 │ speedup=1.18 │
-  │ 4L eager SDMA    │    5.877 │    5.829 │    5.875 │    5.927 │    5.939 │    0.5 │              │
-  │ 4L deferred SDMA │    5.982 │    5.351 │    6.073 │    6.279 │    6.440 │    4.3 │ speedup=0.98 ~│
+  │ 4L eager NCCL    │    5.879 │    5.815 │    5.878 │    5.920 │    5.925 │    0.5 │              │
+  │ 4L deferred NCCL │    4.966 │    4.942 │    4.965 │    4.997 │    5.002 │    0.3 │ speedup=1.18 │
+  │ 4L eager SDMA    │    5.865 │    5.837 │    5.867 │    5.893 │    5.898 │    0.3 │              │
+  │ 4L deferred SDMA │    6.065 │    5.928 │    6.078 │    6.128 │    6.132 │    0.9 │ speedup=0.97 │
   └──────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-  NCCL:  speedup=1.18x  saved=0.882 ms
-  SDMA:  speedup=0.98x  saved=-0.105 ms
-  SDMA vs NCCL (deferred):  0.83x
+  NCCL:  speedup=1.18x  saved=0.912 ms
+  SDMA:  speedup=0.97x  saved=-0.200 ms
+  SDMA vs NCCL (deferred):  0.82x
+
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=1024] AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edd7fe00000
+  Output transit buffer: 8.00 MB at 0x7edd7d600000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f2073e00000
+  Output transit buffer: 8.00 MB at 0x7f2071600000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f2199400000
+  Output transit buffer: 8.00 MB at 0x7f2196c00000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f3474e00000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Output transit buffer: 8.00 MB at 0x7f3472600000
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2c08200000
+  Output transit buffer: 8.00 MB at 0x7f2c05a00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f0099800000
+  Output transit buffer: 8.00 MB at 0x7f0097000000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f83dbe00000
+  Output transit buffer: 8.00 MB at 0x7f83d9600000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f83e9a00000
+  Barrier: 128 bytes at 0x7f8378400000
+  Output transit buffer: 8.00 MB at 0x7f8375c00000
+
+========================================================================
+  Wgrad Overlap Scaling N=1024 (world=8)
+========================================================================
+                                   wgrad N=1024  avg=   0.071 ms  min=   0.070 ms  max=   0.072 ms  std=  0.001 ms  cv=  0.9%  flops=34.4G
+                                NCCL ovl N=1024  avg=   0.168 ms  min=   0.164 ms  max=   0.181 ms  std=  0.004 ms  cv=  2.2%  [~unstable]
+                                SDMA ovl N=1024  avg=   0.221 ms  min=   0.218 ms  max=   0.226 ms  std=  0.002 ms  cv=  1.0%  vs_nccl=0.7600
+========================================================================
+
+
+  Wgrad Overlap Scaling N=1024 (world=8)
+  ┌─────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name            │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├─────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ wgrad N=1024    │    0.071 │    0.070 │    0.070 │    0.072 │    0.072 │    0.9 │ flops=34.4G  │
+  │ NCCL ovl N=1024 │    0.168 │    0.164 │    0.168 │    0.173 │    0.181 │    2.2 │  ~           │
+  │ SDMA ovl N=1024 │    0.221 │    0.218 │    0.221 │    0.224 │    0.226 │    1.0 │ vs_nccl=0.76 │
+  └─────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=4096] AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f1ffba00000
+  Barrier: 128 bytes at 0x7f33fd000000
+  Output transit buffer: 32.00 MB at 0x7f1ff7a00000
+  Output transit buffer: 32.00 MB at 0x7f33f9000000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f0021a00000
+  Output transit buffer: 32.00 MB at 0x7f001da00000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8363400000
+  Output transit buffer: 32.00 MB at 0x7f835f400000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7f2121600000
+  Barrier: 128 bytes at 0x7edd08000000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Output transit buffer: 32.00 MB at 0x7f211d600000
+  Flags: 64 bytes at 0x7f83e9a00000
+  Output transit buffer: 32.00 MB at 0x7edd04000000
+  Barrier: 128 bytes at 0x7f8300800000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Output transit buffer: 32.00 MB at 0x7f82fc800000
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2b8f800000
+  Output transit buffer: 32.00 MB at 0x7f2b8b800000
+
+========================================================================
+  Wgrad Overlap Scaling N=4096 (world=8)
+========================================================================
+                                   wgrad N=4096  avg=   0.140 ms  min=   0.131 ms  max=   0.153 ms  std=  0.007 ms  cv=  5.0%  flops=137.4G  [!NOISY]
+                                NCCL ovl N=4096  avg=   0.341 ms  min=   0.332 ms  max=   0.390 ms  std=  0.013 ms  cv=  3.7%  [~unstable]
+                                SDMA ovl N=4096  avg=   0.393 ms  min=   0.380 ms  max=   0.422 ms  std=  0.014 ms  cv=  3.6%  vs_nccl=0.8700  [~unstable]
+========================================================================
+
+
+  Wgrad Overlap Scaling N=4096 (world=8)
+  ┌─────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name            │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├─────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ wgrad N=4096    │    0.140 │    0.131 │    0.137 │    0.153 │    0.153 │    5.0 │ flops=137.4G *│
+  │ NCCL ovl N=4096 │    0.341 │    0.332 │    0.336 │    0.356 │    0.390 │    3.7 │  ~           │
+  │ SDMA ovl N=4096 │    0.393 │    0.380 │    0.388 │    0.420 │    0.422 │    3.6 │ vs_nccl=0.87 ~│
+  └─────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=7168] AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f33f9800000
+  Output transit buffer: 56.00 MB at 0x7f33e0e00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f1ff8200000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Output transit buffer: 56.00 MB at 0x7f1fdf800000
+  Flags: 64 bytes at 0x7eddf1200000
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7edd04800000
+  Barrier: 128 bytes at 0x7f835fc00000
+  Output transit buffer: 56.00 MB at 0x7edcebe00000
+  Output transit buffer: 56.00 MB at 0x7f8347200000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7f001e200000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f83e9a00000
+  Output transit buffer: 56.00 MB at 0x7f0005800000
+  Barrier: 128 bytes at 0x7f82fd000000
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f211de00000
+  Output transit buffer: 56.00 MB at 0x7f82e4600000
+  Output transit buffer: 56.00 MB at 0x7f2105400000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2b8c000000
+  Output transit buffer: 56.00 MB at 0x7f2b73600000
+
+========================================================================
+  Wgrad Overlap Scaling N=7168 (world=8)
+========================================================================
+                                   wgrad N=7168  avg=   0.247 ms  min=   0.233 ms  max=   0.286 ms  std=  0.018 ms  cv=  7.4%  flops=240.5G  [!NOISY]
+                                NCCL ovl N=7168  avg=   0.514 ms  min=   0.509 ms  max=   0.522 ms  std=  0.003 ms  cv=  0.7%
+                                SDMA ovl N=7168  avg=   0.673 ms  min=   0.650 ms  max=   0.905 ms  std=  0.051 ms  cv=  7.5%  vs_nccl=0.7600  [!NOISY]
+========================================================================
+
+
+  Wgrad Overlap Scaling N=7168 (world=8)
+  ┌─────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name            │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├─────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ wgrad N=7168    │    0.247 │    0.233 │    0.237 │    0.286 │    0.286 │    7.4 │ flops=240.5G *│
+  │ NCCL ovl N=7168 │    0.514 │    0.509 │    0.514 │    0.519 │    0.522 │    0.7 │              │
+  │ SDMA ovl N=7168 │    0.673 │    0.650 │    0.658 │    0.684 │    0.905 │    7.5 │ vs_nccl=0.76 *│
+  └─────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 5
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=14336] AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Flags: 64 bytes at 0x7f34e2000000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f33e2e00000
+  Barrier: 128 bytes at 0x7f8349200000
+  Flags: 64 bytes at 0x7f83e9a00000
+  Barrier: 128 bytes at 0x7f1fe1800000
+  Output transit buffer: 112.00 MB at 0x7f33bac00000
+  Barrier: 128 bytes at 0x7f82e6600000
+  Output transit buffer: 112.00 MB at 0x7f8321000000
+  Output transit buffer: 112.00 MB at 0x7f1fb9600000
+  Output transit buffer: 112.00 MB at 0x7f82be400000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edcede00000
+  Output transit buffer: 112.00 MB at 0x7edcc5c00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f0007800000
+  Output transit buffer: 112.00 MB at 0x7effdf600000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f2107400000
+  Output transit buffer: 112.00 MB at 0x7f20df200000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2b75600000
+  Output transit buffer: 112.00 MB at 0x7f2b4d400000
+
+========================================================================
+  Wgrad Overlap Scaling N=14336 (world=8)
+========================================================================
+                                  wgrad N=14336  avg=   0.459 ms  min=   0.446 ms  max=   0.479 ms  std=  0.009 ms  cv=  2.0%  flops=481.0G  [~unstable]
+                               NCCL ovl N=14336  avg=   1.158 ms  min=   1.125 ms  max=   1.179 ms  std=  0.017 ms  cv=  1.5%
+                               SDMA ovl N=14336  avg=   1.236 ms  min=   1.220 ms  max=   1.259 ms  std=  0.012 ms  cv=  0.9%  vs_nccl=0.9400
+========================================================================
+
+
+  Wgrad Overlap Scaling N=14336 (world=8)
+  ┌──────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├──────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ wgrad N=14336    │    0.459 │    0.446 │    0.460 │    0.472 │    0.479 │    2.0 │ flops=481.0G ~│
+  │ NCCL ovl N=14336 │    1.158 │    1.125 │    1.163 │    1.176 │    1.179 │    1.5 │              │
+  │ SDMA ovl N=14336 │    1.236 │    1.220 │    1.235 │    1.255 │    1.259 │    0.9 │ vs_nccl=0.94 │
+  └──────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=28672] AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8326800000
+  Flags: 64 bytes at 0x7f34e2000000
+  Flags: 64 bytes at 0x7f83e9a00000
+  Output transit buffer: 224.00 MB at 0x7f8283600000
+  Barrier: 128 bytes at 0x7f33c0400000
+  Barrier: 128 bytes at 0x7f82c3c00000
+  Output transit buffer: 224.00 MB at 0x7f8220a00000
+  Output transit buffer: 224.00 MB at 0x7f331d200000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7effe4e00000
+  Output transit buffer: 224.00 MB at 0x7eff41c00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f1fbee00000
+  Output transit buffer: 224.00 MB at 0x7f1f1bc00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edccb400000
+  Output transit buffer: 224.00 MB at 0x7edc28200000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f20e4a00000
+  Output transit buffer: 224.00 MB at 0x7f2041800000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2b52c00000
+  Output transit buffer: 224.00 MB at 0x7f2aafa00000
+
+========================================================================
+  Wgrad Overlap Scaling N=28672 (world=8)
+========================================================================
+                                  wgrad N=28672  avg=   0.848 ms  min=   0.836 ms  max=   0.865 ms  std=  0.009 ms  cv=  1.0%  flops=962.1G
+                               NCCL ovl N=28672  avg=   2.129 ms  min=   2.092 ms  max=   2.157 ms  std=  0.022 ms  cv=  1.0%
+                               SDMA ovl N=28672  avg=   2.354 ms  min=   2.310 ms  max=   2.410 ms  std=  0.028 ms  cv=  1.2%  vs_nccl=0.9000
+========================================================================
+
+
+  Wgrad Overlap Scaling N=28672 (world=8)
+  ┌──────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├──────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ wgrad N=28672    │    0.848 │    0.836 │    0.846 │    0.861 │    0.865 │    1.0 │ flops=962.1G │
+  │ NCCL ovl N=28672 │    2.129 │    2.092 │    2.133 │    2.157 │    2.157 │    1.0 │              │
+  │ SDMA ovl N=28672 │    2.354 │    2.310 │    2.349 │    2.397 │    2.410 │    1.2 │ vs_nccl=0.90 │
+  └──────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344]
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344] benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344]
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling[N=57344] AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f83e9a00000
+  Barrier: 128 bytes at 0x7f82bf400000
+  Output transit buffer: 448.00 MB at 0x7f80cd800000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8322000000
+  Output transit buffer: 448.00 MB at 0x7f8130400000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f33bbc00000
+  Output transit buffer: 448.00 MB at 0x7f31ca000000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f1fba600000
+  Output transit buffer: 448.00 MB at 0x7f1dc8a00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edcc6c00000
+  Output transit buffer: 448.00 MB at 0x7edad5000000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7effe0600000
+  Output transit buffer: 448.00 MB at 0x7efdeea00000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f20e0200000
+  Output transit buffer: 448.00 MB at 0x7f1eee600000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2b4e400000
+  Output transit buffer: 448.00 MB at 0x7f295c800000
+
+========================================================================
+  Wgrad Overlap Scaling N=57344 (world=8)
+========================================================================
+                                  wgrad N=57344  avg=   1.690 ms  min=   1.664 ms  max=   1.704 ms  std=  0.013 ms  cv=  0.8%  flops=1924.1G
+                               NCCL ovl N=57344  avg=   4.350 ms  min=   4.300 ms  max=   4.405 ms  std=  0.030 ms  cv=  0.7%
+                               SDMA ovl N=57344  avg=   4.424 ms  min=   4.385 ms  max=   4.457 ms  std=  0.021 ms  cv=  0.5%  vs_nccl=0.9800
+========================================================================
+
+
+  Wgrad Overlap Scaling N=57344 (world=8)
+  ┌──────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────┐
+  │ Name             │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras        │
+  ├──────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────┤
+  │ wgrad N=57344    │    1.690 │    1.664 │    1.695 │    1.703 │    1.704 │    0.8 │ flops=1924.1G │
+  │ NCCL ovl N=57344 │    4.350 │    4.300 │    4.348 │    4.404 │    4.405 │    0.7 │               │
+  │ SDMA ovl N=57344 │    4.424 │    4.385 │    4.426 │    4.454 │    4.457 │    0.5 │ vs_nccl=0.98  │
+  └──────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────┘
+
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 4
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary
+benchmarks/bench_wgrad_delay.py::TestNCCLvsSdmaWgradDelay::test_wgrad_overlap_scaling_summary AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edc32e00000
+  Output transit buffer: 8.00 MB at 0x7edc30600000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f1f26800000
+  Output transit buffer: 8.00 MB at 0x7f1f24000000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f204c400000
+  Output transit buffer: 8.00 MB at 0x7f2049c00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7eff4c800000
+  Flags: 64 bytes at 0x7f83e9a00000
+  Barrier: 128 bytes at 0x7f822b600000
+  Output transit buffer: 8.00 MB at 0x7eff4a000000
+  Output transit buffer: 8.00 MB at 0x7f8228e00000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2aba600000
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f3327e00000
+  Output transit buffer: 8.00 MB at 0x7f3325600000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Output transit buffer: 8.00 MB at 0x7f2ab7e00000
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f828e200000
+  Output transit buffer: 8.00 MB at 0x7f828ba00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f1f1c200000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7f1de3200000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f331d800000
+  Output transit buffer: 32.00 MB at 0x7f1ddf200000
+  Barrier: 128 bytes at 0x7f31e4800000
+  Flags: 64 bytes at 0x7f8283c00000
+  Barrier: 128 bytes at 0x7f814ac00000
+  Output transit buffer: 32.00 MB at 0x7f31e0800000
+  Output transit buffer: 32.00 MB at 0x7f8146c00000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7edc28800000
+  Barrier: 128 bytes at 0x7edaef800000
+  Flags: 64 bytes at 0x7f8221000000
+  Barrier: 128 bytes at 0x7f80e8000000
+  Output transit buffer: 32.00 MB at 0x7edaeb800000
+  Output transit buffer: 32.00 MB at 0x7f80e4000000
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 2
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2041e00000
+  Barrier: 128 bytes at 0x7f1f08e00000
+  Output transit buffer: 32.00 MB at 0x7f1f04e00000
+AllreduceSdma destroyed: PE 5
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eff42200000
+  Barrier: 128 bytes at 0x7efe09200000
+  Output transit buffer: 32.00 MB at 0x7efe05200000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+AllreduceSdma destroyed: PE 3
+  Flags: 64 bytes at 0x7f2ab0000000
+  Barrier: 128 bytes at 0x7f2977000000
+  Output transit buffer: 32.00 MB at 0x7f2973000000
+AllreduceSdma destroyed: PE 4
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7efdf2400000
+  Output transit buffer: 56.00 MB at 0x7efcd0c00000
+AllreduceSdma destroyed: PE 3
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8133e00000
+  Output transit buffer: 56.00 MB at 0x7f8012600000
+AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2960200000
+  Output transit buffer: 56.00 MB at 0x7f283ea00000
+AllreduceSdma destroyed: PE 4
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f31cda00000
+  Output transit buffer: 56.00 MB at 0x7f30ac200000
+AllreduceSdma destroyed: PE 0
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f83e9a00000
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f80d1200000
+  Barrier: 128 bytes at 0x7f1ef2000000
+  Output transit buffer: 56.00 MB at 0x7f7fafa00000
+  Output transit buffer: 56.00 MB at 0x7f1dd0800000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7edad8a00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+AllreduceSdma destroyed: PE 5
+  Output transit buffer: 56.00 MB at 0x7ed9b7200000
+  Flags: 64 bytes at 0x7f20e4e00000
+AllreduceSdma destroyed: PE 2
+  Barrier: 128 bytes at 0x7f1dcc400000
+AllreduceSdma destroyed: PE 6
+  Output transit buffer: 56.00 MB at 0x7f1caac00000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f8283c00000
+  Barrier: 128 bytes at 0x7f8147400000
+  Output transit buffer: 112.00 MB at 0x7f7fed400000
+AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f331d800000
+  Barrier: 128 bytes at 0x7f31e1000000
+  Output transit buffer: 112.00 MB at 0x7f3087000000
+AllreduceSdma destroyed: PE 0
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f1f1c200000
+  Flags: 64 bytes at 0x7f8221000000
+  Barrier: 128 bytes at 0x7f1ddfa00000
+  Barrier: 128 bytes at 0x7f80e4800000
+  Output transit buffer: 112.00 MB at 0x7f1c85a00000
+  Output transit buffer: 112.00 MB at 0x7f7f8a800000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 2
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2041e00000
+  Barrier: 128 bytes at 0x7f1f05600000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Output transit buffer: 112.00 MB at 0x7f1dab600000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2ab0000000
+  Barrier: 128 bytes at 0x7f2973800000
+  Flags: 64 bytes at 0x7edc28800000
+AllreduceSdma destroyed: PE 5
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7edaec000000
+  Output transit buffer: 112.00 MB at 0x7f2819800000
+  Flags: 64 bytes at 0x7eff42200000
+  Output transit buffer: 112.00 MB at 0x7ed992000000
+  Barrier: 128 bytes at 0x7efe05a00000
+AllreduceSdma destroyed: PE 4
+  Output transit buffer: 112.00 MB at 0x7efcaba00000
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 3
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f20e4e00000
+  Barrier: 128 bytes at 0x7f1cad400000
+  Output transit buffer: 224.00 MB at 0x7f1c3d800000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f34e2000000
+  Barrier: 128 bytes at 0x7f30aea00000
+  Output transit buffer: 224.00 MB at 0x7f303ee00000
+AllreduceSdma destroyed: PE 0
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f844c800000
+  Barrier: 128 bytes at 0x7f8014e00000
+  Output transit buffer: 224.00 MB at 0x7f7fa5200000
+AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eddf1200000
+  Barrier: 128 bytes at 0x7ed9b9a00000
+  Output transit buffer: 224.00 MB at 0x7ed949e00000
+AllreduceSdma destroyed: PE 6
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f83e9a00000
+  Flags: 64 bytes at 0x7f0106c00000
+  Barrier: 128 bytes at 0x7f7fb2200000
+  Barrier: 128 bytes at 0x7efcd3400000
+  Output transit buffer: 224.00 MB at 0x7f7f42600000
+  Output transit buffer: 224.00 MB at 0x7efc63800000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2206800000
+  Barrier: 128 bytes at 0x7f1dd3000000
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+  Output transit buffer: 224.00 MB at 0x7f1d63400000
+AllreduceSdma destroyed: PE 5
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2c78a00000
+  Barrier: 128 bytes at 0x7f2841200000
+  Output transit buffer: 224.00 MB at 0x7f27d1600000
+AllreduceSdma destroyed: PE 4
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f1f1c200000
+  Barrier: 128 bytes at 0x7f1c8be00000
+  Output transit buffer: 448.00 MB at 0x7f1baf600000
+AllreduceSdma destroyed: PE 7
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f8283c00000
+  Barrier: 128 bytes at 0x7f7ff3800000
+  Output transit buffer: 448.00 MB at 0x7f7f17000000
+AllreduceSdma destroyed: PE 1
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f331d800000
+  Barrier: 128 bytes at 0x7f308d400000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
+  Output transit buffer: 448.00 MB at 0x7f2fb0c00000
+  Flags: 64 bytes at 0x7edc28800000
+  Barrier: 128 bytes at 0x7ed998400000
+  Output transit buffer: 448.00 MB at 0x7ed8bbc00000
+AllreduceSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 6
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f2041e00000
+  Barrier: 128 bytes at 0x7f1db1a00000
+  Output transit buffer: 448.00 MB at 0x7f1cd5200000
+AllreduceSdma destroyed: PE 5
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7f8221000000
+  Barrier: 128 bytes at 0x7f7f90c00000
+  Output transit buffer: 448.00 MB at 0x7f7eb4400000
+AllreduceSdma destroyed: PE 2
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
+  Flags: 64 bytes at 0x7eff42200000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
+  Barrier: 128 bytes at 0x7efcb1e00000
+  Flags: 64 bytes at 0x7f2ab0000000
+  Barrier: 128 bytes at 0x7f281fc00000
+  Output transit buffer: 448.00 MB at 0x7efbd5600000
+  Output transit buffer: 448.00 MB at 0x7f2743400000
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 1
+
+========================================================================AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 7
+
+AllreduceSdma destroyed: PE 4
+  Wgrad Overlap Scaling Summary (world=8)AllreduceSdma destroyed: PE 5
+
+========================================================================
+                                    NCCL N=1024  avg=   0.172 ms  min=   0.169 ms  max=   0.182 ms  std=  0.003 ms  cv=  1.7%  vs_sdma=1.31x
+                                    SDMA N=1024  avg=   0.226 ms  min=   0.222 ms  max=   0.230 ms  std=  0.002 ms  cv=  1.0%  vs_nccl=0.76x
+                                    NCCL N=4096  avg=   0.333 ms  min=   0.328 ms  max=   0.344 ms  std=  0.004 ms  cv=  1.2%  vs_sdma=1.22x
+                                    SDMA N=4096  avg=   0.406 ms  min=   0.399 ms  max=   0.444 ms  std=  0.009 ms  cv=  2.3%  vs_nccl=0.82x  [~unstable]
+                                    NCCL N=7168  avg=   0.519 ms  min=   0.514 ms  max=   0.525 ms  std=  0.003 ms  cv=  0.6%  vs_sdma=1.26x
+                                    SDMA N=7168  avg=   0.657 ms  min=   0.642 ms  max=   0.671 ms  std=  0.009 ms  cv=  1.3%  vs_nccl=0.79x
+                                   NCCL N=14336  avg=   1.162 ms  min=   1.128 ms  max=   1.198 ms  std=  0.019 ms  cv=  1.6%  vs_sdma=1.12x
+                                   SDMA N=14336  avg=   1.302 ms  min=   1.265 ms  max=   1.327 ms  std=  0.016 ms  cv=  1.2%  vs_nccl=0.89x
+                                   NCCL N=28672  avg=   2.129 ms  min=   2.088 ms  max=   2.163 ms  std=  0.020 ms  cv=  0.9%  vs_sdma=1.10x
+                                   SDMA N=28672  avg=   2.348 ms  min=   2.303 ms  max=   2.372 ms  std=  0.021 ms  cv=  0.9%  vs_nccl=0.91x
+                                   NCCL N=57344  avg=   4.356 ms  min=   4.303 ms  max=   4.402 ms  std=  0.027 ms  cv=  0.6%  vs_sdma=1.07x
+                                   SDMA N=57344  avg=   4.655 ms  min=   4.587 ms  max=   4.727 ms  std=  0.036 ms  cv=  0.8%  vs_nccl=0.94x
+========================================================================
+
+
+  Wgrad Overlap Scaling Summary (world=8)
+  ┌──────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────┐
+  │ Name         │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras        │
+  ├──────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────┤
+  │ NCCL N=1024  │    0.172 │    0.169 │    0.171 │    0.176 │    0.182 │    1.7 │ vs_sdma=1.31x │
+  │ SDMA N=1024  │    0.226 │    0.222 │    0.225 │    0.229 │    0.230 │    1.0 │ vs_nccl=0.76x │
+  │ NCCL N=4096  │    0.333 │    0.328 │    0.332 │    0.340 │    0.344 │    1.2 │ vs_sdma=1.22x │
+  │ SDMA N=4096  │    0.406 │    0.399 │    0.403 │    0.417 │    0.444 │    2.3 │ vs_nccl=0.82x ~│
+  │ NCCL N=7168  │    0.519 │    0.514 │    0.520 │    0.525 │    0.525 │    0.6 │ vs_sdma=1.26x │
+  │ SDMA N=7168  │    0.657 │    0.642 │    0.656 │    0.670 │    0.671 │    1.3 │ vs_nccl=0.79x │
+  │ NCCL N=14336 │    1.162 │    1.128 │    1.158 │    1.191 │    1.198 │    1.6 │ vs_sdma=1.12x │
+  │ SDMA N=14336 │    1.302 │    1.265 │    1.300 │    1.325 │    1.327 │    1.2 │ vs_nccl=0.89x │
+  │ NCCL N=28672 │    2.129 │    2.088 │    2.133 │    2.152 │    2.163 │    0.9 │ vs_sdma=1.10x │
+  │ SDMA N=28672 │    2.348 │    2.303 │    2.356 │    2.369 │    2.372 │    0.9 │ vs_nccl=0.91x │
+  │ NCCL N=57344 │    4.356 │    4.303 │    4.355 │    4.401 │    4.402 │    0.6 │ vs_sdma=1.07x │
+  │ SDMA N=57344 │    4.655 │    4.587 │    4.665 │    4.701 │    4.727 │    0.8 │ vs_nccl=0.94x │
+  └──────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────┘
 
 AllreduceSdma destroyed: PE 0
 PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
 
-======================= 6 passed, 9 deselected in 11.43s =======================
+====================== 12 passed, 9 deselected in 13.50s =======================
 
 
-======================= 6 passed, 9 deselected in 11.64s =======================
+====================== 12 passed, 9 deselected in 14.11s =======================
 
 
-======================= 6 passed, 9 deselected in 11.51s =======================
+====================== 12 passed, 9 deselected in 13.82s =======================
 
 
-======================= 6 passed, 9 deselected in 11.55s =======================
+====================== 12 passed, 9 deselected in 14.46s =======================
 
 
-======================= 6 passed, 9 deselected in 11.54s =======================
+====================== 12 passed, 9 deselected in 13.64s =======================
 
 
-======================= 6 passed, 9 deselected in 12.03s =======================
+====================== 12 passed, 9 deselected in 13.70s =======================
 
 
-======================= 6 passed, 9 deselected in 11.58s =======================
+====================== 12 passed, 9 deselected in 13.67s =======================
 
 
-======================= 6 passed, 9 deselected in 11.66s =======================
+====================== 12 passed, 9 deselected in 14.30s =======================
