@@ -929,6 +929,153 @@ class TestNCCLvsSdma:
         if self.rank == 0:
             print_report_with_table(f"NCCL vs SDMA Overlap (world={self.world})", [r_nccl, r_sdma])
 
+    @pytest.mark.parametrize(
+        "gemm_n",
+        [256, 1024, 4096, 7168, 14336, 28672],
+        ids=lambda n: f"N={n}",
+    )
+    def test_nccl_vs_sdma_scaling(self, gemm_n):
+        """Sweep GEMM output dimension to find SDMA crossover point.
+
+        Keeps the allgather size fixed (shard_m x K) and varies the GEMM
+        weight width.  Smaller gemm_n → tiny GEMM where SDMA overhead
+        dominates; larger gemm_n → SDMA DMA engine parallelism wins.
+        """
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        shard_m = M // self.world
+        x_local = torch.randn(shard_m, K, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+
+        comm = SdmaTpComm(dist.group.WORLD)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        for _ in range(3):
+            _distributed_allgather(x_local)
+            comm.allgather_dim0(x_local)
+            _ = x_local @ w.T
+        torch.cuda.synchronize()
+
+        gemm_flops = 2 * shard_m * K * gemm_n
+
+        r_gemm = cuda_timer(
+            lambda: x_local @ w.T,
+            label=f"GEMM N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _nccl():
+            with torch.cuda.stream(comm_stream):
+                _distributed_allgather(x_local)
+            _ = x_local @ w.T
+            comm_stream.synchronize()
+
+        def _sdma():
+            comm.allgather_dim0_async(x_local, stream=sdma_stream)
+            _ = x_local @ w.T
+            comm.wait_allgather_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_nccl = cuda_timer(
+            _nccl,
+            label=f"NCCL N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            _sdma,
+            label=f"SDMA N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        winner = "SDMA" if speedup > 1.0 else "NCCL"
+        r_sdma.extra["vs_nccl"] = f"{speedup:.2f}x"
+        r_sdma.extra["winner"] = winner
+        r_gemm.extra["GFLOPS"] = round(gemm_flops / max(r_gemm.avg_ms * 1e6, 1), 1)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"NCCL vs SDMA  N={gemm_n}  (world={self.world})",
+                [r_gemm, r_nccl, r_sdma],
+            )
+
+    def test_nccl_vs_sdma_scaling_summary(self):
+        """Print a combined summary table after all scaling tests.
+
+        Runs all GEMM sizes in one test so the results appear in a single
+        table for easy comparison.
+        """
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        shard_m = M // self.world
+        x_local = torch.randn(shard_m, K, device=self.device, dtype=torch.bfloat16)
+        comm = SdmaTpComm(dist.group.WORLD)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        sizes = [256, 1024, 4096, 7168, 14336, 28672]
+        all_results: List[BenchResult] = []
+
+        for gemm_n in sizes:
+            w = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+
+            for _ in range(3):
+                _distributed_allgather(x_local)
+                comm.allgather_dim0(x_local)
+                _ = x_local @ w.T
+            torch.cuda.synchronize()
+
+            def _nccl(w=w):
+                with torch.cuda.stream(comm_stream):
+                    _distributed_allgather(x_local)
+                _ = x_local @ w.T
+                comm_stream.synchronize()
+
+            def _sdma(w=w):
+                comm.allgather_dim0_async(x_local, stream=sdma_stream)
+                _ = x_local @ w.T
+                comm.wait_allgather_dim0(stream=sdma_stream)
+                compute_stream.wait_stream(sdma_stream)
+
+            r_nccl = cuda_timer(
+                _nccl,
+                label=f"NCCL  N={gemm_n:>5}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+            r_sdma = cuda_timer(
+                _sdma,
+                label=f"SDMA  N={gemm_n:>5}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+
+            speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+            tag = "SDMA wins" if speedup > 1.0 else "NCCL wins"
+            r_sdma.extra["vs_nccl"] = f"{speedup:.2f}x ({tag})"
+            all_results.extend([r_nccl, r_sdma])
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"NCCL vs SDMA Scaling Summary (world={self.world})",
+                all_results,
+            )
+
 
 # ---------------------------------------------------------------------------
 # Standalone runner

@@ -25,17 +25,27 @@ Run single-GPU::
     python -m benchmarks.bench_fp8_param_allgather
     pytest benchmarks/bench_fp8_param_allgather.py -v -s
 
-Run multi-GPU — NCCL::
+Run multi-GPU (2 GPU) — NCCL::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
 
-Run multi-GPU — SDMA (requires mori)::
+Run multi-GPU (2 GPU) — SDMA (requires mori)::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k SDMA
 
-Run multi-GPU — E2E::
+Run multi-GPU (2 GPU) — E2E::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
+
+Run multi-GPU (8 GPU) — all distributed tests::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "NCCL or SDMA or E2E"
+
+Run multi-GPU (8 GPU) — individual sections::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k SDMA
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
 """
 
 from __future__ import annotations
@@ -104,7 +114,10 @@ def _init_dist():
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend="nccl:gloo", device_id=torch.device(f"cuda:{local_rank}"))
+    dist.init_process_group(
+        backend="cpu:gloo,cuda:nccl",
+        device_id=torch.device(f"cuda:{local_rank}"),
+    )
 
 
 _DIST = pytest.mark.skipif(
