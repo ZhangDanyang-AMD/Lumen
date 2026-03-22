@@ -23,20 +23,19 @@ class CPUOffloadManager:
     def __init__(self, enabled=True, pin_memory=True):
         self.enabled = enabled
         self.pin_memory = pin_memory
-        self._device = None
-        self._d2h_stream = None
-        self._h2d_stream = None
+        self._d2h_streams = {}
+        self._h2d_streams = {}
         self._offloaded_bytes = 0
 
-    def _get_d2h_stream(self):
-        if self._d2h_stream is None:
-            self._d2h_stream = torch.cuda.Stream(device=self._device)
-        return self._d2h_stream
+    def _get_d2h_stream(self, device):
+        if device not in self._d2h_streams:
+            self._d2h_streams[device] = torch.cuda.Stream(device=device)
+        return self._d2h_streams[device]
 
-    def _get_h2d_stream(self):
-        if self._h2d_stream is None:
-            self._h2d_stream = torch.cuda.Stream(device=self._device)
-        return self._h2d_stream
+    def _get_h2d_stream(self, device):
+        if device not in self._h2d_streams:
+            self._h2d_streams[device] = torch.cuda.Stream(device=device)
+        return self._h2d_streams[device]
 
     @property
     def memory_saved_bytes(self):
@@ -47,9 +46,9 @@ class CPUOffloadManager:
             return tensor
         if tensor.nelement() * tensor.element_size() < 1024:
             return tensor
-        self._device = tensor.device
-        d2h = self._get_d2h_stream()
-        event = torch.cuda.current_stream(self._device).record_event()
+        device = tensor.device
+        d2h = self._get_d2h_stream(device)
+        event = torch.cuda.current_stream(device).record_event()
         with torch.cuda.stream(d2h):
             d2h.wait_event(event)
             cpu = torch.empty(
@@ -59,6 +58,7 @@ class CPUOffloadManager:
             )
             cpu.copy_(tensor, non_blocking=True)
             cpu._d2h_event = d2h.record_event()
+            cpu._src_device = device
         self._offloaded_bytes += tensor.nelement() * tensor.element_size()
         return cpu
 
@@ -67,11 +67,12 @@ class CPUOffloadManager:
             return packed
         if hasattr(packed, "_d2h_event"):
             packed._d2h_event.synchronize()
-        h2d = self._get_h2d_stream()
-        event = torch.cuda.current_stream(self._device).record_event()
+        device = getattr(packed, "_src_device", torch.device("cuda"))
+        h2d = self._get_h2d_stream(device)
+        event = torch.cuda.current_stream(device).record_event()
         with torch.cuda.stream(h2d):
             h2d.wait_event(event)
-            gpu = packed.to(self._device, non_blocking=True)
+            gpu = packed.to(device, non_blocking=True)
         h2d.synchronize()
         return gpu
 

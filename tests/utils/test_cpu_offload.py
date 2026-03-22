@@ -29,7 +29,6 @@ class TestCPUOffloadManager:
         assert packed.is_cuda
         assert mgr.memory_saved_bytes == 0
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
     def test_pack_skips_cpu_tensors(self):
         mgr = CPUOffloadManager(enabled=True)
         t = torch.randn(64, 64)
