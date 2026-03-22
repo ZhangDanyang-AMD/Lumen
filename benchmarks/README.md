@@ -37,6 +37,41 @@ torchrun --nproc_per_node=2 -m benchmarks.bench_comm_overlap
 torchrun --nproc_per_node=8 -m benchmarks.bench_comm_overlap
 ```
 
+## Tracing
+
+Generate Chrome/Perfetto-compatible `.json` trace files that visualize the GPU
+timeline (kernel names, durations, stream concurrency).
+
+```bash
+# All trace groups
+python -m benchmarks.run_traces
+
+# Single group
+python -m benchmarks.run_traces --only kernel   # kernel launch
+python -m benchmarks.run_traces --only comm     # comm-compute overlap
+python -m benchmarks.run_traces --only wgrad    # wgrad delay
+python -m benchmarks.run_traces --only rope     # RoPE fusion
+python -m benchmarks.run_traces --only fp8      # FP8 param
+
+# Single trace function (or multiple)
+python -m benchmarks.run_traces --run trace_fused_moe
+python -m benchmarks.run_traces --run trace_fused_moe trace_fused_qk_rope
+
+# List all available trace function names
+python -m benchmarks.run_traces --list
+```
+
+Trace files are written to `benchmarks/traces/` (git-ignored). Open them at
+`chrome://tracing` or https://ui.perfetto.dev.
+
+| Group | Trace Files | What to Look For |
+|-------|-------------|------------------|
+| kernel | `kernel_fused_moe.json`, `kernel_manual_moe.json`, `kernel_scaling_*.json`, `kernel_attn_*.json` | Kernel count reduction, kernel names, fused vs decomposed |
+| comm | `comm_column_*.json`, `comm_pipeline_*.json` | Stream concurrency: allgather on comm stream overlapping GEMM on compute stream |
+| wgrad | `wgrad_sequential.json`, `wgrad_overlapped.json`, `wgrad_4layer_*.json` | Deferred wgrad on secondary stream overlapping forward on default stream |
+| rope | `rope_fused_s2048.json`, `rope_pytorch_s2048.json`, `rope_fused_qk.json` | Single fused kernel vs 4+ decomposed PyTorch ops |
+| fp8 | `fp8_quant.json`, `fp8_dequant.json`, `fp8_forward_*.json` | Quant/dequant kernel overhead, BF16 vs FP8 param forward pipeline |
+
 ## Feature Coverage
 
 ### 1. Single-GPU Kernel Launch Reduction (`bench_kernel_launch.py`)

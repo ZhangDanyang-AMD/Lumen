@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Generator, List, Optional
 
 import torch
+
+TRACE_DIR = os.path.join(os.path.dirname(__file__), "traces")
 
 # ---------------------------------------------------------------------------
 # Hardware guards
@@ -183,3 +186,112 @@ def dump_json(results: List[BenchResult], path: str) -> None:
         data.append(d)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Tracing helpers (torch.profiler → Chrome / Perfetto JSON)
+# ---------------------------------------------------------------------------
+
+
+def _ensure_trace_dir(trace_path: str) -> None:
+    d = os.path.dirname(trace_path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+
+def trace_fn(
+    fn: Callable[[], object],
+    trace_path: str,
+    warmup: int = 3,
+    active: int = 1,
+    label: str = "",
+    record_shapes: bool = True,
+    with_stack: bool = False,
+    with_modules: bool = False,
+) -> str:
+    """Run *fn* under ``torch.profiler`` and export a Chrome trace JSON.
+
+    Args:
+        fn: Zero-arg callable to profile.
+        trace_path: Output ``.json`` path (directories created automatically).
+        warmup: Profiler warmup iterations (not recorded).
+        active: Iterations recorded in the trace.
+        label: Optional label printed in the summary header.
+        record_shapes: Record tensor shapes in the trace.
+        with_stack: Capture Python call stacks (slower but more detail).
+        with_modules: Record ``nn.Module`` hierarchy.
+
+    Returns:
+        The absolute path to the exported trace file.
+    """
+    _ensure_trace_dir(trace_path)
+
+    for _ in range(warmup):
+        fn()
+        torch.cuda.synchronize()
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        record_shapes=record_shapes,
+        with_stack=with_stack,
+        with_modules=with_modules,
+    ) as prof:
+        for _ in range(active):
+            fn()
+            torch.cuda.synchronize()
+
+    prof.export_chrome_trace(trace_path)
+
+    header = label or os.path.basename(trace_path)
+    print(f"\n--- Trace: {header} ---")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    size = os.path.getsize(trace_path)
+    print(f"  Saved: {trace_path} ({format_bytes(size)})")
+    return os.path.abspath(trace_path)
+
+
+@contextlib.contextmanager
+def trace_context(
+    trace_path: str,
+    record_shapes: bool = True,
+    with_stack: bool = False,
+    label: str = "",
+) -> Generator[torch.profiler.profile, None, None]:
+    """Context manager that wraps a code block in ``torch.profiler``.
+
+    Use this instead of :func:`trace_fn` when the profiled code is not a
+    single callable (e.g. multi-stream overlap benchmarks).
+
+    .. code-block:: python
+
+        with trace_context("traces/my_trace.json") as prof:
+            # ... code to profile ...
+        # trace JSON written automatically on exit
+
+    Yields:
+        The ``torch.profiler.profile`` object (rarely needed directly).
+    """
+    _ensure_trace_dir(trace_path)
+
+    prof = torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        record_shapes=record_shapes,
+        with_stack=with_stack,
+    )
+    prof.__enter__()
+    try:
+        yield prof
+    finally:
+        prof.__exit__(None, None, None)
+        prof.export_chrome_trace(trace_path)
+        header = label or os.path.basename(trace_path)
+        print(f"\n--- Trace: {header} ---")
+        print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+        size = os.path.getsize(trace_path)
+        print(f"  Saved: {trace_path} ({format_bytes(size)})")
