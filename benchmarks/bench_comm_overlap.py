@@ -201,7 +201,7 @@ def _make_row_parallel(overlap: bool, seq_parallel: bool = False):
 
     config = _make_config(sequence_parallel=seq_parallel, lumen_tp_comm_overlap=overlap)
     m = LumenRowParallelLinear(
-        N // TP_SIZE,
+        N,
         K,
         config=config,
         init_method=lambda w: torch.nn.init.kaiming_uniform_(w),
