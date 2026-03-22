@@ -79,7 +79,7 @@ class TestDeferredWgrad:
         dw.execute()
         torch.testing.assert_close(weight.grad, torch.ones(4, 4) * 4)
 
-    def test_double_defer_overwrites(self):
+    def test_double_defer_queues_both(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
         dw = _DeferredWgrad()
@@ -89,7 +89,8 @@ class TestDeferredWgrad:
         dw.defer(lambda: weight.grad.add_(torch.ones(4, 4)))
         dw.defer(lambda: weight.grad.add_(torch.ones(4, 4) * 5))
         dw.execute()
-        torch.testing.assert_close(weight.grad, torch.ones(4, 4) * 5)
+        # Both closures run: 0 + 1 + 5 = 6
+        torch.testing.assert_close(weight.grad, torch.ones(4, 4) * 6)
 
 
 # =========================================================================
@@ -133,6 +134,7 @@ class TestQuantizedLinearDeferredWgrad:
             False,  # gradient_accumulation_fusion
             False,  # delay_wgrad
             None,  # deferred_wgrad
+            False,  # fp8_activation_store
         )
         loss_eager = y_eager.sum()
         loss_eager.backward()
@@ -153,6 +155,7 @@ class TestQuantizedLinearDeferredWgrad:
             False,  # gradient_accumulation_fusion
             True,  # delay_wgrad
             dwg,  # deferred_wgrad
+            False,  # fp8_activation_store
         )
         loss_defer = y_defer.sum()
         loss_defer.backward()
@@ -200,6 +203,7 @@ class TestQuantizedLinearDeferredWgrad:
             True,  # gradient_accumulation_fusion
             True,  # delay_wgrad
             dwg,
+            False,  # fp8_activation_store
         )
         y.sum().backward()
 
@@ -237,6 +241,7 @@ class TestQuantizedLinearDeferredWgrad:
             False,  # gradient_accumulation_fusion
             True,  # delay_wgrad
             dwg,
+            False,  # fp8_activation_store
         )
         y.sum().backward()
 

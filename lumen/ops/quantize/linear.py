@@ -150,6 +150,17 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
     raise ValueError(f"Unknown scaling_type={scaling_type!r}")
 
 
+def _fp8_store_activation(input_2d, fp8_dtype):
+    """Quantize activation for memory-efficient storage in save_for_backward."""
+    input_fp8, scale = quantize_input(input_2d, "dynamic", fp8_dtype)
+    return input_fp8, scale
+
+
+def _fp8_restore_activation(input_fp8, scale, target_dtype):
+    """Dequantize stored FP8 activation. Convention: dequant = fp8 * scale."""
+    return (input_fp8.to(torch.float32) * scale).to(target_dtype)
+
+
 # ---------------------------------------------------------------------------
 # GEMM dispatch with fallback (all via AITER)
 #
@@ -348,11 +359,19 @@ class QuantizedLinearFunction(torch.autograd.Function):
         gradient_accumulation_fusion: bool = False,
         delay_wgrad: bool = False,
         deferred_wgrad=None,
+        fp8_activation_store: bool = False,
     ) -> torch.Tensor:
         # weight is [N, K] — standard PyTorch Linear convention
         if scaling_type == "none":
             output = gemm_bf16(input, weight, bias)
-            ctx.save_for_backward(input, weight)
+            if fp8_activation_store:
+                input_2d = input.reshape(-1, input.shape[-1]).contiguous()
+                input_store, input_scale = _fp8_store_activation(input_2d, fp8_dtype)
+                ctx.save_for_backward(input_store, input_scale, weight)
+                ctx._input_shape = input.shape
+            else:
+                ctx.save_for_backward(input, weight)
+            ctx.fp8_activation_store = fp8_activation_store
             ctx.has_bias = bias is not None
             ctx.scaling_type = "none"
             ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
@@ -372,7 +391,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
             weight_dequant = (weight_fp8.to(input.dtype) * weight_scale).to(input.dtype)
             output = gemm_bf16(input, weight_dequant, bias)
-            ctx.save_for_backward(input, weight_fp8, weight_scale)
+            if fp8_activation_store:
+                input_2d = input.reshape(-1, input.shape[-1]).contiguous()
+                input_store, input_scale = _fp8_store_activation(input_2d, fp8_dtype)
+                ctx.save_for_backward(input_store, input_scale, weight_fp8, weight_scale)
+                ctx._input_shape = input.shape
+            else:
+                ctx.save_for_backward(input, weight_fp8, weight_scale)
+            ctx.fp8_activation_store = fp8_activation_store
             ctx.scaling_manager = scaling_manager
             ctx.has_bias = bias is not None
             ctx.quantize_activation = False
@@ -410,6 +436,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
             output = output + bias
 
         ctx.save_for_backward(input_fp8, weight_fp8, input_scale, weight_scale)
+        ctx.fp8_activation_store = False
         ctx.scaling_manager = scaling_manager
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
@@ -430,7 +457,12 @@ class QuantizedLinearFunction(torch.autograd.Function):
         scaling_type = ctx.scaling_type
 
         if scaling_type == "none":
-            input_tensor, weight = ctx.saved_tensors
+            if ctx.fp8_activation_store:
+                input_store, input_scale, weight = ctx.saved_tensors
+                input_tensor = _fp8_restore_activation(input_store, input_scale, grad_output.dtype)
+                input_tensor = input_tensor.view(ctx._input_shape)
+            else:
+                input_tensor, weight = ctx.saved_tensors
             grad_input = dispatch_gemm(
                 grad_output,
                 weight.t().contiguous(),
@@ -477,10 +509,30 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     grad_weight = None
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
+            return (
+                grad_input,
+                grad_weight,
+                grad_bias,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
 
         if not ctx.quantize_activation:
-            input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
+            if ctx.fp8_activation_store:
+                input_store, input_scale, weight_fp8, weight_scale = ctx.saved_tensors
+                input_tensor = _fp8_restore_activation(input_store, input_scale, grad_output.dtype)
+                input_tensor = input_tensor.view(ctx._input_shape)
+            else:
+                input_tensor, weight_fp8, weight_scale = ctx.saved_tensors
             weight_dequant = (weight_fp8.to(grad_output.dtype) * weight_scale).to(grad_output.dtype)
             grad_input = dispatch_gemm(
                 grad_output,
@@ -533,7 +585,22 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     grad_weight = None
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
-            return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
+            return (
+                grad_input,
+                grad_weight,
+                grad_bias,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
@@ -656,7 +723,22 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
-        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None, None, None, None, None
+        return (
+            grad_input,
+            grad_weight,
+            grad_bias,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
@@ -683,6 +765,7 @@ def quantized_linear(
     gradient_accumulation_fusion: bool = False,
     delay_wgrad: bool = False,
     deferred_wgrad=None,
+    fp8_activation_store: bool = False,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -731,4 +814,5 @@ def quantized_linear(
         gradient_accumulation_fusion,
         delay_wgrad,
         deferred_wgrad,
+        fp8_activation_store,
     )

@@ -358,6 +358,11 @@ def _replace_forward(
     """
     original_forward = module.forward
 
+    _delay_wgrad = getattr(module, "delay_wgrad", False)
+    _deferred_wgrad = getattr(module, "_deferred_wgrad", None) if _delay_wgrad else None
+    _gaf = getattr(module, "gradient_accumulation_fusion", False)
+    _fp8_act_store = getattr(module, "fp8_activation_store", False)
+
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
@@ -373,6 +378,10 @@ def _replace_forward(
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
                 fp8_wgrad=fp8_wgrad,
+                gradient_accumulation_fusion=_gaf,
+                delay_wgrad=_delay_wgrad,
+                deferred_wgrad=_deferred_wgrad,
+                fp8_activation_store=_fp8_act_store,
             )
 
     else:
@@ -409,6 +418,10 @@ def _replace_forward(
                 tensor_id=tensor_id,
                 quantize_activation=quantize_activation,
                 fp8_wgrad=fp8_wgrad,
+                gradient_accumulation_fusion=_gaf,
+                delay_wgrad=_delay_wgrad,
+                deferred_wgrad=_deferred_wgrad,
+                fp8_activation_store=_fp8_act_store,
             )
 
             if is_row_parallel and seq_parallel:
