@@ -697,6 +697,9 @@ class TestDeferredWgradSdmaComm:
             dist_barrier=True,
         )
 
+        torch.cuda.synchronize()
+        dist.barrier()
+
         # Overlapped: SDMA allreduce async on sdma_stream, wgrad on default
         def _overlapped():
             w.main_grad.zero_()
@@ -735,6 +738,10 @@ class TestDeferredWgradSdmaComm:
                 compute_label="wgrad",
                 comm_label="SDMA AR",
             )
+
+        # Drain all SDMA work before next test creates a new SdmaTpComm
+        torch.cuda.synchronize()
+        dist.barrier()
 
     # Expected: In a 4-layer pipeline, SDMA overlap should yield higher
     # speedup than NCCL (compare with TestDeferredWgradRealComm) because
@@ -780,6 +787,9 @@ class TestDeferredWgradSdmaComm:
             trim_pct=_TRIM,
             dist_barrier=True,
         )
+
+        torch.cuda.synchronize()
+        dist.barrier()
 
         # Deferred: overlap wgrad with SDMA allreduce of previous layer
         def _deferred():
@@ -834,6 +844,10 @@ class TestDeferredWgradSdmaComm:
             print(f"  Speedup:  {speedup:.2f}x")
             print(f"  Saved:    {saved_ms:.3f} ms  " f"(≈ {n_layers} × {saved_ms / n_layers:.3f} ms per layer)")
             print()
+
+        # Drain all SDMA work before next test
+        torch.cuda.synchronize()
+        dist.barrier()
 
 
 # ---------------------------------------------------------------------------

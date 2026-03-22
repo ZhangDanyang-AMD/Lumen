@@ -68,6 +68,43 @@ def _pytorch_rope_neox(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) ->
     return x * cos_exp.repeat(1, 1, 1, 2)[..., :d] + rotated * sin_exp.repeat(1, 1, 1, 2)[..., :d]
 
 
+def _pytorch_rope_2d(
+    x: torch.Tensor,
+    cos_h: torch.Tensor,
+    sin_h: torch.Tensor,
+    cos_w: torch.Tensor,
+    sin_w: torch.Tensor,
+    img_h: int,
+    img_w: int,
+) -> torch.Tensor:
+    """Naive PyTorch 2D RoPE matching AITER _rope_fwd_2d_kernel_neox.
+
+    x: [B, H*W, n_heads, D].  The kernel splits D into two halves:
+      - first half rotated by height freqs (NeoX quarter-pairing)
+      - second half rotated by width freqs (NeoX quarter-pairing)
+    cos_h/sin_h: [img_h, D//2],  cos_w/sin_w: [img_w, D//2].
+    """
+    B_dim, _wh, n_heads, d = x.shape
+    d2 = d // 2
+    q = d2 // 2
+    x_first = x[..., :d2].reshape(B_dim, img_h, img_w, n_heads, d2)
+    x_second = x[..., d2:].reshape(B_dim, img_h, img_w, n_heads, d2)
+
+    cos_h_exp = cos_h[:img_h, :].reshape(1, img_h, 1, 1, d2)
+    sin_h_exp = sin_h[:img_h, :].reshape(1, img_h, 1, 1, d2)
+    x_a, x_b = x_first[..., :q], x_first[..., q:]
+    rot_h = torch.cat([-x_b, x_a], dim=-1)
+    out_h = (x_first * cos_h_exp + rot_h * sin_h_exp).reshape(B_dim, _wh, n_heads, d2)
+
+    cos_w_exp = cos_w[:img_w, :].reshape(1, 1, img_w, 1, d2)
+    sin_w_exp = sin_w[:img_w, :].reshape(1, 1, img_w, 1, d2)
+    x_c, x_d = x_second[..., :q], x_second[..., q:]
+    rot_w = torch.cat([-x_d, x_c], dim=-1)
+    out_w = (x_second * cos_w_exp + rot_w * sin_w_exp).reshape(B_dim, _wh, n_heads, d2)
+
+    return torch.cat([out_h, out_w], dim=-1)
+
+
 # ---------------------------------------------------------------------------
 # 0. Fused AITER RoPE vs naive PyTorch RoPE (M3 acceptance criterion)
 # ---------------------------------------------------------------------------
@@ -154,12 +191,17 @@ class TestRoPE1D:
         x = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
         cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
 
-        r = cuda_timer(
+        r_fused = cuda_timer(
             lambda: apply_rotary_pos_emb(x, cos, sin),
-            label=f"apply_rotary_pos_emb S={seqlen}",
+            label=f"Lumen fused S={seqlen}",
         )
-        print_report(f"RoPE 1D S={seqlen}", [r])
-        assert r.avg_ms > 0
+        r_naive = cuda_timer(
+            lambda: _pytorch_rope_neox(x, cos, sin),
+            label=f"PyTorch decomposed S={seqlen}",
+        )
+        speedup = r_naive.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report(f"RoPE 1D S={seqlen}", [r_fused, r_naive])
 
     # Expected: Both NeoX and GPT-J styles should have similar latency because
     # the AITER Triton kernel handles the index permutation internally. NeoX
@@ -202,7 +244,7 @@ class TestFusedRoPEQK:
     # full kernel launch and one round of cos/sin memory reads.
     @pytest.mark.parametrize("seqlen", [512, 2048, 4096])
     def test_fused_qk(self, seqlen):
-        from lumen.ops.rope import apply_rotary_pos_emb, fused_rope
+        from lumen.ops.rope import fused_rope
 
         q = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
         k = torch.randn(B, H, seqlen, D, device="cuda", dtype=torch.bfloat16)
@@ -210,18 +252,18 @@ class TestFusedRoPEQK:
 
         r_fused = cuda_timer(
             lambda: fused_rope(q, k, cos, sin),
-            label=f"fused_rope Q+K S={seqlen}",
+            label=f"Lumen fused Q+K S={seqlen}",
         )
 
-        def _separate():
-            apply_rotary_pos_emb(q, cos, sin)
-            apply_rotary_pos_emb(k, cos, sin)
+        def _pytorch():
+            _pytorch_rope_neox(q, cos, sin)
+            _pytorch_rope_neox(k, cos, sin)
 
-        r_sep = cuda_timer(_separate, label=f"apply_rotary x2 S={seqlen}")
+        r_pytorch = cuda_timer(_pytorch, label=f"PyTorch RoPE Q+K S={seqlen}")
 
-        speedup = r_sep.avg_ms / max(r_fused.avg_ms, 1e-6)
+        speedup = r_pytorch.avg_ms / max(r_fused.avg_ms, 1e-6)
         r_fused.extra["speedup"] = round(speedup, 2)
-        print_report(f"Fused vs Separate RoPE S={seqlen}", [r_fused, r_sep])
+        print_report(f"Fused vs PyTorch Q+K S={seqlen}", [r_fused, r_pytorch])
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +289,20 @@ class TestRoPEGQA:
         k = torch.randn(B, h_kv, seqlen, D, device="cuda", dtype=torch.bfloat16)
         cos, sin = _make_cos_sin(seqlen, ROTARY_DIM)
 
-        r = cuda_timer(
+        r_fused = cuda_timer(
             lambda: fused_rope(q, k, cos, sin),
-            label=f"fused_rope GQA H_q={H} H_kv={h_kv}",
+            label=f"Lumen fused GQA H_q={H} H_kv={h_kv}",
         )
-        print_report(f"RoPE GQA H_kv={h_kv}", [r])
-        assert r.avg_ms > 0
+
+        def _pytorch():
+            _pytorch_rope_neox(q, cos, sin)
+            _pytorch_rope_neox(k, cos, sin)
+
+        r_pytorch = cuda_timer(_pytorch, label=f"PyTorch RoPE Q({H})+K({h_kv})")
+
+        speedup = r_pytorch.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report(f"RoPE GQA H_kv={h_kv}", [r_fused, r_pytorch])
 
 
 # ---------------------------------------------------------------------------
@@ -277,18 +327,22 @@ class TestRoPE2D:
         spatial = img_h * img_w
         n_heads = 16
         dim = 64
-        rot_dim = dim // 2
 
         x = torch.randn(B, spatial, n_heads, dim, device="cuda", dtype=torch.bfloat16)
-        cos_h, sin_h = _make_cos_sin(img_h, rot_dim)
-        cos_w, sin_w = _make_cos_sin(img_w, rot_dim)
+        cos_h, sin_h = _make_cos_sin(img_h, dim)
+        cos_w, sin_w = _make_cos_sin(img_w, dim)
 
-        r = cuda_timer(
+        r_fused = cuda_timer(
             lambda: apply_rotary_pos_emb_2d(x, cos_h, sin_h, cos_w, sin_w, img_h, img_w),
-            label=f"RoPE 2D {img_h}x{img_w}",
+            label=f"Lumen fused 2D {img_h}x{img_w}",
         )
-        print_report(f"RoPE 2D {img_h}x{img_w}", [r])
-        assert r.avg_ms > 0
+        r_naive = cuda_timer(
+            lambda: _pytorch_rope_2d(x, cos_h, sin_h, cos_w, sin_w, img_h, img_w),
+            label=f"PyTorch decomposed 2D {img_h}x{img_w}",
+        )
+        speedup = r_naive.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report(f"RoPE 2D {img_h}x{img_w}", [r_fused, r_naive])
 
 
 # ---------------------------------------------------------------------------
@@ -322,12 +376,31 @@ class TestRoPE3D:
         freqs = torch.randn(spatial, 3, freqs_per_axis, device="cuda", dtype=torch.float32)
         freqs_complex = torch.view_as_complex(torch.stack([freqs.cos(), freqs.sin()], dim=-1))
 
-        r = cuda_timer(
+        r_fused = cuda_timer(
             lambda: apply_rotary_pos_emb_3d(x, grid_sizes, freqs_complex),
-            label=f"RoPE 3D T={T} H={H_img} W={W_img}",
+            label=f"Lumen fused 3D {T}x{H_img}x{W_img}",
         )
-        print_report(f"RoPE 3D {T}x{H_img}x{W_img}", [r])
-        assert r.avg_ms > 0
+
+        def _pytorch_3d():
+            c_total = dim // 2
+            c1 = c_total - 2 * (c_total // 3)
+            c2 = c_total // 3
+            c3 = c_total // 3
+            x_complex = torch.view_as_complex(x.reshape(B, spatial, n_heads, c_total, 2))
+            ft = freqs_complex[:, 0, :c1].unsqueeze(0).unsqueeze(2)
+            fh = freqs_complex[:, 1, :c2].unsqueeze(0).unsqueeze(2)
+            fw = freqs_complex[:, 2, :c3].unsqueeze(0).unsqueeze(2)
+            out_t = x_complex[..., :c1] * ft
+            out_h = x_complex[..., c1 : c1 + c2] * fh
+            out_w = x_complex[..., c1 + c2 : c1 + c2 + c3] * fw
+            out_complex = torch.cat([out_t, out_h, out_w], dim=-1)
+            return torch.view_as_real(out_complex).reshape(B, spatial, n_heads, dim)
+
+        r_naive = cuda_timer(_pytorch_3d, label=f"PyTorch decomposed 3D {T}x{H_img}x{W_img}")
+
+        speedup = r_naive.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report(f"RoPE 3D {T}x{H_img}x{W_img}", [r_fused, r_naive])
 
 
 # ---------------------------------------------------------------------------
