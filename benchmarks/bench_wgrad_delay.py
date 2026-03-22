@@ -806,6 +806,8 @@ class TestDeferredWgradSdmaComm:
 
             if dwg.has_pending:
                 dwg.execute()
+            if pending_ar:
+                comm.wait_allreduce_sum(stream=sdma_stream)
             comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
@@ -1156,6 +1158,8 @@ class TestNCCLvsSdmaWgradDelay:
                     pending_ar = True
             if dwg.has_pending:
                 dwg.execute()
+            if pending_ar:
+                sdma_comm.wait_allreduce_sum(stream=sdma_stream)
             sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)

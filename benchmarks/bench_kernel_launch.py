@@ -667,9 +667,17 @@ class TestFusionLatency:
     # one global memory round-trip.  Comparing the end-to-end latency
     # of the fused pipeline against the decomposed version.
     def test_norm_quant_gemm_pipeline(self):
-        """Full pipeline: RMSNorm → FP8 quant → GEMM (fused vs decomposed)."""
+        """Full pipeline: RMSNorm → FP8 quant → GEMM (fused vs decomposed).
+
+        Both paths use the same pre-quantized FP8 weight so the comparison
+        isolates norm+quant fusion (one fewer global-memory round-trip) from
+        weight quantization overhead.
+        """
         from lumen.ops.normalization.rmsnorm import rmsnorm, rmsnorm_with_quant
-        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.ops.quantize.linear import (
+            dispatch_gemm,
+            quantize_input,
+        )
         from lumen.quantize.config import _get_float8_e4m3
 
         fp8_dtype = _get_float8_e4m3()
@@ -677,25 +685,28 @@ class TestFusionLatency:
         norm_w = torch.ones(HIDDEN, device="cuda", dtype=torch.bfloat16)
         gemm_w = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
 
+        w_fp8, w_scale = quantize_input(gemm_w, "dynamic", fp8_dtype)
+
         def _decomposed():
             normed = rmsnorm(x, norm_w)
-            return quantized_linear(normed, gemm_w, scaling_type="dynamic", fp8_dtype=fp8_dtype)
+            normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+            a_fp8, a_scale = quantize_input(normed_2d, "dynamic", fp8_dtype)
+            return dispatch_gemm(a_fp8, w_fp8, a_scale, w_scale, "dynamic")
 
-        r_decomposed = cuda_timer(_decomposed, label="rmsnorm → quantized_linear (separate)")
+        r_decomposed = cuda_timer(_decomposed, label="rmsnorm + quant + GEMM (separate)")
 
         def _fused():
-            normed_fp8 = rmsnorm_with_quant(
+            normed_fp8, a_scale = rmsnorm_with_quant(
                 x,
                 norm_w,
                 eps=1e-6,
                 scaling_type="dynamic",
                 fp8_dtype=fp8_dtype,
             )
-            if isinstance(normed_fp8, tuple):
-                normed_fp8, _scale = normed_fp8
-            return quantized_linear(normed_fp8, gemm_w, scaling_type="dynamic", fp8_dtype=fp8_dtype)
+            normed_2d = normed_fp8.reshape(-1, normed_fp8.shape[-1]).contiguous()
+            return dispatch_gemm(normed_2d, w_fp8, a_scale, w_scale, "dynamic")
 
-        r_fused = cuda_timer(_fused, label="rmsnorm_with_quant → quantized_linear (fused)")
+        r_fused = cuda_timer(_fused, label="rmsnorm_with_quant + GEMM (fused)")
 
         speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
         r_fused.extra["speedup"] = round(speedup, 2)
