@@ -42,12 +42,12 @@ from benchmarks.bench_utils import (
 )
 
 # ---------------------------------------------------------------------------
-# Shared dimensions (Llama-2 7B style, matching the benchmark files)
+# Shared dimensions (Llama 3.1 8B, matching the benchmark files)
 # ---------------------------------------------------------------------------
 B, S = 2, 2048
 H, D = 32, 128
 HIDDEN = H * D  # 4096
-FFN_HIDDEN = 11008
+FFN_HIDDEN = 14336
 NUM_EXPERTS = 8
 TOP_K = 2
 ROTARY_DIM = D

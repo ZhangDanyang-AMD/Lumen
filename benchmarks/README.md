@@ -2,6 +2,10 @@
 
 Performance benchmarks validating Lumen's key feature optimizations.
 
+All benchmarks use **Llama 3.1 8B** dimensions by default:
+`hidden_size=4096`, `intermediate_size=14336`, `num_attention_heads=32`,
+`num_key_value_heads=8`, `head_dim=128`.
+
 ## Benchmarks
 
 | # | File | Lumen Features Exercised | Requirements |

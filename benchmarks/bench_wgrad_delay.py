@@ -38,11 +38,11 @@ from benchmarks.bench_utils import (
 from benchmarks.conftest import AITER, CUDA
 
 # ---------------------------------------------------------------------------
-# Dimensions (Llama-2 7B style)
+# Dimensions (Llama 3.1 8B)
 # ---------------------------------------------------------------------------
 M = 4096  # tokens (B * S)
 K = 4096  # hidden_dim
-N = 11008  # FFN intermediate
+N = 14336  # FFN intermediate
 
 
 # ---------------------------------------------------------------------------

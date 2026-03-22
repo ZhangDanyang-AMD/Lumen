@@ -40,12 +40,13 @@ from benchmarks.bench_utils import (
 from benchmarks.conftest import AITER, CUDA
 
 # ---------------------------------------------------------------------------
-# Model dimensions (Llama-2 7B style)
+# Model dimensions (Llama 3.1 8B)
 # ---------------------------------------------------------------------------
 B, S = 2, 2048
 H, D = 32, 128
+H_KV = 8
 HIDDEN = H * D  # 4096
-FFN_HIDDEN = 11008
+FFN_HIDDEN = 14336
 NUM_EXPERTS = 8
 TOP_K = 2
 
@@ -392,10 +393,9 @@ class TestAttentionBackends:
         """GQA: 32 Q heads, 8 KV heads."""
         from lumen.ops.attention import attention
 
-        H_kv = 8
         q = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
-        k = torch.randn(B, S, H_kv, D, device="cuda", dtype=torch.bfloat16)
-        v = torch.randn(B, S, H_kv, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, H_KV, D, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(B, S, H_KV, D, device="cuda", dtype=torch.bfloat16)
 
         r_csrc = cuda_timer(
             lambda: attention(q, k, v, causal=True, backend_type="aiter_csrc"),

@@ -53,12 +53,12 @@ from benchmarks.bench_utils import (
 from benchmarks.conftest import CUDA
 
 # ---------------------------------------------------------------------------
-# Dimensions — Llama-2 7B column-parallel shape
+# Dimensions — Llama 3.1 8B column-parallel shape
 # ---------------------------------------------------------------------------
 B, S = 2, 2048
 H, D = 32, 128
 HIDDEN = H * D  # 4096
-FFN_HIDDEN = 11008
+FFN_HIDDEN = 14336
 TP_SIZE = 2
 
 M = B * S  # tokens

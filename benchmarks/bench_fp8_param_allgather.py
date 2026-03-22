@@ -41,7 +41,7 @@ from benchmarks.conftest import CUDA
 # Dimensions
 # ---------------------------------------------------------------------------
 HIDDEN = 4096
-FFN_HIDDEN = 11008
+FFN_HIDDEN = 14336
 N_LAYERS = 32
 
 
@@ -76,7 +76,7 @@ class TestFP8ParamManagerCompression:
 
     # Expected: ~2x memory reduction. BF16 uses 2 bytes/element; FP8 uses
     # 1 byte/element plus a small per-tensor scale (4 bytes). For large weight
-    # matrices (e.g., 4096x11008), the scale overhead is negligible, yielding
+    # matrices (e.g., 4096x14336), the scale overhead is negligible, yielding
     # close to 2x compression. This directly halves all-gather volume in TP.
     def test_single_layer_savings(self):
         """Quantize a single layer's linears to FP8."""
