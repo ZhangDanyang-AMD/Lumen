@@ -568,8 +568,13 @@ class TestFP8AllGatherNCCL:
     def test_full_pipeline_quant_gather_dequant(self, shape):
         """Full pipeline: quant→gather→dequant (FP8) vs plain gather (BF16).
 
-        This is the realistic hot path: rank-local weights are stored in FP8,
-        all-gathered in FP8 (half the bytes), then dequantized to BF16 for GEMM.
+        Compares three paths:
+          1. BF16 gather (baseline)
+          2. FP8 sequential: gather → dequant
+          3. FP8 overlapped: gather(current) on comm_stream while
+             dequant(previous) runs on compute_stream — models the
+             realistic multi-layer pipeline where layer N's gather
+             overlaps with layer N-1's dequant.
         """
         from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
 
@@ -583,6 +588,12 @@ class TestFP8AllGatherNCCL:
         bf16_out = torch.empty_like(weight_bf16)
         fp8_out = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
 
+        comm_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        prev_fp8_gathered = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
+        dist.all_gather_into_tensor(prev_fp8_gathered, fp8_shard)
+
         for _ in range(3):
             dist.all_gather_into_tensor(bf16_out, bf16_shard)
             dist.all_gather_into_tensor(fp8_out, fp8_shard)
@@ -591,9 +602,15 @@ class TestFP8AllGatherNCCL:
         def _bf16_pipeline():
             dist.all_gather_into_tensor(bf16_out, bf16_shard)
 
-        def _fp8_pipeline():
+        def _fp8_sequential():
             dist.all_gather_into_tensor(fp8_out, fp8_shard)
             dequantize_param_from_fp8(fp8_out, scale_shard, torch.bfloat16)
+
+        def _fp8_overlapped():
+            with torch.cuda.stream(comm_stream):
+                dist.all_gather_into_tensor(fp8_out, fp8_shard)
+            dequantize_param_from_fp8(prev_fp8_gathered, scale_shard, torch.bfloat16)
+            compute_stream.wait_stream(comm_stream)
 
         r_bf16 = cuda_timer(
             _bf16_pipeline,
@@ -603,26 +620,44 @@ class TestFP8AllGatherNCCL:
             trim_pct=_TRIM,
             dist_barrier=True,
         )
-        r_fp8 = cuda_timer(
-            _fp8_pipeline,
-            label=f"FP8 quant+gather+dequant {shape}",
+        r_seq = cuda_timer(
+            _fp8_sequential,
+            label=f"FP8 sequential {shape}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ovl = cuda_timer(
+            _fp8_overlapped,
+            label=f"FP8 overlapped {shape}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
-        r_fp8.extra["speedup"] = round(speedup, 2)
+        seq_speedup = r_bf16.avg_ms / max(r_seq.avg_ms, 1e-6)
+        ovl_speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_seq.extra["vs_bf16"] = round(seq_speedup, 2)
+        r_ovl.extra["speedup"] = round(ovl_speedup, 2)
 
         if self.rank == 0:
             print_report_with_table(
                 f"Full Pipeline BF16 vs FP8 {shape} (world={self.world})",
-                [r_bf16, r_fp8],
+                [r_bf16, r_seq, r_ovl],
             )
 
     def test_multi_layer_pipeline(self):
-        """Pipeline across 4 transformer layers (gate+up+down+qkv per layer)."""
+        """Pipeline across 4 transformer layers (gate+up+down+qkv per layer).
+
+        Compares three paths:
+          1. BF16 gather (baseline — all 16 weights gathered in BF16)
+          2. FP8 sequential: gather all 16 in FP8, then dequant all 16
+          3. FP8 pipelined: gather[i] on comm_stream overlapped with
+             dequant[i-1] on compute_stream — hides dequant latency
+             behind the next weight's gather
+        """
         from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
 
         layer_shapes = [
@@ -649,44 +684,70 @@ class TestFP8AllGatherNCCL:
                 bf16_outs.append(torch.empty_like(w))
                 fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
 
-        for i in range(len(bf16_shards)):
+        n_weights = len(bf16_shards)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        for i in range(n_weights):
             dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
             dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
         torch.cuda.synchronize()
 
         def _bf16_all():
-            for i in range(len(bf16_shards)):
+            for i in range(n_weights):
                 dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
 
-        def _fp8_all():
-            for i in range(len(fp8_shards)):
+        def _fp8_sequential():
+            for i in range(n_weights):
                 dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-            for i in range(len(fp8_shards)):
+            for i in range(n_weights):
                 dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+
+        def _fp8_pipelined():
+            with torch.cuda.stream(comm_stream):
+                dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
+            for i in range(1, n_weights):
+                compute_stream.wait_stream(comm_stream)
+                with torch.cuda.stream(comm_stream):
+                    dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+                dequantize_param_from_fp8(fp8_outs[i - 1], fp8_scales[i - 1], torch.bfloat16)
+            compute_stream.wait_stream(comm_stream)
+            dequantize_param_from_fp8(fp8_outs[-1], fp8_scales[-1], torch.bfloat16)
 
         r_bf16 = cuda_timer(
             _bf16_all, label=f"BF16 gather {n_layers}L", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
         )
-        r_fp8 = cuda_timer(
-            _fp8_all,
-            label=f"FP8 gather+dequant {n_layers}L",
+        r_seq = cuda_timer(
+            _fp8_sequential,
+            label=f"FP8 sequential {n_layers}L",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_pipe = cuda_timer(
+            _fp8_pipelined,
+            label=f"FP8 pipelined {n_layers}L",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
         total_bf16_bytes = sum(s.nelement() * s.element_size() for s in bf16_shards)
         total_fp8_bytes = sum(s.nelement() * s.element_size() for s in fp8_shards)
-        r_fp8.extra["speedup"] = round(speedup, 2)
-        r_fp8.extra["bf16_vol"] = format_bytes(total_bf16_bytes)
-        r_fp8.extra["fp8_vol"] = format_bytes(total_fp8_bytes)
+        seq_vs_bf16 = r_bf16.avg_ms / max(r_seq.avg_ms, 1e-6)
+        pipe_speedup = r_seq.avg_ms / max(r_pipe.avg_ms, 1e-6)
+        r_seq.extra["vs_bf16"] = round(seq_vs_bf16, 2)
+        r_seq.extra["bf16_vol"] = format_bytes(total_bf16_bytes)
+        r_seq.extra["fp8_vol"] = format_bytes(total_fp8_bytes)
+        r_pipe.extra["speedup"] = round(pipe_speedup, 2)
+        r_pipe.extra["vs_bf16"] = round(r_bf16.avg_ms / max(r_pipe.avg_ms, 1e-6), 2)
 
         if self.rank == 0:
             print_report_with_table(
                 f"Multi-Layer Pipeline ({n_layers}L, world={self.world})",
-                [r_bf16, r_fp8],
+                [r_bf16, r_seq, r_pipe],
             )
 
 

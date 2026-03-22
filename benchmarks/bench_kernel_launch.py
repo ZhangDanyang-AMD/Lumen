@@ -137,7 +137,7 @@ class TestQuantizedLinearScalingModes:
 @CUDA
 @AITER
 class TestFusedMoE:
-    """fused_moe_triton (end-to-end) vs individual fused_topk + GEMMs + fused_unpermute."""
+    """fused_moe_triton (end-to-end) vs individual fused_topk + per-expert GEMMs."""
 
     def _make_moe_inputs(self, num_tokens=B * S):
         hidden = torch.randn(num_tokens, HIDDEN, device="cuda", dtype=torch.bfloat16)
@@ -182,12 +182,12 @@ class TestFusedMoE:
         assert r.avg_ms > 0
 
     # Expected: Slower than fused_moe_triton. Each expert requires a separate
-    # GEMM kernel launch (8 experts = 8 launches), plus fused_topk, fused_permute,
-    # and fused_unpermute overhead. The Python loop and per-expert masking add
+    # GEMM kernel launch (8 experts = 8 launches), plus fused_topk and
+    # fused_permute overhead. The Python loop and per-expert masking add
     # host-side latency that the fused kernel avoids entirely.
     def test_individual_routing_latency(self):
-        """Individual routing: fused_topk + per-expert GEMMs + fused_unpermute."""
-        from lumen.ops.moe.fused_routing import fused_permute, fused_topk, fused_unpermute
+        """Individual routing: fused_topk + per-expert GEMMs (no fusion)."""
+        from lumen.ops.moe.fused_routing import fused_permute, fused_topk
         from lumen.ops.quantize.linear import gemm_bf16
 
         hidden, expert_w, logits = self._make_moe_inputs()
@@ -196,7 +196,7 @@ class TestFusedMoE:
 
         def _individual_moe():
             weights, indices = fused_topk(logits, TOP_K)
-            sorted_ids, sorted_w, sorted_expert_ids, num_valid, moe_buf = fused_permute(
+            sorted_ids, sorted_w, sorted_expert_ids, num_valid, _moe_buf = fused_permute(
                 hidden,
                 indices,
                 weights,
@@ -222,10 +222,9 @@ class TestFusedMoE:
                         token_ids_list.append(valid)
                 if token_ids_list:
                     valid_ids = torch.cat(token_ids_list)
-                    inp = moe_buf[valid_ids]
+                    inp = hidden[valid_ids // TOP_K]
                     expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
-            out = fused_unpermute(expert_out, sorted_ids, hidden.shape[0], TOP_K)
-            return out
+            return expert_out
 
         r = cuda_timer(_individual_moe, label="individual routing + per-expert GEMMs")
         print_report("MoE: Individual Routing", [r])
