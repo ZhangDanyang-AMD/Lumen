@@ -683,8 +683,9 @@ class TestDeferredWgradSdmaComm:
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup
+        # Warmup both NCCL and SDMA paths
         for _ in range(3):
+            dist.all_reduce(ar_buf.clone())
             comm.allreduce_sum(ar_buf.clone())
             _ = grad_out.T @ x
         torch.cuda.synchronize()
@@ -694,25 +695,27 @@ class TestDeferredWgradSdmaComm:
             lambda: grad_out.T @ x, label="wgrad GEMM alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM
         )
 
-        def _sdma_ar():
+        # Use NCCL for standalone comm measurement — keeps SDMA budget for
+        # the async overlap phase which is this test's primary target.
+        def _nccl_ar():
             buf = ar_buf.clone()
-            comm.allreduce_sum_inplace(buf)
+            dist.all_reduce(buf)
 
         r_comm = cuda_timer(
-            _sdma_ar, label="SDMA allreduce alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+            _nccl_ar, label="NCCL allreduce alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
         )
 
-        # Sequential: wgrad then SDMA allreduce
+        # Sequential baseline: wgrad then NCCL allreduce
         def _sequential():
             w.main_grad.zero_()
             dwg.defer(w, lambda: grad_out.T @ x)
             dwg.execute()
             buf = ar_buf.clone()
-            comm.allreduce_sum_inplace(buf)
+            dist.all_reduce(buf)
 
         r_seq = cuda_timer(
             _sequential,
-            label="sequential: wgrad then SDMA AR",
+            label="sequential: wgrad then NCCL AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -768,6 +771,11 @@ class TestDeferredWgradSdmaComm:
     # Expected: In a 4-layer pipeline, SDMA overlap should yield higher
     # speedup than NCCL (compare with TestDeferredWgradRealComm) because
     # the DMA engines never contend with the compute SMs running wgrad.
+    #
+    # The baseline uses NCCL sequential allreduce (not SDMA eager) to avoid
+    # hammering the SDMA hardware with hundreds of synchronous operations
+    # before the async pipeline phase — mori's AllreduceSdma has limited
+    # in-flight capacity and can timeout when overloaded.
     def test_multi_layer_pipeline_with_sdma_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
@@ -785,24 +793,26 @@ class TestDeferredWgradSdmaComm:
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
 
-        # Warmup
+        # Warmup — use NCCL for sequential baseline, SDMA only for the
+        # deferred pipeline that is the primary target of this test.
         for _ in range(3):
+            dist.all_reduce(weights[0].data.clone())
             comm.allreduce_sum(weights[0].data.clone())
             _ = grad_outs[0].T @ x
         torch.cuda.synchronize()
         dist.barrier()
 
-        # Eager: sequential wgrad + SDMA allreduce per layer
-        def _eager():
+        # Baseline: sequential wgrad + NCCL allreduce per layer
+        def _nccl_sequential():
             for i in range(n_layers):
                 weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]  # dX
-                weights[i].main_grad.add_(grad_outs[i].T @ x)  # dW
-                comm.allreduce_sum_inplace(weights[i].main_grad)
+                _ = grad_outs[i] @ weights[i]
+                weights[i].main_grad.add_(grad_outs[i].T @ x)
+                dist.all_reduce(weights[i].main_grad)
 
-        r_eager = cuda_timer(
-            _eager,
-            label=f"{n_layers}-layer eager+SDMA AR",
+        r_baseline = cuda_timer(
+            _nccl_sequential,
+            label=f"{n_layers}-layer sequential (NCCL AR)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -825,7 +835,7 @@ class TestDeferredWgradSdmaComm:
                     comm.wait_allreduce_sum(stream=sdma_stream)
                     torch.cuda.current_stream().wait_stream(sdma_stream)
 
-                _ = grad_outs[i] @ weights[i]  # dX on compute stream
+                _ = grad_outs[i] @ weights[i]
                 dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
 
                 if i > 0:
@@ -852,15 +862,15 @@ class TestDeferredWgradSdmaComm:
             dist_barrier=True,
         )
 
-        speedup = r_eager.avg_ms / max(r_deferred.avg_ms, 1e-6)
+        speedup = r_baseline.avg_ms / max(r_deferred.avg_ms, 1e-6)
         r_deferred.extra["speedup"] = round(speedup, 2)
 
-        saved_ms = r_eager.avg_ms - r_deferred.avg_ms
+        saved_ms = r_baseline.avg_ms - r_deferred.avg_ms
 
         if self.rank == 0:
             print_report_with_table(
-                f"{n_layers}-Layer Pipeline: Eager vs Deferred + SDMA AR (world={self.world})",
-                [r_eager, r_deferred],
+                f"{n_layers}-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR (world={self.world})",
+                [r_baseline, r_deferred],
             )
             print(f"  Speedup:  {speedup:.2f}x")
             print(f"  Saved:    {saved_ms:.3f} ms  " f"(≈ {n_layers} × {saved_ms / n_layers:.3f} ms per layer)")
