@@ -716,6 +716,7 @@ class TestDeferredWgradSdmaComm:
             w.main_grad.zero_()
             dwg.defer(w, lambda: grad_out.T @ x)
             buf = ar_buf.clone()
+            sdma_stream.wait_stream(torch.cuda.current_stream())
             comm.allreduce_sum_async(buf, stream=sdma_stream)
             dwg.execute()
             comm.wait_allreduce_sum(stream=sdma_stream)
@@ -750,6 +751,7 @@ class TestDeferredWgradSdmaComm:
                 comm_label="SDMA AR",
             )
 
+        sdma_stream.synchronize()
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -764,8 +766,13 @@ class TestDeferredWgradSdmaComm:
         grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
         dwg2 = _DeferredWgrad()
 
+        # Re-prime the SDMA handle after the idle gap (NCCL-only Part 1
+        # baselines).  The mori ccl reference tests always barrier+sync
+        # around every SDMA operation; a long idle gap can leave the
+        # SDMA transport in an inconsistent state across peers.
         for _ in range(3):
             dist.all_reduce(weights[0].data.clone())
+            comm.allreduce_sum(weights[0].main_grad.clone())
             _ = grad_outs[0].T @ x
         torch.cuda.synchronize()
         dist.barrier()
@@ -805,6 +812,7 @@ class TestDeferredWgradSdmaComm:
                 dwg2.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
 
                 if i > 0:
+                    sdma_stream.wait_stream(torch.cuda.current_stream())
                     comm.allreduce_sum_async(
                         weights[i - 1].main_grad,
                         stream=sdma_stream,
@@ -815,6 +823,7 @@ class TestDeferredWgradSdmaComm:
                 dwg2.execute()
             if pending_ar:
                 comm.wait_allreduce_sum(stream=sdma_stream)
+            sdma_stream.wait_stream(torch.cuda.current_stream())
             comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
@@ -842,6 +851,7 @@ class TestDeferredWgradSdmaComm:
             print(f"  Saved:    {saved_ms:.3f} ms  " f"(≈ {n_layers} × {saved_ms / n_layers:.3f} ms per layer)")
             print()
 
+        sdma_stream.synchronize()
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1009,6 +1019,7 @@ class TestNCCLvsSdmaWgradDelay:
             w.main_grad.zero_()
             dwg.defer(w, lambda: grad_out.T @ x)
             buf = ar_buf.clone()
+            sdma_stream.wait_stream(torch.cuda.current_stream())
             sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
             dwg.execute()
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)
@@ -1172,6 +1183,7 @@ class TestNCCLvsSdmaWgradDelay:
                 _ = grad_outs[i] @ weights[i]
                 dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
                 if i > 0:
+                    sdma_stream.wait_stream(torch.cuda.current_stream())
                     sdma_comm.allreduce_sum_async(
                         weights[i - 1].main_grad,
                         stream=sdma_stream,
@@ -1181,6 +1193,7 @@ class TestNCCLvsSdmaWgradDelay:
                 dwg.execute()
             if pending_ar:
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)
+            sdma_stream.wait_stream(torch.cuda.current_stream())
             sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
@@ -1288,6 +1301,7 @@ class TestNCCLvsSdmaWgradDelay:
             w.main_grad.zero_()
             dwg.defer(w, lambda: grad_out.T @ x)
             buf = ar_buf.clone()
+            sdma_stream.wait_stream(torch.cuda.current_stream())
             sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
             dwg.execute()
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)
@@ -1371,6 +1385,7 @@ class TestNCCLvsSdmaWgradDelay:
                 w.main_grad.zero_()
                 dwg.defer(w, lambda: grad_out.T @ x)
                 buf = ar_buf.clone()
+                sdma_stream.wait_stream(torch.cuda.current_stream())
                 sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)
                 dwg.execute()
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)
