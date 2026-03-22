@@ -1,4 +1,4 @@
-# Lumen Feature Parity Reference
+# Lumen Coding Reference
 
 ## TE → Lumen Module Mapping
 
@@ -19,82 +19,43 @@
 | `te_checkpoint` | `lumen_checkpoint` | FP8-aware activation recompute |
 | `get_cpu_offload_context` | `CPUOffloadManager` | Optimizer state offload |
 
-## Attention Features
+---
 
-| Feature | Status | Backend |
-|---------|--------|---------|
-| Flash Attention | Supported | AITER CK / Triton |
-| FP8 DPA | Supported | `--lumen-fp8-attn dpa` |
-| FP8 MHA | Supported | `--lumen-fp8-attn mha` + Blockwise2D |
-| MLA | Supported | K/V pad |
-| CP A2A | Supported | SDMA option |
-| CP P2P | Supported | Ring send/recv |
-| CP A2A+P2P | **Missing** | Hierarchical |
-| Sliding Window | **Partial** | csrc only, no Triton |
-| Attention Bias | Supported | All modules |
-| ALiBi | Supported | csrc + Triton |
-| GQA | Supported | HQ > HKV |
-| Return LSE | Supported | |
-| Softmax Variants | **Deferred** | Needs AITER kernel changes |
+## Feature Parity Scorecard
 
-## FP8 Quantization Features
+| Category | Features | Supported | Lumen-Only | Missing | Partial | Deferred |
+|----------|:--------:|:---------:|:----------:|:-------:|:-------:|:--------:|
+| Attention | 13 | 10 | 0 | 1 | 1 | 1 |
+| FP8 Quantization | 15 | 12 | 2 | 0 | 0 | 1 |
+| Linear/GEMM | 11 | 9 | 0 | 0 | 2 | 0 |
+| Normalization | 4 | 4 | 0 | 0 | 0 | 0 |
+| Cross-Entropy | 4 | 3 | 1 | 0 | 0 | 0 |
+| Communication | 5 | 2 | 1 | 0 | 2 | 0 |
+| Advanced | 9 | 7 | 0 | 1 | 1 | 0 |
+| **Total** | **~61** | **~47 (77%)** | **4** | **~2** | **~6** | **~2** |
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Delayed Scaling | Supported | Default TE path |
-| Dynamic (per-tensor) | Supported | |
-| Block Scaling | Supported | |
-| Blockwise 2D | Supported | **Lumen-only** — attention: true 2D scales; linear: 1D blockscale kernel |
-| MXFP8 | Supported | gfx950+ |
-| Per-Token | Supported | **Lumen-only** |
-| E4M3 / E5M2 / Hybrid | Supported | fnuz on gfx94x |
-| FP4 | **Deferred** | No AMD hardware support |
-| Amax History | Supported | `history_len`, `AmaxAlgo` |
-| FP8 Margin | Supported | |
-| FP8 Weight Gradients | Supported | |
-| First/Last Layers BF16 | Supported | |
+### Remaining Work
 
-## Linear / GEMM Features
+**Missing (2):** CP A2A+P2P, FP8 Padding/Unpadding
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Column/Row Parallel | Supported | |
-| LayerNorm + Linear | Supported | |
-| Grouped Linear (MoE) | Supported | |
-| Fused MLP | Supported | Gate+up+act+down |
-| FP8 GEMM | Supported | ASM/CK/Triton/hipBLASLt |
-| FP8 Activation Store | Supported | Memory savings |
-| TP Comm-GEMM Overlap | **Partial** | SDMA only, no chunk pipeline |
-| Grad Accumulation Fusion | Supported | |
-| Delay wgrad | **Partial** | Infra exists, not wired |
+**Partial (5):** TP Comm-GEMM Overlap (needs chunk pipelining), FP8 Param All-Gather (not wired), Delay wgrad (not wired), Sliding Window (Triton missing), MoE TopK/Aux Loss (aux loss at Megatron level)
 
-## FP8 GEMM Backend Dispatch
+**Deferred (2):** FP4 (no AMD HW), Softmax Variants (AITER hard-codes vanilla)
 
-| Scaling Type | Backends (priority order) | Tuning Config |
-|---|---|---|
-| delayed/dynamic | hipBLASLt → CK (`gemm_a8w8_CK`) → Triton | `a8w8_tuned_gemm.csv` |
-| per_token | Triton only (`gemm_a8w8_per_token_scale`) | None |
-| blockwise / blockwise2d | CK (`gemm_a8w8_blockscale`) → Triton | `a8w8_blockscale_tuned_gemm.csv` |
-| mxfp8 | Triton only (`gemm_mxfp8`) | None |
+### Lumen-Only Features
 
-`blockwise2d` shares the same GEMM kernels as `blockwise`. All `scaling_type == "blockwise"` checks are `in ("blockwise", "blockwise2d")` in: `linear.py`, `rmsnorm.py`, `layernorm.py`, `grouped_gemm.py`, `scaling_manager.py`.
+1. **Blockwise2D quantization** — 2D block FP8 scaling for attention; linear uses 1D blockscale
+2. **Per-Token FP8 scaling** — per-row FP8 quantization
+3. **SDMA-based TP collectives** — System DMA on MI300X shared memory
+4. **SDMA cross-entropy** — SDMA-routed all-gather in parallel cross-entropy
 
-## FP8 Attention Dispatch
+---
 
-| Quant Type | Autograd Function | Scale Shape |
-|---|---|---|
-| `blockwise` | `AttentionTritonFunction` | 1D: `[B, H, ceil(S/bm)]` |
-| `blockwise2d` | `AttentionTritonBlockwise2DFunction` | 2D: `[B, H, S//bm, D//bn]` |
-| `mxfp8` | `AttentionTritonMXFP8Function` | MXFP8 block scales |
+## Normalization
 
-`blockwise2d` uses `Blockwise2DScaleManager` to cache FP8 Q/K/V tensors and scales across forward/backward. Internally the Triton kernel still receives 1D block scales (via `quantize_block_fp8` for Q/K, per-tensor for V).
-
-## Grouped GEMM
-
-- BF16: `aiter.ops.triton.gmm`
-- FP8 per-token / mxfp8: fused MOE GEMM kernels (`moe_gemm_per_token`, `moe_gemm_mxfp8`)
-- Sequential fallback: iterates per-group when no fused kernel
-- wgrad: `ptgmm` (permuted-tensor GMM)
+- Backward: prefer Triton when `requires_grad=True` (CK fwd doesn't save intermediates for CK bwd)
+- Fused norm+quant: available for all scaling types in both LayerNorm and RMSNorm
+- ASM: `layernorm2d_with_add_asm` for LayerNorm only (no RMSNorm ASM)
 
 ## Cross Entropy
 
@@ -102,7 +63,7 @@
 - Large vocab may need chunking (shared memory limit)
 - SDMA all-gather route available (`use_sdma=True`, Lumen-only)
 
-## Communication Features
+## Communication
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -112,19 +73,17 @@
 | SDMA Collectives | Supported | **Lumen-only** (MI300X shared mem) |
 | FP8 Param All-Gather | **Partial** | Manager exists, not wired |
 
-## Lumen-Only Features (No TE Equivalent)
+---
 
-1. **Blockwise2D quantization** — 2D block FP8 scaling for attention Q/K/V; linear path uses 1D blockscale kernels for API consistency
-2. **Per-Token FP8 scaling** — per-row FP8 quantization
-3. **SDMA-based TP collectives** — System DMA on MI300X shared memory
-4. **SDMA cross-entropy** — SDMA-routed all-gather in parallel cross-entropy
+## Submission Checklist
 
-## Checklist Before Submitting Code
-
-- [ ] Every constant traces to a hardware fact, math property, or documented requirement
+- [ ] Constants trace to hardware facts, math properties, or documented requirements
 - [ ] No unnecessary abstraction layers
 - [ ] Graceful degradation (fallback backends, clear error messages)
+- [ ] Fallback paths logged — every `try/except`, `try_backends()`, or conditional fallback emits `logger.warning()`
+- [ ] Fallback comments — `try_backends()` chains have per-lambda comments
 - [ ] Performance-critical path free of Python-level overhead
-- [ ] No TE replacement language in docstrings/comments
-- [ ] Tests use `compute_snr` or `check_close` against reference implementations
-- [ ] New AITER imports guarded by probe functions
+- [ ] No TE replacement language in docstrings
+- [ ] Tests use `compute_snr` or `check_close` against references
+- [ ] Fallback paths tested — at least one test disables primary backend and verifies fallback
+- [ ] AITER imports guarded by probe functions

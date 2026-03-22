@@ -1,207 +1,109 @@
 ---
 name: lumen-coding
-description: "Comprehensive development guide for the Lumen library — a TE replacement for Megatron-Core on AMD GPUs. Covers architecture, dispatch patterns, FP8 conventions, testing, and TE feature parity. Use when writing, reviewing, or designing any Lumen code including ops, modules, kernels, or tests."
+description: "Development guide for Lumen — a TE replacement for Megatron-Core on AMD GPUs. Covers architecture, dispatch, FP8 conventions, coding standards, and code review. Use when writing, reviewing, or designing any Lumen code."
 ---
 
 # Lumen Development Guide
 
 ## Mission
 
-Lumen is a drop-in replacement for NVIDIA TransformerEngine (TE) within Megatron-Core, targeting AMD GPUs (gfx94x / gfx950). Every module, op, and kernel provides a feature-equivalent alternative to TE's interfaces so Megatron-Core runs on AMD hardware without source modifications. All design decisions should be evaluated against this goal.
+Lumen is a drop-in replacement for NVIDIA TransformerEngine (TE) within Megatron-Core, targeting AMD GPUs (gfx94x / gfx950). Every module, op, and kernel provides a feature-equivalent alternative to TE's interfaces.
 
 ## Architecture
 
 ```
 Megatron-Core
-  └─ lumen/models/megatron.py  (LumenSpecProvider — returns Lumen modules for Megatron layer specs)
-       └─ lumen/modules/        (nn.Module wrappers: LumenColumnParallelLinear, LumenAttention, etc.)
-            └─ lumen/ops/       (stateless dispatch functions: attention(), gemm(), rmsnorm(), etc.)
-                 └─ lumen/kernels/   (Lumen-owned Triton kernels, e.g. attention_impl.py)
-                 └─ third_party/aiter/  (AITER: CK, ASM, Triton kernels — NOT Lumen code)
+  └─ lumen/models/megatron.py   (LumenSpecProvider)
+       └─ lumen/modules/         (nn.Module wrappers)
+            └─ lumen/ops/        (stateless dispatch functions)
+                 └─ lumen/kernels/    (Lumen-owned Triton kernels)
+                 └─ third_party/aiter/ (AITER: CK, ASM — NOT Lumen code)
 ```
-
-### Code Boundary: Lumen vs AITER
-
-**New GPU kernels belong in `third_party/aiter/`, not in Lumen.** Lumen only implements dispatch and calling logic — choosing the right backend, marshalling arguments, handling fallback. If a feature needs a new kernel, add it to AITER and call it from Lumen via `try_backends()`.
-
-AITER is always available on AMD targets. No PyTorch fallbacks for production paths — raise `RuntimeError` if AITER is missing.
-
-### Layer Responsibilities
 
 | Layer | Owns | Does NOT own |
 |-------|------|-------------|
 | `modules/` | State (params, buffers), Megatron API shape | Kernel calls |
-| `ops/` | Backend dispatch, argument marshalling, fallback | Param management, nn.Module concerns |
-| `kernels/` | Lumen-specific Triton kernels | CK/ASM kernels (those go in AITER) |
+| `ops/` | Backend dispatch, argument marshalling, fallback | Param management |
+| `kernels/` | Lumen-specific Triton kernels | CK/ASM kernels (→ AITER) |
 
-## Dispatch Architecture
-
-Use `try_backends()` from `lumen/ops/dispatch.py` to fall through backends on failure. It catches `RuntimeError`, `NotImplementedError`, `TypeError`, `ValueError`, Triton `CompilationError`, and `OutOfResources`.
-
-**Backend priority:** ASM → CK → Triton → torch (last resort, not for production)
-
-```python
-from lumen.ops.dispatch import try_backends
-
-def my_op(x, ...):
-    return try_backends(
-        lambda: _asm_path(x, ...),
-        lambda: _ck_path(x, ...),
-        lambda: _triton_path(x, ...),
-    )
-```
-
-**Rules:**
-- All AITER imports: guarded by `try/except (ImportError, OSError)` via `_probe_aiter_*()` functions
-- New backend: add `@functools.lru_cache(maxsize=1)` probe in `dispatch.py`
-- Always `torch.cuda.synchronize()` after GPU kernels before fallback
-
-## FP8 Quantization
-
-### Scaling Types — GEMM
-
-| Type | Backends (priority) | Backward Constraint |
-|------|--------------------|--------------------|
-| `delayed` | hipBLASLt → CK → Triton | Full FP8 bwd OK |
-| `dynamic` | hipBLASLt → CK → Triton | Full FP8 bwd OK |
-| `per_token` | Triton only | No FP8 wgrad (scale misalignment after transpose) |
-| `blockwise` | CK → Triton | No FP8 wgrad |
-| `blockwise2d` | CK → Triton (same kernels as `blockwise`) | No FP8 wgrad |
-| `mxfp8` | Triton only | No FP8 wgrad |
-
-**`blockwise2d` in linear:** Routes through the same 1D block quant (`_quant_blockwise`) and blockscale GEMM (`gemm_blockscale`) as `blockwise`. All `scaling_type == "blockwise"` checks are updated to `in ("blockwise", "blockwise2d")` across `linear.py`, `rmsnorm.py`, `layernorm.py`, `grouped_gemm.py`, and `scaling_manager.py`. The "2D" naming provides API consistency with the attention path.
-
-**Scale misalignment:** Per-tensor scalar scales survive `weight.t()`. Per-token `(N,1)`, blockwise/blockwise2d `(N,K/bs)`, and mxfp8 block scales become misaligned — FP8 backward restricted to `["delayed", "dynamic", "none"]`.
-
-### Scaling Types — Attention
-
-| Type | Backend | Mechanism |
-|------|---------|-----------|
-| `blockwise` | Triton (`AttentionTritonFunction`) | 1D block quant per Q/K/V tensor |
-| `blockwise2d` | Triton (`AttentionTritonBlockwise2DFunction`) | 2D block scales `[B, H, S//bm, D//bn]` via `Blockwise2DScaleManager` |
-| `mxfp8` | Triton (`AttentionTritonMXFP8Function`) | MXFP8 block scales |
-
-**`blockwise2d` in attention:** Uses true 2D block scales. The `Blockwise2DScaleManager` caches FP8-quantized Q/K/V and their scales across forward/backward, allowing backward to skip re-quantization and reuse the dO scale across iterations. The underlying Triton kernel still receives 1D block scales internally (`quantize_block_fp8` for Q/K, per-tensor for V).
-
-### blockwise2d: Dual Behavior Summary
-
-| Context | Quantization | Scale Shape | Kernel |
-|---------|-------------|-------------|--------|
-| Linear (GEMM) | 1D block (identical to `blockwise`) | `(M, ceil(K/bs))` | `gemm_blockscale` (CK/Triton) |
-| Attention | 2D block via `Blockwise2DScaleManager` | `[B, H, S//bm, D//bn]` | `AttentionTritonBlockwise2DFunction` |
-
-`blockwise2d` is **Lumen-only** (no TE equivalent). When `--lumen-fp8-quant-type blockwise2d` is set, both the linear and attention paths activate. For MHA, a shared `Blockwise2DScaleManager` is attached to each `LumenDotProductAttention` so QKV projection, dot-product attention, and output projection share the same FP8 scale context.
-
-### Deriving Constants
-
-```python
-# GOOD: derived from spec
-FP8_E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
-scale = amax / FP8_E4M3_MAX
-
-# BAD: magic number
-scale = 448.0
-```
-
-## BF16 GEMM
-
-All GEMM kernels use TN layout: `Y = A @ W^T`, weight is always `(N, K)`.
-
-- `tuned_gemm` / `hipb_mm` / `F.linear` require matching dtypes — cast after dequant: `(w_fp8.to(bf16) * scale).to(bf16)`
-- Triton `gemm_a16w16`: BLOCK_SIZE_K ≥ 128 on gfx942
-- ASM: requires K % 64 == 0 and N % 64 == 0
-- Backward dgrad: pass `weight.t().contiguous()` as `w`
-
-## Normalization
-
-- Backward: prefer Triton when `requires_grad=True` (CK fwd doesn't save intermediates for CK bwd)
-- Fused norm+quant: available for all scaling types in both LayerNorm and RMSNorm
-- ASM: `layernorm2d_with_add_asm` for LayerNorm only (no RMSNorm ASM)
-
-## Testing Conventions
-
-### Reference Implementations
-
-Op-level tests compare against pure PyTorch references in `tests/ops/conftest.py`:
-
-| Reference | For |
-|-----------|-----|
-| `attention_ref` | Multi-head attention (BSHD, f32 compute, causal mask, GQA) |
-| `rmsnorm_ref` | RMSNorm |
-| `layernorm_ref` | LayerNorm (`F.layer_norm`) |
-| `grouped_gemm_ref` | Sequential per-expert GEMM |
-| `cross_entropy_ref` | `F.cross_entropy` |
-
-### Accuracy Metrics
-
-- `compute_snr(x, y)`: Signal-to-Noise Ratio in dB. Forward: SNR > 20 dB, Backward: SNR > 15 dB.
-- `check_close(a, b)`: Element-wise closeness with outlier tolerance (default 5%).
-- Fixed seed via `seed_rng` fixture (autouse).
-
-### Test Structure
-
-```python
-from conftest import SomeConfig, some_ref, compute_snr
-
-CONFIGS = [SomeConfig(...), ...]
-
-@pytest.mark.parametrize("config", CONFIGS, ids=[repr(c) for c in CONFIGS])
-def test_some_op_fwd(config):
-    out_ref = some_ref(...)
-    out = lumen_op(...)
-    snr = compute_snr(out_ref, out)
-    assert snr > 20
-```
+**New GPU kernels belong in AITER, not in Lumen.** Lumen only dispatches.
 
 ## Coding Conventions
 
-### Documentation
-
-Do NOT describe Lumen modules as "drop-in replacements" for TE in docstrings/comments:
+### Constants — derive from spec
 
 ```python
-# BAD
-"""Drop-in replacement for TE's TEColumnParallelLinear."""
-
-# GOOD
-"""Column-parallel linear using Lumen GEMM."""
+FP8_E4M3_MAX = torch.finfo(torch.float8_e4m3fn).max  # 448.0
+scale = amax / FP8_E4M3_MAX  # NOT: scale = 448.0
 ```
 
-Exception: actual code referencing TE class names (imports, runtime logic) is fine.
+### No TE language in docstrings
+
+```python
+# BAD: """Drop-in replacement for TE's TEColumnParallelLinear."""
+# GOOD: """Column-parallel linear using Lumen GEMM."""
+```
+
+### Fallback Logging
+
+Every fallback path must log why and comment the intent:
+
+```python
+def my_op(x):
+    try:
+        return _asm_path(x)
+    except RuntimeError as e:
+        logger.warning("my_op: ASM failed (%s), falling back to Triton", e)
+        return _triton_path(x)
+```
+
+`try_backends()` chains need per-lambda comments. Conditional fallbacks need comments explaining why.
 
 ### First-Principles Codegen
 
-1. Clarify the problem in one sentence before writing code
+1. Clarify the problem in one sentence
 2. Identify constraints (memory bandwidth, register pressure, API contract)
 3. Derive solution from constraints, not analogy
-4. Eliminate unnecessary abstraction — add a layer only when it removes duplication across ≥2 call sites
+4. Add abstraction only when it removes duplication across ≥2 call sites
 
 ### Anti-Patterns
 
-```python
-# BAD: abstraction with one subclass
-class QuantScaleManager(ABC): ...
+- Abstraction with one subclass → use plain function
+- Copying TE API blindly → shape API by Lumen's own requirements
 
-# GOOD: plain function until second strategy appears
-def compute_delayed_scale(amax_history, fp8_max): ...
-```
+## Code Review Checklist
 
-```python
-# BAD: copying TE API without understanding
-def forward(self, inp, weight, bias=None, **te_kwargs): ...
+- [ ] Constants derived from hardware facts, not magic numbers
+- [ ] No unnecessary abstraction (YAGNI)
+- [ ] `try_backends()` ordered correctly (ASM → CK → Triton)
+- [ ] AITER imports guarded by `_probe_aiter_*()` probes
+- [ ] Fallback paths logged with reason
+- [ ] FP8 scaling type handled for both forward and backward
+- [ ] No TE "drop-in replacement" language in docstrings
+- [ ] Tests use `compute_snr` / `check_close` against references
+- [ ] Fallback paths covered by tests
+- [ ] Performance-critical path free of Python-level overhead
 
-# GOOD: API shaped by Lumen's own requirements
-def forward(self, inp: Tensor, *, quant_config: QuantConfig) -> Tensor: ...
-```
+### Handling Review Feedback
 
-## TE Feature Parity
+- **Verify before implementing** — check against codebase reality
+- **Push back with reasoning** if a suggestion breaks functionality or violates YAGNI
+- **No performative agreement** — state what changed or ask for clarification
+- **One fix at a time**, test each before proceeding
 
-For the complete feature parity tracker, see [reference.md](reference.md).
+## Feature Parity
 
-**Current scorecard:** ~61 features total, ~46 supported (75%), 4 Lumen-only, ~3 missing, ~8 partial.
+Scorecard: ~61 features, ~47 supported (77%), 4 Lumen-only, ~2 missing, ~6 partial, ~2 deferred.
 
-**Key remaining work:**
-- CP A2A+P2P (missing)
-- TP comm-GEMM overlap full pipelining (partial)
-- MoE fused permute/unpermute via AITER (partial)
-- Sliding window attention on Triton backend (partial)
+For complete feature matrix and TE mapping → see [reference.md](reference.md).
+
+---
+
+## Subsection Guides
+
+Detailed domain-specific guides are in separate files. Read when working in that area:
+
+- **[AITER Dispatch](aiter-dispatch.md)** — `try_backends()`, probe functions, GEMM/attention backend dispatch tables, fallback chain design
+- **[Quantize Manager](quantize-manager.md)** — ScalingManager lifecycle, FP8 scaling types, blockwise2d dual behavior, amax history
+- **[torch.compile Compatibility](torch-compile.md)** — Compile Guard Dual-Mode design, 6 blockers, implementation phases, `LUMEN_BACKEND` env var
+- **[Megatron & FSDP Integration](megatron-fsdp.md)** — LumenSpecProvider, norm patching, FSDP1/FSDP2, CLI args, example scripts, QuantConfig wiring

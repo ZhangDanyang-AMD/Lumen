@@ -1,6 +1,4 @@
-# Lumen Test Coverage Matrix
-
-Complete mapping of features to test files, current coverage status, and what each test file contains.
+# Lumen Test Reference
 
 ## Test Inventory by Directory
 
@@ -177,3 +175,137 @@ Complete mapping of features to test files, current coverage status, and what ea
 | FP8 Padding/Unpadding | Missing | — | None |
 | FSDP2 | Supported | `test_fsdp2.py` | **Thin** |
 | LoRA | Supported | `test_megatron.py`, `test_fsdp.py` | Full |
+
+---
+
+## What to Test per Feature Category
+
+### Attention
+
+| Feature | Required Tests |
+|---------|---------------|
+| New attention variant | Forward SNR vs `attention_ref`, backward dQ/dK/dV SNR, causal mode, GQA |
+| Sliding window (`window_size`) | Forward correctness with window mask, compare masked vs full attention |
+| Attention bias | All `core_attention_bias_type` variants, forward SNR, backward SNR |
+| ALiBi slopes | Forward with slopes tensor, compare vs manual bias addition |
+| Return LSE | Check `lse` shape and dtype, verify `exp(lse)` matches row softmax sums |
+| CP (context parallelism) | Multi-GPU spawn, output matches non-CP reference (same global input) |
+
+### FP8 Quantization
+
+| Feature | Required Tests |
+|---------|---------------|
+| New scaling type | Forward GEMM SNR, backward dX SNR, round-trip quant→dequant vs `fp8_quant_dequant_ref` |
+| Hybrid (e4m3/e5m2) | Forward uses e4m3, backward uses e5m2, verify dtype of intermediate tensors |
+| Amax/delayed scale | `delayed_scale_ref` comparison, history buffer length, algorithm (most_recent/max) |
+| FP8 param all-gather | Distributed: quant on each rank, all-gather, dequant, compare to BF16 all-gather |
+
+### Linear / GEMM
+
+| Feature | Required Tests |
+|---------|---------------|
+| New GEMM path | Forward SNR vs `torch.mm`, backward dX and dW SNR, parametrize all scaling types |
+| Fused MLP | `torch.testing.assert_close` vs decomposed reference, backward correctness |
+| TP overlap | Multi-GPU: verify output matches non-overlapped path, measure overlap ratio |
+| Grad accum fusion | Compare accumulated gradient vs sequential accumulation |
+
+### Normalization
+
+| Feature | Required Tests |
+|---------|---------------|
+| Norm op | Forward+backward SNR vs `rmsnorm_ref`/`layernorm_ref`, parametrize shapes |
+| Fused norm+quant | Forward output SNR, verify quantized output dtype, scale shape per scaling type |
+| Zero-centered gamma | Forward with `zero_centered_gamma=True`, compare vs `(1 + gamma) * norm(x)` |
+
+### Communication
+
+| Feature | Required Tests |
+|---------|---------------|
+| SDMA collective | Multi-GPU: output matches NCCL reference, dtype variants (bf16, fp32) |
+| Sequence parallelism | Verify SP scatter/gather round-trip preserves tensor values |
+| SDMA cross-entropy | Multi-GPU: SDMA path output matches non-SDMA reference |
+
+### Module
+
+| Feature | Required Tests |
+|---------|---------------|
+| Any `nn.Module` | Construction (shapes, defaults), forward shape, backward runs, FP8 variant |
+| Checkpoint/recompute | Verify recomputation same output, memory reduction |
+| CPU offload | Hooks registered, tensors moved to CPU, restored on forward |
+| HIP graphs | Capture succeeds, replayed output matches eager output |
+
+---
+
+## Distributed Test Pattern
+
+### Multi-GPU spawn
+
+```python
+import functools, os, torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import pytest
+
+_MULTI_GPU = pytest.mark.skipif(
+    torch.cuda.device_count() < 2, reason="Need ≥2 GPUs"
+)
+
+def _worker(rank, world_size, fn, *args):
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = "29500"
+    device = torch.device("cuda", rank)
+    torch.cuda.set_device(rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank,
+                            world_size=world_size, device_id=device)
+    try:
+        fn(rank, world_size, *args)
+    finally:
+        dist.destroy_process_group()
+
+@_MULTI_GPU
+def test_distributed_op():
+    def _check(rank, world_size):
+        ...
+    mp.spawn(_worker, args=(2, _check), nprocs=2, join=True)
+```
+
+### SDMA tests
+
+Also register the process group for mori:
+```python
+torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+```
+
+### TP/SP mocking (module tests)
+
+```python
+@mock.patch("lumen.modules.parallel_linear._get_tp_group", return_value=None)
+@mock.patch("lumen.modules.parallel_linear._pg_size", return_value=1)
+@mock.patch("lumen.modules.parallel_linear._pg_rank", return_value=0)
+class TestLumenColumnParallelLinear: ...
+```
+
+---
+
+## Coverage Gaps (as of 2026-03-18)
+
+### P0 — Supported but untested
+
+- Sliding window attention (`window_size` parameter)
+- Attention bias (`core_attention_bias_type` variants)
+- ALiBi slopes (csrc + Triton backends)
+- CP P2P distributed ring test (only existence checks)
+
+### P1 — Plan compliance
+
+- End-to-end training smoke test (short loop, Lumen FP8 vs BF16)
+- Hybrid FP8 (e4m3 fwd / e5m2 bwd) GEMM round-trip
+- MoE auxiliary loss
+- Multi-GPU SP/TP integration tests
+
+### P2 — Hardening thin tests
+
+- `test_fp8_activation_store.py` — needs multi-dtype, large-tensor, SNR comparison
+- `test_fsdp2.py` — needs FP8 integration, multi-GPU
+- `test_delay_wgrad.py` — needs wiring into `LumenRowParallelLinear`
+- `test_cp_p2p.py` — needs actual distributed ring send/recv
