@@ -256,6 +256,28 @@ def _probe_aiter_moe_topk_softmax():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_softmax_topk():
+    """Check if AITER softmax_topk HIP binding is available."""
+    try:
+        from aiter.ops.moe_op import softmax_topk as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_triton_moe_aux_loss():
+    """Check if AITER Triton moe_aux_loss kernels are available."""
+    try:
+        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_moe_sorting():
     """Check if AITER moe_sorting HIP kernel is available."""
     try:
