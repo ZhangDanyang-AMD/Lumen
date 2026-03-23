@@ -368,6 +368,11 @@ class PipelinedGemmReduceScatter:
         chunk_full = S_full // N
         if chunk_full * N != S_full:
             raise ValueError(f"S_full={S_full} not divisible by num_chunks={N}.")
+        if chunk_full % tp_size != 0:
+            raise ValueError(
+                f"chunk_full={chunk_full} (S_full={S_full} // num_chunks={N}) "
+                f"must be divisible by tp_size={tp_size} for reduce_scatter."
+            )
         chunk_local = chunk_full // tp_size
 
         if self._comm_stream is None:

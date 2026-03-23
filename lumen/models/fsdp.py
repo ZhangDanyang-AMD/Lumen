@@ -183,7 +183,32 @@ def add_common_fsdp_args(parser):
         "--lumen-tp-comm-overlap",
         action="store_true",
         default=False,
-        help="Overlap TP communication (SDMA) with GEMM computation.",
+        help="Overlap TP communication with GEMM computation. "
+        "Mode is set by --lumen-tp-comm-overlap-mode (default: none, which uses "
+        "SDMA async overlap when --use-sdma is set). Use 'pipeline' for chunked "
+        "NCCL fused pipelining (requires sequence_parallel, BF16/scaling_type=none).",
+    )
+    overlap.add_argument(
+        "--lumen-tp-comm-overlap-mode",
+        type=str,
+        default="none",
+        choices=["none", "pipeline"],
+        help="TP comm-GEMM overlap mode. 'none': legacy SDMA async overlap (requires "
+        "--use-sdma). 'pipeline': chunked NCCL fused pipelining with user-buffer "
+        "double-buffering (requires sequence_parallel, BF16).",
+    )
+    overlap.add_argument(
+        "--lumen-tp-comm-overlap-chunks",
+        type=int,
+        default=4,
+        help="Number of pipeline chunks for 'pipeline' overlap mode.",
+    )
+    overlap.add_argument(
+        "--lumen-tp-comm-overlap-method",
+        type=str,
+        default="nccl",
+        choices=["nccl"],
+        help="Communication backend for 'pipeline' overlap mode. Only 'nccl' supported.",
     )
 
     # -- Fused MLP --

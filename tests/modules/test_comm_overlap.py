@@ -607,13 +607,14 @@ def _worker_fused_column_fwd(rank, world_size, port, results_dict, num_chunks=2)
         )
 
         max_diff = (actual - expected).abs().max().item()
-        results_dict[rank] = f"{'PASS' if max_diff < 0.1 else 'FAIL'}: max_diff={max_diff:.6f}"
+        rel_err = max_diff / (expected.abs().max().item() + 1e-7)
+        results_dict[rank] = f"{'PASS' if rel_err < 0.02 else 'FAIL'}: max_diff={max_diff:.6f}, rel_err={rel_err:.6f}"
     finally:
         dist.destroy_process_group()
 
 
 def _worker_fused_column_grad(rank, world_size, port, results_dict):
-    """Verify fused column backward produces correct dgrad."""
+    """Verify fused column backward produces numerically correct dgrad."""
     import torch.distributed as dist
 
     from lumen.modules.comm_overlap import (
@@ -655,14 +656,30 @@ def _worker_fused_column_grad(rank, world_size, port, results_dict):
         loss = output.sum()
         loss.backward()
 
+        # Reference: naive AG + GEMM backward for dgrad
+        input_ref = input_local.detach().clone().requires_grad_(True)
+        chunks = [torch.empty_like(input_ref) for _ in range(world_size)]
+        dist.all_gather(chunks, input_ref)
+        input_full = torch.cat(chunks, dim=0)
+        ref_out = F.linear(input_full, weight)
+        ref_out.sum().backward()
+        # dgrad from all_gather backward: each rank gets a slice of the full gradient
+        ref_dgrad = input_ref.grad
+
+        checks = []
         if input_local.grad is None:
-            results_dict[rank] = "FAIL: no grad on input_local"
+            checks.append("FAIL: no grad on input_local")
         elif input_local.grad.shape != (S_local, H):
-            results_dict[rank] = f"FAIL: grad shape {input_local.grad.shape}"
+            checks.append(f"FAIL: grad shape {input_local.grad.shape}")
         else:
-            results_dict[rank] = (
-                f"PASS: grad shape={input_local.grad.shape}, " f"norm={input_local.grad.norm().item():.4f}"
-            )
+            dgrad_diff = (input_local.grad - ref_dgrad).abs().max().item()
+            dgrad_rel = dgrad_diff / (ref_dgrad.abs().max().item() + 1e-7)
+            if dgrad_rel < 0.02:
+                checks.append(f"PASS: dgrad rel_err={dgrad_rel:.6f}")
+            else:
+                checks.append(f"FAIL: dgrad rel_err={dgrad_rel:.6f} (max_diff={dgrad_diff:.6f})")
+
+        results_dict[rank] = ", ".join(checks)
     finally:
         dist.destroy_process_group()
 
@@ -708,18 +725,36 @@ def _worker_fused_row_fwd_bwd(rank, world_size, port, results_dict):
         loss = output.sum()
         loss.backward()
 
+        # Reference: naive GEMM + reduce_scatter
+        input_ref = input_parallel.detach().clone().requires_grad_(True)
+        ref_local = F.linear(input_ref, weight)
+        ref_rs = torch.zeros(S // world_size, out_dim, device=device, dtype=torch.bfloat16)
+        dist.reduce_scatter_tensor(ref_rs, ref_local)
+        ref_rs.sum().backward()
+        ref_dgrad = input_ref.grad
+
         checks = []
         expected_out_rows = S // world_size
         if output.shape[0] != expected_out_rows:
             checks.append(f"FAIL: fwd shape {output.shape}, expected ({expected_out_rows}, ...)")
         else:
-            checks.append("PASS: fwd shape")
+            fwd_diff = (output - ref_rs).abs().max().item()
+            fwd_rel = fwd_diff / (ref_rs.abs().max().item() + 1e-7)
+            if fwd_rel < 0.02:
+                checks.append(f"PASS: fwd rel_err={fwd_rel:.6f}")
+            else:
+                checks.append(f"FAIL: fwd rel_err={fwd_rel:.6f}")
         if input_parallel.grad is None:
             checks.append("FAIL: grad is None")
         elif input_parallel.grad.shape != (S, H_tp):
             checks.append(f"FAIL: grad shape {input_parallel.grad.shape}")
         else:
-            checks.append("PASS: grad shape")
+            dgrad_diff = (input_parallel.grad - ref_dgrad).abs().max().item()
+            dgrad_rel = dgrad_diff / (ref_dgrad.abs().max().item() + 1e-7)
+            if dgrad_rel < 0.02:
+                checks.append(f"PASS: dgrad rel_err={dgrad_rel:.6f}")
+            else:
+                checks.append(f"FAIL: dgrad rel_err={dgrad_rel:.6f}")
 
         all_pass = all(c.startswith("PASS") for c in checks)
         results_dict[rank] = ("PASS" if all_pass else "FAIL") + ": " + ", ".join(checks)

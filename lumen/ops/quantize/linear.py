@@ -143,8 +143,11 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
 
     if scaling_type == "mxfp8":
         from lumen.ops.quantize.ops import convert_to_mxfp8
+        from lumen.ops.quantize.padding import pad_to_block
 
         mxfp8_block = 32 if block_size > 64 else block_size
+        x_2d, _orig_m = pad_to_block(x_2d, mxfp8_block, dim=0)
+        x_2d, _orig_n = pad_to_block(x_2d, mxfp8_block, dim=-1)
         return convert_to_mxfp8(x_2d, block_size=mxfp8_block, axis=-1, float8_dtype_pt=fp8_dtype)
 
     raise ValueError(f"Unknown scaling_type={scaling_type!r}")

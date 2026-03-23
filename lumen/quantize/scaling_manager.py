@@ -52,14 +52,13 @@ def _round_to_fp8(tensor: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
 
 def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
     """Microscaling FP8 quant-dequant round-trip."""
+    from lumen.ops.quantize.padding import pad_to_block
+
     orig_dtype = tensor.dtype
     orig_shape = tensor.shape
 
     flat = tensor.reshape(-1, orig_shape[-1]).contiguous()
-    M, N = flat.shape
-    pad_n = (block_size - N % block_size) % block_size
-    if pad_n > 0:
-        flat = torch.nn.functional.pad(flat, (0, pad_n))
+    flat, orig_n = pad_to_block(flat, block_size, dim=-1)
 
     data_bf16 = flat.to(torch.bfloat16)
     convert_to_mxfp8, convert_from_mxfp8, _ = _get_quant_ops()
@@ -72,8 +71,8 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
         axis=-1,
     )
 
-    if pad_n > 0:
-        data_hp = data_hp[:, :N]
+    if data_hp.size(-1) != orig_n:
+        data_hp = data_hp[:, :orig_n]
 
     return data_hp.reshape(orig_shape).to(orig_dtype)
 

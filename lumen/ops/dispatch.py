@@ -270,7 +270,8 @@ def _probe_aiter_softmax_topk():
 def _probe_aiter_triton_moe_aux_loss():
     """Check if AITER Triton moe_aux_loss kernels are available."""
     try:
-        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_fwd as _  # noqa: F401
+        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_bwd as _bwd  # noqa: F401
+        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_fwd as _fwd  # noqa: F401
 
         return True
     except (ImportError, OSError):

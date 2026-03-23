@@ -204,7 +204,13 @@ def test_unsupported_score_function():
         fused_compute_score_for_moe_aux_loss(logits, 2, "sigmoid")
 
     with pytest.raises(NotImplementedError, match="Group"):
-        fused_topk_with_score_function(logits, 2, True, 2, 1, None, "softmax", None)
+        fused_topk_with_score_function(logits, 2, True, 2, None, None, "softmax", None)
+
+    with pytest.raises(NotImplementedError, match="top-k"):
+        fused_topk_with_score_function(logits, 2, True, None, 4, None, "softmax", None)
+
+    with pytest.raises(NotImplementedError, match="expert_bias"):
+        fused_topk_with_score_function(logits, 2, True, None, None, None, "softmax", torch.ones(8, device="cuda"))
 
 
 # -- Test 5: gradcheck with pure PyTorch float64 wrappers --

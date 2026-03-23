@@ -82,36 +82,31 @@ def _quant_blockwise_2d(w, fp8_dtype, block_size=128):
     """
     import triton
 
+    from lumen.ops.quantize.padding import pad_to_block
+
     E, K, N = w.shape
     bs = block_size
     bk = triton.cdiv(K, bs)
     bn = triton.cdiv(N, bs)
     fp8_max = torch.finfo(fp8_dtype).max
 
-    K_pad = bk * bs
-    N_pad = bn * bs
-    need_pad = (K_pad != K) or (N_pad != N)
-
     w_fp8 = torch.empty(E, K, N, dtype=fp8_dtype, device=w.device)
     w_scales = torch.empty(E, bk, bn, dtype=torch.float32, device=w.device)
 
     for e in range(E):
         we = w[e]
-        if need_pad:
-            we_padded = torch.zeros(K_pad, N_pad, dtype=w.dtype, device=w.device)
-            we_padded[:K, :N] = we
-        else:
-            we_padded = we
+        we, orig_k = pad_to_block(we, bs, dim=0)
+        we, orig_n = pad_to_block(we, bs, dim=1)
 
-        blocks = we_padded.reshape(bk, bs, bn, bs).permute(0, 2, 1, 3)
+        blocks = we.reshape(bk, bs, bn, bs).permute(0, 2, 1, 3)
         amax = blocks.float().abs().amax(dim=(-2, -1)).clamp(min=1e-12)
         scales = amax / fp8_max
         w_scales[e] = scales
 
         scale_expanded = scales.unsqueeze(-1).unsqueeze(-1)
         q_blocks = (blocks.float() / scale_expanded).clamp(-fp8_max, fp8_max)
-        q_full = q_blocks.permute(0, 2, 1, 3).reshape(K_pad, N_pad)
-        w_fp8[e] = q_full[:K, :N].to(fp8_dtype)
+        q_full = q_blocks.permute(0, 2, 1, 3).reshape(we.size(0), we.size(1))
+        w_fp8[e] = q_full[:orig_k, :orig_n].to(fp8_dtype)
 
     return w_fp8, w_scales
 
