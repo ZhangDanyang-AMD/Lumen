@@ -267,15 +267,6 @@ def add_common_fsdp_args(parser):
         help="Use FP8-aware activation checkpointing.",
     )
 
-    # -- MoE routing --
-    moe = parser.add_argument_group("moe-routing")
-    moe.add_argument(
-        "--lumen-fused-moe-routing",
-        action="store_true",
-        default=False,
-        help="Use fused MoE token routing.",
-    )
-
     # -- Norm replacement --
     norm = parser.add_argument_group("norm")
     norm.add_argument(

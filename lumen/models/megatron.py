@@ -73,6 +73,38 @@ from lumen.modules.attention_mla import LumenDotProductAttentionMLA
 
 logger = logging.getLogger(__name__)
 
+
+def _patch_moe_fused_router():
+    """Monkey-patch Megatron-Core's moe_utils with Lumen fused router ops."""
+    try:
+        import megatron.core.transformer.moe.moe_utils as moe_utils
+
+        from lumen.ops.moe.fused_router import (
+            fused_compute_score_for_moe_aux_loss,
+            fused_moe_aux_loss,
+            fused_topk_with_score_function,
+        )
+
+        moe_utils.fused_topk_with_score_function = fused_topk_with_score_function
+        moe_utils.fused_compute_score_for_moe_aux_loss = fused_compute_score_for_moe_aux_loss
+        moe_utils.fused_moe_aux_loss = fused_moe_aux_loss
+
+        try:
+            import megatron.core.extensions.transformer_engine as te_ext
+
+            te_ext.fused_topk_with_score_function = fused_topk_with_score_function
+            te_ext.fused_compute_score_for_moe_aux_loss = fused_compute_score_for_moe_aux_loss
+            te_ext.fused_moe_aux_loss = fused_moe_aux_loss
+        except ImportError:
+            pass
+
+        logger.info("Patched Megatron-Core moe_utils with Lumen fused router ops")
+    except ImportError:
+        logger.debug("Megatron-Core moe_utils not found, skipping MoE router patch")
+
+
+_patch_moe_fused_router()
+
 stimer = StragglerDetector()
 
 
@@ -1102,13 +1134,6 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(
         lumen,
-        "--lumen-fused-moe-routing",
-        action="store_true",
-        default=False,
-        help="Use fused MoE token routing (top-k + permute + unpermute).",
-    )
-    safe_add_argument(
-        lumen,
         "--lumen-fp8-activation-store",
         action="store_true",
         default=False,
@@ -1141,7 +1166,37 @@ def add_common_megatron_args(parser):
         "--lumen-tp-comm-overlap",
         action="store_true",
         default=False,
-        help="Overlap TP communication (SDMA) with GEMM computation.",
+        help="Overlap TP communication with GEMM computation. "
+        "Mode is set by --lumen-tp-comm-overlap-mode (default: none, which uses "
+        "SDMA async overlap when --use-sdma is set). Use 'pipeline' for chunked "
+        "NCCL fused pipelining (requires sequence_parallel, BF16/scaling_type=none).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-tp-comm-overlap-mode",
+        type=str,
+        default="none",
+        choices=["none", "pipeline"],
+        help="TP comm-GEMM overlap mode. 'none': legacy SDMA async overlap (requires "
+        "--use-sdma). 'pipeline': chunked NCCL fused pipelining with user-buffer "
+        "double-buffering (requires sequence_parallel, BF16).",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-tp-comm-overlap-chunks",
+        type=int,
+        default=4,
+        help="Number of pipeline chunks for 'pipeline' overlap mode. Sequence length "
+        "must be divisible by this value. More chunks = finer overlap granularity "
+        "but higher scheduling overhead.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-tp-comm-overlap-method",
+        type=str,
+        default="nccl",
+        choices=["nccl"],
+        help="Communication backend for 'pipeline' overlap mode. Currently only 'nccl' " "is supported.",
     )
     safe_add_argument(
         lumen,
