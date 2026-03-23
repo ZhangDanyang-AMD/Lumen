@@ -85,6 +85,13 @@ def add_common_fsdp_args(parser):
         choices=[1, 2],
         help="FSDP version: 1 (legacy FullyShardedDataParallel) or 2 (fully_shard API).",
     )
+    f.add_argument(
+        "--use-sdma",
+        action="store_true",
+        default=False,
+        help="Use mori SDMA instead of torch.distributed for supported collectives "
+        "(TP comm, amax all-reduce, CP all-to-all) when available.",
+    )
 
     # -- LoRA --
     lora = parser.add_argument_group("lora")
@@ -431,20 +438,21 @@ def apply_fsdp2(
     args,
     dp_group=None,
 ) -> nn.Module:
-    """Apply PyTorch FSDP2 (fully_shard) to the model.
+    """Apply FSDP2 (``fully_shard``) to *model*.
 
-    Uses torch.distributed.fsdp.fully_shard() which provides per-parameter
-    sharding with lazy initialization and better composability.
+    Shards each decoder layer individually (equivalent to FSDP1's
+    ``transformer_auto_wrap_policy``), then shards the root model.
 
     Args:
         model: The model to shard.
-        args: CLI arguments.
-        dp_group: Data-parallel process group.
+        args: CLI arguments (needs ``linear_fp8``, ``sharding_strategy``).
+        dp_group: Data-parallel process group (used to derive DeviceMesh size).
 
     Returns:
-        FSDP2-wrapped model.
+        The same model (in-place sharding).
     """
     try:
+        from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
     except ImportError as e:
         raise ImportError(
@@ -452,33 +460,54 @@ def apply_fsdp2(
             "Install a compatible PyTorch version or use --fsdp-version 1."
         ) from e
 
-    # Build mixed precision policy
+    sharding_strategy = getattr(args, "sharding_strategy", "full_shard")
+    if sharding_strategy == "no_shard":
+        raise ValueError(
+            "--sharding-strategy no_shard is not supported with --fsdp-version 2. "
+            "Use --fsdp-version 1 or plain DDP for replicated parameters."
+        )
+
+    reshard = sharding_strategy != "shard_grad_op"
+
+    world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
+    mesh = init_device_mesh("cuda", (world_size,))
+
     mp_policy = None
-    if getattr(args, "linear_fp8", False):
+    if getattr(args, "linear_fp8", False) or getattr(args, "fp8_training", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
             buffer_dtype=torch.bfloat16,
         )
 
-    # Apply fully_shard to each transformer layer (bottom-up)
-    for name, module in model.named_children():
-        if hasattr(module, "layers") or "layers" in name:
-            for layer_name, layer in module.named_children():
+    sharded_layers = False
+    for module in model.modules():
+        if hasattr(module, "layers") and isinstance(module.layers, nn.ModuleList):
+            for layer in module.layers:
                 fully_shard(
                     layer,
-                    mesh=dp_group,
+                    mesh=mesh,
                     mp_policy=mp_policy,
+                    reshard_after_forward=reshard,
                 )
+            sharded_layers = True
+            break
 
-    # Shard the top-level model
     fully_shard(
         model,
-        mesh=dp_group,
+        mesh=mesh,
         mp_policy=mp_policy,
+        reshard_after_forward=reshard,
     )
 
-    _rank0_print(f"> FSDP2 applied (fully_shard, mp_policy={mp_policy})")
+    n_layers = "unknown"
+    if sharded_layers:
+        for m in model.modules():
+            if hasattr(m, "layers") and isinstance(m.layers, nn.ModuleList):
+                n_layers = len(m.layers)
+                break
+
+    _rank0_print(f"> FSDP2 applied (fully_shard, {n_layers} layers, " f"reshard={reshard}, mp_policy={mp_policy})")
     return model
 
 

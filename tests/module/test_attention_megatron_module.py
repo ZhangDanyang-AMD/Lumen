@@ -302,3 +302,40 @@ class TestLumenDotProductAttentionBenchmark:
         torch.cuda.synchronize()
         avg_ms = start.elapsed_time(end) / iters
         assert avg_ms >= 0
+
+
+class TestCpParamBundleUseSdma:
+    @mock.patch("lumen.modules.attention_megatron.AttnMaskType", _MockAttnMaskType)
+    @mock.patch("lumen.modules.attention_megatron.divide", side_effect=lambda a, b: a // b)
+    @mock.patch("lumen.modules.attention_megatron.MegatronModule.__init__", _patched_megatron_init)
+    @mock.patch("lumen.modules.attention_megatron.get_args", return_value=_make_args())
+    @mock.patch("lumen.modules.attention_megatron.parallel_state")
+    def test_cp_param_bundle_includes_use_sdma(self, mock_ps, *_):
+        mock_ps.get_context_parallel_group.return_value = "fake_cp_group"
+
+        from lumen.modules.attention_megatron import LumenDotProductAttention
+
+        config = _make_config()
+        config.context_parallel_size = 2
+        attn = LumenDotProductAttention(
+            config=config,
+            layer_number=1,
+            attn_mask_type=_MockAttnMaskType.causal,
+            attention_type="self",
+        )
+
+        with mock.patch("lumen.modules.attention_megatron._use_sdma_from_args", return_value=True), mock.patch(
+            "lumen.modules.attention_megatron.attention"
+        ) as mock_attn:
+            mock_attn.return_value = torch.randn(2, 4, 8, 64, device="cuda")
+            sq, b, np_, hn = 4, 2, 8, 64
+            q = torch.randn(sq, b, np_, hn, device="cuda")
+            k = torch.randn(sq, b, 8, hn, device="cuda")
+            v = torch.randn(sq, b, 8, hn, device="cuda")
+            attn(q, k, v, attention_mask=None)
+
+            _, kwargs = mock_attn.call_args
+            bundle = kwargs["cp_param_bundle"]
+            assert bundle is not None
+            assert bundle["use_sdma"] is True
+            assert bundle["cp_group"] == "fake_cp_group"

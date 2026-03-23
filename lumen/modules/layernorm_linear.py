@@ -64,10 +64,8 @@ class LumenLayerNormLinear(nn.Module):
         skip_weight_param_allocation: bool = False,
         tp_comm_buffer_name: Optional[str] = None,
         tp_group: Optional[torch.distributed.ProcessGroup] = None,
-        use_fsdp2: bool = False,
     ):
         super().__init__()
-        self.use_fsdp2 = use_fsdp2
 
         if gather_output:
             raise ValueError("LumenLayerNormLinear does not support gather_output=True")

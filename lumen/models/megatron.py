@@ -1088,13 +1088,6 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(
         lumen,
-        "--lumen-fsdp2",
-        action="store_true",
-        default=False,
-        help="Use FSDP2 (fully_shard) instead of legacy FSDP when backend=fsdp.",
-    )
-    safe_add_argument(
-        lumen,
         "--lumen-fp8-checkpoint",
         action="store_true",
         default=False,
@@ -1149,6 +1142,14 @@ def add_common_megatron_args(parser):
         action="store_true",
         default=False,
         help="Overlap TP communication (SDMA) with GEMM computation.",
+    )
+    safe_add_argument(
+        lumen,
+        "--use-sdma",
+        action="store_true",
+        default=False,
+        help="Use mori SDMA instead of torch.distributed for supported collectives "
+        "(TP comm, amax all-reduce, CP all-to-all) when available.",
     )
     safe_add_argument(
         lumen,
@@ -1210,13 +1211,6 @@ def add_common_megatron_args(parser):
     safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
     safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
     safe_add_argument(lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False)
-    safe_add_argument(
-        lfp8,
-        "--use-sdma",
-        action="store_true",
-        default=False,
-        help="Use mori SDMA for amax all-reduce instead of torch.distributed.",
-    )
     safe_add_argument(lfp8, "--linear-fp8-amax-history", type=int, default=16)
     safe_add_argument(
         lfp8, "--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation."

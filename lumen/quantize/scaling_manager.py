@@ -181,21 +181,27 @@ class ScalingManager:
                 amax = torch.stack(list(history)).amax().to(device=tensor.device)
 
             if self.config.reduce_amax and self._dp_group is not None:
-                torch.distributed.all_reduce(
-                    amax,
-                    op=torch.distributed.ReduceOp.MAX,
-                    group=self._dp_group,
-                )
+                if self._use_sdma:
+                    amax = self._reduce_single_amax_sdma(amax)
+                else:
+                    torch.distributed.all_reduce(
+                        amax,
+                        op=torch.distributed.ReduceOp.MAX,
+                        group=self._dp_group,
+                    )
 
             return self._compute_scale(amax, fp8_max)
         elif recipe == "dynamic":
             amax = tensor.abs().amax()
             if self.config.reduce_amax and self._dp_group is not None:
-                torch.distributed.all_reduce(
-                    amax,
-                    op=torch.distributed.ReduceOp.MAX,
-                    group=self._dp_group,
-                )
+                if self._use_sdma:
+                    amax = self._reduce_single_amax_sdma(amax)
+                else:
+                    torch.distributed.all_reduce(
+                        amax,
+                        op=torch.distributed.ReduceOp.MAX,
+                        group=self._dp_group,
+                    )
             return self._compute_scale(amax, fp8_max)
         elif recipe in ("blockwise", "blockwise2d", "mxfp8", "per_token"):
             return None
@@ -351,6 +357,18 @@ class ScalingManager:
         packed = torch.stack([a.to(device) for a in amaxes]).contiguous()
         torch.distributed.all_reduce(packed, op=torch.distributed.ReduceOp.MAX, group=self._dp_group)
         self._scatter_amaxes(packed, tensor_ids)
+
+    def _reduce_single_amax_sdma(self, amax: torch.Tensor) -> torch.Tensor:
+        """Reduce a single amax scalar via SDMA (allgather + max)."""
+        from lumen.ops.sdma import sdma_allgather_max
+
+        packed = amax.float().unsqueeze(0)
+        if self._sdma_allgather is None:
+            from lumen.ops.sdma import SdmaAllgather
+
+            self._sdma_allgather = SdmaAllgather()
+        result = sdma_allgather_max(packed, self._sdma_allgather)
+        return result[0]
 
     def register_fp8_optimizer_hook(
         self,

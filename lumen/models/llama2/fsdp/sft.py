@@ -133,7 +133,7 @@ class FSDPTrainer:
         self._warmup_counter = 0
         self._val_loss_ema: Optional[float] = None
 
-    def _build_and_wrap_model(self) -> FSDP:
+    def _build_and_wrap_model(self) -> nn.Module:
         args = self.args
         model = build_model(args)
 
@@ -149,37 +149,43 @@ class FSDPTrainer:
         if args.fp8_training:
             apply_fp8_training(model, args)
 
-        from functools import partial
+        if getattr(args, "fsdp_version", 1) == 2:
+            from lumen.models.fsdp import apply_fsdp2
 
-        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+            apply_fsdp2(model, args)
+        else:
+            from functools import partial
 
-        auto_wrap_policy = partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={LlamaDecoderLayer},
+            from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
+            auto_wrap_policy = partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls={LlamaDecoderLayer},
+            )
+            mixed_precision = MixedPrecision(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+                buffer_dtype=torch.bfloat16,
+            )
+            sharding = ShardingStrategy.FULL_SHARD
+            if args.sharding_strategy == "shard_grad_op":
+                sharding = ShardingStrategy.SHARD_GRAD_OP
+            elif args.sharding_strategy == "no_shard":
+                sharding = ShardingStrategy.NO_SHARD
+
+            model = FSDP(
+                model,
+                auto_wrap_policy=auto_wrap_policy,
+                mixed_precision=mixed_precision,
+                sharding_strategy=sharding,
+                device_id=self.local_rank,
+                limit_all_gathers=True,
+            )
+
+        _rank0_print(
+            f"> FSDP model ready (version={getattr(args, 'fsdp_version', 1)}, "
+            f"sharding={args.sharding_strategy}, world_size={self.world_size})"
         )
-
-        mixed_precision = MixedPrecision(
-            param_dtype=torch.bfloat16,
-            reduce_dtype=torch.bfloat16,
-            buffer_dtype=torch.bfloat16,
-        )
-
-        sharding = ShardingStrategy.FULL_SHARD
-        if args.sharding_strategy == "shard_grad_op":
-            sharding = ShardingStrategy.SHARD_GRAD_OP
-        elif args.sharding_strategy == "no_shard":
-            sharding = ShardingStrategy.NO_SHARD
-
-        model = FSDP(
-            model,
-            auto_wrap_policy=auto_wrap_policy,
-            mixed_precision=mixed_precision,
-            sharding_strategy=sharding,
-            device_id=self.local_rank,
-            limit_all_gathers=True,
-        )
-
-        _rank0_print(f"> FSDP model ready (sharding={args.sharding_strategy}, " f"world_size={self.world_size})")
         return model
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
@@ -317,7 +323,10 @@ class FSDPTrainer:
                 accum_loss += loss.item()
 
             if args.max_grad_norm > 0:
-                self.model.clip_grad_norm_(args.max_grad_norm)
+                if getattr(args, "fsdp_version", 1) == 2:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
+                else:
+                    self.model.clip_grad_norm_(args.max_grad_norm)
 
             self.optimizer.step()
             self.scheduler.step()
@@ -409,6 +418,20 @@ def get_args() -> argparse.Namespace:
     f = parser.add_argument_group("fsdp")
     f.add_argument(
         "--sharding-strategy", type=str, default="full_shard", choices=["full_shard", "shard_grad_op", "no_shard"]
+    )
+    f.add_argument(
+        "--fsdp-version",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="FSDP version: 1=legacy FSDP, 2=fully_shard (PyTorch 2.4+)",
+    )
+    f.add_argument(
+        "--use-sdma",
+        action="store_true",
+        default=False,
+        help="Use mori SDMA instead of torch.distributed for supported collectives "
+        "(TP comm, amax all-reduce, CP all-to-all) when available.",
     )
 
     # -- LoRA --

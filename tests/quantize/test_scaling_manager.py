@@ -706,3 +706,68 @@ class TestBlockwise2DScaleManager:
         assert torch.allclose(q_s, ref_qs)
         assert torch.allclose(k_s, ref_ks)
         assert torch.allclose(v_s, ref_vs)
+
+
+class TestGetScaleSdma:
+    """Verify get_scale routes to SDMA when _use_sdma is True."""
+
+    def test_delayed_uses_sdma_when_enabled(self):
+        from unittest import mock as umock
+
+        mgr = ScalingManager(recipe="delayed")
+        mgr._use_sdma = True
+        mgr._dp_group = "fake_dp_group"
+        mgr.config.reduce_amax = True
+        mgr.amax_history["x"].append(torch.tensor(2.0, device="cuda"))
+
+        with umock.patch.object(
+            mgr, "_reduce_single_amax_sdma", return_value=torch.tensor(2.0, device="cuda")
+        ) as mock_sdma:
+            scale = mgr.get_scale("x", torch.randn(4, 8, device="cuda"))
+            mock_sdma.assert_called_once()
+            assert scale is not None
+
+    def test_dynamic_uses_sdma_when_enabled(self):
+        from unittest import mock as umock
+
+        mgr = ScalingManager(recipe="dynamic")
+        mgr._use_sdma = True
+        mgr._dp_group = "fake_dp_group"
+        mgr.config.reduce_amax = True
+
+        with umock.patch.object(
+            mgr, "_reduce_single_amax_sdma", return_value=torch.tensor(2.0, device="cuda")
+        ) as mock_sdma:
+            scale = mgr.get_scale("x", torch.randn(4, 8, device="cuda"))
+            mock_sdma.assert_called_once()
+            assert scale is not None
+
+    def test_delayed_uses_dist_when_sdma_disabled(self):
+        from unittest import mock as umock
+
+        mgr = ScalingManager(recipe="delayed")
+        mgr._use_sdma = False
+        mgr._dp_group = "fake_dp_group"
+        mgr.config.reduce_amax = True
+        mgr.amax_history["x"].append(torch.tensor(2.0, device="cuda"))
+
+        with umock.patch("torch.distributed.all_reduce") as mock_dist:
+            mgr.get_scale("x", torch.randn(4, 8, device="cuda"))
+            mock_dist.assert_called_once()
+
+    def test_reduce_single_amax_sdma_casts_to_float32(self):
+        """Verify _reduce_single_amax_sdma casts input to float32."""
+        from unittest import mock as umock
+
+        mgr = ScalingManager(recipe="delayed")
+        mgr._use_sdma = True
+
+        fake_result = torch.tensor([3.0], device="cuda")
+        with umock.patch("lumen.ops.sdma.sdma_allgather_max", return_value=fake_result) as mock_fn, umock.patch(
+            "lumen.ops.sdma.SdmaAllgather"
+        ):
+            amax_bf16 = torch.tensor(2.0, device="cuda", dtype=torch.bfloat16)
+            result = mgr._reduce_single_amax_sdma(amax_bf16)
+            call_args = mock_fn.call_args[0][0]
+            assert call_args.dtype == torch.float32
+            assert result.item() == pytest.approx(3.0)

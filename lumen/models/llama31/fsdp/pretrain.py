@@ -152,7 +152,13 @@ class FSDPTrainer:
         self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
         torch.cuda.set_device(self.local_rank)
 
-    def _wrap_fsdp(self, model: nn.Module) -> FSDP:
+    def _wrap_fsdp(self, model: nn.Module) -> nn.Module:
+        if getattr(self.args, "fsdp_version", 1) == 2:
+            from lumen.models.fsdp import apply_fsdp2
+
+            apply_fsdp2(model, self.args)
+            return model
+
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
         wrap_policy = transformer_auto_wrap_policy(
@@ -244,7 +250,10 @@ class FSDPTrainer:
                 accum_loss += loss.item()
 
             if args.max_grad_norm > 0:
-                self.model.clip_grad_norm_(args.max_grad_norm)
+                if getattr(args, "fsdp_version", 1) == 2:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
+                else:
+                    self.model.clip_grad_norm_(args.max_grad_norm)
 
             self.optimizer.step()
             self.scheduler.step()
@@ -367,6 +376,20 @@ def get_args() -> argparse.Namespace:
     f = parser.add_argument_group("fsdp")
     f.add_argument(
         "--sharding-strategy", type=str, default="full_shard", choices=["full_shard", "shard_grad_op", "no_shard"]
+    )
+    f.add_argument(
+        "--fsdp-version",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="FSDP version: 1=legacy FSDP, 2=fully_shard (PyTorch 2.4+)",
+    )
+    f.add_argument(
+        "--use-sdma",
+        action="store_true",
+        default=False,
+        help="Use mori SDMA instead of torch.distributed for supported collectives "
+        "(TP comm, amax all-reduce, CP all-to-all) when available.",
     )
 
     # -- LoRA --

@@ -739,6 +739,18 @@ class TestResetFP8State:
             reset_fp8_state(outer)
         assert inner.fp8_initialized is False
 
+    def test_works_with_fsdp1_module_wrapper(self):
+        """Regression: reset_fp8_state still works with FSDP1 .module wrapper."""
+        inner = nn.Linear(8, 4)
+        inner.fp8_initialized = True
+        model = nn.Module()
+        model.module = inner
+
+        with mock.patch("lumen.models.fsdp._rank0_print"):
+            reset_fp8_state(model)
+
+        assert not getattr(inner, "fp8_initialized", False)
+
     def test_handles_model_without_fp8(self):
         model = nn.Sequential(nn.Linear(4, 4))
         with mock.patch("lumen.models.fsdp._rank0_print"):
@@ -818,3 +830,25 @@ class TestApplyLora:
         assert out.shape == (1, 8, config.vocab_size)
         assert not torch.isnan(out).any()
         assert not torch.isinf(out).any()
+
+
+class TestUseSdmaArg:
+    def test_add_common_fsdp_args_has_use_sdma(self):
+        import argparse
+
+        from lumen.models.fsdp import add_common_fsdp_args
+
+        parser = argparse.ArgumentParser()
+        add_common_fsdp_args(parser)
+        args = parser.parse_args([])
+        assert args.use_sdma is False
+
+    def test_add_common_fsdp_args_use_sdma_true(self):
+        import argparse
+
+        from lumen.models.fsdp import add_common_fsdp_args
+
+        parser = argparse.ArgumentParser()
+        add_common_fsdp_args(parser)
+        args = parser.parse_args(["--use-sdma"])
+        assert args.use_sdma is True

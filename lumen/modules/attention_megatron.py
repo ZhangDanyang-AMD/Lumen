@@ -38,6 +38,7 @@ from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.core.utils import divide
 from megatron.training import get_args
 
+from lumen.modules.parallel_linear import _use_sdma_from_args
 from lumen.ops.attention.attention import (
     attention,
     attention_fp8_quant,
@@ -178,6 +179,7 @@ class LumenDotProductAttention(MegatronModule):
             cp_param_bundle = {
                 "cp_group": cp_group,
                 "cp_comm_type": cp_comm_type,
+                "use_sdma": _use_sdma_from_args(),
             }
 
         if self._is_fp8_backend:

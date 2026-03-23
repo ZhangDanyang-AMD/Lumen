@@ -122,6 +122,33 @@ def _tp_comm_overlap_from_args() -> bool:
         return False
 
 
+def _overlap_mode_from_args():
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "lumen_tp_comm_overlap_mode", "none")
+    except Exception:
+        return "none"
+
+
+def _overlap_chunks_from_args():
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "lumen_tp_comm_overlap_chunks", 4)
+    except Exception:
+        return 4
+
+
+def _overlap_method_from_args():
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "lumen_tp_comm_overlap_method", "nccl")
+    except Exception:
+        return "nccl"
+
+
 def _get_tp_group(tp_group, is_expert):
     if tp_group is not None:
         return tp_group
@@ -206,7 +233,6 @@ class LumenColumnParallelLinear(nn.Module):
         skip_weight_param_allocation: bool = False,
         tp_comm_buffer_name: Optional[str] = None,
         tp_group: Optional[torch.distributed.ProcessGroup] = None,
-        use_fsdp2: bool = False,
     ):
         super().__init__()
 
@@ -216,7 +242,6 @@ class LumenColumnParallelLinear(nn.Module):
         self.gather_output = gather_output
         self.skip_bias_add = skip_bias_add
         self.is_expert = is_expert
-        self.use_fsdp2 = use_fsdp2
 
         self.tp_group = _get_tp_group(tp_group, is_expert)
         self.tp_size = _pg_size(self.tp_group)
@@ -246,6 +271,16 @@ class LumenColumnParallelLinear(nn.Module):
         self.delay_wgrad = False
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
+
+        # Pipeline overlap config (fused comm-GEMM)
+        _cfg_mode = getattr(config, "lumen_tp_comm_overlap_mode", None)
+        self._overlap_mode = _cfg_mode if _cfg_mode is not None else _overlap_mode_from_args()
+        _cfg_chunks = getattr(config, "lumen_tp_comm_overlap_chunks", None)
+        self._num_chunks = _cfg_chunks if _cfg_chunks is not None else _overlap_chunks_from_args()
+        _cfg_method = getattr(config, "lumen_tp_comm_overlap_method", None)
+        self._overlap_method = _cfg_method if _cfg_method is not None else _overlap_method_from_args()
+        self._pipeline_ag = None
+        self._pipeline_rs_for_bwd = None
 
         # Weight allocation
         if not skip_weight_param_allocation:
@@ -320,11 +355,27 @@ class LumenColumnParallelLinear(nn.Module):
             self._sdma_comm = SdmaTpComm.get(self.tp_group)
         return self._sdma_comm
 
+    def _make_comm_backend(self):
+        from lumen.modules.comm_overlap import NcclCommBackend, SdmaCommBackend
+
+        if self._overlap_method == "sdma":
+            return SdmaCommBackend(self._get_sdma_comm())
+        return NcclCommBackend(self.tp_group)
+
     def forward(self, input_: torch.Tensor, weight=None, runtime_gather_output=None):
         if weight is None:
             weight = self.weight
 
         if (
+            self.tp_size > 1
+            and self.tp_comm_overlap
+            and self._overlap_mode == "pipeline"
+            and self.sequence_parallel
+            and not self.explicit_expert_comm
+            and self.scaling_type == "none"
+        ):
+            output_parallel, gemm_bias = self._forward_fused_pipelined_column(input_, weight)
+        elif (
             self.use_sdma
             and self.tp_size > 1
             and self.tp_comm_overlap
@@ -445,6 +496,36 @@ class LumenColumnParallelLinear(nn.Module):
         output_parallel = torch.cat([out_local, out_remaining], dim=0)
         return output_parallel, self.bias if self.skip_bias_add else None
 
+    def _forward_fused_pipelined_column(
+        self, input_: torch.Tensor, weight: torch.Tensor
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Fused pipelined AG+GEMM forward with real comm-GEMM overlap."""
+        from lumen.modules.comm_overlap import (
+            PipelinedAllgatherGemm,
+            PipelinedGemmReduceScatter,
+            fused_column_parallel_forward,
+        )
+
+        if self._pipeline_ag is None:
+            backend = self._make_comm_backend()
+            self._pipeline_ag = PipelinedAllgatherGemm(self._num_chunks, backend)
+            self._pipeline_rs_for_bwd = PipelinedGemmReduceScatter(self._num_chunks, backend)
+
+        bias = self.bias if not self.skip_bias_add else None
+        output = fused_column_parallel_forward(
+            input_.contiguous(),
+            weight,
+            bias,
+            self._pipeline_ag,
+            self._pipeline_rs_for_bwd,
+            self.weight,
+            self.gradient_accumulation_fusion,
+            self.delay_wgrad,
+            self._deferred_wgrad if self.delay_wgrad else None,
+            bias is not None,
+        )
+        return output, self.bias if self.skip_bias_add else None
+
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
         from lumen.quantize import QuantConfig, ScalingManager
 
@@ -518,7 +599,6 @@ class LumenRowParallelLinear(nn.Module):
         is_expert: bool = False,
         tp_comm_buffer_name: Optional[str] = None,
         tp_group: Optional[torch.distributed.ProcessGroup] = None,
-        use_fsdp2: bool = False,
     ):
         super().__init__()
 
@@ -528,7 +608,6 @@ class LumenRowParallelLinear(nn.Module):
         self.input_is_parallel = input_is_parallel
         self.skip_bias_add = skip_bias_add
         self.is_expert = is_expert
-        self.use_fsdp2 = use_fsdp2
 
         self.tp_group = _get_tp_group(tp_group, is_expert)
         self.tp_size = _pg_size(self.tp_group)
@@ -555,6 +634,15 @@ class LumenRowParallelLinear(nn.Module):
         self.delay_wgrad = False
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
+
+        _cfg_mode = getattr(config, "lumen_tp_comm_overlap_mode", None)
+        self._overlap_mode = _cfg_mode if _cfg_mode is not None else _overlap_mode_from_args()
+        _cfg_chunks = getattr(config, "lumen_tp_comm_overlap_chunks", None)
+        self._num_chunks = _cfg_chunks if _cfg_chunks is not None else _overlap_chunks_from_args()
+        _cfg_method = getattr(config, "lumen_tp_comm_overlap_method", None)
+        self._overlap_method = _cfg_method if _cfg_method is not None else _overlap_method_from_args()
+        self._pipeline_rs = None
+        self._pipeline_ag_for_bwd = None
 
         # Weight
         if getattr(config, "use_cpu_initialization", False):
@@ -625,6 +713,13 @@ class LumenRowParallelLinear(nn.Module):
             self._sdma_comm = SdmaTpComm.get(self.tp_group)
         return self._sdma_comm
 
+    def _make_comm_backend(self):
+        from lumen.modules.comm_overlap import NcclCommBackend, SdmaCommBackend
+
+        if self._overlap_method == "sdma":
+            return SdmaCommBackend(self._get_sdma_comm())
+        return NcclCommBackend(self.tp_group)
+
     def forward(self, input_: torch.Tensor):
         if self.input_is_parallel:
             input_parallel = input_
@@ -633,29 +728,40 @@ class LumenRowParallelLinear(nn.Module):
 
             input_parallel = scatter_to_tensor_model_parallel_region(input_, group=self.tp_group)
 
-        output_parallel = _do_gemm(
-            input_parallel,
-            self.weight,
-            None,
-            self.scaling_manager,
-            self.scaling_type,
-            self.fp8_dtype,
-            self.block_size,
-            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
-            delay_wgrad=self.delay_wgrad,
-            deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
-        )
-
-        if self.explicit_expert_comm:
-            output_ = output_parallel
-        elif self.use_sdma and self.tp_size > 1 and self.tp_comm_overlap:
-            output_ = self._forward_sdma_overlap_row(output_parallel)
-        elif self.use_sdma and self.tp_size > 1:
-            output_ = self._forward_sdma_post_gemm(output_parallel)
-        elif self.sequence_parallel:
-            output_ = reduce_scatter_to_sequence_parallel_region(output_parallel, group=self.tp_group)
+        # Fused pipeline: GEMM + RS are done together inside the fused function
+        if (
+            self.tp_size > 1
+            and self.tp_comm_overlap
+            and self._overlap_mode == "pipeline"
+            and self.sequence_parallel
+            and self.scaling_type == "none"
+            and not self.explicit_expert_comm
+        ):
+            output_ = self._forward_fused_pipelined_row(input_parallel)
         else:
-            output_ = reduce_from_tensor_model_parallel_region(output_parallel, group=self.tp_group)
+            output_parallel = _do_gemm(
+                input_parallel,
+                self.weight,
+                None,
+                self.scaling_manager,
+                self.scaling_type,
+                self.fp8_dtype,
+                self.block_size,
+                gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                delay_wgrad=self.delay_wgrad,
+                deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+            )
+
+            if self.explicit_expert_comm:
+                output_ = output_parallel
+            elif self.use_sdma and self.tp_size > 1 and self.tp_comm_overlap:
+                output_ = self._forward_sdma_overlap_row(output_parallel)
+            elif self.use_sdma and self.tp_size > 1:
+                output_ = self._forward_sdma_post_gemm(output_parallel)
+            elif self.sequence_parallel:
+                output_ = reduce_scatter_to_sequence_parallel_region(output_parallel, group=self.tp_group)
+            else:
+                output_ = reduce_from_tensor_model_parallel_region(output_parallel, group=self.tp_group)
 
         if not self.skip_bias_add:
             output = (output_ + self.bias) if self.bias is not None else output_
@@ -694,6 +800,30 @@ class LumenRowParallelLinear(nn.Module):
             comm.allreduce_sum_async(output_parallel, stream=sdma_stream)
             comm.wait_allreduce_sum(stream=sdma_stream)
             return output_parallel
+
+    def _forward_fused_pipelined_row(self, input_parallel: torch.Tensor) -> torch.Tensor:
+        """Fused pipelined GEMM+RS forward with real comm-GEMM overlap."""
+        from lumen.modules.comm_overlap import (
+            PipelinedAllgatherGemm,
+            PipelinedGemmReduceScatter,
+            fused_row_parallel_forward,
+        )
+
+        if self._pipeline_rs is None:
+            backend = self._make_comm_backend()
+            self._pipeline_rs = PipelinedGemmReduceScatter(self._num_chunks, backend)
+            self._pipeline_ag_for_bwd = PipelinedAllgatherGemm(self._num_chunks, backend)
+
+        return fused_row_parallel_forward(
+            input_parallel,
+            self.weight,
+            self._pipeline_rs,
+            self._pipeline_ag_for_bwd,
+            self.weight,
+            self.gradient_accumulation_fusion,
+            self.delay_wgrad,
+            self._deferred_wgrad if self.delay_wgrad else None,
+        )
 
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
         from lumen.quantize import QuantConfig, ScalingManager
