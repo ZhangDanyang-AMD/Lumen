@@ -285,7 +285,17 @@ class PipelinedAllgatherGemm:
         out_last = gemm_fn(bufs[(N - 1) % 2], weight, None)
         output_chunks.append(out_last)
 
-        return torch.cat(output_chunks, dim=0)
+        result = torch.cat(output_chunks, dim=0)
+
+        # Reorder from chunk-interleaved layout to rank-contiguous layout.
+        # Each allgather chunk produces [tp_size * chunk_local, ...] with rows
+        # ordered as [rank0, rank1, ...].  After concatenating N chunks the
+        # layout is [c0_r0, c0_r1, ..., c1_r0, c1_r1, ...] which differs from
+        # the monolithic allgather order [r0_c0, r0_c1, ..., r1_c0, r1_c1, ...].
+        # Reshape → transpose → reshape converts between the two.
+        out_cols = result.shape[1:]
+        result = result.view(N, tp_size, chunk_local, *out_cols).transpose(0, 1).contiguous().view(-1, *out_cols)
+        return result
 
     def _forward_single_chunk(
         self,
@@ -383,7 +393,14 @@ class PipelinedGemmReduceScatter:
         compute_stream = torch.cuda.current_stream(input_full.device)
         comm_stream = self._comm_stream
 
-        input_chunks = list(input_full.split(chunk_full, dim=0))
+        # Reorder input from rank-contiguous [r0_c0..cN, r1_c0..cN, ...] to
+        # chunk-interleaved [c0_r0..rP, c1_r0..rP, ...] so that per-chunk
+        # reduce-scatter produces results equivalent to a monolithic RS.
+        trailing = input_full.shape[1:]
+        input_reordered = (
+            input_full.view(tp_size, N, chunk_local, *trailing).transpose(0, 1).contiguous().view(S_full, *trailing)
+        )
+        input_chunks = list(input_reordered.split(chunk_full, dim=0))
 
         rs_events: list[torch.cuda.Event] = []
         rs_bufs: list[torch.Tensor] = []
@@ -438,7 +455,12 @@ class PipelinedGemmReduceScatter:
         compute_stream = torch.cuda.current_stream(tensor.device)
         comm_stream = self._comm_stream
 
-        chunks = list(tensor.split(chunk_full, dim=0))
+        # Reorder to chunk-interleaved layout (see forward() for rationale).
+        trailing = tensor.shape[1:]
+        tensor_reordered = (
+            tensor.view(tp_size, N, chunk_local, *trailing).transpose(0, 1).contiguous().view(S_full, *trailing)
+        )
+        chunks = list(tensor_reordered.split(chunk_full, dim=0))
 
         rs_events: list[torch.cuda.Event] = []
         rs_bufs: list[torch.Tensor] = []

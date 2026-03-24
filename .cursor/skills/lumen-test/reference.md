@@ -21,7 +21,7 @@
 | `test_quantize.py` | 458 | 10 | FP8 tensorwise, blockwise, MXFP8 vs torchao references |
 | `test_sdma.py` | 965 | 19 | SDMA context, allgather, allreduce, all2all, distributed, performance |
 
-### tests/module/ (14 files, ~2,800 lines)
+### tests/modules/ (17 files, ~3,700 lines)
 
 | File | Lines | Tests | What it covers |
 |------|:-----:|:-----:|----------------|

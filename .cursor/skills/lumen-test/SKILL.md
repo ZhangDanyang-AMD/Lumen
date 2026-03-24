@@ -14,7 +14,7 @@ Every Lumen feature, kernel, or module must have tests before it can be marked "
 | You are testing… | Directory | Pattern |
 |------------------|-----------|---------|
 | A function in `lumen/ops/` | `tests/ops/` | Compare vs PyTorch reference using `compute_snr` |
-| An `nn.Module` in `lumen/modules/` | `tests/module/` | Mock distributed primitives, test construction + fwd + bwd |
+| An `nn.Module` in `lumen/modules/` | `tests/modules/` | Mock distributed primitives, test construction + fwd + bwd |
 | Megatron/FSDP integration | `tests/models/` | Mock `MegatronConfig`, test patching + CLI args |
 | `QuantConfig` / `ScalingManager` | `tests/quantize/` | Config parsing, scale computation, amax history |
 | Utilities (graphs, checkpoint) | `tests/utils/` | Lifecycle, context managers |
@@ -110,7 +110,7 @@ def test_op_fwd_bwd(config):
     assert compute_snr(x_ref.grad, x.grad) > 15
 ```
 
-### Module-level (`tests/module/`)
+### Module-level (`tests/modules/`)
 
 ```python
 @_CUDA

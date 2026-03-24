@@ -17,13 +17,13 @@ Covers:
 How to run::
 
     # All tests (unit + multi-GPU); SDMA-capable hardware required for distributed tests:
-    pytest tests/module/test_sdma_comm.py -v
+    pytest tests/modules/test_sdma_comm.py -v
 
     # Unit tests only (single GPU):
-    pytest tests/module/test_sdma_comm.py -v -k "Unit"
+    pytest tests/modules/test_sdma_comm.py -v -k "Unit"
 
     # Multi-GPU TP communication tests (mp.spawn, uses all available GPUs up to 8):
-    pytest tests/module/test_sdma_comm.py -v -k "Distributed"
+    pytest tests/modules/test_sdma_comm.py -v -k "Distributed"
   - reduce_scatter_dim0: correctness, shape
   - Autograd functions: forward/backward gradient flow
   - Performance: throughput for TP-sized collectives
