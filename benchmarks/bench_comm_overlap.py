@@ -64,7 +64,10 @@ import torch.distributed as dist
 
 from benchmarks.bench_utils import (
     BenchResult,
+    compute_bandwidth_gb_s,
     cuda_timer,
+    print_bandwidth_summary,
+    print_bench_warnings,
     print_overlap_summary,
     print_report,
     print_report_with_table,
@@ -1073,6 +1076,225 @@ class TestNCCLvsSdma:
         if self.rank == 0:
             print_report_with_table(
                 f"NCCL vs SDMA Scaling Summary (world={self.world})",
+                all_results,
+            )
+
+    def test_nccl_vs_sdma_reduce_scatter_overlap(self):
+        """NCCL vs SDMA for GEMM + reduce-scatter overlap."""
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        K_tp = K // self.world
+        x = torch.randn(M, K_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(N, K_tp, device=self.device, dtype=torch.bfloat16)
+        comm = SdmaTpComm(dist.group.WORLD)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        def _rs_nccl(tensor):
+            shard = tensor.shape[0] // self.world
+            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
+            dist.reduce_scatter_tensor(out, tensor)
+            return out
+
+        for _ in range(3):
+            gemm_out = x @ w.T
+            _rs_nccl(gemm_out)
+            comm.reduce_scatter_dim0(gemm_out)
+        torch.cuda.synchronize()
+
+        def _nccl():
+            gemm_out = x @ w.T
+            with torch.cuda.stream(comm_stream):
+                _rs_nccl(gemm_out)
+            comm_stream.synchronize()
+
+        r_nccl = cuda_timer(
+            _nccl,
+            label="NCCL RS overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        def _sdma():
+            gemm_out = x @ w.T
+            comm.reduce_scatter_dim0_async(gemm_out, stream=sdma_stream)
+            comm.wait_reduce_scatter_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_sdma = cuda_timer(
+            _sdma,
+            label="SDMA RS overlap",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
+        rs_bytes = M * N * 2
+        r_nccl.extra["rs_bw_gb_s"] = round(compute_bandwidth_gb_s(rs_bytes, r_nccl.avg_ms), 1)
+        r_sdma.extra["rs_bw_gb_s"] = round(compute_bandwidth_gb_s(rs_bytes, r_sdma.avg_ms), 1)
+
+        if self.rank == 0:
+            print_report_with_table(f"NCCL vs SDMA RS Overlap (world={self.world})", [r_nccl, r_sdma])
+            print_bandwidth_summary(label="RS (NCCL)", bytes_transferred=rs_bytes, time_ms=r_nccl.avg_ms)
+            print_bandwidth_summary(label="RS (SDMA)", bytes_transferred=rs_bytes, time_ms=r_sdma.avg_ms)
+            print_bench_warnings(result=r_sdma, speedup=speedup)
+
+    @pytest.mark.parametrize(
+        "gemm_n",
+        [256, 1024, 4096, 7168, 14336, 28672],
+        ids=lambda n: f"N={n}",
+    )
+    def test_nccl_vs_sdma_rs_scaling(self, gemm_n):
+        """Sweep GEMM output dim for RS: SDMA vs NCCL crossover."""
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        K_tp = K // self.world
+        x = torch.randn(M, K_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(gemm_n, K_tp, device=self.device, dtype=torch.bfloat16)
+
+        comm = SdmaTpComm(dist.group.WORLD)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        def _rs_nccl(tensor):
+            shard = tensor.shape[0] // self.world
+            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
+            dist.reduce_scatter_tensor(out, tensor)
+            return out
+
+        for _ in range(3):
+            gemm_out = x @ w.T
+            _rs_nccl(gemm_out)
+            comm.reduce_scatter_dim0(gemm_out)
+        torch.cuda.synchronize()
+
+        rs_bytes = M * gemm_n * 2
+
+        r_gemm = cuda_timer(
+            lambda: x @ w.T,
+            label=f"GEMM N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _nccl(w=w):
+            gemm_out = x @ w.T
+            with torch.cuda.stream(comm_stream):
+                _rs_nccl(gemm_out)
+            comm_stream.synchronize()
+
+        def _sdma(w=w):
+            gemm_out = x @ w.T
+            comm.reduce_scatter_dim0_async(gemm_out, stream=sdma_stream)
+            comm.wait_reduce_scatter_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_nccl = cuda_timer(
+            _nccl,
+            label=f"NCCL RS N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            _sdma,
+            label=f"SDMA RS N={gemm_n}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        winner = "SDMA" if speedup > 1.0 else "NCCL"
+        r_sdma.extra["vs_nccl"] = f"{speedup:.2f}x"
+        r_sdma.extra["winner"] = winner
+        r_sdma.extra["rs_bw_gb_s"] = round(compute_bandwidth_gb_s(rs_bytes, r_sdma.avg_ms), 1)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"NCCL vs SDMA RS  N={gemm_n}  (world={self.world})",
+                [r_gemm, r_nccl, r_sdma],
+            )
+            print_bench_warnings(result=r_sdma, speedup=speedup)
+
+    def test_nccl_vs_sdma_rs_scaling_summary(self):
+        """Combined summary for RS scaling across all GEMM sizes."""
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        K_tp = K // self.world
+        x = torch.randn(M, K_tp, device=self.device, dtype=torch.bfloat16)
+        comm = SdmaTpComm(dist.group.WORLD)
+        comm_stream = torch.cuda.Stream(device=self.device)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        sizes = [256, 1024, 4096, 7168, 14336, 28672]
+        all_results: List[BenchResult] = []
+
+        def _rs_nccl(tensor):
+            shard = tensor.shape[0] // self.world
+            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
+            dist.reduce_scatter_tensor(out, tensor)
+            return out
+
+        for gemm_n in sizes:
+            w = torch.randn(gemm_n, K_tp, device=self.device, dtype=torch.bfloat16)
+
+            for _ in range(3):
+                gemm_out = x @ w.T
+                _rs_nccl(gemm_out)
+                comm.reduce_scatter_dim0(gemm_out)
+            torch.cuda.synchronize()
+
+            def _nccl(w=w):
+                gemm_out = x @ w.T
+                with torch.cuda.stream(comm_stream):
+                    _rs_nccl(gemm_out)
+                comm_stream.synchronize()
+
+            def _sdma(w=w):
+                gemm_out = x @ w.T
+                comm.reduce_scatter_dim0_async(gemm_out, stream=sdma_stream)
+                comm.wait_reduce_scatter_dim0(stream=sdma_stream)
+                compute_stream.wait_stream(sdma_stream)
+
+            r_nccl = cuda_timer(
+                _nccl,
+                label=f"NCCL RS N={gemm_n:>5}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+            r_sdma = cuda_timer(
+                _sdma,
+                label=f"SDMA RS N={gemm_n:>5}",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+
+            speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+            r_sdma.extra["vs_nccl"] = f"{speedup:.2f}x"
+            r_sdma.extra["winner"] = "SDMA" if speedup > 1.0 else "NCCL"
+            rs_bytes = M * gemm_n * 2
+            r_sdma.extra["rs_bw_gb_s"] = round(compute_bandwidth_gb_s(rs_bytes, r_sdma.avg_ms), 1)
+            all_results.extend([r_nccl, r_sdma])
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"NCCL vs SDMA RS Scaling Summary (world={self.world})",
                 all_results,
             )
 
