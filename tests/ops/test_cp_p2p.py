@@ -176,16 +176,17 @@ class TestAttentionCPP2P:
 # =========================================================================
 
 
-def _multi_gpu_skip_condition():
+def _has_multi_gpu() -> bool:
     try:
-        if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
-            return True, "Need ≥2 GPUs for CP P2P distributed test"
+        return torch.cuda.is_available() and torch.cuda.device_count() >= 2
     except Exception:
-        return True, "CUDA not available"
-    return False, ""
+        return False
 
 
-_MULTI_GPU = pytest.mark.skipif(*_multi_gpu_skip_condition())
+_MULTI_GPU = pytest.mark.skipif(
+    not _has_multi_gpu(),
+    reason="Need >= 2 GPUs for CP P2P distributed test",
+)
 
 
 def _is_aiter_available():

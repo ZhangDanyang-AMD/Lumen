@@ -39,16 +39,17 @@ import torch.nn.functional as F
 # ===================================================================
 
 
-def _multi_gpu_skip_condition():
+def _has_multi_gpu() -> bool:
     try:
-        if torch.cuda.device_count() < 2:
-            return True, "Requires at least 2 GPUs"
+        return torch.cuda.device_count() >= 2
     except Exception:
-        return True, "CUDA not available"
-    return False, ""
+        return False
 
 
-_requires_multi_gpu = pytest.mark.skipif(*_multi_gpu_skip_condition())
+_requires_multi_gpu = pytest.mark.skipif(
+    not _has_multi_gpu(),
+    reason="Requires at least 2 GPUs",
+)
 
 _SPAWN_COOLDOWN = float(os.environ.get("LUMEN_SPAWN_COOLDOWN_SECS", "1"))
 
