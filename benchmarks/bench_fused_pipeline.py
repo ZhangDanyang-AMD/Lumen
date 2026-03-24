@@ -45,8 +45,11 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
+from benchmarks.bench_utils import compute_bandwidth_gb_s  # noqa: F401
+from benchmarks.bench_utils import print_bandwidth_summary  # noqa: F401
 from benchmarks.bench_utils import (
     cuda_timer,
+    print_bench_warnings,
     print_overlap_summary,
     print_report_with_table,
 )
@@ -62,6 +65,21 @@ _TRIM = 10.0
 _DIST = pytest.mark.skipif(
     "RANK" not in os.environ,
     reason="Multi-GPU — run with torchrun --nproc_per_node=N",
+)
+
+
+def _sdma_available():
+    try:
+        import mori  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+_SDMA_DIST = pytest.mark.skipif(
+    "RANK" not in os.environ or not _sdma_available(),
+    reason="Multi-GPU + mori SDMA required",
 )
 
 
@@ -442,3 +460,385 @@ class TestFusedPipelineRowFwd:
                 compute_label="GEMM",
                 comm_label="reduce_scatter",
             )
+
+
+@_SDMA_DIST
+class TestFusedPipelineSdmaColumn:
+    """NCCL vs SDMA backend for fused pipelined overlap."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def _make_backends(self):
+        from lumen.modules.comm_overlap import (
+            NcclCommBackend,
+            PipelinedAllgatherGemm,
+            PipelinedGemmReduceScatter,
+            SdmaCommBackend,
+        )
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        nccl = NcclCommBackend(dist.group.WORLD)
+        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma = SdmaCommBackend(sdma_comm)
+
+        ag_nccl = PipelinedAllgatherGemm(num_chunks=4, comm=nccl)
+        rs_nccl = PipelinedGemmReduceScatter(num_chunks=4, comm=nccl)
+        ag_sdma = PipelinedAllgatherGemm(num_chunks=4, comm=sdma)
+        rs_sdma = PipelinedGemmReduceScatter(num_chunks=4, comm=sdma)
+        return (ag_nccl, rs_nccl), (ag_sdma, rs_sdma)
+
+    def test_nccl_vs_sdma_fused_column_fwd(self):
+        from lumen.modules.comm_overlap import fused_column_parallel_forward
+
+        S_local = (B * S) // self.world
+        x_local = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
+
+        def _run(ag, rs):
+            return fused_column_parallel_forward(
+                x_local.clone(),
+                w.clone(),
+                None,
+                ag,
+                rs,
+                w_param,
+                False,
+                False,
+                None,
+                False,
+            )
+
+        for _ in range(3):
+            _run(ag_nccl, rs_nccl)
+            _run(ag_sdma, rs_sdma)
+        torch.cuda.synchronize()
+
+        r_nccl = cuda_timer(
+            lambda: _run(ag_nccl, rs_nccl),
+            label="NCCL fused column fwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            lambda: _run(ag_sdma, rs_sdma),
+            label="SDMA fused column fwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"Fused Column Fwd: NCCL vs SDMA (world={self.world})",
+                [r_nccl, r_sdma],
+            )
+            print_bench_warnings(result=r_sdma, speedup=speedup)
+
+    def test_nccl_vs_sdma_fused_row_fwd(self):
+        from lumen.modules.comm_overlap import fused_row_parallel_forward
+
+        S_full = B * S
+        H_tp = H // self.world
+        x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
+
+        def _run(rs, ag):
+            return fused_row_parallel_forward(
+                x.clone(),
+                w.clone(),
+                rs,
+                ag,
+                w_param,
+                False,
+                False,
+                None,
+            )
+
+        for _ in range(3):
+            _run(rs_nccl, ag_nccl)
+            _run(rs_sdma, ag_sdma)
+        torch.cuda.synchronize()
+
+        r_nccl = cuda_timer(
+            lambda: _run(rs_nccl, ag_nccl),
+            label="NCCL fused row fwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            lambda: _run(rs_sdma, ag_sdma),
+            label="SDMA fused row fwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"Fused Row Fwd: NCCL vs SDMA (world={self.world})",
+                [r_nccl, r_sdma],
+            )
+            print_bench_warnings(result=r_sdma, speedup=speedup)
+
+    def test_nccl_vs_sdma_fused_column_fwd_bwd(self):
+        from lumen.modules.comm_overlap import fused_column_parallel_forward
+
+        S_local = (B * S) // self.world
+        w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
+
+        def _run(ag, rs):
+            x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            y = fused_column_parallel_forward(
+                x,
+                w_param,
+                None,
+                ag,
+                rs,
+                w_param,
+                False,
+                False,
+                None,
+                False,
+            )
+            y.sum().backward()
+            return x.grad
+
+        for _ in range(3):
+            _run(ag_nccl, rs_nccl)
+            _run(ag_sdma, rs_sdma)
+        torch.cuda.synchronize()
+
+        r_nccl = cuda_timer(
+            lambda: _run(ag_nccl, rs_nccl),
+            label="NCCL fused fwd+bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            lambda: _run(ag_sdma, rs_sdma),
+            label="SDMA fused fwd+bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
+        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"Fused Column Fwd+Bwd: NCCL vs SDMA (world={self.world})",
+                [r_nccl, r_sdma],
+            )
+            print_bench_warnings(result=r_sdma, speedup=speedup)
+
+
+@_DIST
+class TestFusedPipelineBackwardOverlap:
+    """Isolate backward overlap: dgrad+RS and AG+dgrad measured separately."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def test_column_backward_dgrad_rs_overlap(self):
+        """Column-parallel backward: dgrad + RS overlap."""
+        from lumen.modules.comm_overlap import (
+            NcclCommBackend,
+            PipelinedAllgatherGemm,
+            PipelinedGemmReduceScatter,
+            fused_column_parallel_forward,
+        )
+
+        S_local = (B * S) // self.world
+        w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
+        pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
+
+        def _seq_bwd():
+            x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            gathered = _distributed_allgather(x)
+            y = F.linear(gathered, w)
+            y.sum().backward()
+            return x.grad
+
+        def _fused_bwd():
+            x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            y = fused_column_parallel_forward(
+                x,
+                w_param,
+                None,
+                pipeline_ag,
+                pipeline_rs,
+                w_param,
+                False,
+                False,
+                None,
+                False,
+            )
+            y.sum().backward()
+            return x.grad
+
+        for _ in range(3):
+            _seq_bwd()
+            _fused_bwd()
+        torch.cuda.synchronize()
+
+        r_seq = cuda_timer(
+            _seq_bwd,
+            label="sequential column bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_fused = cuda_timer(
+            _fused_bwd,
+            label="fused column bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_seq.avg_ms / max(r_fused.avg_ms, 1e-6)
+        overlap_ratio = 1 - (r_fused.avg_ms / max(r_seq.avg_ms, 1e-6))
+        r_fused.extra["speedup"] = round(speedup, 2)
+        r_fused.extra["overlap_ratio"] = round(overlap_ratio, 3)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"Column Backward Overlap (world={self.world})",
+                [r_seq, r_fused],
+            )
+            print_overlap_summary(
+                t_compute=r_seq.avg_ms,
+                t_comm=0,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_fused.avg_ms,
+                compute_label="seq bwd",
+                comm_label="(fused)",
+            )
+            print_bench_warnings(result=r_fused, speedup=speedup, overlap_ratio=overlap_ratio)
+
+    def test_row_backward_ag_dgrad_overlap(self):
+        """Row-parallel backward: AG + dgrad overlap."""
+        from lumen.modules.comm_overlap import (
+            NcclCommBackend,
+            PipelinedAllgatherGemm,
+            PipelinedGemmReduceScatter,
+            fused_row_parallel_forward,
+        )
+
+        S_full = B * S
+        H_tp = H // self.world
+        w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
+        pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
+
+        def _reduce_scatter(tensor):
+            shard = tensor.shape[0] // self.world
+            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
+            dist.reduce_scatter_tensor(out, tensor)
+            return out
+
+        def _seq_bwd():
+            x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            y = _reduce_scatter(F.linear(x, w))
+            y.sum().backward()
+            return x.grad
+
+        def _fused_bwd():
+            x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            y = fused_row_parallel_forward(
+                x,
+                w_param,
+                pipeline_rs,
+                pipeline_ag,
+                w_param,
+                False,
+                False,
+                None,
+            )
+            y.sum().backward()
+            return x.grad
+
+        for _ in range(3):
+            _seq_bwd()
+            _fused_bwd()
+        torch.cuda.synchronize()
+
+        r_seq = cuda_timer(
+            _seq_bwd,
+            label="sequential row bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_fused = cuda_timer(
+            _fused_bwd,
+            label="fused row bwd",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        speedup = r_seq.avg_ms / max(r_fused.avg_ms, 1e-6)
+        overlap_ratio = 1 - (r_fused.avg_ms / max(r_seq.avg_ms, 1e-6))
+        r_fused.extra["speedup"] = round(speedup, 2)
+        r_fused.extra["overlap_ratio"] = round(overlap_ratio, 3)
+
+        if self.rank == 0:
+            print_report_with_table(
+                f"Row Backward Overlap (world={self.world})",
+                [r_seq, r_fused],
+            )
+            print_overlap_summary(
+                t_compute=r_seq.avg_ms,
+                t_comm=0,
+                t_seq=r_seq.avg_ms,
+                t_ovl=r_fused.avg_ms,
+                compute_label="seq bwd",
+                comm_label="(fused)",
+            )
+            print_bench_warnings(result=r_fused, speedup=speedup, overlap_ratio=overlap_ratio)
