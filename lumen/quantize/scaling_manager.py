@@ -58,6 +58,7 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
     orig_shape = tensor.shape
 
     flat = tensor.reshape(-1, orig_shape[-1]).contiguous()
+    flat, orig_m = pad_to_block(flat, block_size, dim=0)
     flat, orig_n = pad_to_block(flat, block_size, dim=-1)
 
     data_bf16 = flat.to(torch.bfloat16)
@@ -71,8 +72,7 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
         axis=-1,
     )
 
-    if data_hp.size(-1) != orig_n:
-        data_hp = data_hp[:, :orig_n]
+    data_hp = data_hp[:orig_m, :orig_n]
 
     return data_hp.reshape(orig_shape).to(orig_dtype)
 

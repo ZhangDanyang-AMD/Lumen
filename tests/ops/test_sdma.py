@@ -17,22 +17,37 @@ Covers:
 
 Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
 
+Hardware requirements:
+  - Unit tests (is_sdma_available, SdmaContext): single GPU, no RDMA needed.
+  - Distributed tests (TestSdmaDistributed, TestSdmaVsNcclGolden): >= 2 GPUs
+    **with RDMA connectivity** (InfiniBand / RoCE).  The ``_requires_sdma_hw``
+    marker probes this by spawning a real 2-rank allgather via mori; nodes
+    without RDMA (``RDMA devices: None``) will be skipped automatically.
+  - Performance tests (TestSdmaPerformance): same as distributed.
+
 How to run::
 
-    # All tests (unit + multi-GPU); requires SDMA-capable hardware for distributed tests:
+    # All tests (unit + multi-GPU); requires SDMA-capable hardware:
     pytest tests/ops/test_sdma.py -v
 
-    # Unit tests only (single GPU):
+    # Unit tests only (single GPU, no RDMA needed):
     pytest tests/ops/test_sdma.py -v -k "not Distributed and not VsNccl and not Performance"
 
-    # Multi-GPU correctness only (up to 8 GPUs):
+    # Multi-GPU correctness only (>= 2 GPUs with RDMA):
     pytest tests/ops/test_sdma.py -v -k "Distributed or VsNccl"
+
+    # Performance benchmarks only (>= 2 GPUs with RDMA):
+    pytest tests/ops/test_sdma.py -v -k "Performance"
+
+    # Override SDMA spawn cooldown for fast local iteration:
+    LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0 pytest tests/ops/test_sdma.py -v
 """
 
 import functools
 import os
 import subprocess
 import sys
+import textwrap
 import time
 
 import pytest
@@ -41,45 +56,84 @@ import torch
 from lumen.ops.sdma import is_sdma_available
 
 
+def _get_free_port():
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 @functools.lru_cache(maxsize=1)
 def _sdma_hardware_available() -> bool:
-    """Probe whether SDMA hardware is usable by doing a minimal mori init in a subprocess.
+    """Probe whether SDMA hardware is usable with a real 2-rank allgather.
 
-    Returns True only if a single-rank mori shmem init (including SDMA queue
-    creation) succeeds.  The result is cached for the lifetime of the process.
+    A single-rank mori shmem init can succeed even without RDMA (it only
+    touches local resources).  Multi-rank collectives require RDMA
+    transport, so this probe spawns 2 ranks that do a small allgather.
+    If RDMA devices are missing (``anvil.cpp`` fails), the subprocess
+    exits non-zero and distributed SDMA tests are skipped.
     """
     if not is_sdma_available():
         return False
     if torch.cuda.device_count() < 2:
         return False
-    probe_script = """
-import os, torch, torch.distributed as dist
-os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-os.environ.setdefault("MASTER_PORT", "29399")
-os.environ["MORI_ENABLE_SDMA"] = "1"
-torch.cuda.set_device(0)
-device = torch.device("cuda", 0)
-dist.init_process_group("cpu:gloo,cuda:nccl", rank=0, world_size=1, device_id=device)
-torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-import mori.shmem as shmem
-shmem.shmem_torch_process_group_init("default")
-shmem.shmem_finalize()
-dist.destroy_process_group()
-"""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-c", probe_script],
-            capture_output=True,
-            timeout=60,
+    probe_script = textwrap.dedent(
+        """\
+        import os, sys, torch, torch.distributed as dist
+
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        os.environ["MORI_ENABLE_SDMA"] = "1"
+        torch.cuda.set_device(rank)
+        device = torch.device("cuda", rank)
+        dist.init_process_group(
+            "cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device
         )
-        return result.returncode == 0
+        torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+        import mori.shmem as shmem
+        shmem.shmem_torch_process_group_init("default")
+
+        from lumen.ops.sdma import SdmaAllgather, SdmaContext
+        ctx = SdmaContext.get()
+        ag = SdmaAllgather(ctx)
+        local = torch.full((4,), float(rank), dtype=torch.float32, device=device)
+        stream = torch.cuda.current_stream(device)
+        out = ag(local, stream)
+        stream.synchronize()
+        del ag
+        torch.cuda.synchronize()
+        dist.barrier()
+        SdmaContext.reset()
+        dist.barrier()
+        shmem.shmem_finalize()
+        dist.barrier()
+        dist.destroy_process_group()
+    """
+    )
+    try:
+        port = _get_free_port()
+        env = {**os.environ, "MASTER_ADDR": "127.0.0.1", "MASTER_PORT": str(port)}
+        procs = []
+        for r in range(2):
+            p = subprocess.Popen(
+                [sys.executable, "-c", probe_script],
+                env={**env, "RANK": str(r), "WORLD_SIZE": "2"},
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            procs.append(p)
+        ok = all(p.wait(timeout=60) == 0 for p in procs)
+        return ok
     except (subprocess.TimeoutExpired, OSError):
+        for p in procs:
+            p.kill()
         return False
 
 
 _requires_sdma_hw = pytest.mark.skipif(
     not _sdma_hardware_available(),
-    reason="SDMA hardware not available (mori shmem init fails)",
+    reason="SDMA multi-GPU probe failed (no RDMA devices or mori transport error)",
 )
 
 
@@ -319,14 +373,6 @@ def _worker_allreduce(rank, world_size, port, results_dict):
     finally:
         del ar
         _sdma_worker_teardown(shmem)
-
-
-def _get_free_port():
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
 
 
 _SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))

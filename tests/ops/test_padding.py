@@ -259,7 +259,7 @@ class TestQuantizeInputMxfp8Padding:
 
         mock_result = (torch.zeros(64, 64, dtype=torch.float8_e4m3fn), torch.ones(64, 2, dtype=torch.uint8))
 
-        with patch("lumen.ops.quantize.linear.convert_to_mxfp8", return_value=mock_result) as mock_fn:
+        with patch("lumen.ops.quantize.ops.convert_to_mxfp8", return_value=mock_result) as mock_fn:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(64, 50, dtype=torch.bfloat16)
@@ -275,7 +275,7 @@ class TestQuantizeInputMxfp8Padding:
 
         mock_result = (torch.zeros(64, 64, dtype=torch.float8_e4m3fn), torch.ones(64, 2, dtype=torch.uint8))
 
-        with patch("lumen.ops.quantize.linear.convert_to_mxfp8", return_value=mock_result) as mock_fn:
+        with patch("lumen.ops.quantize.ops.convert_to_mxfp8", return_value=mock_result) as mock_fn:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(50, 64, dtype=torch.bfloat16)
@@ -296,7 +296,7 @@ class TestQuantizeInputMxfp8Padding:
                 torch.ones(tensor.size(0), tensor.size(1) // block_size, dtype=torch.uint8),
             )
 
-        with patch("lumen.ops.quantize.linear.convert_to_mxfp8", side_effect=fake_convert_to_mxfp8) as mock_fn:
+        with patch("lumen.ops.quantize.ops.convert_to_mxfp8", side_effect=fake_convert_to_mxfp8) as mock_fn:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(50, 50, dtype=torch.bfloat16)

@@ -18,12 +18,36 @@ Ring CP is preferred when:
 """
 
 import logging
+import os
 from typing import Callable, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
+
+
+def is_ck_bwd_compiled(dtype: torch.dtype = torch.bfloat16, causal: bool = True) -> bool:
+    """Check if the CK attention backward kernel .so is pre-compiled in AITER JIT cache.
+
+    The backward module name is constructed from dtype/causal/dropout/deterministic
+    settings, mirroring ``cmdGenFunc_mha_bwd`` in ``aiter.ops.mha``.  We also
+    accept the v3 backward module (``module_fmha_v3_bwd``) as a valid alternative.
+    """
+    try:
+        from aiter.jit.core import AITER_ROOT_DIR
+    except ImportError:
+        return False
+
+    jit_dir = os.path.join(AITER_ROOT_DIR, "aiter", "jit")
+
+    if os.path.isfile(os.path.join(jit_dir, "module_fmha_v3_bwd.so")):
+        return True
+
+    dtype_tag = "_fp16" if dtype == torch.float16 else "_bf16"
+    mask_tag = "_mask" if causal else "_nmask"
+    md_name = f"mha_bwd{dtype_tag}_nbias_ndbias{mask_tag}_ndropout_deterministic"
+    return os.path.isfile(os.path.join(jit_dir, md_name + ".so"))
 
 
 def _ring_send_recv_kv(
@@ -163,6 +187,14 @@ class AttentionCPP2PFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         q, k, v, lse = ctx.saved_tensors
+
+        assert is_ck_bwd_compiled(dtype=q.dtype, causal=ctx.causal), (
+            "CK attention backward kernel is not pre-compiled. "
+            "JIT compilation inside mp.spawn child processes will SIGSEGV. "
+            "Pre-build kernels first: PREBUILD_KERNELS=1 pip install -e third_party/aiter, "
+            "or warmup the backward in the parent process before spawning."
+        )
+
         cp_group = ctx.cp_group
         cp_size = ctx.cp_size
         cp_rank = ctx.cp_rank

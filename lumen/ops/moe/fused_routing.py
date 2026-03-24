@@ -67,11 +67,14 @@ def fused_topk(
     Args:
         logits: Gate logits [num_tokens, num_experts].
         k: Number of top experts per token.
-        softmax_first: If True, apply softmax before top-k (standard).
+        softmax_first: If True (default), apply softmax before top-k and
+            renormalize selected weights to sum to 1.  If False, top-k
+            selects on raw logit values; weights are NOT renormalized.
 
     Returns:
         Tuple of (weights, indices) where:
-        - weights: [num_tokens, k] softmax-normalized weights
+        - weights: [num_tokens, k] expert weights (renormalized when
+          softmax_first=True, raw otherwise)
         - indices: [num_tokens, k] selected expert indices
     """
     assert _probe_aiter_moe_topk_softmax() and logits.is_cuda, (

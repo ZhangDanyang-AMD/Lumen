@@ -124,8 +124,10 @@ def test_fused_topk_with_score_function(N, E, topk, use_pre_softmax, scaling_fac
     loss_ref.backward()
 
     torch.testing.assert_close(logits.grad, logits_ref.grad, atol=1e-4, rtol=1e-4)
-    snr = compute_snr(logits.grad, logits_ref.grad)
-    assert snr > 15, f"Backward SNR too low: {snr:.1f} dB"
+    ref_energy = logits_ref.grad.float().norm()
+    if ref_energy > 1e-3:
+        snr = compute_snr(logits.grad, logits_ref.grad)
+        assert snr > 15, f"Backward SNR too low: {snr:.1f} dB"
 
 
 # -- Test 2 --

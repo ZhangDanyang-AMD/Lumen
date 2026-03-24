@@ -193,16 +193,23 @@ def _is_aiter_available():
 _AITER = pytest.mark.skipif(not _is_aiter_available(), reason="AITER required")
 
 
-def _warmup_ck_kernels(B, S_local, H, D, dtype, device="cuda:0"):
-    """Pre-JIT CK attention kernels so mp.spawn children hit the cache."""
+def _warmup_ck_kernels(B, S_local, H, D, dtype, device="cuda:0", include_bwd=False):
+    """Pre-JIT CK attention kernels so mp.spawn children hit the cache.
+
+    When *include_bwd* is True the backward kernel is also warmed up so that
+    ``AttentionCPP2PFunction.backward`` can safely run inside spawned workers
+    without triggering JIT compilation (which would SIGSEGV).
+    """
     from lumen.ops.attention.attention import attention
 
-    q = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
-    k = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
-    v = torch.randn(B, S_local, H, D, dtype=dtype, device=device)
-    attention(q, k, v, causal=True, return_lse=True)
+    q = torch.randn(B, S_local, H, D, dtype=dtype, device=device, requires_grad=include_bwd)
+    k = torch.randn(B, S_local, H, D, dtype=dtype, device=device, requires_grad=include_bwd)
+    v = torch.randn(B, S_local, H, D, dtype=dtype, device=device, requires_grad=include_bwd)
+    out, _lse = attention(q, k, v, causal=True, return_lse=True)
+    if include_bwd:
+        out.sum().backward()
     torch.cuda.synchronize()
-    del q, k, v
+    del q, k, v, out, _lse
 
 
 def _cp_p2p_worker(rank, world_size, result_queue, global_q, global_k, global_v, sm_scale, port, requires_grad=False):
@@ -324,7 +331,7 @@ def _spawn_cp_p2p(B, S, H, D, sm_scale, requires_grad=False):
         port = sock.getsockname()[1]
 
     S_local = S // 2
-    _warmup_ck_kernels(B, S_local, H, D, dtype=torch.bfloat16)
+    _warmup_ck_kernels(B, S_local, H, D, dtype=torch.bfloat16, include_bwd=requires_grad)
 
     result_queue = mp.Queue()
     mp.spawn(
@@ -388,6 +395,14 @@ class TestCPP2PDistributed:
         Uses the same global Q,K,V and grad_output, computes reference gradients
         on a single device, then compares.
         """
+        from lumen.ops.attention.attention_with_cp_p2p import is_ck_bwd_compiled
+
+        if not is_ck_bwd_compiled(dtype=torch.bfloat16, causal=True):
+            pytest.skip(
+                "CK attention backward kernel not pre-compiled; "
+                "run PREBUILD_KERNELS=1 pip install -e third_party/aiter"
+            )
+
         B, S, H, D = 2, 256, 8, 64
         sm_scale = D**-0.5
         global_q, global_k, global_v, results = _spawn_cp_p2p(
