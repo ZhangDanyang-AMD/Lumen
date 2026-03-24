@@ -582,3 +582,61 @@ def trace_context(
         print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
         size = os.path.getsize(trace_path)
         print(f"  Saved: {trace_path} ({format_bytes(size)})")
+
+
+# ---------------------------------------------------------------------------
+# Bandwidth helpers
+# ---------------------------------------------------------------------------
+
+
+def compute_bandwidth_gb_s(bytes_transferred: int, time_ms: float) -> float:
+    """Return effective bandwidth in GB/s."""
+    if time_ms <= 0:
+        return 0.0
+    return bytes_transferred / (time_ms * 1e-3) / 1e9
+
+
+def print_bandwidth_summary(
+    *,
+    label: str,
+    bytes_transferred: int,
+    time_ms: float,
+) -> None:
+    """Print bandwidth utilization for a communication operation."""
+    bw = compute_bandwidth_gb_s(bytes_transferred, time_ms)
+    print(f"  {label}: {bw:.1f} GB/s " f"({bytes_transferred / 1e6:.1f} MB in {time_ms:.3f} ms)")
+
+
+# ---------------------------------------------------------------------------
+# Anomaly detection
+# ---------------------------------------------------------------------------
+
+
+def print_bench_warnings(
+    *,
+    result: BenchResult,
+    overlap_ratio: float | None = None,
+    speedup: float | None = None,
+) -> None:
+    """Print diagnostic warnings when benchmark results look suspicious."""
+    warnings = []
+    if result.cv_pct > 15:
+        warnings.append(
+            f"CV={result.cv_pct:.1f}% — results are noisy, " "consider more iterations or check for background load"
+        )
+    if result.p95_ms > 2 * result.median_ms and result.median_ms > 0:
+        warnings.append(
+            f"p95={result.p95_ms:.3f}ms >> median={result.median_ms:.3f}ms "
+            "— high tail latency, possible GC or throttling"
+        )
+    if overlap_ratio is not None and overlap_ratio < 0:
+        warnings.append(
+            f"overlap ratio {overlap_ratio:.1%} is negative — "
+            "fused path is slower than sequential, check for contention"
+        )
+    elif overlap_ratio is not None and overlap_ratio < 0.1:
+        warnings.append(f"overlap ratio {overlap_ratio:.1%} < 10% — " "fusion is not hiding communication effectively")
+    if speedup is not None and speedup < 1.0:
+        warnings.append(f"speedup {speedup:.2f}x < 1.0 — " "optimized path is slower than baseline")
+    for w in warnings:
+        print(f"  \u26a0 WARNING: {w}")
