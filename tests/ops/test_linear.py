@@ -359,3 +359,9 @@ def test_fp8_linear_m1(scaling_type):
     assert compute_snr(out_ref, out_lumen) > fwd_floor
     assert x.grad is not None and x.grad.shape == x.shape
     assert w.grad is not None and w.grad.shape == w.shape
+    assert (
+        compute_snr(x_ref.grad, x.grad) > _BWD_DX_SNR[scaling_type]
+    ), f"M=1 bwd dx ({scaling_type}) SNR: {compute_snr(x_ref.grad, x.grad):.1f} dB"
+    assert (
+        compute_snr(w_ref.grad, w.grad) > _BWD_DW_SNR[scaling_type]
+    ), f"M=1 bwd dw ({scaling_type}) SNR: {compute_snr(w_ref.grad, w.grad):.1f} dB"

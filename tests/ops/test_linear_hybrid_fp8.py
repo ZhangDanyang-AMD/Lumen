@@ -102,8 +102,9 @@ class TestHybridFP8Forward:
 class TestHybridFP8Backward:
     """Hybrid FP8 backward pass uses E5M2 for gradient quantization."""
 
-    @pytest.mark.parametrize("config", LINEAR_SHAPES[:1], ids=LINEAR_IDS[:1])
-    def test_backward_produces_gradient(self, config):
+    @pytest.mark.parametrize("config", LINEAR_SHAPES, ids=LINEAR_IDS)
+    def test_backward_dgrad_snr(self, config):
+        """dX = grad_output @ W should match bf16 reference within SNR threshold."""
         from lumen.ops.quantize.linear import quantized_linear
         from lumen.quantize.config import QuantConfig, QuantFormat, ScalingType
         from lumen.quantize.scaling_manager import ScalingManager
@@ -117,12 +118,40 @@ class TestHybridFP8Backward:
         mgr.quantize("weight", w, backward=False)
 
         out = quantized_linear(x, w, scaling_type="delayed", scaling_manager=mgr)
-        out.sum().backward()
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
 
         assert x.grad is not None, "Backward did not produce gradient"
-        assert x.grad.shape == x.shape, f"Gradient shape mismatch: {x.grad.shape} vs {x.shape}"
+        assert x.grad.shape == x.shape
         assert torch.isfinite(x.grad).all(), "Gradient contains NaN or Inf"
-        assert x.grad.abs().sum() > 0, "Gradient is all zeros"
+
+        ref_dgrad = (grad_output.float() @ w.float()).to(torch.bfloat16)
+        snr = compute_snr(ref_dgrad, x.grad)
+        assert snr > 6, f"Hybrid FP8 backward dgrad SNR too low: {snr:.1f} dB"
+
+    @pytest.mark.parametrize("config", LINEAR_SHAPES[:1], ids=LINEAR_IDS[:1])
+    def test_backward_wgrad_snr(self, config):
+        """dW = grad_output^T @ X should be close to bf16 reference."""
+        from lumen.ops.quantize.linear import quantized_linear
+        from lumen.quantize.config import QuantConfig, QuantFormat, ScalingType
+        from lumen.quantize.scaling_manager import ScalingManager
+
+        x = torch.randn(config.M, config.K, device="cuda", dtype=torch.bfloat16) * 0.1
+        w_param = torch.nn.Parameter(torch.randn(config.N, config.K, device="cuda", dtype=torch.bfloat16) * 0.02)
+
+        cfg = QuantConfig(format=QuantFormat.HYBRID, scaling=ScalingType.DELAYED)
+        mgr = ScalingManager(cfg)
+        mgr.quantize("input", x, backward=False)
+        mgr.quantize("weight", w_param.detach(), backward=False)
+
+        out = quantized_linear(x, w_param, scaling_type="delayed", scaling_manager=mgr)
+        grad_output = torch.randn_like(out)
+        out.backward(grad_output)
+
+        assert w_param.grad is not None, "No weight gradient produced"
+        ref_wgrad = (grad_output.float().t() @ x.float()).to(torch.bfloat16)
+        snr = compute_snr(ref_wgrad, w_param.grad)
+        assert snr > 6, f"Hybrid FP8 backward wgrad SNR too low: {snr:.1f} dB"
 
     def test_hybrid_uses_e5m2_in_backward(self):
         """Verify the ScalingManager returns E5M2 dtype for backward quantization."""

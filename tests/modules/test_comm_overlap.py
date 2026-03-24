@@ -14,6 +14,17 @@ Covers:
   - End-to-end pipeline: bulk vs pipeline mode equivalence
 
 Multi-GPU tests use torch.multiprocessing.spawn with NCCL.
+
+How to run::
+
+    # All tests (unit + multi-GPU); multi-GPU tests require >= 2 GPUs (some up to 4):
+    pytest tests/modules/test_comm_overlap.py -v
+
+    # Unit tests only (single GPU):
+    pytest tests/modules/test_comm_overlap.py -v -k "Pool"
+
+    # Multi-GPU comm-overlap tests (mp.spawn, up to 4 GPUs):
+    pytest tests/modules/test_comm_overlap.py -v -k "not Pool"
 """
 
 import os

@@ -199,6 +199,24 @@ class TestFusedTopKCorrectness:
 
 
 @_CUDA
+class TestFusedTopKSoftmaxFirst:
+    """Test softmax_first=False path."""
+
+    def test_softmax_first_false(self):
+        """With softmax_first=False, weights should still be renormalized top-k."""
+        from lumen.ops.moe.fused_routing import fused_topk
+
+        logits = torch.randn(16, 8, device=DEVICE, dtype=torch.float32)
+        weights_true, indices_true = fused_topk(logits, k=2, softmax_first=True)
+        weights_false, indices_false = fused_topk(logits, k=2, softmax_first=False)
+
+        assert weights_false.shape == (16, 2)
+        assert indices_false.shape == (16, 2)
+        row_sums = weights_false.sum(dim=-1)
+        torch.testing.assert_close(row_sums, torch.ones_like(row_sums), atol=1e-5, rtol=1e-5)
+
+
+@_CUDA
 class TestFusedPermuteCorrectness:
     """Numerical correctness for fused_permute."""
 
@@ -238,6 +256,73 @@ class TestFusedPermuteCorrectness:
         assert (
             len(actual_tokens) >= num_tokens
         ), f"Only {len(actual_tokens)} unique token slots found, expected >= {num_tokens}"
+
+    def test_sorted_weights_match_input(self):
+        """sorted_weights should contain the original routing weights, reordered."""
+        from lumen.ops.moe.fused_routing import fused_permute
+
+        num_tokens, hidden, k, num_experts = 16, 32, 2, 4
+        tokens = torch.randn(num_tokens, hidden, device=DEVICE)
+        indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
+        weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1)
+
+        sorted_ids, sorted_weights, _, num_valid_ids, _ = fused_permute(
+            tokens, indices, weights, num_experts=num_experts
+        )
+
+        total_valid = num_valid_ids[0].item()
+        ref_flat_weights = weights.float().reshape(-1)
+        actual_sorted_weights = sorted_weights[:total_valid].cpu()
+        expected_sorted_weights = ref_flat_weights[sorted_ids[:total_valid].long().cpu()]
+        torch.testing.assert_close(actual_sorted_weights, expected_sorted_weights, atol=1e-5, rtol=1e-5)
+
+    def test_sorted_ids_grouped_by_expert(self):
+        """Within valid range, token IDs should be grouped by expert."""
+        from lumen.ops.moe.fused_routing import fused_permute
+
+        num_tokens, hidden, k, num_experts = 16, 32, 2, 4
+        tokens = torch.randn(num_tokens, hidden, device=DEVICE)
+        indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
+        weights = torch.ones(num_tokens, k, device=DEVICE)
+
+        sorted_ids, _, sorted_expert_ids, num_valid_ids, _ = fused_permute(
+            tokens, indices, weights, num_experts=num_experts
+        )
+
+        total_valid = num_valid_ids[0].item()
+        block_size = 32
+        num_blocks = (total_valid + block_size - 1) // block_size
+        eid_cpu = sorted_expert_ids[:num_blocks].cpu()
+        assert (eid_cpu >= 0).all() and (eid_cpu < num_experts).all(), f"expert_ids out of range: {eid_cpu.tolist()}"
+
+    def test_permute_unpermute_round_trip(self):
+        """permute → per-expert identity → unpermute should recover weighted sum."""
+        from lumen.ops.moe.fused_routing import fused_permute, fused_unpermute
+
+        num_tokens, hidden, k, num_experts = 16, 64, 2, 4
+        tokens = torch.randn(num_tokens, hidden, device=DEVICE, dtype=torch.float32)
+        indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
+        weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1)
+
+        sorted_ids, sorted_weights, _, num_valid_ids, _ = fused_permute(
+            tokens, indices, weights, num_experts=num_experts
+        )
+
+        total_valid = num_valid_ids[0].item()
+        valid_ids = sorted_ids[:total_valid].long()
+        valid_weights = sorted_weights[:total_valid]
+
+        flat_tokens = tokens.unsqueeze(1).expand(-1, k, -1).reshape(-1, hidden)
+        expert_output = flat_tokens[valid_ids] * valid_weights.unsqueeze(-1)
+
+        out = fused_unpermute(expert_output, sorted_ids[:total_valid], num_tokens, k)
+
+        ref = torch.zeros(num_tokens, hidden, device=DEVICE)
+        for i in range(num_tokens):
+            for j in range(k):
+                ref[i] += weights[i, j] * tokens[i]
+
+        torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
 
 
 @_CUDA

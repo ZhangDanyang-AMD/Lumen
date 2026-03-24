@@ -3,6 +3,16 @@
 #
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
+"""Tests for FSDP2 distributed training integration.
+
+How to run::
+
+    # All tests (unit + distributed); distributed tests require >= 2 GPUs:
+    pytest tests/models/test_fsdp2.py -v
+
+    # Distributed FSDP2 training test (launches torchrun --nproc_per_node=2 internally):
+    pytest tests/models/test_fsdp2.py -v -k "dist"
+"""
 
 import argparse
 import os

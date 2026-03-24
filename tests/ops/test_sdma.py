@@ -16,6 +16,17 @@ Covers:
   - Performance: SDMA bandwidth measurement (latency, throughput)
 
 Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
+
+How to run::
+
+    # All tests (unit + multi-GPU); requires SDMA-capable hardware for distributed tests:
+    pytest tests/ops/test_sdma.py -v
+
+    # Unit tests only (single GPU):
+    pytest tests/ops/test_sdma.py -v -k "not Distributed and not VsNccl and not Performance"
+
+    # Multi-GPU correctness only (up to 8 GPUs):
+    pytest tests/ops/test_sdma.py -v -k "Distributed or VsNccl"
 """
 
 import functools

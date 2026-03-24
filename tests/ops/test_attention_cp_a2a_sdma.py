@@ -12,6 +12,17 @@ Covers:
   - Forward + backward numerical correctness vs non-SDMA baseline
   - Performance comparison: SDMA vs torch.distributed all-to-all
 
+How to run::
+
+    # All tests (unit + multi-GPU); SDMA-capable hardware required for distributed tests:
+    pytest tests/ops/test_attention_cp_a2a_sdma.py -v
+
+    # Unit tests only (single GPU):
+    pytest tests/ops/test_attention_cp_a2a_sdma.py -v -k "Helper"
+
+    # Multi-GPU CP A2A tests (up to 8 GPUs, mp.spawn):
+    pytest tests/ops/test_attention_cp_a2a_sdma.py -v -k "CPA2ASdma"
+
 Skip conditions:
   - mori not available → skip SDMA tests
   - torch.cuda.device_count() < 2 → skip distributed tests

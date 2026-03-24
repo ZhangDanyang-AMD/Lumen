@@ -90,5 +90,28 @@ class TestMakeWgradClosureBf16:
         closure = make_wgrad_closure_bf16(grad_output, input_tensor, weight, False)
         closure()
 
+        expected = grad_output.reshape(-1, N).t() @ input_tensor.reshape(-1, K)
         assert weight.grad is not None
         assert weight.grad.shape == (N, K)
+        torch.testing.assert_close(weight.grad, expected, atol=1e-1, rtol=1e-1)
+
+    def test_grad_accumulation_across_calls(self):
+        """Two closure calls should accumulate (not overwrite) into weight.grad."""
+        from lumen.ops.quantize.gemm_primitives import make_wgrad_closure_bf16
+
+        M, N, K = 128, 256, 512
+        grad_output_1 = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+        input_tensor_1 = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        grad_output_2 = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+        input_tensor_2 = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+        weight = torch.nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16))
+
+        c1 = make_wgrad_closure_bf16(grad_output_1, input_tensor_1, weight, False)
+        c2 = make_wgrad_closure_bf16(grad_output_2, input_tensor_2, weight, False)
+        c1()
+        c2()
+
+        expected = grad_output_1.reshape(-1, N).t() @ input_tensor_1.reshape(-1, K) + grad_output_2.reshape(
+            -1, N
+        ).t() @ input_tensor_2.reshape(-1, K)
+        torch.testing.assert_close(weight.grad, expected, atol=1e-1, rtol=1e-1)
