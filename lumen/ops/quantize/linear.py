@@ -38,6 +38,7 @@ import torch
 from lumen.ops.dispatch import (
     Backend,
     _probe_aiter_ck_gemm,
+    _probe_aiter_hipblas,
     _probe_aiter_quant,
     _probe_aiter_triton_gemm,
     _probe_aiter_triton_gemm_mxfp8,
@@ -213,14 +214,19 @@ def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
 
 
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w):
-    """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends."""
+    """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends.
+
+    hipBLASLt is tried last because ``hipb_create_extension`` / ``hipb_mm``
+    can SIGSEGV in ``mp.spawn`` child processes (known multi-GPU issue in the
+    gradlib C++ globals).  CK and Triton are safe to run first.
+    """
     backends = []
-    if _probe_aiter_quant():
-        backends.append((Backend.CK, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_ck_gemm():
         backends.append((Backend.CK, lambda: _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
+    if _probe_aiter_hipblas():
+        backends.append((Backend.CK, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
     return try_backends(backends, op_name="gemm_per_tensor")
 
 

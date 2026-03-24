@@ -59,13 +59,10 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
-def _sdma_skip_condition():
-    if not is_sdma_available():
-        return True, "SDMA not available"
-    return False, ""
-
-
-_requires_sdma_hw = pytest.mark.skipif(*_sdma_skip_condition())
+_requires_sdma_hw = pytest.mark.skipif(
+    not is_sdma_available(),
+    reason="SDMA not available (is_sdma_available() returned False)",
+)
 
 
 # ===================================================================

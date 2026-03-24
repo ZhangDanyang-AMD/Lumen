@@ -160,6 +160,17 @@ def _probe_aiter_triton_quant():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_hipblas():
+    """Check if AITER hipBLASLt GEMM ops are available."""
+    try:
+        from aiter.ops.gradlib import hipb_mm as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_fused_quant():
     try:
         from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_per_tensor_static_quant as _  # noqa: F401

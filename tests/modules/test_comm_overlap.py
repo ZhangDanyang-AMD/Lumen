@@ -923,6 +923,7 @@ def _worker_fused_column_fp8_fwd(rank, world_size, port, results_dict, scaling_t
         PipelinedGemmReduceScatter,
         fused_column_parallel_forward,
     )
+    from lumen.quantize.config import _get_float8_e4m3
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
@@ -930,13 +931,15 @@ def _worker_fused_column_fp8_fwd(rank, world_size, port, results_dict, scaling_t
     device = torch.device("cuda", rank)
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
+    fp8_dtype = _get_float8_e4m3()
+
     try:
         from lumen.ops.quantize.linear import quantize_input
 
         xq, _ = quantize_input(
             torch.randn(2, 4, device=device, dtype=torch.bfloat16),
             scaling_type,
-            torch.float8_e4m3fn,
+            fp8_dtype,
             128,
         )
     except Exception as e:
@@ -969,7 +972,7 @@ def _worker_fused_column_fp8_fwd(rank, world_size, port, results_dict, scaling_t
             False,
             scaling_manager=None,
             scaling_type=scaling_type,
-            fp8_dtype=torch.float8_e4m3fn,
+            fp8_dtype=fp8_dtype,
             block_size=128,
         )
 
@@ -998,6 +1001,7 @@ def _worker_fused_column_fp8_grad(rank, world_size, port, results_dict, scaling_
         PipelinedGemmReduceScatter,
         fused_column_parallel_forward,
     )
+    from lumen.quantize.config import _get_float8_e4m3
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
@@ -1005,13 +1009,15 @@ def _worker_fused_column_fp8_grad(rank, world_size, port, results_dict, scaling_
     device = torch.device("cuda", rank)
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
+    fp8_dtype = _get_float8_e4m3()
+
     try:
         from lumen.ops.quantize.linear import quantize_input
 
         quantize_input(
             torch.randn(2, 4, device=device, dtype=torch.bfloat16),
             scaling_type,
-            torch.float8_e4m3fn,
+            fp8_dtype,
             128,
         )
     except Exception as e:
@@ -1048,7 +1054,7 @@ def _worker_fused_column_fp8_grad(rank, world_size, port, results_dict, scaling_
             False,
             scaling_manager=None,
             scaling_type=scaling_type,
-            fp8_dtype=torch.float8_e4m3fn,
+            fp8_dtype=fp8_dtype,
             block_size=128,
         )
         output.sum().backward()
@@ -1076,6 +1082,7 @@ def _worker_fused_row_fp8_fwd_bwd(rank, world_size, port, results_dict, scaling_
         PipelinedGemmReduceScatter,
         fused_row_parallel_forward,
     )
+    from lumen.quantize.config import _get_float8_e4m3
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
@@ -1083,13 +1090,15 @@ def _worker_fused_row_fp8_fwd_bwd(rank, world_size, port, results_dict, scaling_
     device = torch.device("cuda", rank)
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
+    fp8_dtype = _get_float8_e4m3()
+
     try:
         from lumen.ops.quantize.linear import quantize_input
 
         quantize_input(
             torch.randn(2, 4, device=device, dtype=torch.bfloat16),
             scaling_type,
-            torch.float8_e4m3fn,
+            fp8_dtype,
             128,
         )
     except Exception as e:
@@ -1124,7 +1133,7 @@ def _worker_fused_row_fp8_fwd_bwd(rank, world_size, port, results_dict, scaling_
             None,
             scaling_manager=None,
             scaling_type=scaling_type,
-            fp8_dtype=torch.float8_e4m3fn,
+            fp8_dtype=fp8_dtype,
             block_size=128,
         )
         output.sum().backward()
@@ -1157,6 +1166,7 @@ def _worker_fused_column_bf16_compat(rank, world_size, port, results_dict):
         PipelinedGemmReduceScatter,
         fused_column_parallel_forward,
     )
+    from lumen.quantize.config import _get_float8_e4m3
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
@@ -1193,7 +1203,7 @@ def _worker_fused_column_bf16_compat(rank, world_size, port, results_dict):
             False,
             scaling_manager=None,
             scaling_type="none",
-            fp8_dtype=torch.float8_e4m3fn,
+            fp8_dtype=_get_float8_e4m3(),
             block_size=128,
         )
 
