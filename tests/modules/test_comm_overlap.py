@@ -667,15 +667,18 @@ def _worker_fused_column_grad(rank, world_size, port, results_dict):
         loss = output.sum()
         loss.backward()
 
-        # Reference: naive AG + GEMM backward for dgrad
-        input_ref = input_local.detach().clone().requires_grad_(True)
+        # Reference dgrad: allgather backward is reduce_scatter.
+        # Forward: output = F.linear(allgather(input_local), weight)
+        # dL/d(input_full) = ones(S_local*world_size, O_tp) @ weight  (since loss = sum)
+        # dL/d(input_local) = reduce_scatter(dL/d(input_full))
+        input_ref = input_local.detach().clone()
         chunks = [torch.empty_like(input_ref) for _ in range(world_size)]
         dist.all_gather(chunks, input_ref)
         input_full = torch.cat(chunks, dim=0)
-        ref_out = F.linear(input_full, weight)
-        ref_out.sum().backward()
-        # dgrad from all_gather backward: each rank gets a slice of the full gradient
-        ref_dgrad = input_ref.grad
+        grad_output = torch.ones(input_full.shape[0], O_tp, device=device, dtype=torch.bfloat16)
+        grad_full = grad_output @ weight
+        ref_dgrad = torch.zeros(S_local, H, device=device, dtype=torch.bfloat16)
+        dist.reduce_scatter_tensor(ref_dgrad, grad_full)
 
         checks = []
         if input_local.grad is None:
@@ -736,13 +739,19 @@ def _worker_fused_row_fwd_bwd(rank, world_size, port, results_dict):
         loss = output.sum()
         loss.backward()
 
-        # Reference: naive GEMM + reduce_scatter
-        input_ref = input_parallel.detach().clone().requires_grad_(True)
+        # Reference forward: naive GEMM + reduce_scatter (non-differentiable)
+        input_ref = input_parallel.detach().clone()
         ref_local = F.linear(input_ref, weight)
         ref_rs = torch.zeros(S // world_size, out_dim, device=device, dtype=torch.bfloat16)
         dist.reduce_scatter_tensor(ref_rs, ref_local)
-        ref_rs.sum().backward()
-        ref_dgrad = input_ref.grad
+
+        # Reference dgrad: reduce_scatter backward is allgather.
+        # dL/d(ref_local) = allgather(ones(S/world_size, out_dim))
+        # dL/d(input_ref) = dL/d(ref_local) @ weight
+        grad_rs = torch.ones(S // world_size, out_dim, device=device, dtype=torch.bfloat16)
+        grad_local = torch.zeros(S, out_dim, device=device, dtype=torch.bfloat16)
+        dist.all_gather_into_tensor(grad_local, grad_rs)
+        ref_dgrad = grad_local @ weight
 
         checks = []
         expected_out_rows = S // world_size
