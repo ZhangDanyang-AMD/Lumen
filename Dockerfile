@@ -38,6 +38,8 @@ RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
     && cd megatron/core/datasets && make
 
 ENV PYTHONPATH="/workspace/megatron_lm:"
+ENV PYTHONPATH="/workspace/Lumen/third_party/mori:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/Lumen/third_party/aiter:${PYTHONPATH:-}"
 
 # Lumen + test dependencies
 RUN cd /workspace/Lumen && pip install -e ".[dev]"
