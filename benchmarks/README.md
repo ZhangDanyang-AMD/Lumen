@@ -15,6 +15,8 @@ All benchmarks use **Llama 3.1 8B** dimensions by default:
 | 3 | `bench_fp8_param_allgather.py` | FP8ParamManager on LumenGatedMLP/LumenFusedMLP, dequant hooks, param compression SNR | 1 GPU |
 | 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
 | 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU |
+| 6 | `bench_fused_pipeline.py` | Pipelined AG+GEMM / GEMM+RS overlap, NCCL vs SDMA backend, backward overlap isolation, chunk sweep | 2+ GPUs |
+| 7 | `bench_e2e_fusion.py` | End-to-end transformer layer with all fusion strategies, TP scaling sweep, bandwidth reporting | 2+ GPUs (8 for TP scaling) |
 
 ## Quick Start
 
@@ -39,6 +41,26 @@ torchrun --nproc_per_node=2 -m benchmarks.bench_comm_overlap
 
 # 8-GPU
 torchrun --nproc_per_node=8 -m benchmarks.bench_comm_overlap
+```
+
+### Fused Pipeline
+
+```bash
+# Forward overlap
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k fwd
+# NCCL vs SDMA
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k SdmaColumn
+# Backward isolation
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k BackwardOverlap
+```
+
+### E2E Transformer Layer
+
+```bash
+# Single layer with all fusion strategies
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TransformerLayer
+# TP scaling sweep (requires 8 GPUs)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TPScaling
 ```
 
 ## Tracing
@@ -127,3 +149,23 @@ Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
 | Two-layer pipeline | End-to-end: layer-2 dW overlaps layer-1 dX |
 | `gradient_accumulation_fusion` | `w.main_grad.add_(dw)` vs `w.grad = dw` |
 | Wgrad-comm overlap | Deferred dW overlaps with reduce-scatter |
+
+### 6. Fused Pipeline Comm-GEMM Overlap (`bench_fused_pipeline.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| Column-parallel AG+GEMM | Fused vs sequential forward latency, overlap ratio |
+| Row-parallel GEMM+RS | Fused vs sequential forward latency, overlap ratio |
+| NCCL vs SDMA backend | Head-to-head fused pipeline latency comparison |
+| Backward overlap isolation | dgrad+RS and AG+dgrad measured separately |
+| Chunk sweep | Pipeline chunk count (1, 2, 4, 8) sensitivity |
+
+### 7. End-to-End Transformer Layer Fusion (`bench_e2e_fusion.py`)
+
+| Feature | What's Measured |
+|---------|----------------|
+| Single-layer fwd+bwd | Naive vs Fused NCCL vs Fused SDMA total latency |
+| Forward-only | Isolated forward with all fusion strategies |
+| Backward-only | Isolated backward with dgrad+RS overlap + deferred wgrad |
+| TP scaling | TP=2/4/8 latency, speedup, bandwidth at each scale |
+| Bandwidth utilization | AG and RS effective bandwidth in GB/s |
