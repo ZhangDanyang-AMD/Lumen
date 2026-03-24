@@ -247,6 +247,8 @@ class TestE2ETransformerLayerFusion:
         else:
 
             def _naive():
+                w_up_param.grad = None
+                w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
                 y = self._naive_fwd(x, w_up_param, w_down_param)
                 if needs_grad:
@@ -254,6 +256,8 @@ class TestE2ETransformerLayerFusion:
                 return y
 
             def _fused_nccl():
+                w_up_param.grad = None
+                w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
                 y = self._fused_fwd(
                     x, w_up, w_down, ag, rs, w_up_param, w_down_param, deferred=deferred if needs_grad else None
@@ -265,6 +269,8 @@ class TestE2ETransformerLayerFusion:
 
         for _ in range(3):
             _naive()
+        torch.cuda.synchronize()
+        for _ in range(3):
             _fused_nccl()
         torch.cuda.synchronize()
 
@@ -302,6 +308,8 @@ class TestE2ETransformerLayerFusion:
             ag_s, rs_s = self._make_pipelines(sdma)
 
             def _fused_sdma():
+                w_up_param.grad = None
+                w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
                 y = self._fused_fwd(
                     x, w_up, w_down, ag_s, rs_s, w_up_param, w_down_param, deferred=deferred if needs_grad else None
@@ -423,6 +431,8 @@ class TestE2ETransformerLayerSdmaOnly:
         else:
 
             def _fused():
+                w_up_param.grad = None
+                w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
                 up = fused_column_parallel_forward(
                     x,
@@ -534,6 +544,8 @@ class TestTPScaling:
             rs_bytes = B * S * H * 2
 
             def _naive(s_local=S_local, w_u=w_up_param, w_d=w_down_param, tp_g=tp_group, tp_s=tp_size):
+                w_u.grad = None
+                w_d.grad = None
                 x = torch.randn(s_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
                 gathered = _distributed_allgather(x, group=tp_g)
                 up = F.linear(gathered, w_u)
@@ -552,6 +564,8 @@ class TestTPScaling:
                 w_d_p=w_down_param,
                 _def=deferred,
             ):
+                w_u_p.grad = None
+                w_d_p.grad = None
                 x = torch.randn(s_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
                 up = fused_column_parallel_forward(
                     x,
@@ -581,6 +595,8 @@ class TestTPScaling:
 
             for _ in range(3):
                 _naive()
+            torch.cuda.synchronize()
+            for _ in range(3):
                 _fused()
             torch.cuda.synchronize()
 
