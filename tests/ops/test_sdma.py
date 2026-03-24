@@ -66,6 +66,50 @@ _requires_sdma_hw = pytest.mark.skipif(
 
 
 # ===================================================================
+# TorchDistContext — matches mori/tests/python/utils.py exactly
+# ===================================================================
+
+
+class _TorchDistContext:
+    """Context manager for torch.distributed init / teardown.
+
+    Mirrors ``TorchDistContext`` from ``mori/tests/python/utils.py``
+    so that Lumen SDMA tests follow the identical process lifecycle
+    that the mori ccl test suite relies on.
+    """
+
+    def __init__(self, rank, world_size, master_port, backend="cpu:gloo,cuda:nccl"):
+        self.rank = rank
+        self.world_size = world_size
+        self.master_port = master_port
+        self.backend = backend
+
+    def __enter__(self):
+        import torch.distributed as dist
+
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(self.master_port)
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            backend=self.backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        world_group = torch.distributed.group.WORLD
+        assert world_group is not None
+        torch._C._distributed_c10d._register_process_group("default", world_group)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import torch.distributed as dist
+
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
+
+
+# ===================================================================
 # is_sdma_available
 # ===================================================================
 
@@ -174,137 +218,11 @@ class TestSdmaAll2allUnit:
 
 
 # ===================================================================
-# Multi-GPU distributed SDMA tests
+# Spawn helpers
 # ===================================================================
 
 
-def _worker_allgather(rank, world_size, port, results_dict):
-    """Worker: test SdmaAllgather correctness."""
-    import mori.shmem as shmem
-    import torch.distributed as dist
-
-    from lumen.ops.sdma import SdmaAllgather, SdmaContext
-
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-
-    ag = None
-    try:
-        ctx = SdmaContext.get()
-        ag = SdmaAllgather(ctx)
-
-        n_elems = 1024
-        local = torch.full((n_elems,), float(rank + 1), dtype=torch.float32, device=f"cuda:{rank}")
-        gathered = ag(local)
-
-        passed = True
-        for pe in range(world_size):
-            expected_val = float(pe + 1)
-            chunk = gathered[pe]
-            if not torch.allclose(chunk, torch.full_like(chunk, expected_val)):
-                passed = False
-
-        results_dict[rank] = passed
-    except Exception:
-        results_dict[rank] = False
-    finally:
-        del ag
-        _sdma_worker_teardown(shmem)
-
-
-def _worker_all2all(rank, world_size, port, results_dict):
-    """Worker: test SdmaAll2all correctness."""
-    import mori.shmem as shmem
-    import torch.distributed as dist
-
-    from lumen.ops.sdma import SdmaAll2all, SdmaContext
-
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-
-    a2a = None
-    try:
-        ctx = SdmaContext.get()
-        a2a = SdmaAll2all(ctx)
-
-        elems_per_pe = 256
-        device = f"cuda:{rank}"
-
-        input_tensor = torch.zeros(elems_per_pe * world_size, dtype=torch.uint32, device=device)
-        for dest_pe in range(world_size):
-            value = (rank + 1) * 1000 + dest_pe
-            input_tensor[dest_pe * elems_per_pe : (dest_pe + 1) * elems_per_pe] = value
-
-        output_tensor = torch.zeros_like(input_tensor)
-        a2a(input_tensor, output_tensor)
-
-        passed = True
-        for src_pe in range(world_size):
-            expected_value = (src_pe + 1) * 1000 + rank
-            chunk = output_tensor[src_pe * elems_per_pe : (src_pe + 1) * elems_per_pe]
-            if not torch.all(chunk == expected_value):
-                passed = False
-
-        results_dict[rank] = passed
-    except Exception:
-        results_dict[rank] = False
-    finally:
-        del a2a
-        _sdma_worker_teardown(shmem)
-
-
-def _worker_allreduce(rank, world_size, port, results_dict):
-    """Worker: test SdmaAllreduce correctness."""
-    import mori.shmem as shmem
-    import torch.distributed as dist
-
-    from lumen.ops.sdma import SdmaAllreduce, SdmaContext
-
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-
-    ar = None
-    try:
-        ctx = SdmaContext.get()
-        ar = SdmaAllreduce(ctx=ctx)
-
-        n_elems = 1024
-        local = torch.full((n_elems,), float(rank + 1), dtype=torch.float32, device=f"cuda:{rank}")
-
-        expected_sum = sum(range(1, world_size + 1))
-
-        result = local.clone()
-        ar.inplace(result)
-
-        results_dict[rank] = torch.allclose(
-            result,
-            torch.full_like(result, float(expected_sum)),
-            atol=0.5,
-        )
-    except Exception:
-        results_dict[rank] = False
-    finally:
-        del ar
-        _sdma_worker_teardown(shmem)
-
-
 _SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
-
 
 _SDMA_SPAWN_TIMEOUT_SECS = int(os.environ.get("LUMEN_SDMA_SPAWN_TIMEOUT_SECS", "120"))
 
@@ -312,20 +230,11 @@ _SDMA_SPAWN_TIMEOUT_SECS = int(os.environ.get("LUMEN_SDMA_SPAWN_TIMEOUT_SECS", "
 def _sdma_spawn(fn, args, nprocs, join=True):
     """``mp.spawn`` wrapper with a cooldown for KFD SDMA queue reclamation.
 
-    The SDMA transport creates KFD queues (``hsaKmtCreateQueueExt``) during
-    ``shmem_torch_process_group_init``.  When spawned processes exit, the
-    kernel driver needs a brief window to release those queues before new
-    processes can allocate them on the same SDMA engines.  Running many
-    ``mp.spawn`` calls back-to-back (e.g. parametrized tests) can exhaust
-    the queue pool, causing a hard ``exit(1)`` from the C++ macro that
-    bypasses Python exception handling entirely.
+    A short pre-spawn sleep prevents back-to-back ``mp.spawn`` calls from
+    exhausting the SDMA queue pool on KFD.  Override with
+    ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
 
-    A short pre-spawn sleep prevents the race.  Override the default 2 s
-    cooldown with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
-
-    ``mp.spawn(join=True)`` blocks forever if a worker hangs (e.g. a
-    ``dist.barrier`` waiting on a crashed peer).  We use ``join=False``
-    and poll with a deadline so the test fails instead of hanging.
+    Uses ``join=False`` + polling with a deadline to avoid indefinite hangs.
     """
     import torch.multiprocessing as mp
 
@@ -348,39 +257,122 @@ def _sdma_spawn(fn, args, nprocs, join=True):
             )
 
 
-def _sdma_worker_teardown(shmem_mod):
-    """Standard teardown for SDMA worker processes.
+def _sdma_cleanup(shmem_mod):
+    """Cleanup helper matching mori ccl test teardown order.
 
-    Follows the cleanup order from the mori ccl reference tests
-    (``test_allgather.py``, ``test_all2all.py``, etc.) plus
-    ``TorchDistContext.__exit__``:
+    Must be called before leaving the ``_TorchDistContext`` block.
+    The context manager handles ``dist.barrier()`` + ``dist.destroy_process_group()``.
 
-    1. CUDA sync — flush any outstanding GPU work.
-    2. Barrier — all ranks rendezvous before tearing down.
-    3. ``SdmaContext.reset()`` — clears the singleton reference.
-       Callers must ``del`` their SDMA wrapper objects (``ag``,
-       ``a2a``, ``ar``, …) **before** calling this function so that
-       the C++ SDMA handle destructors run while shmem is still alive.
-    4. Barrier — sync again after handle destruction.
-    5. ``shmem_finalize()`` — release mori symmetric-memory resources.
-    6. Barrier — mirrors ``TorchDistContext.__exit__`` rendezvous.
-    7. ``destroy_process_group()`` — must be **last** so that shmem can
-       still use the torch process group during finalization.
+    Caller must ``del`` all CCL wrapper objects before calling this.
     """
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaContext
 
     torch.cuda.synchronize()
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
     SdmaContext.reset()
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
     shmem_mod.shmem_finalize()
-    if dist.is_initialized():
-        dist.barrier()
-        dist.destroy_process_group()
+
+
+# ===================================================================
+# Multi-GPU distributed SDMA tests
+# ===================================================================
+
+
+def _worker_allgather(rank, world_size, port):
+    """Worker: test SdmaAllgather correctness (mori pattern)."""
+    import mori.shmem as shmem
+
+    from lumen.ops.sdma import SdmaAllgather, SdmaContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        ctx = SdmaContext.get()
+        ag = SdmaAllgather(ctx)
+
+        n_elems = 1024
+        local = torch.full((n_elems,), float(rank + 1), dtype=torch.float32, device=f"cuda:{rank}")
+        gathered = ag(local)
+
+        errors = []
+        for pe in range(world_size):
+            expected_val = float(pe + 1)
+            chunk = gathered[pe]
+            if not torch.allclose(chunk, torch.full_like(chunk, expected_val)):
+                errors.append(f"PE {rank}: chunk from PE {pe} mismatch")
+
+        del ag
+        _sdma_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
+
+
+def _worker_all2all(rank, world_size, port):
+    """Worker: test SdmaAll2all correctness (mori pattern)."""
+    import mori.shmem as shmem
+
+    from lumen.ops.sdma import SdmaAll2all, SdmaContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        ctx = SdmaContext.get()
+        a2a = SdmaAll2all(ctx)
+
+        elems_per_pe = 256
+        device = f"cuda:{rank}"
+        input_tensor = torch.zeros(elems_per_pe * world_size, dtype=torch.uint32, device=device)
+        for dest_pe in range(world_size):
+            value = (rank + 1) * 1000 + dest_pe
+            input_tensor[dest_pe * elems_per_pe : (dest_pe + 1) * elems_per_pe] = value
+
+        output_tensor = torch.zeros_like(input_tensor)
+        a2a(input_tensor, output_tensor)
+
+        errors = []
+        for src_pe in range(world_size):
+            expected_value = (src_pe + 1) * 1000 + rank
+            chunk = output_tensor[src_pe * elems_per_pe : (src_pe + 1) * elems_per_pe]
+            if not torch.all(chunk == expected_value):
+                errors.append(f"PE {rank}: chunk from PE {src_pe} mismatch")
+
+        del a2a
+        _sdma_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
+
+
+def _worker_allreduce(rank, world_size, port):
+    """Worker: test SdmaAllreduce correctness (mori pattern)."""
+    import mori.shmem as shmem
+
+    from lumen.ops.sdma import SdmaAllreduce, SdmaContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        ctx = SdmaContext.get()
+        ar = SdmaAllreduce(ctx=ctx)
+
+        n_elems = 1024
+        local = torch.full((n_elems,), float(rank + 1), dtype=torch.float32, device=f"cuda:{rank}")
+        expected_sum = float(sum(range(1, world_size + 1)))
+
+        result = local.clone()
+        ar.inplace(result)
+
+        ok = torch.allclose(result, torch.full_like(result, expected_sum), atol=0.5)
+
+        del ar
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: allreduce sum mismatch")
 
 
 @_requires_sdma_hw
@@ -393,48 +385,30 @@ class TestSdmaDistributed:
 
     def test_allgather_correctness(self):
         """SdmaAllgather produces correct gathered data across PEs."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allgather,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank} allgather verification failed"
 
     def test_all2all_correctness(self):
         """SdmaAll2all produces correct shuffled data across PEs."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_all2all,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank} all2all verification failed"
 
     def test_allreduce_correctness(self):
         """SdmaAllreduce SUM produces correct reduced values."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allreduce,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank} allreduce verification failed"
 
 
 # ===================================================================
@@ -442,23 +416,16 @@ class TestSdmaDistributed:
 # ===================================================================
 
 
-def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, seed):
+def _worker_allgather_vs_nccl(rank, world_size, port, n_elems, seed):
     """Worker: compare SdmaAllgather output against NCCL all_gather golden."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ag = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
         local = torch.randn(n_elems, dtype=torch.float32, device=device)
@@ -471,31 +438,25 @@ def _worker_allgather_vs_nccl(rank, world_size, port, results_dict, n_elems, see
         dist.all_gather(nccl_gathered, local)
         nccl_stacked = torch.stack(nccl_gathered)
 
-        results_dict[rank] = torch.allclose(sdma_gathered, nccl_stacked, atol=1e-6)
-    except Exception:
-        results_dict[rank] = False
-    finally:
+        ok = torch.allclose(sdma_gathered, nccl_stacked, atol=1e-6)
+
         del ag
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: SdmaAllgather != NCCL (n={n_elems})")
 
 
-def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, seed):
+def _worker_all2all_vs_nccl(rank, world_size, port, elems_per_pe, seed):
     """Worker: compare SdmaAll2all output against NCCL all_to_all golden."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    a2a = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         total_elems = elems_per_pe * world_size
         torch.manual_seed(seed + rank)
@@ -511,31 +472,25 @@ def _worker_all2all_vs_nccl(rank, world_size, port, results_dict, elems_per_pe, 
         dist.all_to_all_single(nccl_output, nccl_input)
         nccl_output_u32 = nccl_output.view(torch.uint32)
 
-        results_dict[rank] = torch.equal(sdma_output, nccl_output_u32)
-    except Exception:
-        results_dict[rank] = False
-    finally:
+        ok = torch.equal(sdma_output, nccl_output_u32)
+
         del a2a
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: SdmaAll2all != NCCL (per_pe={elems_per_pe})")
 
 
-def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, seed):
+def _worker_allreduce_vs_nccl(rank, world_size, port, n_elems, seed):
     """Worker: compare SdmaAllreduce SUM against NCCL all_reduce golden."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllreduce, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ar = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
         local = torch.randn(n_elems, dtype=torch.float32, device=device)
@@ -548,31 +503,25 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, results_dict, n_elems, see
         nccl_result = local.clone()
         dist.all_reduce(nccl_result, op=dist.ReduceOp.SUM)
 
-        results_dict[rank] = torch.allclose(sdma_result, nccl_result, atol=0.5, rtol=0.02)
-    except Exception:
-        results_dict[rank] = False
-    finally:
+        ok = torch.allclose(sdma_result, nccl_result, atol=0.5, rtol=0.02)
+
         del ar
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: SdmaAllreduce != NCCL (n={n_elems})")
 
 
-def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, seed):
+def _worker_allreduce_outofplace(rank, world_size, port, n_elems, seed):
     """Worker: test SdmaAllreduce out-of-place __call__ path."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllreduce, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ar = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
         local = torch.randn(n_elems, dtype=torch.float32, device=device)
@@ -585,31 +534,25 @@ def _worker_allreduce_outofplace(rank, world_size, port, results_dict, n_elems, 
         nccl_result = local.clone()
         dist.all_reduce(nccl_result, op=dist.ReduceOp.SUM)
 
-        results_dict[rank] = torch.allclose(sdma_output, nccl_result, atol=0.5, rtol=0.02)
-    except Exception:
-        results_dict[rank] = False
-    finally:
+        ok = torch.allclose(sdma_output, nccl_result, atol=0.5, rtol=0.02)
+
         del ar
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: SdmaAllreduce outofplace != NCCL")
 
 
-def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
+def _worker_allgather_max(rank, world_size, port, n_elems, seed):
     """Worker: test sdma_allgather_max against torch.distributed MAX golden."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext, sdma_allgather_max
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ag = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         torch.manual_seed(seed + rank)
         local = torch.randn(n_elems, dtype=torch.float32, device=device)
@@ -621,36 +564,30 @@ def _worker_allgather_max(rank, world_size, port, results_dict, n_elems, seed):
         nccl_max = local.clone()
         dist.all_reduce(nccl_max, op=dist.ReduceOp.MAX)
 
-        results_dict[rank] = torch.allclose(sdma_max_result, nccl_max, atol=1e-6)
-    except Exception:
-        results_dict[rank] = False
-    finally:
+        ok = torch.allclose(sdma_max_result, nccl_max, atol=1e-6)
+
         del ag
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: sdma_allgather_max != NCCL MAX (n={n_elems})")
 
 
-def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
+def _worker_allgather_buffer_reuse(rank, world_size, port, seed):
     """Worker: call SdmaAllgather multiple times with different data/sizes."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ag = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         ctx = SdmaContext.get()
         ag = SdmaAllgather(ctx)
 
-        passed = True
+        errors = []
         for call_idx, n_elems in enumerate([256, 1024, 512, 2048, 256]):
             torch.manual_seed(seed + rank * 100 + call_idx)
             local = torch.randn(n_elems, dtype=torch.float32, device=device)
@@ -662,39 +599,30 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, results_dict, seed):
             nccl_stacked = torch.stack(nccl_gathered)
 
             if not torch.allclose(sdma_gathered, nccl_stacked, atol=1e-6):
-                passed = False
-                break
+                errors.append(f"PE {rank}: allgather buffer reuse failed at call {call_idx}")
 
-        results_dict[rank] = passed
-    except Exception:
-        results_dict[rank] = False
-    finally:
         del ag
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
 
 
-def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
+def _worker_all2all_buffer_reuse(rank, world_size, port, seed):
     """Worker: call SdmaAll2all multiple times with different sizes."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    a2a = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
         ctx = SdmaContext.get()
         a2a = SdmaAll2all(ctx)
 
-        passed = True
+        errors = []
         for call_idx, elems_per_pe in enumerate([64, 512, 256, 1024, 64]):
             total = elems_per_pe * world_size
             torch.manual_seed(seed + rank * 100 + call_idx)
@@ -707,15 +635,13 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, results_dict, seed):
             dist.all_to_all_single(nccl_out, nccl_in)
 
             if not torch.equal(sdma_out, nccl_out.view(torch.uint32)):
-                passed = False
-                break
+                errors.append(f"PE {rank}: all2all buffer reuse failed at call {call_idx}")
 
-        results_dict[rank] = passed
-    except Exception:
-        results_dict[rank] = False
-    finally:
         del a2a
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
 
 
 @_requires_sdma_hw
@@ -729,111 +655,69 @@ class TestSdmaVsNcclGolden:
     @pytest.mark.parametrize("n_elems", [128, 1024, 65536, 1048576])
     def test_allgather_vs_nccl(self, n_elems):
         """SdmaAllgather matches NCCL all_gather on random data."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allgather_vs_nccl,
-            args=(self.world_size, port, results, n_elems, 42),
+            args=(self.world_size, port, n_elems, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: SdmaAllgather != NCCL (n={n_elems})"
 
     @pytest.mark.parametrize("elems_per_pe", [64, 256, 4096, 65536])
     def test_all2all_vs_nccl(self, elems_per_pe):
         """SdmaAll2all matches NCCL all_to_all_single on random data."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_all2all_vs_nccl,
-            args=(self.world_size, port, results, elems_per_pe, 42),
+            args=(self.world_size, port, elems_per_pe, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: SdmaAll2all != NCCL (per_pe={elems_per_pe})"
 
     @pytest.mark.parametrize("n_elems", [128, 1024, 65536, 1048576])
     def test_allreduce_vs_nccl(self, n_elems):
         """SdmaAllreduce SUM matches NCCL all_reduce SUM on random data."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allreduce_vs_nccl,
-            args=(self.world_size, port, results, n_elems, 42),
+            args=(self.world_size, port, n_elems, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: SdmaAllreduce != NCCL (n={n_elems})"
 
     def test_allreduce_outofplace_vs_nccl(self):
         """SdmaAllreduce out-of-place __call__ matches NCCL all_reduce."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allreduce_outofplace,
-            args=(self.world_size, port, results, 4096, 42),
+            args=(self.world_size, port, 4096, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: SdmaAllreduce outofplace != NCCL"
 
     @pytest.mark.parametrize("n_elems", [256, 4096, 65536])
     def test_allgather_max_vs_nccl(self, n_elems):
         """sdma_allgather_max matches NCCL all_reduce MAX on random data."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allgather_max,
-            args=(self.world_size, port, results, n_elems, 42),
+            args=(self.world_size, port, n_elems, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: sdma_allgather_max != NCCL MAX (n={n_elems})"
 
     def test_allgather_buffer_reuse(self):
         """SdmaAllgather handle reuse across varying sizes stays correct."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allgather_buffer_reuse,
-            args=(self.world_size, port, results, 42),
+            args=(self.world_size, port, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: allgather buffer reuse failed"
 
     def test_all2all_buffer_reuse(self):
         """SdmaAll2all handle reuse across varying sizes stays correct."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_all2all_buffer_reuse,
-            args=(self.world_size, port, results, 42),
+            args=(self.world_size, port, 42),
             nprocs=self.world_size,
         )
-        for rank in range(self.world_size):
-            assert results[rank], f"PE {rank}: all2all buffer reuse failed"
 
 
 # ===================================================================
@@ -841,24 +725,16 @@ class TestSdmaVsNcclGolden:
 # ===================================================================
 
 
-def _worker_all2all_perf(rank, world_size, port, results_dict, elems_per_pe, iterations, warmup):
-    """Worker: measure SdmaAll2all throughput."""
+def _worker_all2all_perf(rank, world_size, port, elems_per_pe, iterations, warmup):
+    """Worker: measure SdmaAll2all throughput (mori pattern)."""
     import mori.shmem as shmem
     import numpy as np
-    import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    a2a = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
         a2a = SdmaAll2all(ctx)
         device = f"cuda:{rank}"
@@ -884,35 +760,26 @@ def _worker_all2all_perf(rank, world_size, port, results_dict, elems_per_pe, ite
         total_bytes = elems_per_pe * world_size * 4
         bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
 
-        results_dict[rank] = {
-            "avg_ms": avg_ms,
-            "min_ms": np.min(times) if times else 0,
-            "max_ms": np.max(times) if times else 0,
-            "bandwidth_gb_s": bandwidth_gb_s,
-        }
-    finally:
+        if rank == 0:
+            print(
+                f"\n  All2all SDMA PE0: {total_bytes / 1024**2:.1f} MB, "
+                f"avg={avg_ms:.3f}ms, BW={bandwidth_gb_s:.2f} GB/s"
+            )
+
         del a2a
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
 
 
-def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterations, warmup):
-    """Worker: measure SdmaAllgather throughput."""
+def _worker_allgather_perf(rank, world_size, port, n_elems, iterations, warmup):
+    """Worker: measure SdmaAllgather throughput (mori pattern)."""
     import mori.shmem as shmem
     import numpy as np
-    import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    ag = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
         ag = SdmaAllgather(ctx)
         device = f"cuda:{rank}"
@@ -937,13 +804,14 @@ def _worker_allgather_perf(rank, world_size, port, results_dict, n_elems, iterat
         total_bytes = n_elems * 4 * world_size
         bandwidth_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
 
-        results_dict[rank] = {
-            "avg_ms": avg_ms,
-            "bandwidth_gb_s": bandwidth_gb_s,
-        }
-    finally:
+        if rank == 0:
+            print(
+                f"\n  Allgather SDMA PE0: {total_bytes / 1024**2:.1f} MB, "
+                f"avg={avg_ms:.3f}ms, BW={bandwidth_gb_s:.2f} GB/s"
+            )
+
         del ag
-        _sdma_worker_teardown(shmem)
+        _sdma_cleanup(shmem)
 
 
 @_requires_sdma_hw
@@ -961,41 +829,19 @@ class TestSdmaPerformance:
     @pytest.mark.parametrize("elems_per_pe", [1024, 65536, 1048576, 16777216])
     def test_all2all_bandwidth(self, elems_per_pe):
         """Measure SdmaAll2all bandwidth for various data sizes."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_all2all_perf,
-            args=(self.world_size, port, results, elems_per_pe, 10, 5),
+            args=(self.world_size, port, elems_per_pe, 10, 5),
             nprocs=self.world_size,
-        )
-        total_bytes = elems_per_pe * self.world_size * 4
-        r0 = results[0]
-        print(
-            f"\nAll2all SDMA: {total_bytes / 1024**2:.1f} MB, "
-            f"avg={r0['avg_ms']:.3f}ms, "
-            f"BW={r0['bandwidth_gb_s']:.2f} GB/s"
         )
 
     @pytest.mark.parametrize("n_elems", [1024, 65536, 1048576, 16777216])
     def test_allgather_bandwidth(self, n_elems):
         """Measure SdmaAllgather bandwidth for various data sizes."""
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_allgather_perf,
-            args=(self.world_size, port, results, n_elems, 10, 5),
+            args=(self.world_size, port, n_elems, 10, 5),
             nprocs=self.world_size,
-        )
-        total_bytes = n_elems * 4 * self.world_size
-        r0 = results[0]
-        print(
-            f"\nAllgather SDMA: {total_bytes / 1024**2:.1f} MB, "
-            f"avg={r0['avg_ms']:.3f}ms, "
-            f"BW={r0['bandwidth_gb_s']:.2f} GB/s"
         )

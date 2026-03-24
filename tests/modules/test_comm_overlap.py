@@ -906,3 +906,370 @@ class TestFusedAutograd:
         )
         for rank, msg in sorted(results.items()):
             assert msg.startswith("PASS"), f"Rank {rank}: {msg}"
+
+
+# ===================================================================
+# FP8 pipeline overlap workers and tests
+# ===================================================================
+
+
+def _worker_fused_column_fp8_fwd(rank, world_size, port, results_dict, scaling_type):
+    """Verify fused column FP8 forward produces valid output."""
+    import torch.distributed as dist
+
+    from lumen.modules.comm_overlap import (
+        NcclCommBackend,
+        PipelinedAllgatherGemm,
+        PipelinedGemmReduceScatter,
+        fused_column_parallel_forward,
+    )
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+    try:
+        from lumen.ops.quantize.linear import quantize_input
+
+        xq, _ = quantize_input(
+            torch.randn(2, 4, device=device, dtype=torch.bfloat16),
+            scaling_type,
+            torch.float8_e4m3fn,
+            128,
+        )
+    except Exception as e:
+        results_dict[rank] = f"SKIP: FP8 backend not available ({e})"
+        return
+    finally:
+        pass
+
+    try:
+        torch.manual_seed(42)
+        S_local, H, O_tp = 64, 128, 256
+        input_local = torch.randn(S_local, H, device=device, dtype=torch.bfloat16)
+        weight = torch.randn(O_tp, H, device=device, dtype=torch.bfloat16)
+
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_ag = PipelinedAllgatherGemm(2, backend)
+        pipeline_rs = PipelinedGemmReduceScatter(2, backend)
+        weight_ref = torch.nn.Parameter(weight.clone())
+
+        actual = fused_column_parallel_forward(
+            input_local.clone(),
+            weight.clone(),
+            None,
+            pipeline_ag,
+            pipeline_rs,
+            weight_ref,
+            False,
+            False,
+            None,
+            False,
+            scaling_manager=None,
+            scaling_type=scaling_type,
+            fp8_dtype=torch.float8_e4m3fn,
+            block_size=128,
+        )
+
+        checks = []
+        if actual.shape != (S_local * world_size, O_tp):
+            checks.append(f"FAIL: shape {actual.shape}")
+        elif torch.isnan(actual).any():
+            checks.append("FAIL: NaN in output")
+        elif torch.isinf(actual).any():
+            checks.append("FAIL: Inf in output")
+        else:
+            checks.append("PASS: output valid")
+
+        results_dict[rank] = checks[0]
+    finally:
+        dist.destroy_process_group()
+
+
+def _worker_fused_column_fp8_grad(rank, world_size, port, results_dict, scaling_type):
+    """Verify fused column FP8 backward produces non-None gradients."""
+    import torch.distributed as dist
+
+    from lumen.modules.comm_overlap import (
+        NcclCommBackend,
+        PipelinedAllgatherGemm,
+        PipelinedGemmReduceScatter,
+        fused_column_parallel_forward,
+    )
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+    try:
+        from lumen.ops.quantize.linear import quantize_input
+
+        quantize_input(
+            torch.randn(2, 4, device=device, dtype=torch.bfloat16),
+            scaling_type,
+            torch.float8_e4m3fn,
+            128,
+        )
+    except Exception as e:
+        results_dict[rank] = f"SKIP: FP8 backend not available ({e})"
+        return
+
+    try:
+        torch.manual_seed(42)
+        S_local, H, O_tp = 64, 128, 256
+        input_local = torch.randn(
+            S_local,
+            H,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        weight = torch.randn(O_tp, H, device=device, dtype=torch.bfloat16)
+
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_ag = PipelinedAllgatherGemm(2, backend)
+        pipeline_rs = PipelinedGemmReduceScatter(2, backend)
+        weight_param = torch.nn.Parameter(weight.clone())
+
+        output = fused_column_parallel_forward(
+            input_local,
+            weight_param,
+            None,
+            pipeline_ag,
+            pipeline_rs,
+            weight_param,
+            False,
+            False,
+            None,
+            False,
+            scaling_manager=None,
+            scaling_type=scaling_type,
+            fp8_dtype=torch.float8_e4m3fn,
+            block_size=128,
+        )
+        output.sum().backward()
+
+        checks = []
+        if input_local.grad is None:
+            checks.append("FAIL: no input grad")
+        elif torch.isnan(input_local.grad).any():
+            checks.append("FAIL: NaN in input grad")
+        else:
+            checks.append("PASS: input grad OK")
+
+        results_dict[rank] = checks[0]
+    finally:
+        dist.destroy_process_group()
+
+
+def _worker_fused_row_fp8_fwd_bwd(rank, world_size, port, results_dict, scaling_type):
+    """Verify fused row FP8 forward + backward."""
+    import torch.distributed as dist
+
+    from lumen.modules.comm_overlap import (
+        NcclCommBackend,
+        PipelinedAllgatherGemm,
+        PipelinedGemmReduceScatter,
+        fused_row_parallel_forward,
+    )
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+    try:
+        from lumen.ops.quantize.linear import quantize_input
+
+        quantize_input(
+            torch.randn(2, 4, device=device, dtype=torch.bfloat16),
+            scaling_type,
+            torch.float8_e4m3fn,
+            128,
+        )
+    except Exception as e:
+        results_dict[rank] = f"SKIP: FP8 backend not available ({e})"
+        return
+
+    try:
+        torch.manual_seed(42)
+        S, H_tp, out_dim = 128, 64, 256
+        input_parallel = torch.randn(
+            S,
+            H_tp,
+            device=device,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        weight = torch.randn(out_dim, H_tp, device=device, dtype=torch.bfloat16)
+
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_rs = PipelinedGemmReduceScatter(2, backend)
+        pipeline_ag = PipelinedAllgatherGemm(2, backend)
+        weight_param = torch.nn.Parameter(weight.clone())
+
+        output = fused_row_parallel_forward(
+            input_parallel,
+            weight_param,
+            pipeline_rs,
+            pipeline_ag,
+            weight_param,
+            False,
+            False,
+            None,
+            scaling_manager=None,
+            scaling_type=scaling_type,
+            fp8_dtype=torch.float8_e4m3fn,
+            block_size=128,
+        )
+        output.sum().backward()
+
+        checks = []
+        expected_rows = S // world_size
+        if output.shape[0] != expected_rows:
+            checks.append(f"FAIL: fwd shape {output.shape}")
+        elif torch.isnan(output).any():
+            checks.append("FAIL: NaN in output")
+        elif input_parallel.grad is None:
+            checks.append("FAIL: no input grad")
+        elif torch.isnan(input_parallel.grad).any():
+            checks.append("FAIL: NaN in input grad")
+        else:
+            checks.append("PASS: fwd + bwd OK")
+
+        results_dict[rank] = checks[0]
+    finally:
+        dist.destroy_process_group()
+
+
+def _worker_fused_column_bf16_compat(rank, world_size, port, results_dict):
+    """Verify new FP8-extended API is backward-compatible with BF16 (scaling_type='none')."""
+    import torch.distributed as dist
+
+    from lumen.modules.comm_overlap import (
+        NcclCommBackend,
+        PipelinedAllgatherGemm,
+        PipelinedGemmReduceScatter,
+        fused_column_parallel_forward,
+    )
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
+    try:
+        torch.manual_seed(42)
+        S_local, H, O_tp = 64, 128, 256
+        input_local = torch.randn(S_local, H, device=device, dtype=torch.bfloat16)
+        weight = torch.randn(O_tp, H, device=device, dtype=torch.bfloat16)
+
+        chunks = [torch.empty_like(input_local) for _ in range(world_size)]
+        dist.all_gather(chunks, input_local)
+        input_full = torch.cat(chunks, dim=0)
+        expected = F.linear(input_full, weight)
+
+        backend = NcclCommBackend(dist.group.WORLD)
+        pipeline_ag = PipelinedAllgatherGemm(2, backend)
+        pipeline_rs = PipelinedGemmReduceScatter(2, backend)
+        weight_ref = torch.nn.Parameter(weight.clone())
+
+        actual = fused_column_parallel_forward(
+            input_local.clone(),
+            weight.clone(),
+            None,
+            pipeline_ag,
+            pipeline_rs,
+            weight_ref,
+            False,
+            False,
+            None,
+            False,
+            scaling_manager=None,
+            scaling_type="none",
+            fp8_dtype=torch.float8_e4m3fn,
+            block_size=128,
+        )
+
+        max_diff = (actual - expected).abs().max().item()
+        rel_err = max_diff / (expected.abs().max().item() + 1e-7)
+        results_dict[rank] = f"{'PASS' if rel_err < 0.02 else 'FAIL'}: rel_err={rel_err:.6f}"
+    finally:
+        dist.destroy_process_group()
+
+
+@_requires_multi_gpu
+class TestFusedFP8Pipeline:
+    """FP8 pipeline overlap correctness tests."""
+
+    @pytest.mark.parametrize("scaling_type", ["dynamic", "delayed", "per_token", "blockwise"])
+    def test_fused_column_fp8_fwd(self, scaling_type):
+        import torch.multiprocessing as mp
+
+        world_size = min(torch.cuda.device_count(), 2)
+        results = mp.Manager().dict()
+        port = _find_free_port()
+        _nccl_spawn(
+            _worker_fused_column_fp8_fwd,
+            (world_size, port, results, scaling_type),
+            nprocs=world_size,
+        )
+        for rank, msg in sorted(results.items()):
+            if msg.startswith("SKIP"):
+                pytest.skip(msg)
+            assert msg.startswith("PASS"), f"Rank {rank}: {msg}"
+
+    @pytest.mark.parametrize("scaling_type", ["dynamic", "delayed", "per_token", "blockwise"])
+    def test_fused_column_fp8_grad(self, scaling_type):
+        import torch.multiprocessing as mp
+
+        world_size = min(torch.cuda.device_count(), 2)
+        results = mp.Manager().dict()
+        port = _find_free_port()
+        _nccl_spawn(
+            _worker_fused_column_fp8_grad,
+            (world_size, port, results, scaling_type),
+            nprocs=world_size,
+        )
+        for rank, msg in sorted(results.items()):
+            if msg.startswith("SKIP"):
+                pytest.skip(msg)
+            assert msg.startswith("PASS"), f"Rank {rank}: {msg}"
+
+    @pytest.mark.parametrize("scaling_type", ["dynamic", "delayed", "per_token", "blockwise"])
+    def test_fused_row_fp8_fwd_bwd(self, scaling_type):
+        import torch.multiprocessing as mp
+
+        world_size = min(torch.cuda.device_count(), 2)
+        results = mp.Manager().dict()
+        port = _find_free_port()
+        _nccl_spawn(
+            _worker_fused_row_fp8_fwd_bwd,
+            (world_size, port, results, scaling_type),
+            nprocs=world_size,
+        )
+        for rank, msg in sorted(results.items()):
+            if msg.startswith("SKIP"):
+                pytest.skip(msg)
+            assert msg.startswith("PASS"), f"Rank {rank}: {msg}"
+
+    def test_bf16_backward_compat(self):
+        """Ensure the extended API with FP8 params works unchanged for BF16."""
+        import torch.multiprocessing as mp
+
+        world_size = min(torch.cuda.device_count(), 2)
+        results = mp.Manager().dict()
+        port = _find_free_port()
+        _nccl_spawn(
+            _worker_fused_column_bf16_compat,
+            (world_size, port, results),
+            nprocs=world_size,
+        )
+        for rank, msg in sorted(results.items()):
+            assert msg.startswith("PASS"), f"Rank {rank}: {msg}"

@@ -339,15 +339,30 @@ class SdmaTpComm:
     TP mapping primitives but route through mori SDMA.
 
     Use :meth:`get` to obtain the (cached) singleton for a given TP group.
+
+    Args:
+        tp_group: TP process group.
+        rs_chunk_method: Backend for chunk-level reduce-scatter.
+            ``"allreduce"`` uses AllreduceSdma + local shard extraction.
+            ``"nccl"`` falls back to ``torch.distributed.reduce_scatter_tensor``.
     """
 
     _instance: Optional["SdmaTpComm"] = None
 
-    def __init__(self, tp_group: torch.distributed.ProcessGroup):
+    def __init__(
+        self,
+        tp_group: torch.distributed.ProcessGroup,
+        rs_chunk_method: str = "allreduce",
+    ):
         self._ctx = SdmaTpContext.get(tp_group)
+        self._tp_group = tp_group
         self._ag = _TpSdmaAllgather(self._ctx)
+        self._ag_chunk = _TpSdmaAllgather(self._ctx)
         self._ar_handles: dict = {}
         self._rs_output_buf: Optional[torch.Tensor] = None
+        self._rs_chunk_method = rs_chunk_method
+        self._rs_chunk_ar: Optional[_TpSdmaAllreduce] = None
+        self._rs_chunk_buf: Optional[torch.Tensor] = None
 
     @property
     def npes(self) -> int:
@@ -442,6 +457,128 @@ class SdmaTpComm:
         ar = self._get_ar(dtype)
         ar.wait_async(stream)
         del self._ar_async_dtype
+
+    # -- Chunk-level primitives (for pipelined comm-GEMM overlap) --
+
+    def allgather_dim0_chunk(
+        self,
+        input_chunk: torch.Tensor,
+        output_buf: torch.Tensor,
+        stream: torch.cuda.Stream,
+    ) -> torch.cuda.Event:
+        """All-gather a single chunk for pipelined overlap.
+
+        Args:
+            input_chunk: ``[S_chunk, H]`` — local chunk from one PE.
+            output_buf: ``[S_chunk * npes, H]`` — pre-allocated output.
+            stream: CUDA stream on which to run the collective.
+
+        Returns:
+            CUDA event recorded on *stream* after the operation completes.
+        """
+        input_chunk = input_chunk.contiguous()
+        orig_dtype = input_chunk.dtype
+        flat_in = input_chunk.view(-1)
+        if orig_dtype != torch.float32:
+            flat_in = flat_in.view(torch.float32)
+        n_f32 = flat_in.numel()
+        npes = self._ctx.npes
+
+        self._ag_chunk._ensure(n_f32)
+
+        flat_out = output_buf.view(-1)
+        if orig_dtype != torch.float32:
+            flat_out = flat_out.view(torch.float32)
+
+        self._ag_chunk._handle(flat_in, flat_out[: n_f32 * npes], n_f32, stream)
+        return stream.record_event()
+
+    def reduce_scatter_dim0_chunk(
+        self,
+        input_chunk: torch.Tensor,
+        output_buf: torch.Tensor,
+        stream: torch.cuda.Stream,
+    ) -> torch.cuda.Event:
+        """Reduce-scatter a single chunk for pipelined overlap.
+
+        .. warning::
+
+            When ``rs_chunk_method="allreduce"`` and the tensor dtype matches
+            the SDMA wire dtype (no cast needed), the allreduce runs in-place
+            on *input_chunk*.  Callers must not read *input_chunk* after this
+            call returns.
+
+        Args:
+            input_chunk: ``[S_chunk, ...]`` — chunk to reduce-scatter.
+            output_buf: ``[S_chunk // npes, ...]`` — pre-allocated output.
+            stream: CUDA stream on which to run the collective.
+
+        Returns:
+            CUDA event recorded on *stream* after the operation completes.
+        """
+        if self._rs_chunk_method == "nccl":
+            return self._rs_chunk_nccl(input_chunk, output_buf, stream)
+        return self._rs_chunk_allreduce(input_chunk, output_buf, stream)
+
+    def _rs_chunk_nccl(
+        self,
+        input_chunk: torch.Tensor,
+        output_buf: torch.Tensor,
+        stream: torch.cuda.Stream,
+    ) -> torch.cuda.Event:
+        with torch.cuda.stream(stream):
+            torch.distributed.reduce_scatter_tensor(
+                output_buf,
+                input_chunk.contiguous(),
+                group=self._tp_group,
+            )
+        return stream.record_event()
+
+    def _rs_chunk_allreduce(
+        self,
+        input_chunk: torch.Tensor,
+        output_buf: torch.Tensor,
+        stream: torch.cuda.Stream,
+    ) -> torch.cuda.Event:
+        """Reduce-scatter via AllreduceSdma + local shard extraction."""
+        input_chunk = input_chunk.contiguous()
+        dtype = input_chunk.dtype
+        npes = self._ctx.npes
+
+        if self._rs_chunk_ar is None:
+            self._rs_chunk_ar = _TpSdmaAllreduce(self._ctx, dtype)
+
+        ar = self._rs_chunk_ar
+        flat = input_chunk.view(-1)
+        wire_dtype = ar._wire_dtype
+        if ar._needs_cast:
+            flat = flat.to(wire_dtype)
+        n_elems = flat.numel()
+        ar._ensure(n_elems)
+
+        if (
+            self._rs_chunk_buf is None
+            or self._rs_chunk_buf.numel() < n_elems
+            or self._rs_chunk_buf.device != flat.device
+            or self._rs_chunk_buf.dtype != wire_dtype
+        ):
+            self._rs_chunk_buf = torch.empty(
+                n_elems,
+                dtype=wire_dtype,
+                device=flat.device,
+            )
+
+        ar._handle.allreduce_inplace(flat, n_elems, stream)
+
+        reduced = flat.view(input_chunk.shape)
+        chunk_size = input_chunk.shape[0] // npes
+        start = self._ctx.my_pe * chunk_size
+        with torch.cuda.stream(stream):
+            shard = reduced[start : start + chunk_size]
+            if ar._needs_cast:
+                shard = shard.to(dtype)
+            output_buf.copy_(shard)
+        return stream.record_event()
 
     def reduce_scatter_dim0_async(self, tensor: torch.Tensor, stream=None) -> bool:
         """Start async reduce-scatter along dim 0.

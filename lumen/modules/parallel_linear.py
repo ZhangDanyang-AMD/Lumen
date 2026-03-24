@@ -281,7 +281,6 @@ class LumenColumnParallelLinear(nn.Module):
         self._overlap_method = _cfg_method if _cfg_method is not None else _overlap_method_from_args()
         self._pipeline_ag = None
         self._pipeline_rs_for_bwd = None
-        self._warned_fp8_pipeline = False
 
         # Weight allocation
         if not skip_weight_param_allocation:
@@ -357,14 +356,15 @@ class LumenColumnParallelLinear(nn.Module):
         return self._sdma_comm
 
     def _make_comm_backend(self):
+        if self._overlap_method == "sdma":
+            from lumen.modules.comm_overlap import SdmaCommBackend
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            if self._sdma_comm is None:
+                self._sdma_comm = SdmaTpComm.get(self.tp_group)
+            return SdmaCommBackend(self._sdma_comm)
         from lumen.modules.comm_overlap import NcclCommBackend
 
-        if self._overlap_method != "nccl":
-            raise ValueError(
-                f"Pipeline overlap mode only supports 'nccl' backend, "
-                f"got '{self._overlap_method}'. SDMA chunk APIs are not "
-                f"yet implemented for pipelined operation."
-            )
         return NcclCommBackend(self.tp_group)
 
     def forward(self, input_: torch.Tensor, weight=None, runtime_gather_output=None):
@@ -372,26 +372,11 @@ class LumenColumnParallelLinear(nn.Module):
             weight = self.weight
 
         if (
-            self.tp_comm_overlap
-            and self._overlap_mode == "pipeline"
-            and self.scaling_type != "none"
-            and not self._warned_fp8_pipeline
-        ):
-            warnings.warn(
-                f"Fused pipeline overlap requested but scaling_type='{self.scaling_type}' "
-                f"(FP8) is not supported. Falling back to default path. "
-                f"Pipeline overlap requires scaling_type='none' (BF16).",
-                stacklevel=2,
-            )
-            self._warned_fp8_pipeline = True
-
-        if (
             self.tp_size > 1
             and self.tp_comm_overlap
             and self._overlap_mode == "pipeline"
             and self.sequence_parallel
             and not self.explicit_expert_comm
-            and self.scaling_type == "none"
         ):
             output_parallel, gemm_bias = self._forward_fused_pipelined_column(input_, weight)
         elif (
@@ -542,6 +527,10 @@ class LumenColumnParallelLinear(nn.Module):
             self.delay_wgrad,
             self._deferred_wgrad if self.delay_wgrad else None,
             bias is not None,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
         )
         return output, self.bias if self.skip_bias_add else None
 
@@ -662,7 +651,6 @@ class LumenRowParallelLinear(nn.Module):
         self._overlap_method = _cfg_method if _cfg_method is not None else _overlap_method_from_args()
         self._pipeline_rs = None
         self._pipeline_ag_for_bwd = None
-        self._warned_fp8_pipeline = False
 
         # Weight
         if getattr(config, "use_cpu_initialization", False):
@@ -734,14 +722,15 @@ class LumenRowParallelLinear(nn.Module):
         return self._sdma_comm
 
     def _make_comm_backend(self):
+        if self._overlap_method == "sdma":
+            from lumen.modules.comm_overlap import SdmaCommBackend
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            if self._sdma_comm is None:
+                self._sdma_comm = SdmaTpComm.get(self.tp_group)
+            return SdmaCommBackend(self._sdma_comm)
         from lumen.modules.comm_overlap import NcclCommBackend
 
-        if self._overlap_method != "nccl":
-            raise ValueError(
-                f"Pipeline overlap mode only supports 'nccl' backend, "
-                f"got '{self._overlap_method}'. SDMA chunk APIs are not "
-                f"yet implemented for pipelined operation."
-            )
         return NcclCommBackend(self.tp_group)
 
     def forward(self, input_: torch.Tensor):
@@ -753,25 +742,10 @@ class LumenRowParallelLinear(nn.Module):
             input_parallel = scatter_to_tensor_model_parallel_region(input_, group=self.tp_group)
 
         if (
-            self.tp_comm_overlap
-            and self._overlap_mode == "pipeline"
-            and self.scaling_type != "none"
-            and not self._warned_fp8_pipeline
-        ):
-            warnings.warn(
-                f"Fused pipeline overlap requested but scaling_type='{self.scaling_type}' "
-                f"(FP8) is not supported. Falling back to default path. "
-                f"Pipeline overlap requires scaling_type='none' (BF16).",
-                stacklevel=2,
-            )
-            self._warned_fp8_pipeline = True
-
-        if (
             self.tp_size > 1
             and self.tp_comm_overlap
             and self._overlap_mode == "pipeline"
             and self.sequence_parallel
-            and self.scaling_type == "none"
             and not self.explicit_expert_comm
         ):
             output_ = self._forward_fused_pipelined_row(input_parallel)
@@ -860,6 +834,10 @@ class LumenRowParallelLinear(nn.Module):
             self.gradient_accumulation_fusion,
             self.delay_wgrad,
             self._deferred_wgrad if self.delay_wgrad else None,
+            self.scaling_manager,
+            self.scaling_type,
+            self.fp8_dtype,
+            self.block_size,
         )
 
     def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):

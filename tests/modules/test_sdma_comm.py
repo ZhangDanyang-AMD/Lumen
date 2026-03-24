@@ -102,27 +102,61 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
-def _sdma_tp_worker_teardown(shmem_mod):
-    """Standard teardown for SdmaTpComm worker processes.
+class _TorchDistContext:
+    """Context manager for torch.distributed init / teardown.
 
-    Follows the cleanup order from the mori ccl reference tests:
-    destroy SDMA handles, finalize shmem, then destroy process group.
+    Mirrors ``TorchDistContext`` from ``mori/tests/python/utils.py``
+    so that Lumen SDMA tests follow the identical process lifecycle
+    that the mori ccl test suite relies on.
+    """
+
+    def __init__(self, rank, world_size, master_port, backend="cpu:gloo,cuda:nccl"):
+        self.rank = rank
+        self.world_size = world_size
+        self.master_port = master_port
+        self.backend = backend
+
+    def __enter__(self):
+        import torch.distributed as dist
+
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(self.master_port)
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        dist.init_process_group(
+            backend=self.backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        world_group = torch.distributed.group.WORLD
+        assert world_group is not None
+        torch._C._distributed_c10d._register_process_group("default", world_group)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        import torch.distributed as dist
+
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
+
+
+def _sdma_tp_cleanup(shmem_mod):
+    """Release SdmaTpComm / SdmaTpContext singletons and finalize shmem.
+
+    Must be called *inside* the ``_TorchDistContext`` block (before
+    ``dist.destroy_process_group``), with all comm handles already deleted.
     """
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
     torch.cuda.synchronize()
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
     SdmaTpComm.reset()
     SdmaTpContext.reset()
-    if dist.is_initialized():
-        dist.barrier()
+    dist.barrier()
     shmem_mod.shmem_finalize()
-    if dist.is_initialized():
-        dist.barrier()
-        dist.destroy_process_group()
 
 
 # ===================================================================
@@ -156,23 +190,16 @@ class TestSdmaTpCommUnit:
 # ===================================================================
 
 
-def _worker_tp_allgather_dim0(rank, world_size, port, results_dict):
+def _worker_tp_allgather_dim0(rank, world_size, port):
     """Worker: test SdmaTpComm.allgather_dim0 correctness."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    comm = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
         SdmaTpComm.reset()
@@ -189,38 +216,33 @@ def _worker_tp_allgather_dim0(rank, world_size, port, results_dict):
 
         gathered = comm.allgather_dim0(local_tensor)
 
-        passed = True
-        assert gathered.shape == (seq_local * world_size, hidden)
+        errors = []
+        if gathered.shape != (seq_local * world_size, hidden):
+            errors.append(f"PE {rank}: shape mismatch {gathered.shape} != {(seq_local * world_size, hidden)}")
 
         for pe in range(world_size):
             chunk = gathered[pe * seq_local : (pe + 1) * seq_local]
             expected = float(pe + 1)
             if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
-                passed = False
+                errors.append(f"PE {rank}: allgather_dim0 chunk from PE {pe} mismatch")
 
-        results_dict[rank] = passed
-    finally:
         del comm
-        _sdma_tp_worker_teardown(shmem)
+        _sdma_tp_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
 
 
-def _worker_tp_allreduce(rank, world_size, port, results_dict):
+def _worker_tp_allreduce(rank, world_size, port):
     """Worker: test SdmaTpComm.allreduce_sum correctness."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    comm = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
         SdmaTpComm.reset()
@@ -237,34 +259,29 @@ def _worker_tp_allreduce(rank, world_size, port, results_dict):
         result = comm.allreduce_sum(local)
 
         expected_sum = sum(range(1, world_size + 1))
-        passed = torch.allclose(
+        ok = torch.allclose(
             result,
             torch.full_like(result, float(expected_sum)),
             atol=0.5,
         )
-        results_dict[rank] = passed
-    finally:
+
         del comm
-        _sdma_tp_worker_teardown(shmem)
+        _sdma_tp_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(f"PE {rank}: allreduce_sum mismatch")
 
 
-def _worker_tp_reduce_scatter(rank, world_size, port, results_dict):
+def _worker_tp_reduce_scatter(rank, world_size, port):
     """Worker: test SdmaTpComm.reduce_scatter_dim0 correctness."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    comm = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
         SdmaTpComm.reset()
@@ -280,37 +297,36 @@ def _worker_tp_reduce_scatter(rank, world_size, port, results_dict):
         )
 
         result = comm.reduce_scatter_dim0(local)
-        assert result.shape == (chunk_size,)
+
+        errors = []
+        if result.shape != (chunk_size,):
+            errors.append(f"PE {rank}: shape mismatch {result.shape} != {(chunk_size,)}")
 
         expected_sum = sum(range(1, world_size + 1))
-        passed = torch.allclose(
+        if not torch.allclose(
             result,
             torch.full_like(result, float(expected_sum)),
             atol=0.5,
-        )
-        results_dict[rank] = passed
-    finally:
+        ):
+            errors.append(f"PE {rank}: reduce_scatter_dim0 mismatch")
+
         del comm
-        _sdma_tp_worker_teardown(shmem)
+        _sdma_tp_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
 
 
-def _worker_tp_allgather_last_dim(rank, world_size, port, results_dict):
+def _worker_tp_allgather_last_dim(rank, world_size, port):
     """Worker: test SdmaTpComm.allgather_last_dim correctness."""
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    comm = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
         SdmaTpComm.reset()
@@ -325,19 +341,177 @@ def _worker_tp_allgather_last_dim(rank, world_size, port, results_dict):
         )
 
         gathered = comm.allgather_last_dim(local)
-        assert gathered.shape == (batch, seq, d_local * world_size)
 
-        passed = True
+        errors = []
+        if gathered.shape != (batch, seq, d_local * world_size):
+            errors.append(f"PE {rank}: shape mismatch {gathered.shape} != {(batch, seq, d_local * world_size)}")
+
         for pe in range(world_size):
             chunk = gathered[..., pe * d_local : (pe + 1) * d_local]
             expected = float(pe + 1)
             if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
-                passed = False
+                errors.append(f"PE {rank}: allgather_last_dim chunk from PE {pe} mismatch")
 
-        results_dict[rank] = passed
-    finally:
         del comm
-        _sdma_tp_worker_teardown(shmem)
+        _sdma_tp_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
+
+
+def _worker_tp_allgather_chunk(rank, world_size, port):
+    """Worker: test SdmaTpComm.allgather_dim0_chunk correctness."""
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        tp_group = dist.new_group(list(range(world_size)))
+        SdmaTpContext.reset()
+        SdmaTpComm.reset()
+        comm = SdmaTpComm.get(tp_group)
+
+        chunk_rows = 8
+        hidden = 64
+        input_chunk = torch.full(
+            (chunk_rows, hidden),
+            float(rank + 1),
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        output_buf = torch.zeros(
+            chunk_rows * world_size,
+            hidden,
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        stream = torch.cuda.Stream(device=f"cuda:{rank}")
+        ev = comm.allgather_dim0_chunk(input_chunk, output_buf, stream)
+        torch.cuda.current_stream(f"cuda:{rank}").wait_event(ev)
+        torch.cuda.synchronize()
+
+        errors = []
+        if output_buf.shape != (chunk_rows * world_size, hidden):
+            errors.append(f"PE {rank}: shape {output_buf.shape}")
+
+        for pe in range(world_size):
+            chunk = output_buf[pe * chunk_rows : (pe + 1) * chunk_rows]
+            expected = float(pe + 1)
+            if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
+                errors.append(f"PE {rank}: chunk from PE {pe} mismatch")
+
+        del comm
+        _sdma_tp_cleanup(shmem)
+
+        if errors:
+            raise AssertionError("\n".join(errors))
+
+
+def _worker_tp_reduce_scatter_chunk_allreduce(rank, world_size, port):
+    """Worker: test SdmaTpComm.reduce_scatter_dim0_chunk with allreduce backend."""
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        tp_group = dist.new_group(list(range(world_size)))
+        SdmaTpContext.reset()
+        SdmaTpComm.reset()
+        comm = SdmaTpComm(tp_group, rs_chunk_method="allreduce")
+
+        chunk_full = 16 * world_size
+        out_dim = 32
+        input_chunk = torch.full(
+            (chunk_full, out_dim),
+            float(rank + 1),
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        output_buf = torch.zeros(
+            chunk_full // world_size,
+            out_dim,
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        stream = torch.cuda.Stream(device=f"cuda:{rank}")
+        ev = comm.reduce_scatter_dim0_chunk(input_chunk, output_buf, stream)
+        torch.cuda.current_stream(f"cuda:{rank}").wait_event(ev)
+        torch.cuda.synchronize()
+
+        expected_sum = float(sum(range(1, world_size + 1)))
+        ok = torch.allclose(
+            output_buf.float(),
+            torch.full_like(output_buf.float(), expected_sum),
+            atol=1.0,
+        )
+
+        del comm
+        SdmaTpComm.reset()
+        _sdma_tp_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(
+                f"PE {rank}: reduce_scatter_chunk (allreduce) mismatch, "
+                f"got {output_buf[0, 0].item()}, expected {expected_sum}"
+            )
+
+
+def _worker_tp_reduce_scatter_chunk_nccl(rank, world_size, port):
+    """Worker: test SdmaTpComm.reduce_scatter_dim0_chunk with NCCL fallback."""
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
+
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
+    with _TorchDistContext(rank, world_size, port):
+        tp_group = dist.new_group(list(range(world_size)))
+        SdmaTpContext.reset()
+        SdmaTpComm.reset()
+        comm = SdmaTpComm(tp_group, rs_chunk_method="nccl")
+
+        chunk_full = 16 * world_size
+        out_dim = 32
+        input_chunk = torch.full(
+            (chunk_full, out_dim),
+            float(rank + 1),
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        output_buf = torch.zeros(
+            chunk_full // world_size,
+            out_dim,
+            dtype=torch.bfloat16,
+            device=f"cuda:{rank}",
+        )
+        stream = torch.cuda.Stream(device=f"cuda:{rank}")
+        ev = comm.reduce_scatter_dim0_chunk(input_chunk, output_buf, stream)
+        torch.cuda.current_stream(f"cuda:{rank}").wait_event(ev)
+        torch.cuda.synchronize()
+
+        expected_sum = float(sum(range(1, world_size + 1)))
+        ok = torch.allclose(
+            output_buf.float(),
+            torch.full_like(output_buf.float(), expected_sum),
+            atol=0.5,
+        )
+
+        del comm
+        SdmaTpComm.reset()
+        _sdma_tp_cleanup(shmem)
+
+        if not ok:
+            raise AssertionError(
+                f"PE {rank}: reduce_scatter_chunk (nccl) mismatch, "
+                f"got {output_buf[0, 0].item()}, expected {expected_sum}"
+            )
 
 
 @_requires_sdma_hw
@@ -349,60 +523,60 @@ class TestSdmaTpCommDistributed:
         return min(torch.cuda.device_count(), 8)
 
     def test_allgather_dim0(self):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_allgather_dim0,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for r in range(self.world_size):
-            assert results[r], f"PE {r} allgather_dim0 failed"
 
     def test_allreduce_sum(self):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_allreduce,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for r in range(self.world_size):
-            assert results[r], f"PE {r} allreduce_sum failed"
 
     def test_reduce_scatter_dim0(self):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_reduce_scatter,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for r in range(self.world_size):
-            assert results[r], f"PE {r} reduce_scatter_dim0 failed"
 
     def test_allgather_last_dim(self):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_allgather_last_dim,
-            args=(self.world_size, port, results),
+            args=(self.world_size, port),
             nprocs=self.world_size,
         )
-        for r in range(self.world_size):
-            assert results[r], f"PE {r} allgather_last_dim failed"
+
+    def test_allgather_dim0_chunk(self):
+        port = _get_free_port()
+        _sdma_spawn(
+            _worker_tp_allgather_chunk,
+            args=(self.world_size, port),
+            nprocs=self.world_size,
+        )
+
+    def test_reduce_scatter_dim0_chunk_allreduce(self):
+        port = _get_free_port()
+        _sdma_spawn(
+            _worker_tp_reduce_scatter_chunk_allreduce,
+            args=(self.world_size, port),
+            nprocs=self.world_size,
+        )
+
+    def test_reduce_scatter_dim0_chunk_nccl(self):
+        port = _get_free_port()
+        _sdma_spawn(
+            _worker_tp_reduce_scatter_chunk_nccl,
+            args=(self.world_size, port),
+            nprocs=self.world_size,
+        )
 
 
 # ===================================================================
@@ -410,7 +584,7 @@ class TestSdmaTpCommDistributed:
 # ===================================================================
 
 
-def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iterations, warmup):
+def _worker_tp_perf(rank, world_size, port, op_name, n_elems, iterations, warmup):
     """Worker: measure TP comm throughput."""
     import mori.shmem as shmem
     import numpy as np
@@ -418,18 +592,9 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
 
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
-    comm = None
-    op_fn = None
-    local = None
-    try:
+    with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
         SdmaTpContext.reset()
         SdmaTpComm.reset()
@@ -460,12 +625,11 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
         total_bytes = n_elems * 2 * world_size
         bw = (total_bytes / (avg_ms / 1000.0)) / (1024**3) if avg_ms > 0 else 0
 
-        results_dict[rank] = {"avg_ms": avg_ms, "bandwidth_gb_s": bw}
-    finally:
-        op_fn = None
-        local = None
-        comm = None
-        _sdma_tp_worker_teardown(shmem)
+        if rank == 0:
+            print(f"\n  TP {op_name} SDMA PE0: {total_bytes / 1024:.1f} KB, " f"avg={avg_ms:.3f}ms, BW={bw:.2f} GB/s")
+
+        del comm
+        _sdma_tp_cleanup(shmem)
 
 
 @_requires_sdma_hw
@@ -478,38 +642,18 @@ class TestSdmaTpCommPerformance:
 
     @pytest.mark.parametrize("n_elems", [4096, 65536, 1048576])
     def test_allgather_dim0_perf(self, n_elems):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_perf,
-            args=(self.world_size, port, results, "allgather_dim0", n_elems, 10, 5),
+            args=(self.world_size, port, "allgather_dim0", n_elems, 10, 5),
             nprocs=self.world_size,
-        )
-        r0 = results[0]
-        total_bytes = n_elems * 2 * self.world_size
-        print(
-            f"\nTP allgather_dim0 SDMA: {total_bytes / 1024:.1f} KB, "
-            f"avg={r0['avg_ms']:.3f}ms, BW={r0['bandwidth_gb_s']:.2f} GB/s"
         )
 
     @pytest.mark.parametrize("n_elems", [4096, 65536, 1048576])
     def test_allreduce_sum_perf(self, n_elems):
-        import torch.multiprocessing as mp
-
-        manager = mp.Manager()
-        results = manager.dict()
         port = _get_free_port()
         _sdma_spawn(
             _worker_tp_perf,
-            args=(self.world_size, port, results, "allreduce_sum", n_elems, 10, 5),
+            args=(self.world_size, port, "allreduce_sum", n_elems, 10, 5),
             nprocs=self.world_size,
-        )
-        r0 = results[0]
-        total_bytes = n_elems * 2 * self.world_size
-        print(
-            f"\nTP allreduce_sum SDMA: {total_bytes / 1024:.1f} KB, "
-            f"avg={r0['avg_ms']:.3f}ms, BW={r0['bandwidth_gb_s']:.2f} GB/s"
         )

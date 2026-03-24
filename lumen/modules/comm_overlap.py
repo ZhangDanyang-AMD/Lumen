@@ -31,10 +31,11 @@ import torch.distributed as dist
 
 from lumen.ops.quantize.gemm_primitives import (
     compute_dgrad_bf16,
+    compute_dgrad_fp8,
     compute_wgrad_bf16,
     make_wgrad_closure_bf16,
 )
-from lumen.ops.quantize.linear import dispatch_gemm
+from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
 
 logger = logging.getLogger(__name__)
 
@@ -599,6 +600,10 @@ class _FusedColumnParallelForward(torch.autograd.Function):
     Forward: PipelinedAllgatherGemm with real gemm_fn (comm-GEMM overlap).
     Backward: PipelinedGemmReduceScatter with dgrad as gemm_fn (dgrad-RS overlap),
               plus deferred wgrad with AG for input reconstitution.
+
+    Supports both BF16 (scaling_type="none") and FP8 modes. In FP8 mode,
+    weight is quantized once before the pipeline loop; activation chunks
+    are quantized per-chunk inside ``gemm_fn``.
     """
 
     @staticmethod
@@ -614,9 +619,46 @@ class _FusedColumnParallelForward(torch.autograd.Function):
         delay_wgrad,
         deferred_wgrad,
         has_bias,
+        scaling_manager,
+        scaling_type,
+        fp8_dtype,
+        block_size,
     ):
-        def gemm_fn(inp, w, b):
-            return dispatch_gemm(inp, w, None, None, "none", bias=b)
+        if scaling_type != "none":
+            weight_2d = weight.reshape(-1, weight.shape[-1])
+            weight_fp8, weight_scale = quantize_input(
+                weight_2d,
+                scaling_type,
+                fp8_dtype,
+                block_size,
+                manager=scaling_manager,
+                tensor_id="col_weight",
+            )
+
+            def gemm_fn(inp, w, b):
+                inp_2d = inp.reshape(-1, inp.shape[-1])
+                inp_fp8, inp_scale = quantize_input(
+                    inp_2d,
+                    scaling_type,
+                    fp8_dtype,
+                    block_size,
+                    manager=scaling_manager,
+                    tensor_id="col_act",
+                )
+                return dispatch_gemm(
+                    inp_fp8,
+                    weight_fp8,
+                    inp_scale,
+                    weight_scale,
+                    scaling_type,
+                    bias=b,
+                )
+
+        else:
+            weight_fp8, weight_scale = None, None
+
+            def gemm_fn(inp, w, b):
+                return dispatch_gemm(inp, w, None, None, "none", bias=b)
 
         output = pipeline_ag.forward(input_local, weight, bias, gemm_fn)
         ctx.save_for_backward(input_local, weight)
@@ -627,15 +669,39 @@ class _FusedColumnParallelForward(torch.autograd.Function):
         ctx.delay_wgrad = delay_wgrad
         ctx.deferred_wgrad = deferred_wgrad
         ctx.has_bias = has_bias
+        ctx.scaling_manager = scaling_manager
+        ctx.scaling_type = scaling_type
+        ctx.fp8_dtype = fp8_dtype
+        ctx.block_size = block_size
+        ctx.weight_fp8 = weight_fp8
+        ctx.weight_scale = weight_scale
         return output
 
     @staticmethod
     @torch.autograd.function.once_differentiable
     def backward(ctx, grad_output):
         input_local, weight = ctx.saved_tensors
+        scaling_type = ctx.scaling_type
 
-        def dgrad_fn(chunk, w, b):
-            return compute_dgrad_bf16(chunk, w)
+        if scaling_type != "none" and ctx.weight_fp8 is not None:
+            _weight_fp8 = ctx.weight_fp8
+            _weight_scale = ctx.weight_scale
+
+            def dgrad_fn(chunk, w, b):
+                return compute_dgrad_fp8(
+                    chunk,
+                    _weight_fp8,
+                    _weight_scale,
+                    ctx.scaling_type,
+                    ctx.scaling_manager,
+                    ctx.fp8_dtype,
+                    ctx.block_size,
+                )
+
+        else:
+
+            def dgrad_fn(chunk, w, b):
+                return compute_dgrad_bf16(chunk, w)
 
         grad_input = ctx.pipeline_rs.forward(grad_output, weight, dgrad_fn)
 
@@ -679,11 +745,15 @@ class _FusedColumnParallelForward(torch.autograd.Function):
         if ctx.has_bias:
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1)))
 
-        # 10 forward args → 10 backward returns
+        # 14 forward args → 14 backward returns
         return (
             grad_input,
             grad_weight,
             grad_bias,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -700,6 +770,8 @@ class _FusedRowParallelForward(torch.autograd.Function):
     Forward: PipelinedGemmReduceScatter with real gemm_fn (GEMM-RS overlap).
     Backward: PipelinedAllgatherGemm with dgrad as gemm_fn (AG-dgrad overlap),
               plus deferred wgrad with AG for grad_output reconstitution.
+
+    Supports both BF16 (scaling_type="none") and FP8 modes.
     """
 
     @staticmethod
@@ -713,9 +785,46 @@ class _FusedRowParallelForward(torch.autograd.Function):
         gaf,
         delay_wgrad,
         deferred_wgrad,
+        scaling_manager,
+        scaling_type,
+        fp8_dtype,
+        block_size,
     ):
-        def gemm_fn(inp, w, b):
-            return dispatch_gemm(inp, w, None, None, "none", bias=b)
+        if scaling_type != "none":
+            weight_2d = weight.reshape(-1, weight.shape[-1])
+            weight_fp8, weight_scale = quantize_input(
+                weight_2d,
+                scaling_type,
+                fp8_dtype,
+                block_size,
+                manager=scaling_manager,
+                tensor_id="row_weight",
+            )
+
+            def gemm_fn(inp, w, b):
+                inp_2d = inp.reshape(-1, inp.shape[-1])
+                inp_fp8, inp_scale = quantize_input(
+                    inp_2d,
+                    scaling_type,
+                    fp8_dtype,
+                    block_size,
+                    manager=scaling_manager,
+                    tensor_id="row_act",
+                )
+                return dispatch_gemm(
+                    inp_fp8,
+                    weight_fp8,
+                    inp_scale,
+                    weight_scale,
+                    scaling_type,
+                    bias=b,
+                )
+
+        else:
+            weight_fp8, weight_scale = None, None
+
+            def gemm_fn(inp, w, b):
+                return dispatch_gemm(inp, w, None, None, "none", bias=b)
 
         output = pipeline_rs.forward(input_parallel, weight, gemm_fn)
         ctx.save_for_backward(input_parallel, weight)
@@ -725,15 +834,39 @@ class _FusedRowParallelForward(torch.autograd.Function):
         ctx.gaf = gaf
         ctx.delay_wgrad = delay_wgrad
         ctx.deferred_wgrad = deferred_wgrad
+        ctx.scaling_manager = scaling_manager
+        ctx.scaling_type = scaling_type
+        ctx.fp8_dtype = fp8_dtype
+        ctx.block_size = block_size
+        ctx.weight_fp8 = weight_fp8
+        ctx.weight_scale = weight_scale
         return output
 
     @staticmethod
     @torch.autograd.function.once_differentiable
     def backward(ctx, grad_output):
         input_parallel, weight = ctx.saved_tensors
+        scaling_type = ctx.scaling_type
 
-        def dgrad_fn(chunk, w, b):
-            return compute_dgrad_bf16(chunk, weight)
+        if scaling_type != "none" and ctx.weight_fp8 is not None:
+            _weight_fp8 = ctx.weight_fp8
+            _weight_scale = ctx.weight_scale
+
+            def dgrad_fn(chunk, w, b):
+                return compute_dgrad_fp8(
+                    chunk,
+                    _weight_fp8,
+                    _weight_scale,
+                    ctx.scaling_type,
+                    ctx.scaling_manager,
+                    ctx.fp8_dtype,
+                    ctx.block_size,
+                )
+
+        else:
+
+            def dgrad_fn(chunk, w, b):
+                return compute_dgrad_bf16(chunk, weight)
 
         grad_input = ctx.pipeline_ag.forward(
             grad_output,
@@ -778,9 +911,14 @@ class _FusedRowParallelForward(torch.autograd.Function):
                 ctx.weight_ref.main_grad.add_(grad_weight)
                 grad_weight = None
 
+        # 12 forward args → 12 backward returns
         return (
             grad_input,
             grad_weight,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -801,6 +939,10 @@ def fused_column_parallel_forward(
     delay_wgrad,
     deferred_wgrad,
     has_bias,
+    scaling_manager=None,
+    scaling_type="none",
+    fp8_dtype=None,
+    block_size=128,
 ):
     return _FusedColumnParallelForward.apply(
         input_local,
@@ -813,6 +955,10 @@ def fused_column_parallel_forward(
         delay_wgrad,
         deferred_wgrad,
         has_bias,
+        scaling_manager,
+        scaling_type,
+        fp8_dtype,
+        block_size,
     )
 
 
@@ -825,6 +971,10 @@ def fused_row_parallel_forward(
     gaf,
     delay_wgrad,
     deferred_wgrad,
+    scaling_manager=None,
+    scaling_type="none",
+    fp8_dtype=None,
+    block_size=128,
 ):
     return _FusedRowParallelForward.apply(
         input_parallel,
@@ -835,6 +985,10 @@ def fused_row_parallel_forward(
         gaf,
         delay_wgrad,
         deferred_wgrad,
+        scaling_manager,
+        scaling_type,
+        fp8_dtype,
+        block_size,
     )
 
 

@@ -4,19 +4,19 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Standalone dgrad / wgrad primitives for BF16 GEMM.
+"""Standalone dgrad / wgrad primitives for BF16 and FP8 GEMM.
 
-Extracted from ``QuantizedLinearFunction.backward`` (``scaling_type='none'``
-branch) to allow reuse in fused comm-GEMM overlap autograd functions.
+Extracted from ``QuantizedLinearFunction.backward`` to allow reuse in fused
+comm-GEMM overlap autograd functions.
 
 These are additive — ``QuantizedLinearFunction`` is not modified.
 """
 
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 
-from lumen.ops.quantize.linear import dispatch_gemm
+from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
 
 
 def compute_dgrad_bf16(
@@ -95,3 +95,66 @@ def make_wgrad_closure_bf16(
             weight_ref.grad = gw
 
     return _wgrad_fn
+
+
+def _bwd_scaling_for(scaling_type: str) -> str:
+    """Return the backward scaling type corresponding to a forward scaling type.
+
+    Mirrors the logic in ``QuantizedLinearFunction.backward``:
+    per_token, blockwise, and blockwise2d use dynamic scaling in
+    the backward pass; delayed and dynamic pass through unchanged.
+    """
+    if scaling_type in ("per_token", "blockwise", "blockwise2d"):
+        return "dynamic"
+    return scaling_type
+
+
+def compute_dgrad_fp8(
+    grad_chunk: torch.Tensor,
+    weight_fp8: torch.Tensor,
+    weight_scale: torch.Tensor,
+    scaling_type: str,
+    scaling_manager: Optional[object],
+    fp8_dtype: torch.dtype,
+    block_size: int,
+) -> torch.Tensor:
+    """Compute FP8 dgrad for a single grad chunk.
+
+    Quantizes *grad_chunk* (BF16) to FP8 and dispatches the dgrad GEMM
+    against the pre-quantized *weight_fp8*.  Falls back to BF16 GEMM when
+    the operand dtypes are mixed (hybrid E4M3/E5M2 mode).
+
+    Args:
+        grad_chunk: ``[S_chunk, N]`` gradient chunk (BF16).
+        weight_fp8: ``[N, K]`` pre-quantized FP8 weight.
+        weight_scale: Weight quantization scale.
+        scaling_type: Forward scaling type.
+        scaling_manager: Optional :class:`ScalingManager`.
+        fp8_dtype: FP8 dtype (e.g. ``torch.float8_e4m3fn``).
+        block_size: Block size for block-wise quantization.
+    """
+    bwd_scaling = _bwd_scaling_for(scaling_type)
+    bwd_dtype = getattr(scaling_manager, "fp8_dtype_bwd", fp8_dtype) if scaling_manager else fp8_dtype
+
+    grad_flat = grad_chunk.reshape(-1, grad_chunk.shape[-1]).contiguous()
+    grad_fp8, grad_scale = quantize_input(
+        grad_flat,
+        bwd_scaling,
+        bwd_dtype,
+        block_size,
+    )
+
+    mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
+    if mixed_dtype:
+        grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+        weight_t_bf16 = (weight_fp8.t().contiguous().float() * weight_scale).bfloat16()
+        result = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
+    else:
+        result = dispatch_gemm(
+            grad_fp8,
+            weight_fp8.t().contiguous(),
+            grad_scale,
+            weight_scale,
+            bwd_scaling,
+        )
+    return result.view(*grad_chunk.shape[:-1], weight_fp8.shape[-1])
