@@ -38,10 +38,17 @@ import torch.nn.functional as F
 # Skip markers
 # ===================================================================
 
-_requires_multi_gpu = pytest.mark.skipif(
-    torch.cuda.device_count() < 2,
-    reason="Requires at least 2 GPUs",
-)
+
+def _multi_gpu_skip_condition():
+    try:
+        if torch.cuda.device_count() < 2:
+            return True, "Requires at least 2 GPUs"
+    except Exception:
+        return True, "CUDA not available"
+    return False, ""
+
+
+_requires_multi_gpu = pytest.mark.skipif(*_multi_gpu_skip_condition())
 
 _SPAWN_COOLDOWN = float(os.environ.get("LUMEN_SPAWN_COOLDOWN_SECS", "1"))
 
@@ -945,8 +952,6 @@ def _worker_fused_column_fp8_fwd(rank, world_size, port, results_dict, scaling_t
     except Exception as e:
         results_dict[rank] = f"SKIP: FP8 backend not available ({e})"
         return
-    finally:
-        pass
 
     try:
         torch.manual_seed(42)

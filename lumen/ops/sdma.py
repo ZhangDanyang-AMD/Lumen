@@ -21,7 +21,9 @@ Availability check::
 """
 
 import functools
+import glob
 import logging
+import os
 from typing import Optional
 
 import torch
@@ -34,16 +36,53 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _has_kfd_sdma_engines() -> bool:
+    """Check KFD topology for SDMA XGMI engines.
+
+    The anvil transport layer creates SDMA queues via ``hsaKmtCreateQueueExt``
+    using XGMI engine IDs derived from a MI300X-specific OAM map.  If the
+    system has no SDMA XGMI engines (e.g. no ``/dev/kfd``, different GPU
+    family, or VMs without KFD passthrough), queue creation will ``exit(1)``
+    inside C++ and kill the process.
+
+    Returns ``True`` only when at least one KFD topology node reports
+    ``num_sdma_xgmi_engines > 0``.
+    """
+    if not os.path.exists("/dev/kfd"):
+        return False
+
+    for props_path in sorted(glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")):
+        try:
+            with open(props_path) as f:
+                for line in f:
+                    if line.startswith("num_sdma_xgmi_engines"):
+                        if int(line.split()[-1]) > 0:
+                            return True
+        except (OSError, ValueError):
+            continue
+
+    return False
+
+
 @functools.lru_cache(maxsize=1)
 def is_sdma_available() -> bool:
-    """Return True if mori SDMA primitives can be imported."""
+    """Return True if mori SDMA primitives can be imported **and** the
+    hardware exposes SDMA XGMI engines via the KFD topology.
+
+    The two-level check avoids a fatal ``exit(1)`` from the C++ anvil
+    layer when ``hsaKmtCreateQueueExt`` is called on unsupported hardware.
+    """
     try:
         import mori.shmem  # noqa: F401
         from mori.ccl import AllgatherSdma, AllreduceSdma  # noqa: F401
-
-        return True
     except (ImportError, ModuleNotFoundError):
         return False
+
+    if not _has_kfd_sdma_engines():
+        logger.debug("mori importable but no SDMA XGMI engines found in " "/sys/class/kfd/kfd/topology — skipping SDMA")
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------

@@ -175,10 +175,17 @@ class TestAttentionCPP2P:
 # Distributed ring attention test (2 GPUs)
 # =========================================================================
 
-_MULTI_GPU = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.device_count() < 2,
-    reason="Need ≥2 GPUs for CP P2P distributed test",
-)
+
+def _multi_gpu_skip_condition():
+    try:
+        if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
+            return True, "Need ≥2 GPUs for CP P2P distributed test"
+    except Exception:
+        return True, "CUDA not available"
+    return False, ""
+
+
+_MULTI_GPU = pytest.mark.skipif(*_multi_gpu_skip_condition())
 
 
 def _is_aiter_available():
