@@ -59,10 +59,13 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
-_requires_sdma_hw = pytest.mark.skipif(
-    not is_sdma_available() or torch.cuda.device_count() < 2,
-    reason=(f"SDMA not available (is_sdma_available={is_sdma_available()}, " f"GPUs={torch.cuda.device_count()})"),
-)
+def _sdma_skip_condition():
+    if not is_sdma_available():
+        return True, "SDMA not available"
+    return False, ""
+
+
+_requires_sdma_hw = pytest.mark.skipif(*_sdma_skip_condition())
 
 
 # ===================================================================

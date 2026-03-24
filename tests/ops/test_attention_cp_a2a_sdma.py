@@ -24,8 +24,7 @@ How to run::
     pytest tests/ops/test_attention_cp_a2a_sdma.py -v -k "CPA2ASdma"
 
 Skip conditions:
-  - mori not available → skip SDMA tests
-  - torch.cuda.device_count() < 2 → skip distributed tests
+  - mori SDMA not available → skip SDMA / distributed tests
   - aiter not available → skip aiter-specific tests
 """
 
@@ -38,11 +37,10 @@ import torch
 from lumen.ops.sdma import is_sdma_available
 
 _sdma_available = is_sdma_available()
-_multi_gpu = torch.cuda.is_available() and torch.cuda.device_count() >= 2
 
 skip_no_sdma = pytest.mark.skipif(not _sdma_available, reason="mori SDMA not available")
-skip_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-skip_no_multi_gpu = pytest.mark.skipif(not _multi_gpu, reason="Multi-GPU required")
+skip_no_cuda = pytest.mark.skipif(not _sdma_available, reason="CUDA/SDMA required")
+skip_no_multi_gpu = pytest.mark.skipif(not _sdma_available, reason="SDMA/Multi-GPU required")
 
 
 def _is_aiter_available():

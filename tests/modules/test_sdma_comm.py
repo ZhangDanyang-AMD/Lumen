@@ -52,10 +52,14 @@ import torch
 
 from lumen.ops.sdma import is_sdma_available
 
-_requires_sdma_hw = pytest.mark.skipif(
-    not is_sdma_available() or torch.cuda.device_count() < 2,
-    reason=(f"SDMA not available (is_sdma_available={is_sdma_available()}, " f"GPUs={torch.cuda.device_count()})"),
-)
+
+def _sdma_skip_condition():
+    if not is_sdma_available():
+        return True, "SDMA not available"
+    return False, ""
+
+
+_requires_sdma_hw = pytest.mark.skipif(*_sdma_skip_condition())
 
 _SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
 
