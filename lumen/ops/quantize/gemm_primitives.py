@@ -109,6 +109,31 @@ def _bwd_scaling_for(scaling_type: str) -> str:
     return scaling_type
 
 
+def _dequant_fp8_weight(
+    weight_fp8: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: int,
+) -> torch.Tensor:
+    """Dequantize FP8 weight ``(N, K)`` to float32, handling any scale shape.
+
+    Scale shapes by quantization mode:
+      - per-tensor / dynamic / delayed: ``(1,)``
+      - per_token: ``(N, 1)``
+      - blockwise: ``(N, ceil(K / block_size))``
+    """
+    if weight_scale.numel() == 1:
+        return weight_fp8.float() * weight_scale.float()
+
+    K = weight_fp8.shape[-1]
+    scale_cols = weight_scale.shape[-1] if weight_scale.dim() > 1 else 1
+
+    if scale_cols == 1 or scale_cols >= K:
+        return weight_fp8.float() * weight_scale.float()
+
+    scales_expanded = weight_scale.float().repeat_interleave(block_size, dim=-1)[:, :K]
+    return weight_fp8.float() * scales_expanded
+
+
 def compute_dgrad_fp8(
     grad_chunk: torch.Tensor,
     weight_fp8: torch.Tensor,
@@ -122,7 +147,9 @@ def compute_dgrad_fp8(
 
     Quantizes *grad_chunk* (BF16) to FP8 and dispatches the dgrad GEMM
     against the pre-quantized *weight_fp8*.  Falls back to BF16 GEMM when
-    the operand dtypes are mixed (hybrid E4M3/E5M2 mode).
+    the operand dtypes are mixed (hybrid E4M3/E5M2 mode) **or** when the
+    forward weight scale is multi-element (per_token / blockwise) and
+    therefore incompatible with the per-tensor dgrad GEMM.
 
     Args:
         grad_chunk: ``[S_chunk, N]`` gradient chunk (BF16).
@@ -145,10 +172,11 @@ def compute_dgrad_fp8(
     )
 
     mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
-    if mixed_dtype:
+    _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
+    if mixed_dtype or _needs_dequant:
         grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-        weight_t_bf16 = (weight_fp8.t().contiguous().float() * weight_scale).bfloat16()
-        result = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
+        weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
+        result = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
     else:
         result = dispatch_gemm(
             grad_fp8,

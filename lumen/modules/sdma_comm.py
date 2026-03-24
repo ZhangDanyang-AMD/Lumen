@@ -219,6 +219,7 @@ class _TpSdmaAllreduce:
         self._wire_dtype = torch.bfloat16 if dtype == torch.float32 else dtype
         self._handle = None
         self._capacity: int = 0
+        self._out_buf: Optional[torch.Tensor] = None
         self._async_output_buf: Optional[torch.Tensor] = None
 
     def _ensure(self, n_elems: int) -> None:
@@ -237,6 +238,7 @@ class _TpSdmaAllreduce:
             dtype=self._wire_dtype,
         )
         self._capacity = n_elems
+        self._out_buf = None
         self._async_output_buf = None
         logger.debug(
             "_TpSdmaAllreduce: (re)alloc for %d elems, " "user_dtype=%s wire_dtype=%s (PE %d/%d)",
@@ -250,6 +252,18 @@ class _TpSdmaAllreduce:
     @property
     def _needs_cast(self) -> bool:
         return self._user_dtype != self._wire_dtype
+
+    def _get_out_buf(self, template: torch.Tensor) -> torch.Tensor:
+        """Return a cached flat output buffer matching *template*'s size/dtype/device."""
+        n = template.numel()
+        if (
+            self._out_buf is None
+            or self._out_buf.numel() < n
+            or self._out_buf.device != template.device
+            or self._out_buf.dtype != template.dtype
+        ):
+            self._out_buf = torch.empty_like(template)
+        return self._out_buf[:n]
 
     def _ensure_async_output(self, n_elems: int, device: torch.device) -> torch.Tensor:
         """Return a flat output buffer for async allreduce, reusing when possible."""
@@ -272,15 +286,14 @@ class _TpSdmaAllreduce:
         stream = torch.cuda.current_stream(tensor.device)
         if self._needs_cast:
             buf = flat.to(self._wire_dtype)
-            out = torch.empty_like(buf)
+            out = self._get_out_buf(buf)
             self._handle(buf, out, n, stream)
-            stream.synchronize()
             tensor.copy_(out.to(self._user_dtype).reshape(tensor.shape))
         else:
-            out = torch.empty_like(flat)
+            out = self._get_out_buf(flat)
             self._handle(flat, out, n, stream)
-            stream.synchronize()
             tensor.copy_(out.reshape(tensor.shape))
+        stream.synchronize()
 
     def start_async_inplace(self, tensor: torch.Tensor, stream=None) -> bool:
         """Start async in-place allreduce.  Caller must call :meth:`wait_async`.

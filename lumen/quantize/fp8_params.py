@@ -4,16 +4,22 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""FP8 parameter storage and all-gather hooks.
+"""FP8 parameter storage, all-gather communication, and dequant hooks.
 
-Quantizes model parameters to FP8 for storage and communication,
-reducing memory footprint and all-gather bandwidth by ~2x.
-Parameters are dequantized to BF16 after all-gather for computation.
+**Layer 1** — local FP8 cache + lazy re-quant (wired via
+:class:`~lumen.quantize.scaling_manager.ScalingManager`).
+
+**Layer 2** — FP8 all-gather communication: each rank quantizes its
+local weight shard to FP8 (1 byte/elem), all-gathers the FP8 shards
+(half bandwidth vs BF16), then dequantizes per-shard back to BF16.
+Supports NCCL and SDMA backends.
 """
 
 import logging
+from typing import Optional
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)
@@ -47,6 +53,148 @@ def dequantize_param_from_fp8(
 ) -> torch.Tensor:
     """Dequantize an FP8 parameter back to target dtype."""
     return (fp8_param.to(torch.float32) / scale).to(target_dtype)
+
+
+def fp8_allgather_weight(
+    weight_shard: torch.Tensor,
+    group: Optional[dist.ProcessGroup] = None,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    target_dtype: torch.dtype = torch.bfloat16,
+    use_sdma: bool = False,
+) -> torch.Tensor:
+    """All-gather a weight shard via FP8, dequantize per-shard to *target_dtype*.
+
+    This is the "Layer 2" FP8 param all-gather: each rank quantizes its
+    local shard to FP8, communicates only the FP8 bytes (half the volume
+    of BF16), then each rank independently dequantizes back to full
+    precision.  Per-rank scales are also all-gathered so that each
+    chunk is dequantized with its originating rank's scale.
+
+    Args:
+        weight_shard: Local weight shard ``[rows_local, cols]`` in BF16/FP32.
+        group: Process group for the all-gather. Defaults to WORLD.
+        fp8_dtype: Target FP8 dtype for quantization.
+        target_dtype: Dtype to dequantize into after gathering.
+        use_sdma: Use MORI SDMA allgather instead of NCCL.
+
+    Returns:
+        Full weight tensor ``[rows_full, cols]`` in *target_dtype*.
+    """
+    if group is None:
+        group = dist.group.WORLD
+    world_size = dist.get_world_size(group=group)
+
+    if world_size <= 1:
+        return weight_shard.to(target_dtype)
+
+    fp8_shard, local_scale = quantize_param_to_fp8(weight_shard, fp8_dtype)
+
+    # All-gather FP8 data shards
+    full_shape = list(fp8_shard.shape)
+    full_shape[0] *= world_size
+    fp8_full = torch.empty(full_shape, dtype=fp8_shard.dtype, device=fp8_shard.device)
+
+    if use_sdma:
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        comm = SdmaTpComm.get(group)
+        fp8_full = comm.allgather_dim0(fp8_shard)
+    else:
+        dist.all_gather_into_tensor(fp8_full, fp8_shard.contiguous(), group=group)
+
+    # All-gather per-rank scales (tiny: one float32 scalar per rank)
+    scale_scalar = local_scale.float().reshape(1).to(fp8_shard.device)
+    all_scales = torch.empty(world_size, dtype=torch.float32, device=fp8_shard.device)
+    dist.all_gather_into_tensor(all_scales, scale_scalar, group=group)
+
+    chunks = fp8_full.chunk(world_size, dim=0)
+    dequant_chunks = [dequantize_param_from_fp8(chunks[i], all_scales[i], target_dtype) for i in range(world_size)]
+    return torch.cat(dequant_chunks, dim=0)
+
+
+def fp8_allgather_weight_pipelined(
+    weight_shards: list,
+    group: Optional[dist.ProcessGroup] = None,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    target_dtype: torch.dtype = torch.bfloat16,
+    use_sdma: bool = False,
+) -> list:
+    """Pipelined FP8 all-gather for multiple weight shards.
+
+    Overlaps allgather(i+1) on a comm stream with dequant(i) on the
+    compute stream, hiding dequant latency behind communication.
+
+    Args:
+        weight_shards: List of local weight shards to all-gather.
+        group: Process group. Defaults to WORLD.
+        fp8_dtype: Target FP8 dtype.
+        target_dtype: Dtype to dequantize into after gathering.
+        use_sdma: Use MORI SDMA allgather instead of NCCL.
+
+    Returns:
+        List of full (dequantized) weight tensors.
+    """
+    if group is None:
+        group = dist.group.WORLD
+    world_size = dist.get_world_size(group=group)
+
+    if world_size <= 1:
+        return [s.to(target_dtype) for s in weight_shards]
+
+    N = len(weight_shards)
+    device = weight_shards[0].device
+    fp8_shards = []
+    local_scales = []
+    fp8_outs = []
+    all_scales_list = []
+
+    for shard in weight_shards:
+        fp8_s, sc = quantize_param_to_fp8(shard, fp8_dtype)
+        fp8_shards.append(fp8_s)
+        local_scales.append(sc)
+        full_shape = list(fp8_s.shape)
+        full_shape[0] *= world_size
+        fp8_outs.append(torch.empty(full_shape, dtype=fp8_s.dtype, device=device))
+
+    # All-gather per-rank scales for each weight (batched, tiny payload)
+    for sc in local_scales:
+        sc_tensor = sc.float().reshape(1).to(device)
+        gathered = torch.empty(world_size, dtype=torch.float32, device=device)
+        dist.all_gather_into_tensor(gathered, sc_tensor, group=group)
+        all_scales_list.append(gathered)
+
+    comm_stream = torch.cuda.Stream(device=device)
+    compute_stream = torch.cuda.current_stream(device)
+
+    results = [None] * N
+
+    def _do_gather(idx):
+        if use_sdma:
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            comm = SdmaTpComm.get(group)
+            fp8_outs[idx] = comm.allgather_dim0(fp8_shards[idx])
+        else:
+            dist.all_gather_into_tensor(fp8_outs[idx], fp8_shards[idx].contiguous(), group=group)
+
+    def _do_dequant(idx):
+        chunks = fp8_outs[idx].chunk(world_size, dim=0)
+        per_rank_scales = all_scales_list[idx]
+        dq = [dequantize_param_from_fp8(chunks[r], per_rank_scales[r], target_dtype) for r in range(world_size)]
+        results[idx] = torch.cat(dq, dim=0)
+
+    with torch.cuda.stream(comm_stream):
+        _do_gather(0)
+
+    for i in range(N):
+        compute_stream.wait_stream(comm_stream)
+        if i + 1 < N:
+            with torch.cuda.stream(comm_stream):
+                _do_gather(i + 1)
+        _do_dequant(i)
+
+    compute_stream.wait_stream(comm_stream)
+    return results
 
 
 class FP8ParamManager:

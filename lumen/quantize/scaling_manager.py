@@ -407,6 +407,78 @@ class ScalingManager:
             )
         return self
 
+    def fp8_allgather_weight(
+        self,
+        weight_shard: torch.Tensor,
+        group=None,
+        use_sdma: Optional[bool] = None,
+    ) -> torch.Tensor:
+        """All-gather a weight shard via FP8, dequantize per-shard.
+
+        Delegates to :func:`lumen.quantize.fp8_params.fp8_allgather_weight`
+        using this manager's FP8 dtype and SDMA preference.  Per-rank
+        scales are gathered automatically so each shard is dequantized
+        with its originating rank's scale.
+
+        Args:
+            weight_shard: Local weight shard ``[rows_local, cols]``.
+            group: Process group. Defaults to ``self._dp_group`` when
+                set, otherwise WORLD (resolved inside
+                ``fp8_allgather_weight``).
+            use_sdma: Override SDMA preference. Defaults to
+                ``self._use_sdma``.
+
+        Returns:
+            Full weight ``[rows_full, cols]`` in BF16.
+        """
+        from lumen.quantize.fp8_params import fp8_allgather_weight
+
+        if use_sdma is None:
+            use_sdma = self._use_sdma
+        if group is None:
+            group = self._dp_group
+
+        return fp8_allgather_weight(
+            weight_shard,
+            group=group,
+            fp8_dtype=self.fp8_dtype,
+            target_dtype=torch.bfloat16,
+            use_sdma=use_sdma,
+        )
+
+    def fp8_allgather_weights_pipelined(
+        self,
+        weight_shards: list,
+        group=None,
+        use_sdma: Optional[bool] = None,
+    ) -> list:
+        """Pipelined FP8 all-gather for multiple weight shards.
+
+        Overlaps allgather(i+1) with dequant(i) on separate streams.
+
+        Args:
+            weight_shards: List of local weight shards.
+            group: Process group (defaults to ``self._dp_group`` or WORLD).
+            use_sdma: Override SDMA preference.
+
+        Returns:
+            List of full (dequantized) weight tensors in BF16.
+        """
+        from lumen.quantize.fp8_params import fp8_allgather_weight_pipelined
+
+        if use_sdma is None:
+            use_sdma = self._use_sdma
+        if group is None:
+            group = self._dp_group
+
+        return fp8_allgather_weight_pipelined(
+            weight_shards,
+            group=group,
+            fp8_dtype=self.fp8_dtype,
+            target_dtype=torch.bfloat16,
+            use_sdma=use_sdma,
+        )
+
     # ------------------------------------------------------------------
     # Quantize core (shared by both on-the-fly and FP8 param paths)
     # ------------------------------------------------------------------

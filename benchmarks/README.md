@@ -12,7 +12,7 @@ All benchmarks use **Llama 3.1 8B** dimensions by default:
 |---|------|--------------------------|-------------|
 | 1 | `bench_kernel_launch.py` | FP8 quantized_linear (7 scaling modes), fused MoE, FP8 activation store, attention backends (csrc/triton), norm+GEMM pipeline | 1 GPU + AITER |
 | 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison | 2+ GPUs |
-| 3 | `bench_fp8_param_allgather.py` | FP8ParamManager on LumenGatedMLP/LumenFusedMLP, dequant hooks, param compression SNR | 1 GPU |
+| 3 | `bench_fp8_param_allgather.py` | FP8ParamManager, dequant hooks, param compression SNR, **Layer 2 FP8 all-gather** (quant→gather→dequant), tail latency profiling, multi-GPU scaling efficiency | 1 GPU (sections 1-5), 2+ GPUs (sections 6-8), 4+ GPUs (sections 9-10) |
 | 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
 | 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU |
 | 6 | `bench_fused_pipeline.py` | Pipelined AG+GEMM / GEMM+RS overlap, NCCL vs SDMA backend, backward overlap isolation, chunk sweep | 2+ GPUs |
@@ -52,6 +52,16 @@ torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -
 torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k SdmaColumn
 # Backward isolation
 torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k BackwardOverlap
+```
+
+### FP8 Param All-Gather — Tail Latency & Scaling
+
+```bash
+# Tail latency profiling (8 GPUs recommended)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k TailLatency
+
+# Multi-GPU scaling efficiency (4+ GPUs)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k Scaling
 ```
 
 ### E2E Transformer Layer
@@ -129,6 +139,9 @@ Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
 | Dequant hooks | Forward latency with BF16 vs FP8 params + dequant overhead |
 | Param compression | ~2x memory reduction, per-layer bandwidth savings |
 | Round-trip SNR | Quantization quality (>15 dB param, >10 dB output) |
+| **Layer 2 FP8 all-gather** | `fp8_allgather_weight`: quant→gather→per-shard-dequant pipeline via NCCL or SDMA |
+| **Tail latency profiling** | Per-rank p95/p99/max latency, cross-rank worst-case tail for BF16 vs FP8 |
+| **Scaling efficiency** | Group-size sweep (2→4→8 GPUs): BF16 vs FP8 gather+GEMM and pipelined FP8 |
 
 ### 4. RoPE Fusion (`bench_rope_fusion.py`)
 

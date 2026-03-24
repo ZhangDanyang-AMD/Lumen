@@ -246,6 +246,7 @@ class SdmaAllreduce:
         self._wire_dtype = torch.bfloat16 if dtype == torch.float32 else dtype
         self._handle = None
         self._capacity_elems: int = 0
+        self._out_buf: Optional[torch.Tensor] = None
 
     @property
     def npes(self) -> int:
@@ -271,6 +272,7 @@ class SdmaAllreduce:
             dtype=self._wire_dtype,
         )
         self._capacity_elems = n_elems
+        self._out_buf = None
         logger.debug(
             "SdmaAllreduce: (re-)allocated handle for %d elems, " "user_dtype=%s wire_dtype=%s (PE %d/%d)",
             n_elems,
@@ -283,6 +285,18 @@ class SdmaAllreduce:
     @property
     def _needs_cast(self) -> bool:
         return self._user_dtype != self._wire_dtype
+
+    def _get_out_buf(self, template: torch.Tensor) -> torch.Tensor:
+        """Return a cached flat output buffer matching *template*'s size/dtype/device."""
+        n = template.numel()
+        if (
+            self._out_buf is None
+            or self._out_buf.numel() < n
+            or self._out_buf.device != template.device
+            or self._out_buf.dtype != template.dtype
+        ):
+            self._out_buf = torch.empty_like(template)
+        return self._out_buf[:n]
 
     def inplace(
         self,
@@ -298,15 +312,14 @@ class SdmaAllreduce:
         flat = tensor.reshape(-1)
         if self._needs_cast:
             buf = flat.to(self._wire_dtype)
-            out = torch.empty_like(buf)
+            out = self._get_out_buf(buf)
             self._handle(buf, out, n_elems, stream)
-            stream.synchronize()
             tensor.copy_(out.to(self._user_dtype).reshape(tensor.shape))
         else:
-            out = torch.empty_like(flat)
+            out = self._get_out_buf(flat)
             self._handle(flat, out, n_elems, stream)
-            stream.synchronize()
             tensor.copy_(out.reshape(tensor.shape))
+        stream.synchronize()
 
     def __call__(
         self,

@@ -646,16 +646,20 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
 
         # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
-        # In hybrid mode (e.g. E4M3 fwd / E5M2 bwd), weight_fp8 was saved
-        # as the forward dtype.  AITER FP8 GEMM kernels do not support
-        # mixed-dtype operands (CK rejects, Triton misinterprets, hipBLASLt
-        # has no tuned config for E5M2).  Dequantize both to BF16 in that
-        # case.
+        # Fall back to BF16 dequant when:
+        #  1. Hybrid mode (E4M3 fwd / E5M2 bwd) — AITER FP8 GEMM kernels
+        #     don't support mixed-dtype operands.
+        #  2. Forward used per_token / blockwise quantization — weight_scale
+        #     is multi-element and incompatible with the per-tensor dgrad GEMM.
+        # Dequant weight BEFORE transposing so scale dimensions align.
         _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
-        if _mixed_dtype:
+        _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
+        if _mixed_dtype or _needs_dequant:
+            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
             grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-            weight_t_bf16 = (weight_fp8.t().contiguous().float() * weight_scale).bfloat16()
-            grad_input = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
+            weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
+            grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
         else:
             grad_input = dispatch_gemm(
                 grad_fp8,

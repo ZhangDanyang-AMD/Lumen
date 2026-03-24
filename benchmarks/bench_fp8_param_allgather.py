@@ -19,6 +19,10 @@ Exercises Lumen's ``FP8ParamManager`` feature:
     shards on dedicated DMA engines.
   * **Section 8 — E2E distributed**: Full-model FP8 param allgather + forward
     correctness across ranks.
+  * **Section 9 — Tail latency**: Per-rank p95/max tail latency profiling
+    for FP8 all-gather across rank counts.
+  * **Section 10 — Scaling efficiency**: Multi-GPU scaling comparison
+    (2→4→8 GPU subgroups) for FP8 vs BF16 all-gather + GEMM.
 
 Run single-GPU::
 
@@ -41,6 +45,10 @@ Run multi-GPU (8 GPU) — all distributed tests::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "NCCL or SDMA or E2E"
 
+Run multi-GPU (8 GPU) — tail latency & scaling::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "TailLatency or Scaling"
+
 Run multi-GPU (8 GPU) — individual sections::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
@@ -50,7 +58,9 @@ Run multi-GPU (8 GPU) — individual sections::
 
 from __future__ import annotations
 
+import math
 import os
+import statistics
 from typing import List
 
 import pytest
@@ -128,6 +138,7 @@ _DIST = pytest.mark.skipif(
 
 def _sdma_available():
     try:
+        os.environ.setdefault("MORI_ENABLE_SDMA", "1")
         import mori  # noqa: F401
 
         return True
@@ -1120,6 +1131,372 @@ class TestFP8ParamE2EDistributed:
 
 
 # ---------------------------------------------------------------------------
+# 9. Tail latency across ranks: per-rank p95/max for FP8 all-gather
+# ---------------------------------------------------------------------------
+
+
+def _per_rank_latencies(fn, warmup=10, iters=50, dist_barrier=True):
+    """Collect per-iteration latencies on this rank, return sorted list."""
+    for _ in range(warmup):
+        if dist_barrier:
+            dist.barrier()
+        fn()
+    torch.cuda.synchronize()
+
+    times = []
+    for _ in range(iters):
+        if dist_barrier:
+            dist.barrier()
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        fn()
+        end.record()
+        torch.cuda.synchronize()
+        times.append(start.elapsed_time(end))
+    return times
+
+
+@_DIST
+class TestFP8AllGatherTailLatency:
+    """Per-rank tail latency (p95/p99/max) for FP8 vs BF16 all-gather.
+
+    Reports per-rank statistics and cross-rank max (the true system tail).
+    Requires 2+ GPUs.
+
+    Run::
+
+        torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k TailLatency
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    @pytest.mark.parametrize("shape", [(HIDDEN, HIDDEN), (FFN_HIDDEN, HIDDEN)])
+    def test_tail_latency_bf16_vs_fp8(self, shape):
+        """Compare p95/p99/max latency per rank for BF16 vs FP8 all-gather."""
+        from lumen.quantize.fp8_params import quantize_param_to_fp8
+
+        weight = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        fp8_w, _ = quantize_param_to_fp8(weight)
+
+        bf16_shard = weight.chunk(self.world)[self.rank].contiguous()
+        fp8_shard = fp8_w.chunk(self.world)[self.rank].contiguous()
+
+        bf16_out = torch.empty_like(weight)
+        fp8_out = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
+
+        iters = 100
+
+        bf16_times = _per_rank_latencies(
+            lambda: dist.all_gather_into_tensor(bf16_out, bf16_shard),
+            warmup=_WARMUP,
+            iters=iters,
+        )
+        fp8_times = _per_rank_latencies(
+            lambda: dist.all_gather_into_tensor(fp8_out, fp8_shard),
+            warmup=_WARMUP,
+            iters=iters,
+        )
+
+        def _stats(times):
+            s = sorted(times)
+            p95_idx = min(int(math.ceil(0.95 * len(s))) - 1, len(s) - 1)
+            p99_idx = min(int(math.ceil(0.99 * len(s))) - 1, len(s) - 1)
+            return {
+                "avg": statistics.mean(times),
+                "p95": s[p95_idx],
+                "p99": s[p99_idx],
+                "max": s[-1],
+            }
+
+        bf16_s = _stats(bf16_times)
+        fp8_s = _stats(fp8_times)
+
+        bf16_p95_t = torch.tensor(bf16_s["p95"], device=self.device)
+        fp8_p95_t = torch.tensor(fp8_s["p95"], device=self.device)
+        bf16_max_t = torch.tensor(bf16_s["max"], device=self.device)
+        fp8_max_t = torch.tensor(fp8_s["max"], device=self.device)
+
+        dist.all_reduce(bf16_p95_t, op=dist.ReduceOp.MAX)
+        dist.all_reduce(fp8_p95_t, op=dist.ReduceOp.MAX)
+        dist.all_reduce(bf16_max_t, op=dist.ReduceOp.MAX)
+        dist.all_reduce(fp8_max_t, op=dist.ReduceOp.MAX)
+
+        if self.rank == 0:
+            sep = "=" * 72
+            print(f"\n{sep}")
+            print(f"  Tail Latency — FP8 vs BF16 All-Gather {shape} (world={self.world})")
+            print(sep)
+            print(f"  {'Metric':<25s}  {'BF16 (ms)':>12s}  {'FP8 (ms)':>12s}  {'Reduction':>10s}")
+            print(f"  {'─' * 25}  {'─' * 12}  {'─' * 12}  {'─' * 10}")
+            for label, bv, fv in [
+                ("Rank-0 avg", bf16_s["avg"], fp8_s["avg"]),
+                ("Rank-0 p95", bf16_s["p95"], fp8_s["p95"]),
+                ("Rank-0 p99", bf16_s["p99"], fp8_s["p99"]),
+                ("Rank-0 max", bf16_s["max"], fp8_s["max"]),
+                ("Cross-rank p95 max", bf16_p95_t.item(), fp8_p95_t.item()),
+                ("Cross-rank max", bf16_max_t.item(), fp8_max_t.item()),
+            ]:
+                ratio = bv / max(fv, 1e-6)
+                print(f"  {label:<25s}  {bv:>12.3f}  {fv:>12.3f}  {ratio:>9.2f}x")
+            print(sep)
+
+    def test_tail_latency_full_pipeline(self):
+        """Tail latency for the full quant→gather→dequant pipeline."""
+        from lumen.quantize.fp8_params import fp8_allgather_weight
+
+        shape = (FFN_HIDDEN, HIDDEN)
+        weight = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        shard = weight.chunk(self.world)[self.rank].contiguous()
+
+        bf16_out = torch.empty_like(weight)
+        bf16_shard = shard.clone()
+
+        iters = 100
+
+        bf16_times = _per_rank_latencies(
+            lambda: dist.all_gather_into_tensor(bf16_out, bf16_shard),
+            warmup=_WARMUP,
+            iters=iters,
+        )
+        fp8_times = _per_rank_latencies(
+            lambda: fp8_allgather_weight(shard),
+            warmup=_WARMUP,
+            iters=iters,
+        )
+
+        def _p95(times):
+            s = sorted(times)
+            return s[min(int(math.ceil(0.95 * len(s))) - 1, len(s) - 1)]
+
+        bf16_p95 = torch.tensor(_p95(bf16_times), device=self.device)
+        fp8_p95 = torch.tensor(_p95(fp8_times), device=self.device)
+        dist.all_reduce(bf16_p95, op=dist.ReduceOp.MAX)
+        dist.all_reduce(fp8_p95, op=dist.ReduceOp.MAX)
+
+        if self.rank == 0:
+            print(
+                f"\n  Full Pipeline Tail — {shape} (world={self.world})\n"
+                f"  BF16 cross-rank p95: {bf16_p95.item():.3f} ms\n"
+                f"  FP8  cross-rank p95: {fp8_p95.item():.3f} ms\n"
+                f"  Tail reduction: {bf16_p95.item() / max(fp8_p95.item(), 1e-6):.2f}x"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 10. Scaling efficiency: compare FP8 vs BF16 across GPU counts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    "RANK" not in os.environ or int(os.environ.get("WORLD_SIZE", "1")) < 4,
+    reason="Needs 4+ GPUs — run with torchrun --nproc_per_node=N (N>=4)",
+)
+class TestFP8AllGatherScalingEfficiency:
+    """Multi-GPU scaling efficiency for FP8 vs BF16 all-gather + GEMM.
+
+    Creates process sub-groups of size 2, 4, and (if available) 8 to
+    measure how each mode scales. Reports per-group-size latency and
+    scaling efficiency relative to the smallest group.
+
+    Run::
+
+        torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k Scaling
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def test_scaling_allgather_gemm(self):
+        """Sweep group sizes (2,4,8) for BF16 vs FP8 gather+GEMM."""
+        from lumen.quantize.fp8_params import (
+            dequantize_param_from_fp8,
+            quantize_param_to_fp8,
+        )
+
+        shape = (FFN_HIDDEN, HIDDEN)
+        weight_full = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        dist.broadcast(weight_full, src=0)
+        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
+
+        group_sizes = [s for s in [2, 4, 8] if s <= self.world]
+        bf16_results = {}
+        fp8_results = {}
+
+        for gs in group_sizes:
+            group_id = self.rank // gs
+            ranks_in_group = list(range(group_id * gs, group_id * gs + gs))
+            subgroup = dist.new_group(ranks_in_group)
+
+            local_rank_in_group = self.rank % gs
+
+            fp8_full, scale = quantize_param_to_fp8(weight_full)
+            bf16_shard = weight_full.chunk(gs, dim=0)[local_rank_in_group].contiguous()
+            fp8_shard = fp8_full.chunk(gs, dim=0)[local_rank_in_group].contiguous()
+
+            bf16_out = torch.empty_like(weight_full)
+            fp8_out = torch.empty(shape, device=self.device, dtype=fp8_full.dtype)
+
+            for _ in range(5):
+                dist.all_gather_into_tensor(bf16_out, bf16_shard, group=subgroup)
+                dist.all_gather_into_tensor(fp8_out, fp8_shard, group=subgroup)
+            torch.cuda.synchronize()
+
+            def _bf16_fn():
+                dist.all_gather_into_tensor(bf16_out, bf16_shard, group=subgroup)
+                torch.nn.functional.linear(x, bf16_out)
+
+            def _fp8_fn():
+                dist.all_gather_into_tensor(fp8_out, fp8_shard, group=subgroup)
+                w = dequantize_param_from_fp8(fp8_out, scale, torch.bfloat16)
+                torch.nn.functional.linear(x, w)
+
+            r_bf16 = cuda_timer(
+                _bf16_fn,
+                label=f"BF16 gather+GEMM (gs={gs})",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+            r_fp8 = cuda_timer(
+                _fp8_fn,
+                label=f"FP8 gather+dequant+GEMM (gs={gs})",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+
+            bf16_results[gs] = r_bf16
+            fp8_results[gs] = r_fp8
+
+            dist.destroy_process_group(subgroup)
+
+        if self.rank == 0:
+            baseline_gs = group_sizes[0]
+            bf16_base = bf16_results[baseline_gs].avg_ms
+            fp8_base = fp8_results[baseline_gs].avg_ms
+
+            sep = "=" * 80
+            print(f"\n{sep}")
+            print(f"  Scaling Efficiency — FP8 vs BF16 Gather+GEMM {shape}")
+            print(f"  Baseline group size: {baseline_gs}")
+            print(sep)
+            print(
+                f"  {'GPUs':<6s}  "
+                f"{'BF16 (ms)':>10s}  {'BF16 eff':>9s}  "
+                f"{'FP8 (ms)':>10s}  {'FP8 eff':>9s}  "
+                f"{'FP8 speedup':>11s}"
+            )
+            print(f"  {'─' * 6}  " f"{'─' * 10}  {'─' * 9}  " f"{'─' * 10}  {'─' * 9}  " f"{'─' * 11}")
+
+            for gs in group_sizes:
+                bf16_ms = bf16_results[gs].avg_ms
+                fp8_ms = fp8_results[gs].avg_ms
+                bf16_eff = (bf16_base / max(bf16_ms, 1e-6)) * 100
+                fp8_eff = (fp8_base / max(fp8_ms, 1e-6)) * 100
+                speedup = bf16_ms / max(fp8_ms, 1e-6)
+
+                print(
+                    f"  {gs:<6d}  "
+                    f"{bf16_ms:>10.3f}  {bf16_eff:>8.1f}%  "
+                    f"{fp8_ms:>10.3f}  {fp8_eff:>8.1f}%  "
+                    f"{speedup:>10.2f}x"
+                )
+
+            print(sep)
+            print(
+                "  Ideal scaling: latency stays flat as group size grows\n"
+                "  (all-gather volume scales with group size, but shard\n"
+                "  size shrinks proportionally — net traffic per rank stays\n"
+                "  constant if bandwidth scales linearly with group size)"
+            )
+            print()
+
+    def test_scaling_pipelined_fp8(self):
+        """Sweep group sizes for pipelined FP8 gather+dequant+GEMM.
+
+        Uses fp8_allgather_weight_pipelined to overlap communication
+        with dequant across multiple layers.
+        """
+        from lumen.quantize.fp8_params import fp8_allgather_weight_pipelined
+
+        layer_shapes = [
+            (FFN_HIDDEN, HIDDEN),
+            (FFN_HIDDEN, HIDDEN),
+            (HIDDEN, FFN_HIDDEN),
+            (HIDDEN, HIDDEN),
+        ]
+
+        weights = []
+        for s in layer_shapes:
+            w = torch.randn(*s, device=self.device, dtype=torch.bfloat16)
+            dist.broadcast(w, src=0)
+            weights.append(w)
+
+        xs = [torch.randn(2, 2048, s[1], device=self.device, dtype=torch.bfloat16) for s in layer_shapes]
+
+        group_sizes = [s for s in [2, 4, 8] if s <= self.world]
+        results = {}
+
+        for gs in group_sizes:
+            group_id = self.rank // gs
+            ranks_in_group = list(range(group_id * gs, group_id * gs + gs))
+            subgroup = dist.new_group(ranks_in_group)
+            local_rank = self.rank % gs
+
+            shards = [w.chunk(gs, dim=0)[local_rank].contiguous() for w in weights]
+
+            for _ in range(3):
+                fp8_allgather_weight_pipelined(shards, group=subgroup)
+            torch.cuda.synchronize()
+
+            def _pipeline_fn():
+                full_ws = fp8_allgather_weight_pipelined(shards, group=subgroup)
+                for i, fw in enumerate(full_ws):
+                    torch.nn.functional.linear(xs[i], fw)
+
+            r = cuda_timer(
+                _pipeline_fn,
+                label=f"FP8 pipelined {len(layer_shapes)}L (gs={gs})",
+                warmup=_WARMUP,
+                iters=_ITERS,
+                trim_pct=_TRIM,
+                dist_barrier=True,
+            )
+            results[gs] = r
+
+            dist.destroy_process_group(subgroup)
+
+        if self.rank == 0:
+            baseline_gs = group_sizes[0]
+            base_ms = results[baseline_gs].avg_ms
+
+            print(f"\n  FP8 Pipelined Scaling — {len(layer_shapes)} layers")
+            print(f"  {'GPUs':<6s}  {'Avg (ms)':>10s}  {'Scaling eff':>11s}  {'P95 (ms)':>10s}")
+            print(f"  {'─' * 6}  {'─' * 10}  {'─' * 11}  {'─' * 10}")
+            for gs in group_sizes:
+                r = results[gs]
+                eff = (base_ms / max(r.avg_ms, 1e-6)) * 100
+                print(f"  {gs:<6d}  {r.avg_ms:>10.3f}  {eff:>10.1f}%  {r.p95_ms:>10.3f}")
+            print()
+
+
+# ---------------------------------------------------------------------------
 # Standalone runner
 # ---------------------------------------------------------------------------
 
@@ -1130,6 +1507,7 @@ def main():
     from lumen.quantize.fp8_params import (
         FP8ParamManager,
         dequantize_param_from_fp8,
+        fp8_allgather_weight,
         quantize_param_to_fp8,
     )
 
@@ -1157,6 +1535,18 @@ def main():
     r_mem.extra["fp8"] = format_bytes(total_fp8)
     r_mem.extra["ratio"] = round(ratio, 2)
     results.append(r_mem)
+
+    # Layer 2: FP8 all-gather (single-GPU simulation)
+    if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+        shape = (FFN_HIDDEN, HIDDEN)
+        w = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
+        shard = w.chunk(dist.get_world_size())[dist.get_rank()].contiguous()
+        r_l2 = cuda_timer(
+            lambda: fp8_allgather_weight(shard),
+            label="FP8 allgather Layer 2",
+            dist_barrier=True,
+        )
+        results.append(r_l2)
 
     print_report("Lumen FP8 Param All-Gather", results)
     print_table("Summary Table", results)

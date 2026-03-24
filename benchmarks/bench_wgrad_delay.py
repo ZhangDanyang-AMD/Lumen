@@ -606,6 +606,7 @@ class TestDeferredWgradRealComm:
 
 def _sdma_available():
     try:
+        os.environ.setdefault("MORI_ENABLE_SDMA", "1")
         import mori  # noqa: F401
 
         return True
