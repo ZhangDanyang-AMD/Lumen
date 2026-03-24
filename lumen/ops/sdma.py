@@ -295,14 +295,18 @@ class SdmaAllreduce:
         self._ensure_handle(n_elems)
         if stream is None:
             stream = torch.cuda.current_stream(tensor.device)
+        flat = tensor.reshape(-1)
         if self._needs_cast:
-            buf = tensor.to(self._wire_dtype)
-            self._handle.allreduce_inplace(buf, n_elems, stream)
+            buf = flat.to(self._wire_dtype)
+            out = torch.empty_like(buf)
+            self._handle(buf, out, n_elems, stream)
             stream.synchronize()
-            tensor.copy_(buf.to(self._user_dtype))
+            tensor.copy_(out.to(self._user_dtype).reshape(tensor.shape))
         else:
-            self._handle.allreduce_inplace(tensor, n_elems, stream)
+            out = torch.empty_like(flat)
+            self._handle(flat, out, n_elems, stream)
             stream.synchronize()
+            tensor.copy_(out.reshape(tensor.shape))
 
     def __call__(
         self,

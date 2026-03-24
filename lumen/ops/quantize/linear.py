@@ -201,16 +201,31 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
     return hipb_mm(a_fp8, w_fp8.t().contiguous(), -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
+def _expand_per_tensor_scale(scale, size):
+    """Broadcast a per-tensor scale (1,) to a contiguous per-row vector.
+
+    AITER's gemm_a8w8 kernels (CK and Triton) index into scales with
+    per-row offsets.  A (1,)-shaped tensor causes out-of-bounds reads.
+    """
+    return scale.float().reshape(1).expand(size).contiguous()
+
+
 def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.gemm_op_a8w8 import gemm_a8w8_CK
 
-    return gemm_a8w8_CK(a_fp8, w_fp8, scale_a, scale_w)
+    M, N = a_fp8.shape[0], w_fp8.shape[0]
+    sa = _expand_per_tensor_scale(scale_a, M).unsqueeze(1)
+    sw = _expand_per_tensor_scale(scale_w, N).unsqueeze(1)
+    return gemm_a8w8_CK(a_fp8, w_fp8, sa, sw)
 
 
 def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_a8w8 import gemm_a8w8
 
-    return gemm_a8w8(a_fp8, w_fp8, scale_a, scale_w)
+    M, N = a_fp8.shape[0], w_fp8.shape[0]
+    sa = _expand_per_tensor_scale(scale_a, M)
+    sw = _expand_per_tensor_scale(scale_w, N)
+    return gemm_a8w8(a_fp8, w_fp8, sa, sw)
 
 
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w):
@@ -226,7 +241,7 @@ def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w):
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_hipblas():
-        backends.append((Backend.CK, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
+        backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
     return try_backends(backends, op_name="gemm_per_tensor")
 
 

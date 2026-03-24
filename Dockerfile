@@ -17,7 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY . /workspace/Lumen
 
 # AITER (editable from third_party)
-RUN cd /workspace/Lumen/third_party/aiter && pip install -e .
+# PREBUILD_KERNELS=1 pre-compiles CK attention forward+backward .so at
+# install time.  Without it, the first CK call triggers JIT compilation
+# which SIGSEGV's inside mp.spawn subprocesses (fork + HIP driver issue).
+RUN cd /workspace/Lumen/third_party/aiter && \
+    PREBUILD_KERNELS=1 pip install -e .
 
 # mori — SDMA communication library (editable from third_party)
 # Must init mori's own submodules (spdlog, msgpack-c) before cmake build.

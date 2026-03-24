@@ -35,7 +35,8 @@ WORKDIR /workspace
 COPY . /workspace/Lumen
 
 # AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
-RUN cd /workspace/Lumen/third_party/aiter && pip install -e . --force-reinstall
+RUN cd /workspace/Lumen/third_party/aiter && \
+    PREBUILD_KERNELS=1 pip install -e . --force-reinstall
 
 RUN cd /workspace/Lumen && pip install -e ".[all]"
 

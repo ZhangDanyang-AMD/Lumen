@@ -267,18 +267,20 @@ class _TpSdmaAllreduce:
 
     def inplace(self, tensor: torch.Tensor) -> None:
         flat = tensor.contiguous().reshape(-1)
-        self._ensure(flat.numel())
+        n = flat.numel()
+        self._ensure(n)
         stream = torch.cuda.current_stream(tensor.device)
         if self._needs_cast:
             buf = flat.to(self._wire_dtype)
-            self._handle.allreduce_inplace(buf, buf.numel(), stream)
+            out = torch.empty_like(buf)
+            self._handle(buf, out, n, stream)
             stream.synchronize()
-            tensor.copy_(buf.to(self._user_dtype).reshape(tensor.shape))
+            tensor.copy_(out.to(self._user_dtype).reshape(tensor.shape))
         else:
-            self._handle.allreduce_inplace(flat, flat.numel(), stream)
+            out = torch.empty_like(flat)
+            self._handle(flat, out, n, stream)
             stream.synchronize()
-            if not tensor.is_contiguous():
-                tensor.copy_(flat.reshape(tensor.shape))
+            tensor.copy_(out.reshape(tensor.shape))
 
     def start_async_inplace(self, tensor: torch.Tensor, stream=None) -> bool:
         """Start async in-place allreduce.  Caller must call :meth:`wait_async`.
@@ -501,12 +503,10 @@ class SdmaTpComm:
     ) -> torch.cuda.Event:
         """Reduce-scatter a single chunk for pipelined overlap.
 
-        .. warning::
+        .. note::
 
-            When ``rs_chunk_method="allreduce"`` and the tensor dtype matches
-            the SDMA wire dtype (no cast needed), the allreduce runs in-place
-            on *input_chunk*.  Callers must not read *input_chunk* after this
-            call returns.
+            When ``rs_chunk_method="allreduce"``, the result is written to an
+            internal buffer; *input_chunk* is not modified.
 
         Args:
             input_chunk: ``[S_chunk, ...]`` — chunk to reduce-scatter.
@@ -568,9 +568,10 @@ class SdmaTpComm:
                 device=flat.device,
             )
 
-        ar._handle.allreduce_inplace(flat, n_elems, stream)
+        out_flat = self._rs_chunk_buf[:n_elems]
+        ar._handle(flat, out_flat, n_elems, stream)
 
-        reduced = flat.view(input_chunk.shape)
+        reduced = out_flat.view(input_chunk.shape)
         chunk_size = input_chunk.shape[0] // npes
         start = self._ctx.my_pe * chunk_size
         with torch.cuda.stream(stream):

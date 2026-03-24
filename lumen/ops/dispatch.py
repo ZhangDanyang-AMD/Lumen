@@ -36,6 +36,7 @@ class Backend(Enum):
     ASM = "asm"
     CK = "ck"
     TRITON = "triton"
+    HIPBLAS = "hipblas"
 
 
 FALLBACK_ORDER = [Backend.ASM, Backend.CK, Backend.TRITON]
