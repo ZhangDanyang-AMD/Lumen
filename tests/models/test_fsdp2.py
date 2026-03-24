@@ -16,8 +16,10 @@ How to run::
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 from unittest.mock import MagicMock, patch
 
@@ -65,22 +67,25 @@ _BF16_TRAIN_SCRIPT = textwrap.dedent(
     input_ids = torch.randint(0, 256, (2, 16), device="cuda")
     labels = input_ids.clone()
 
-    losses = []
-    for step in range(10):
-        out = model(input_ids=input_ids, labels=labels)
-        loss = out.loss
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        optimizer.zero_grad()
-        losses.append(loss.item())
+    try:
+        losses = []
+        for step in range(10):
+            out = model(input_ids=input_ids, labels=labels)
+            loss = out.loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            losses.append(loss.item())
 
-    if rank == 0:
-        assert losses[-1] < losses[0] * 0.8, (
-            f"Loss did not decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
-        )
-        print(f"PASS: loss {losses[0]:.4f} -> {losses[-1]:.4f}")
-    dist.destroy_process_group()
+        if rank == 0:
+            assert losses[-1] < losses[0] * 0.8, (
+                f"Loss did not decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
+            )
+            print(f"PASS: loss {losses[0]:.4f} -> {losses[-1]:.4f}")
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 """
 )
 
@@ -120,22 +125,25 @@ _FP8_TRAIN_SCRIPT = textwrap.dedent(
     input_ids = torch.randint(0, 256, (2, 16), device="cuda")
     labels = input_ids.clone()
 
-    losses = []
-    for step in range(10):
-        out = model(input_ids=input_ids, labels=labels)
-        loss = out.loss
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        optimizer.zero_grad()
-        losses.append(loss.item())
+    try:
+        losses = []
+        for step in range(10):
+            out = model(input_ids=input_ids, labels=labels)
+            loss = out.loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+            losses.append(loss.item())
 
-    if rank == 0:
-        assert losses[-1] < losses[0] * 0.9, (
-            f"FP8 loss did not decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
-        )
-        print(f"PASS: FP8 loss {losses[0]:.4f} -> {losses[-1]:.4f}")
-    dist.destroy_process_group()
+        if rank == 0:
+            assert losses[-1] < losses[0] * 0.9, (
+                f"FP8 loss did not decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
+            )
+            print(f"PASS: FP8 loss {losses[0]:.4f} -> {losses[-1]:.4f}")
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 """
 )
 
@@ -177,7 +185,8 @@ class TestApplyFSDP2:
 
         with patch("torch.distributed.fsdp.fully_shard") as mock_fs, patch(
             "torch.distributed.device_mesh.init_device_mesh"
-        ) as mock_mesh:
+        ) as mock_mesh, patch("lumen.models.fsdp.dist") as mock_dist:
+            mock_dist.get_world_size.return_value = 1
             mock_mesh.return_value = MagicMock()
             mock_fs.side_effect = lambda m, **kw: m
             apply_fsdp2(model, args)
@@ -215,7 +224,8 @@ class TestApplyFSDP2:
 
         with patch("torch.distributed.fsdp.fully_shard") as mock_fs, patch(
             "torch.distributed.device_mesh.init_device_mesh"
-        ) as mock_mesh:
+        ) as mock_mesh, patch("lumen.models.fsdp.dist") as mock_dist:
+            mock_dist.get_world_size.return_value = 1
             mock_mesh.return_value = MagicMock()
             mock_fs.side_effect = lambda m, **kw: m
             apply_fsdp2(model, args)
@@ -241,7 +251,8 @@ class TestApplyFSDP2:
 
         with patch("torch.distributed.fsdp.fully_shard") as mock_fs, patch(
             "torch.distributed.device_mesh.init_device_mesh"
-        ) as mock_mesh:
+        ) as mock_mesh, patch("lumen.models.fsdp.dist") as mock_dist:
+            mock_dist.get_world_size.return_value = 1
             mock_mesh.return_value = MagicMock()
             mock_fs.side_effect = lambda m, **kw: m
             apply_fsdp2(model, args)
@@ -273,27 +284,58 @@ class TestResetFp8StateFSDP2:
 @_DIST
 class TestFSDP2Integration:
 
+    @staticmethod
+    def _get_free_port():
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
     def _run_training_script(self, script: str, timeout: int = 120):
+        port = str(self._get_free_port())
         env = os.environ.copy()
         env["MASTER_ADDR"] = "127.0.0.1"
-        env["MASTER_PORT"] = "29500"
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "torch.distributed.run",
-                "--nproc_per_node=2",
-                "--master_addr=127.0.0.1",
-                "--master_port=29500",
-                sys.executable,
-                "-c",
-                script,
-            ],
+        env["MASTER_PORT"] = port
+        kwargs = dict(
             capture_output=True,
             text=True,
             timeout=timeout,
             env=env,
         )
+        if sys.platform != "win32":
+            kwargs["start_new_session"] = True
+
+        fd, script_path = tempfile.mkstemp(suffix=".py")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(script)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "torch.distributed.run",
+                    "--nproc_per_node=2",
+                    "--master_addr=127.0.0.1",
+                    f"--master_port={port}",
+                    script_path,
+                ],
+                **kwargs,
+            )
+        except subprocess.TimeoutExpired as exc:
+            if sys.platform != "win32":
+                try:
+                    os.killpg(os.getpgid(exc.pid), signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
+            stdout = (exc.stdout or "")[:2000]
+            stderr = (exc.stderr or "")[:2000]
+            pytest.fail(
+                f"Training script timed out after {timeout}s " f"(port {port}).\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+            )
+        finally:
+            os.unlink(script_path)
         return result
 
     def test_bf16_fsdp2_overfit(self):

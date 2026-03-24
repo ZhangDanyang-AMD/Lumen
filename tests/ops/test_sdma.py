@@ -45,9 +45,6 @@ How to run::
 
 import functools
 import os
-import subprocess
-import sys
-import textwrap
 import time
 
 import pytest
@@ -64,70 +61,81 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
+def _probe_sdma_worker(rank, world_size, port):
+    """Minimal SDMA probe worker matching the mori ccl test pattern.
+
+    Uses the same init sequence as the mori ``test_allreduce.py`` reference:
+    ``TorchDistContext`` → ``shmem_torch_process_group_init`` → SDMA op → teardown.
+    """
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    from lumen.ops.sdma import SdmaAllgather, SdmaContext
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+
+    ag = None
+    try:
+        ctx = SdmaContext.get()
+        ag = SdmaAllgather(ctx)
+        local = torch.full((4,), float(rank), dtype=torch.float32, device=device)
+        stream = torch.cuda.current_stream(device)
+        _ = ag(local, stream)
+        stream.synchronize()
+    finally:
+        del ag
+        torch.cuda.synchronize()
+        if dist.is_initialized():
+            dist.barrier()
+        SdmaContext.reset()
+        if dist.is_initialized():
+            dist.barrier()
+        shmem.shmem_finalize()
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
+
+
 @functools.lru_cache(maxsize=1)
 def _sdma_hardware_available() -> bool:
     """Probe whether SDMA hardware is usable with a real 2-rank allgather.
 
-    A single-rank mori shmem init can succeed even without RDMA (it only
-    touches local resources).  Multi-rank collectives require RDMA
-    transport, so this probe spawns 2 ranks that do a small allgather.
-    If RDMA devices are missing (``anvil.cpp`` fails), the subprocess
-    exits non-zero and distributed SDMA tests are skipped.
+    Uses ``mp.spawn`` (same as the mori ccl reference tests and our own
+    distributed workers) so that child processes inherit all loaded
+    libraries and environment from the parent.  Previous versions used
+    ``subprocess.Popen`` which could fail to locate ``libtorch.so`` or
+    other shared libraries even when they were loadable in-process.
     """
     if not is_sdma_available():
         return False
     if torch.cuda.device_count() < 2:
         return False
-    probe_script = textwrap.dedent(
-        """\
-        import os, sys, torch, torch.distributed as dist
-
-        rank = int(os.environ["RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        os.environ["MORI_ENABLE_SDMA"] = "1"
-        torch.cuda.set_device(rank)
-        device = torch.device("cuda", rank)
-        dist.init_process_group(
-            "cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device
-        )
-        torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
-        import mori.shmem as shmem
-        shmem.shmem_torch_process_group_init("default")
-
-        from lumen.ops.sdma import SdmaAllgather, SdmaContext
-        ctx = SdmaContext.get()
-        ag = SdmaAllgather(ctx)
-        local = torch.full((4,), float(rank), dtype=torch.float32, device=device)
-        stream = torch.cuda.current_stream(device)
-        out = ag(local, stream)
-        stream.synchronize()
-        del ag
-        torch.cuda.synchronize()
-        dist.barrier()
-        SdmaContext.reset()
-        dist.barrier()
-        shmem.shmem_finalize()
-        dist.barrier()
-        dist.destroy_process_group()
-    """
-    )
     try:
+        import torch.multiprocessing as mp
+
+        os.environ.setdefault("MORI_ENABLE_SDMA", "1")
         port = _get_free_port()
-        env = {**os.environ, "MASTER_ADDR": "127.0.0.1", "MASTER_PORT": str(port)}
-        procs = []
-        for r in range(2):
-            p = subprocess.Popen(
-                [sys.executable, "-c", probe_script],
-                env={**env, "RANK": str(r), "WORLD_SIZE": "2"},
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            procs.append(p)
-        ok = all(p.wait(timeout=60) == 0 for p in procs)
-        return ok
-    except (subprocess.TimeoutExpired, OSError):
-        for p in procs:
-            p.kill()
+        ctx = mp.spawn(
+            _probe_sdma_worker,
+            args=(2, port),
+            nprocs=2,
+            join=False,
+        )
+        deadline = time.monotonic() + 60
+        while not ctx.join(timeout=5):
+            if time.monotonic() > deadline:
+                for proc in ctx.processes:
+                    if proc.is_alive():
+                        proc.kill()
+                return False
+        return True
+    except Exception:
         return False
 
 
@@ -378,6 +386,9 @@ def _worker_allreduce(rank, world_size, port, results_dict):
 _SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
 
 
+_SDMA_SPAWN_TIMEOUT_SECS = int(os.environ.get("LUMEN_SDMA_SPAWN_TIMEOUT_SECS", "120"))
+
+
 def _sdma_spawn(fn, args, nprocs, join=True):
     """``mp.spawn`` wrapper with a cooldown for KFD SDMA queue reclamation.
 
@@ -391,12 +402,30 @@ def _sdma_spawn(fn, args, nprocs, join=True):
 
     A short pre-spawn sleep prevents the race.  Override the default 2 s
     cooldown with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
+
+    ``mp.spawn(join=True)`` blocks forever if a worker hangs (e.g. a
+    ``dist.barrier`` waiting on a crashed peer).  We use ``join=False``
+    and poll with a deadline so the test fails instead of hanging.
     """
     import torch.multiprocessing as mp
 
     if _SDMA_SPAWN_COOLDOWN_SECS > 0:
         time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
-    return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
+
+    if not join:
+        return mp.spawn(fn, args=args, nprocs=nprocs, join=False)
+
+    ctx = mp.spawn(fn, args=args, nprocs=nprocs, join=False)
+    deadline = time.monotonic() + _SDMA_SPAWN_TIMEOUT_SECS
+    while not ctx.join(timeout=5):
+        if time.monotonic() > deadline:
+            for proc in ctx.processes:
+                if proc.is_alive():
+                    proc.kill()
+            pytest.fail(
+                f"_sdma_spawn timed out after {_SDMA_SPAWN_TIMEOUT_SECS}s — "
+                f"workers likely hung on dist.barrier or SDMA op"
+            )
 
 
 def _sdma_worker_teardown(shmem_mod):

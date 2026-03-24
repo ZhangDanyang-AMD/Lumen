@@ -13,44 +13,160 @@ Covers:
   - allgather_last_dim: correctness, shape
   - allreduce_sum: correctness, multi-dtype
   - allreduce_sum_inplace: correctness
-
-How to run::
-
-    # All tests (unit + multi-GPU); SDMA-capable hardware required for distributed tests:
-    pytest tests/modules/test_sdma_comm.py -v
-
-    # Unit tests only (single GPU):
-    pytest tests/modules/test_sdma_comm.py -v -k "Unit"
-
-    # Multi-GPU TP communication tests (mp.spawn, uses all available GPUs up to 8):
-    pytest tests/modules/test_sdma_comm.py -v -k "Distributed"
   - reduce_scatter_dim0: correctness, shape
   - Autograd functions: forward/backward gradient flow
   - Performance: throughput for TP-sized collectives
 
 Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
+
+Hardware requirements:
+  - Unit tests (SdmaTpContext, SdmaTpComm): single GPU, no RDMA needed.
+  - Distributed tests (TestSdmaTpCommDistributed): >= 2 GPUs **with RDMA**
+    (InfiniBand / RoCE).  The ``_requires_sdma_hw`` marker probes this by
+    spawning a real 2-rank allgather via mori; nodes without RDMA will be
+    skipped automatically.
+  - Performance tests (TestSdmaTpCommPerformance): same as distributed.
+
+How to run::
+
+    # All tests (unit + multi-GPU); SDMA-capable hardware required:
+    pytest tests/modules/test_sdma_comm.py -v
+
+    # Unit tests only (single GPU, no RDMA needed):
+    pytest tests/modules/test_sdma_comm.py -v -k "Unit"
+
+    # Multi-GPU TP communication tests (mp.spawn, >= 2 GPUs with RDMA):
+    pytest tests/modules/test_sdma_comm.py -v -k "Distributed"
+
+    # Performance benchmarks only (>= 2 GPUs with RDMA):
+    pytest tests/modules/test_sdma_comm.py -v -k "Performance"
+
+    # Override SDMA spawn cooldown for fast local iteration:
+    LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0 pytest tests/modules/test_sdma_comm.py -v
 """
 
+import functools
 import os
 import time
 
 import pytest
 import torch
 
+from lumen.ops.sdma import is_sdma_available
+
+
+def _probe_sdma_worker(rank, world_size, port):
+    """Minimal SDMA probe worker matching the mori ccl test pattern."""
+    import mori.shmem as shmem
+    import torch.distributed as dist
+
+    from lumen.ops.sdma import SdmaAllgather, SdmaContext
+
+    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_PORT"] = str(port)
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+    torch.cuda.set_device(rank)
+    device = torch.device("cuda", rank)
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
+    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+
+    ag = None
+    try:
+        ctx = SdmaContext.get()
+        ag = SdmaAllgather(ctx)
+        local = torch.full((4,), float(rank), dtype=torch.float32, device=device)
+        stream = torch.cuda.current_stream(device)
+        _ = ag(local, stream)
+        stream.synchronize()
+    finally:
+        del ag
+        torch.cuda.synchronize()
+        if dist.is_initialized():
+            dist.barrier()
+        SdmaContext.reset()
+        if dist.is_initialized():
+            dist.barrier()
+        shmem.shmem_finalize()
+        if dist.is_initialized():
+            dist.barrier()
+            dist.destroy_process_group()
+
+
+@functools.lru_cache(maxsize=1)
+def _sdma_hardware_available() -> bool:
+    """Probe whether SDMA hardware is usable with a real 2-rank allgather.
+
+    Uses ``mp.spawn`` (same as the mori ccl reference tests and our own
+    distributed workers) so that child processes inherit all loaded
+    libraries and environment from the parent.
+    """
+    if not is_sdma_available():
+        return False
+    if torch.cuda.device_count() < 2:
+        return False
+    try:
+        import torch.multiprocessing as mp
+
+        os.environ.setdefault("MORI_ENABLE_SDMA", "1")
+        port = _get_free_port()
+        ctx = mp.spawn(
+            _probe_sdma_worker,
+            args=(2, port),
+            nprocs=2,
+            join=False,
+        )
+        deadline = time.monotonic() + 60
+        while not ctx.join(timeout=5):
+            if time.monotonic() > deadline:
+                for proc in ctx.processes:
+                    if proc.is_alive():
+                        proc.kill()
+                return False
+        return True
+    except Exception:
+        return False
+
+
+_requires_sdma_hw = pytest.mark.skipif(
+    not _sdma_hardware_available(),
+    reason="SDMA multi-GPU probe failed (no RDMA devices or mori transport error)",
+)
+
 _SDMA_SPAWN_COOLDOWN_SECS = float(os.environ.get("LUMEN_SDMA_SPAWN_COOLDOWN_SECS", "2"))
 
 
+_SDMA_SPAWN_TIMEOUT_SECS = int(os.environ.get("LUMEN_SDMA_SPAWN_TIMEOUT_SECS", "120"))
+
+
 def _sdma_spawn(fn, args, nprocs, join=True):
-    """``mp.spawn`` with a KFD SDMA-queue reclamation cooldown.
+    """``mp.spawn`` with a KFD SDMA-queue reclamation cooldown and timeout.
 
     See ``tests/ops/test_sdma.py::_sdma_spawn`` for the full rationale.
     Override with ``LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0`` for fast local runs.
+
+    ``mp.spawn(join=True)`` blocks forever if a worker hangs (e.g. a
+    ``dist.barrier`` waiting on a crashed peer).  We use ``join=False``
+    and poll with a deadline so the test fails instead of hanging.
     """
     import torch.multiprocessing as mp
 
     if _SDMA_SPAWN_COOLDOWN_SECS > 0:
         time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
-    return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
+
+    if not join:
+        return mp.spawn(fn, args=args, nprocs=nprocs, join=False)
+
+    ctx = mp.spawn(fn, args=args, nprocs=nprocs, join=False)
+    deadline = time.monotonic() + _SDMA_SPAWN_TIMEOUT_SECS
+    while not ctx.join(timeout=5):
+        if time.monotonic() > deadline:
+            for proc in ctx.processes:
+                if proc.is_alive():
+                    proc.kill()
+            pytest.fail(
+                f"_sdma_spawn timed out after {_SDMA_SPAWN_TIMEOUT_SECS}s — "
+                f"workers likely hung on dist.barrier or SDMA op"
+            )
 
 
 def _get_free_port():
@@ -299,6 +415,7 @@ def _worker_tp_allgather_last_dim(rank, world_size, port, results_dict):
         _sdma_tp_worker_teardown(shmem)
 
 
+@_requires_sdma_hw
 class TestSdmaTpCommDistributed:
     """Multi-GPU SdmaTpComm correctness tests."""
 
@@ -426,6 +543,7 @@ def _worker_tp_perf(rank, world_size, port, results_dict, op_name, n_elems, iter
         _sdma_tp_worker_teardown(shmem)
 
 
+@_requires_sdma_hw
 class TestSdmaTpCommPerformance:
     """TP communication performance benchmarks."""
 
