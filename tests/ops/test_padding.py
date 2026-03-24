@@ -169,7 +169,7 @@ class TestRoundToMxfp8Regression:
             pytest.skip("_round_to_mxfp8 not importable")
 
         for N in [64, 50]:
-            t = torch.randn(4, N, dtype=torch.bfloat16)
+            t = torch.randn(4, N, dtype=torch.bfloat16, device="cuda")
             try:
                 out = _round_to_mxfp8(t, block_size=32)
             except (ImportError, RuntimeError):

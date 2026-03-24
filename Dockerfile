@@ -37,7 +37,7 @@ RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
     && pip install -e .  -U --force-reinstall --no-deps \
     && cd megatron/core/datasets && make
 
-ENV PYTHONPATH="/workspace/megatron_lm:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/megatron_lm:"
 
 # Lumen + test dependencies
 RUN cd /workspace/Lumen && pip install -e ".[dev]"
@@ -47,6 +47,8 @@ RUN pip install -r /workspace/Lumen/requirements.txt
 ENV PYTHONPATH="/workspace/Lumen:${PYTHONPATH}"
 ENV HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 ENV MORI_ENABLE_SDMA=1
+RUN python -c "import torch, pathlib; print(pathlib.Path(torch.__file__).parent / 'lib')" \
+        > /etc/ld.so.conf.d/torch.conf && ldconfig
 
 WORKDIR /workspace/Lumen
 

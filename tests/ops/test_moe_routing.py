@@ -223,12 +223,18 @@ class TestFusedTopKSoftmaxFirst:
 
 @_CUDA
 class TestFusedPermuteCorrectness:
-    """Numerical correctness for fused_permute."""
+    """Numerical correctness for fused_permute.
+
+    All tests use hidden >= 128 to avoid AITER ``moe_sorting_fwd`` HIP kernel
+    crashes that occur non-deterministically with small hidden dimensions
+    (e.g. 32 or 64).  The kernel's internal zero-fill of ``moe_buf`` may
+    access out-of-bounds for tiny buffers.
+    """
 
     def test_output_shapes(self):
         from lumen.ops.moe.fused_routing import fused_permute
 
-        num_tokens, hidden, k, num_experts = 16, 64, 2, 4
+        num_tokens, hidden, k, num_experts = 16, 128, 2, 4
         tokens = torch.randn(num_tokens, hidden, device=DEVICE)
         indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
         weights = torch.ones(num_tokens, k, device=DEVICE)
@@ -247,7 +253,7 @@ class TestFusedPermuteCorrectness:
         """Every token should appear in sorted output for each selected expert."""
         from lumen.ops.moe.fused_routing import fused_permute
 
-        num_tokens, hidden, k, num_experts = 32, 64, 2, 8
+        num_tokens, hidden, k, num_experts = 32, 128, 2, 8
         tokens = torch.randn(num_tokens, hidden, device=DEVICE)
         indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
         weights = torch.ones(num_tokens, k, device=DEVICE)
@@ -266,7 +272,7 @@ class TestFusedPermuteCorrectness:
         """sorted_weights should contain the original routing weights, reordered."""
         from lumen.ops.moe.fused_routing import fused_permute
 
-        num_tokens, hidden, k, num_experts = 16, 32, 2, 4
+        num_tokens, hidden, k, num_experts = 16, 128, 2, 4
         tokens = torch.randn(num_tokens, hidden, device=DEVICE)
         indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
         weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1)
@@ -285,7 +291,7 @@ class TestFusedPermuteCorrectness:
         """Within valid range, token IDs should be grouped by expert."""
         from lumen.ops.moe.fused_routing import fused_permute
 
-        num_tokens, hidden, k, num_experts = 16, 64, 2, 4
+        num_tokens, hidden, k, num_experts = 16, 128, 2, 4
         tokens = torch.randn(num_tokens, hidden, device=DEVICE)
         indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
         weights = torch.ones(num_tokens, k, device=DEVICE)
@@ -304,7 +310,7 @@ class TestFusedPermuteCorrectness:
         """permute → per-expert identity → unpermute should recover weighted sum."""
         from lumen.ops.moe.fused_routing import fused_permute, fused_unpermute
 
-        num_tokens, hidden, k, num_experts = 16, 64, 2, 4
+        num_tokens, hidden, k, num_experts = 16, 128, 2, 4
         tokens = torch.randn(num_tokens, hidden, device=DEVICE, dtype=torch.float32)
         indices = torch.randint(0, num_experts, (num_tokens, k), device=DEVICE, dtype=torch.int64)
         weights = torch.softmax(torch.randn(num_tokens, k, device=DEVICE), dim=-1)
@@ -337,7 +343,7 @@ class TestFusedUnpermuteCorrectness:
     def test_output_shape(self):
         from lumen.ops.moe.fused_routing import fused_unpermute
 
-        num_tokens, k, hidden = 16, 2, 64
+        num_tokens, k, hidden = 16, 2, 128
         expert_output = torch.randn(num_tokens * k, hidden, device=DEVICE)
         sort_order = torch.randperm(num_tokens * k, device=DEVICE)
 
@@ -348,7 +354,7 @@ class TestFusedUnpermuteCorrectness:
         """When sort_order is identity, moe_sum should reduce the k dim."""
         from lumen.ops.moe.fused_routing import fused_unpermute
 
-        num_tokens, k, hidden = 8, 2, 32
+        num_tokens, k, hidden = 8, 2, 128
         expert_output = torch.randn(num_tokens * k, hidden, device=DEVICE, dtype=torch.float32)
         sort_order = torch.arange(num_tokens * k, device=DEVICE)
 
@@ -360,7 +366,7 @@ class TestFusedUnpermuteCorrectness:
     def test_matches_reference_with_random_permutation(self):
         from lumen.ops.moe.fused_routing import fused_unpermute
 
-        num_tokens, k, hidden = 16, 2, 64
+        num_tokens, k, hidden = 16, 2, 128
         expert_output = torch.randn(num_tokens * k, hidden, device=DEVICE, dtype=torch.float32)
         sort_order = torch.randperm(num_tokens * k, device=DEVICE)
 

@@ -188,12 +188,13 @@ class AttentionCPP2PFunction(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):
         q, k, v, lse = ctx.saved_tensors
 
-        assert is_ck_bwd_compiled(dtype=q.dtype, causal=ctx.causal), (
-            "CK attention backward kernel is not pre-compiled. "
-            "JIT compilation inside mp.spawn child processes will SIGSEGV. "
-            "Pre-build kernels first: PREBUILD_KERNELS=1 pip install -e third_party/aiter, "
-            "or warmup the backward in the parent process before spawning."
-        )
+        if not is_ck_bwd_compiled(dtype=q.dtype, causal=ctx.causal):
+            raise RuntimeError(
+                "CK attention backward kernel is not pre-compiled. "
+                "JIT compilation inside mp.spawn child processes will SIGSEGV. "
+                "Pre-build kernels first: PREBUILD_KERNELS=1 pip install -e third_party/aiter, "
+                "or warmup the backward in the parent process before spawning."
+            )
 
         cp_group = ctx.cp_group
         cp_size = ctx.cp_size
