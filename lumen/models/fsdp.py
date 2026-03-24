@@ -488,12 +488,15 @@ def apply_fsdp2(
     world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
     mesh = init_device_mesh("cuda", (world_size,))
 
-    mp_policy = None
     if getattr(args, "linear_fp8", False) or getattr(args, "fp8_training", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
-            buffer_dtype=torch.bfloat16,
+        )
+    else:
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
         )
 
     sharded_layers = False

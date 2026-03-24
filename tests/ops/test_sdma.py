@@ -15,14 +15,13 @@ Covers:
   - sdma_allgather_max: element-wise MAX across PEs
   - Performance: SDMA bandwidth measurement (latency, throughput)
 
-Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init.
+Multi-GPU tests use torch.multiprocessing.spawn with mori shmem init,
+following the same pattern as ``mori/tests/python/ccl/test_allreduce.py``.
 
 Hardware requirements:
   - Unit tests (is_sdma_available, SdmaContext): single GPU, no RDMA needed.
   - Distributed tests (TestSdmaDistributed, TestSdmaVsNcclGolden): >= 2 GPUs
-    **with RDMA connectivity** (InfiniBand / RoCE).  The ``_requires_sdma_hw``
-    marker probes this by spawning a real 2-rank allgather via mori; nodes
-    without RDMA (``RDMA devices: None``) will be skipped automatically.
+    with SDMA support (``is_sdma_available()`` must return True).
   - Performance tests (TestSdmaPerformance): same as distributed.
 
 How to run::
@@ -30,20 +29,19 @@ How to run::
     # All tests (unit + multi-GPU); requires SDMA-capable hardware:
     pytest tests/ops/test_sdma.py -v
 
-    # Unit tests only (single GPU, no RDMA needed):
+    # Unit tests only (single GPU):
     pytest tests/ops/test_sdma.py -v -k "not Distributed and not VsNccl and not Performance"
 
-    # Multi-GPU correctness only (>= 2 GPUs with RDMA):
+    # Multi-GPU correctness only (>= 2 GPUs):
     pytest tests/ops/test_sdma.py -v -k "Distributed or VsNccl"
 
-    # Performance benchmarks only (>= 2 GPUs with RDMA):
+    # Performance benchmarks only (>= 2 GPUs):
     pytest tests/ops/test_sdma.py -v -k "Performance"
 
     # Override SDMA spawn cooldown for fast local iteration:
     LUMEN_SDMA_SPAWN_COOLDOWN_SECS=0 pytest tests/ops/test_sdma.py -v
 """
 
-import functools
 import os
 import time
 
@@ -61,123 +59,9 @@ def _get_free_port():
         return s.getsockname()[1]
 
 
-def _probe_sdma_worker(rank, world_size, port):
-    """Minimal SDMA probe matching the mori ``test_allreduce.py`` pattern exactly.
-
-    Uses ``AllreduceSdma`` directly (the same ccl primitive proven to work
-    in ``mori/tests/python/ccl/test_allreduce.py``) instead of the Lumen
-    ``SdmaAllgather`` wrapper, to isolate transport-level failures from
-    Lumen wrapper issues.
-    """
-    import sys
-
-    import mori.shmem as shmem
-    import torch.distributed as dist
-    from mori.ccl import AllreduceSdma
-
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
-    torch.cuda.set_device(rank)
-    device = torch.device("cuda", rank)
-    dist.init_process_group(
-        "cpu:gloo,cuda:nccl",
-        rank=rank,
-        world_size=world_size,
-        device_id=device,
-    )
-    torch._C._distributed_c10d._register_process_group(
-        "default",
-        dist.group.WORLD,
-    )
-
-    try:
-        shmem.shmem_torch_process_group_init("default")
-        my_pe = shmem.shmem_mype()
-        npes = shmem.shmem_npes()
-
-        elems = 64
-        elem_size = 4
-        ar = AllreduceSdma(
-            my_pe,
-            npes,
-            input_buffer_size=elems * elem_size,
-            output_buffer_size=npes * (elems + 64) * elem_size,
-            copy_output_to_user=True,
-        )
-        data = torch.full(
-            (elems,),
-            float(rank + 1) * 1000,
-            dtype=torch.float32,
-            device=device,
-        )
-        output = torch.zeros(elems, dtype=torch.float32, device=device)
-        stream = torch.cuda.current_stream(device)
-        ar(data, output, elems, stream)
-        stream.synchronize()
-        del ar
-    except Exception as exc:
-        print(f"[SDMA probe] rank {rank} failed: {exc}", file=sys.stderr)
-        raise
-    finally:
-        torch.cuda.synchronize()
-        if dist.is_initialized():
-            dist.barrier()
-        shmem.shmem_finalize()
-        if dist.is_initialized():
-            dist.barrier()
-            dist.destroy_process_group()
-
-
-_sdma_probe_error: str = ""
-
-
-@functools.lru_cache(maxsize=1)
-def _sdma_hardware_available() -> bool:
-    """Probe whether SDMA hardware is usable with a real 2-rank allreduce.
-
-    Uses ``mp.spawn`` (same as the mori ccl reference tests and our own
-    distributed workers) so that child processes inherit all loaded
-    libraries and environment from the parent.  The probe mirrors the
-    exact init/teardown sequence of ``mori/tests/python/ccl/test_allreduce.py``
-    to avoid false negatives from Lumen wrapper issues.
-    """
-    global _sdma_probe_error  # noqa: PLW0603
-    if not is_sdma_available():
-        _sdma_probe_error = "is_sdma_available() returned False"
-        return False
-    if torch.cuda.device_count() < 2:
-        _sdma_probe_error = f"need >= 2 GPUs, have {torch.cuda.device_count()}"
-        return False
-    try:
-        import torch.multiprocessing as mp
-
-        os.environ.setdefault("MORI_ENABLE_SDMA", "1")
-        port = _get_free_port()
-        ctx = mp.spawn(
-            _probe_sdma_worker,
-            args=(2, port),
-            nprocs=2,
-            join=False,
-        )
-        deadline = time.monotonic() + 60
-        while not ctx.join(timeout=5):
-            if time.monotonic() > deadline:
-                for proc in ctx.processes:
-                    if proc.is_alive():
-                        proc.kill()
-                _sdma_probe_error = "probe timed out after 60s"
-                return False
-        return True
-    except Exception as exc:
-        _sdma_probe_error = f"{type(exc).__name__}: {exc}"
-        return False
-
-
-_sdma_hw_ok = _sdma_hardware_available()
 _requires_sdma_hw = pytest.mark.skipif(
-    not _sdma_hw_ok,
-    reason=f"SDMA probe failed: {_sdma_probe_error}" if not _sdma_hw_ok else "",
+    not is_sdma_available() or torch.cuda.device_count() < 2,
+    reason=(f"SDMA not available (is_sdma_available={is_sdma_available()}, " f"GPUs={torch.cuda.device_count()})"),
 )
 
 
