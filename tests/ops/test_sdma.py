@@ -238,6 +238,8 @@ def _sdma_spawn(fn, args, nprocs, join=True):
     """
     import torch.multiprocessing as mp
 
+    os.environ.setdefault("MORI_ENABLE_SDMA", "1")
+
     if _SDMA_SPAWN_COOLDOWN_SECS > 0:
         time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
 
@@ -293,11 +295,11 @@ def _sdma_cleanup(shmem_mod, *ccl_wrappers):
 
 def _worker_allgather(rank, world_size, port):
     """Worker: test SdmaAllgather correctness (mori pattern)."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
@@ -322,11 +324,11 @@ def _worker_allgather(rank, world_size, port):
 
 def _worker_all2all(rank, world_size, port):
     """Worker: test SdmaAll2all correctness (mori pattern)."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
@@ -357,11 +359,11 @@ def _worker_all2all(rank, world_size, port):
 
 def _worker_allreduce(rank, world_size, port):
     """Worker: test SdmaAllreduce correctness (mori pattern)."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
 
     from lumen.ops.sdma import SdmaAllreduce, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
@@ -425,12 +427,12 @@ class TestSdmaDistributed:
 
 def _worker_allgather_vs_nccl(rank, world_size, port, n_elems, seed):
     """Worker: compare SdmaAllgather output against NCCL all_gather golden."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -455,12 +457,12 @@ def _worker_allgather_vs_nccl(rank, world_size, port, n_elems, seed):
 
 def _worker_all2all_vs_nccl(rank, world_size, port, elems_per_pe, seed):
     """Worker: compare SdmaAll2all output against NCCL all_to_all golden."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -488,12 +490,12 @@ def _worker_all2all_vs_nccl(rank, world_size, port, elems_per_pe, seed):
 
 def _worker_allreduce_vs_nccl(rank, world_size, port, n_elems, seed):
     """Worker: compare SdmaAllreduce SUM against NCCL all_reduce golden."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllreduce, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -518,12 +520,12 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, n_elems, seed):
 
 def _worker_allreduce_outofplace(rank, world_size, port, n_elems, seed):
     """Worker: test SdmaAllreduce out-of-place __call__ path."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllreduce, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -548,12 +550,12 @@ def _worker_allreduce_outofplace(rank, world_size, port, n_elems, seed):
 
 def _worker_allgather_max(rank, world_size, port, n_elems, seed):
     """Worker: test sdma_allgather_max against torch.distributed MAX golden."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext, sdma_allgather_max
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -577,12 +579,12 @@ def _worker_allgather_max(rank, world_size, port, n_elems, seed):
 
 def _worker_allgather_buffer_reuse(rank, world_size, port, seed):
     """Worker: call SdmaAllgather multiple times with different data/sizes."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -611,12 +613,12 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, seed):
 
 def _worker_all2all_buffer_reuse(rank, world_size, port, seed):
     """Worker: call SdmaAll2all multiple times with different sizes."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         device = f"cuda:{rank}"
@@ -727,12 +729,12 @@ class TestSdmaVsNcclGolden:
 
 def _worker_all2all_perf(rank, world_size, port, elems_per_pe, iterations, warmup):
     """Worker: measure SdmaAll2all throughput (mori pattern)."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import numpy as np
 
     from lumen.ops.sdma import SdmaAll2all, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()
@@ -771,12 +773,12 @@ def _worker_all2all_perf(rank, world_size, port, elems_per_pe, iterations, warmu
 
 def _worker_allgather_perf(rank, world_size, port, n_elems, iterations, warmup):
     """Worker: measure SdmaAllgather throughput (mori pattern)."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import numpy as np
 
     from lumen.ops.sdma import SdmaAllgather, SdmaContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         ctx = SdmaContext.get()

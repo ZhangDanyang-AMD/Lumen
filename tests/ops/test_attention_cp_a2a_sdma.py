@@ -76,6 +76,8 @@ def _sdma_spawn(fn, args, nprocs, join=True):
     """
     import torch.multiprocessing as mp
 
+    os.environ.setdefault("MORI_ENABLE_SDMA", "1")
+
     if _SDMA_SPAWN_COOLDOWN_SECS > 0:
         time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
     return mp.spawn(fn, args=args, nprocs=nprocs, join=join)
@@ -194,12 +196,13 @@ def _cp_a2a_worker_teardown(shmem_mod):
 
 def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
     """Worker: run CP A2A triton attention with SDMA, compare to reference."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
@@ -276,13 +279,14 @@ def _worker_cp_a2a_triton_sdma(rank, world_size, port, results_dict):
 
 def _worker_cp_a2a_perf_compare(rank, world_size, port, results_dict, iterations, warmup):
     """Worker: compare SDMA vs NCCL all-to-all latency in CP attention."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import numpy as np
     import torch.distributed as dist
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
-    os.environ["MORI_ENABLE_SDMA"] = "1"
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
     dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)

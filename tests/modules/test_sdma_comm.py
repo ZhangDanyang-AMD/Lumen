@@ -75,6 +75,8 @@ def _sdma_spawn(fn, args, nprocs, join=True):
     """
     import torch.multiprocessing as mp
 
+    os.environ.setdefault("MORI_ENABLE_SDMA", "1")
+
     if _SDMA_SPAWN_COOLDOWN_SECS > 0:
         time.sleep(_SDMA_SPAWN_COOLDOWN_SECS)
 
@@ -201,12 +203,12 @@ class TestSdmaTpCommUnit:
 
 def _worker_tp_allgather_dim0(rank, world_size, port):
     """Worker: test SdmaTpComm.allgather_dim0 correctness."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -243,12 +245,12 @@ def _worker_tp_allgather_dim0(rank, world_size, port):
 
 def _worker_tp_allreduce(rank, world_size, port):
     """Worker: test SdmaTpComm.allreduce_sum correctness."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -281,12 +283,12 @@ def _worker_tp_allreduce(rank, world_size, port):
 
 def _worker_tp_reduce_scatter(rank, world_size, port):
     """Worker: test SdmaTpComm.reduce_scatter_dim0 correctness."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -325,12 +327,12 @@ def _worker_tp_reduce_scatter(rank, world_size, port):
 
 def _worker_tp_allgather_last_dim(rank, world_size, port):
     """Worker: test SdmaTpComm.allgather_last_dim correctness."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -366,12 +368,12 @@ def _worker_tp_allgather_last_dim(rank, world_size, port):
 
 def _worker_tp_allgather_chunk(rank, world_size, port):
     """Worker: test SdmaTpComm.allgather_dim0_chunk correctness."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -416,12 +418,12 @@ def _worker_tp_allgather_chunk(rank, world_size, port):
 
 def _worker_tp_reduce_scatter_chunk_allreduce(rank, world_size, port):
     """Worker: test SdmaTpComm.reduce_scatter_dim0_chunk with allreduce backend."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -466,12 +468,12 @@ def _worker_tp_reduce_scatter_chunk_allreduce(rank, world_size, port):
 
 def _worker_tp_reduce_scatter_chunk_nccl(rank, world_size, port):
     """Worker: test SdmaTpComm.reduce_scatter_dim0_chunk with NCCL fallback."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
@@ -586,13 +588,13 @@ class TestSdmaTpCommDistributed:
 
 def _worker_tp_perf(rank, world_size, port, op_name, n_elems, iterations, warmup):
     """Worker: measure TP comm throughput."""
+    os.environ["MORI_ENABLE_SDMA"] = "1"
+
     import mori.shmem as shmem
     import numpy as np
     import torch.distributed as dist
 
     from lumen.modules.sdma_comm import SdmaTpComm, SdmaTpContext
-
-    os.environ["MORI_ENABLE_SDMA"] = "1"
 
     with _TorchDistContext(rank, world_size, port):
         tp_group = dist.new_group(list(range(world_size)))
