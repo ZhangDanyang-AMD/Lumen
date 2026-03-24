@@ -62,38 +62,65 @@ def _get_free_port():
 
 
 def _probe_sdma_worker(rank, world_size, port):
-    """Minimal SDMA probe worker matching the mori ccl test pattern.
+    """Minimal SDMA probe matching the mori ``test_allreduce.py`` pattern exactly.
 
-    Uses the same init sequence as the mori ``test_allreduce.py`` reference:
-    ``TorchDistContext`` → ``shmem_torch_process_group_init`` → SDMA op → teardown.
+    Uses ``AllreduceSdma`` directly (the same ccl primitive proven to work
+    in ``mori/tests/python/ccl/test_allreduce.py``) instead of the Lumen
+    ``SdmaAllgather`` wrapper, to isolate transport-level failures from
+    Lumen wrapper issues.
     """
+    import sys
+
     import mori.shmem as shmem
     import torch.distributed as dist
-
-    from lumen.ops.sdma import SdmaAllgather, SdmaContext
+    from mori.ccl import AllreduceSdma
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = str(port)
     os.environ["MORI_ENABLE_SDMA"] = "1"
     torch.cuda.set_device(rank)
     device = torch.device("cuda", rank)
-    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size, device_id=device)
-    torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
+    dist.init_process_group(
+        "cpu:gloo,cuda:nccl",
+        rank=rank,
+        world_size=world_size,
+        device_id=device,
+    )
+    torch._C._distributed_c10d._register_process_group(
+        "default",
+        dist.group.WORLD,
+    )
 
-    ag = None
     try:
-        ctx = SdmaContext.get()
-        ag = SdmaAllgather(ctx)
-        local = torch.full((4,), float(rank), dtype=torch.float32, device=device)
+        shmem.shmem_torch_process_group_init("default")
+        my_pe = shmem.shmem_mype()
+        npes = shmem.shmem_npes()
+
+        elems = 64
+        elem_size = 4
+        ar = AllreduceSdma(
+            my_pe,
+            npes,
+            input_buffer_size=elems * elem_size,
+            output_buffer_size=npes * (elems + 64) * elem_size,
+            copy_output_to_user=True,
+        )
+        data = torch.full(
+            (elems,),
+            float(rank + 1) * 1000,
+            dtype=torch.float32,
+            device=device,
+        )
+        output = torch.zeros(elems, dtype=torch.float32, device=device)
         stream = torch.cuda.current_stream(device)
-        _ = ag(local, stream)
+        ar(data, output, elems, stream)
         stream.synchronize()
+        del ar
+    except Exception as exc:
+        print(f"[SDMA probe] rank {rank} failed: {exc}", file=sys.stderr)
+        raise
     finally:
-        del ag
         torch.cuda.synchronize()
-        if dist.is_initialized():
-            dist.barrier()
-        SdmaContext.reset()
         if dist.is_initialized():
             dist.barrier()
         shmem.shmem_finalize()
@@ -102,19 +129,25 @@ def _probe_sdma_worker(rank, world_size, port):
             dist.destroy_process_group()
 
 
+_sdma_probe_error: str = ""
+
+
 @functools.lru_cache(maxsize=1)
 def _sdma_hardware_available() -> bool:
-    """Probe whether SDMA hardware is usable with a real 2-rank allgather.
+    """Probe whether SDMA hardware is usable with a real 2-rank allreduce.
 
     Uses ``mp.spawn`` (same as the mori ccl reference tests and our own
     distributed workers) so that child processes inherit all loaded
-    libraries and environment from the parent.  Previous versions used
-    ``subprocess.Popen`` which could fail to locate ``libtorch.so`` or
-    other shared libraries even when they were loadable in-process.
+    libraries and environment from the parent.  The probe mirrors the
+    exact init/teardown sequence of ``mori/tests/python/ccl/test_allreduce.py``
+    to avoid false negatives from Lumen wrapper issues.
     """
+    global _sdma_probe_error  # noqa: PLW0603
     if not is_sdma_available():
+        _sdma_probe_error = "is_sdma_available() returned False"
         return False
     if torch.cuda.device_count() < 2:
+        _sdma_probe_error = f"need >= 2 GPUs, have {torch.cuda.device_count()}"
         return False
     try:
         import torch.multiprocessing as mp
@@ -133,15 +166,18 @@ def _sdma_hardware_available() -> bool:
                 for proc in ctx.processes:
                     if proc.is_alive():
                         proc.kill()
+                _sdma_probe_error = "probe timed out after 60s"
                 return False
         return True
-    except Exception:
+    except Exception as exc:
+        _sdma_probe_error = f"{type(exc).__name__}: {exc}"
         return False
 
 
+_sdma_hw_ok = _sdma_hardware_available()
 _requires_sdma_hw = pytest.mark.skipif(
-    not _sdma_hardware_available(),
-    reason="SDMA multi-GPU probe failed (no RDMA devices or mori transport error)",
+    not _sdma_hw_ok,
+    reason=f"SDMA probe failed: {_sdma_probe_error}" if not _sdma_hw_ok else "",
 )
 
 
