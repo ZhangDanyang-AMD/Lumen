@@ -257,13 +257,20 @@ def _sdma_spawn(fn, args, nprocs, join=True):
             )
 
 
-def _sdma_cleanup(shmem_mod):
-    """Cleanup helper matching mori ccl test teardown order.
+def _sdma_cleanup(shmem_mod, *ccl_wrappers):
+    """Cleanup helper matching mori ccl test teardown order **exactly**.
 
-    Must be called before leaving the ``_TorchDistContext`` block.
-    The context manager handles ``dist.barrier()`` + ``dist.destroy_process_group()``.
+    Must be called before leaving the ``_TorchDistContext`` block.  Pass all
+    CCL wrapper objects (``SdmaAllgather``, ``SdmaAllreduce``, ``SdmaAll2all``)
+    so their C++ handles are released at the right point in the sequence.
 
-    Caller must ``del`` all CCL wrapper objects before calling this.
+    Matches ``mori/tests/python/ccl/test_allgather.py`` lines 276-281::
+
+        torch.cuda.synchronize()          # 1  all local GPU work done
+        dist.barrier()                    # 2  all ranks synchronised
+        del allgather                     # 3  release SHMEM buffers
+        dist.barrier()                    # 4  all ranks released
+        shmem.shmem_finalize()            # 5  close SDMA/HSA resources
     """
     import torch.distributed as dist
 
@@ -271,6 +278,9 @@ def _sdma_cleanup(shmem_mod):
 
     torch.cuda.synchronize()
     dist.barrier()
+    for w in ccl_wrappers:
+        if hasattr(w, "_handle"):
+            w._handle = None
     SdmaContext.reset()
     dist.barrier()
     shmem_mod.shmem_finalize()
@@ -304,8 +314,7 @@ def _worker_allgather(rank, world_size, port):
             if not torch.allclose(chunk, torch.full_like(chunk, expected_val)):
                 errors.append(f"PE {rank}: chunk from PE {pe} mismatch")
 
-        del ag
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ag)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -340,8 +349,7 @@ def _worker_all2all(rank, world_size, port):
             if not torch.all(chunk == expected_value):
                 errors.append(f"PE {rank}: chunk from PE {src_pe} mismatch")
 
-        del a2a
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, a2a)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -368,8 +376,7 @@ def _worker_allreduce(rank, world_size, port):
 
         ok = torch.allclose(result, torch.full_like(result, expected_sum), atol=0.5)
 
-        del ar
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ar)
 
         if not ok:
             raise AssertionError(f"PE {rank}: allreduce sum mismatch")
@@ -440,8 +447,7 @@ def _worker_allgather_vs_nccl(rank, world_size, port, n_elems, seed):
 
         ok = torch.allclose(sdma_gathered, nccl_stacked, atol=1e-6)
 
-        del ag
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ag)
 
         if not ok:
             raise AssertionError(f"PE {rank}: SdmaAllgather != NCCL (n={n_elems})")
@@ -474,8 +480,7 @@ def _worker_all2all_vs_nccl(rank, world_size, port, elems_per_pe, seed):
 
         ok = torch.equal(sdma_output, nccl_output_u32)
 
-        del a2a
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, a2a)
 
         if not ok:
             raise AssertionError(f"PE {rank}: SdmaAll2all != NCCL (per_pe={elems_per_pe})")
@@ -505,8 +510,7 @@ def _worker_allreduce_vs_nccl(rank, world_size, port, n_elems, seed):
 
         ok = torch.allclose(sdma_result, nccl_result, atol=0.5, rtol=0.02)
 
-        del ar
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ar)
 
         if not ok:
             raise AssertionError(f"PE {rank}: SdmaAllreduce != NCCL (n={n_elems})")
@@ -536,8 +540,7 @@ def _worker_allreduce_outofplace(rank, world_size, port, n_elems, seed):
 
         ok = torch.allclose(sdma_output, nccl_result, atol=0.5, rtol=0.02)
 
-        del ar
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ar)
 
         if not ok:
             raise AssertionError(f"PE {rank}: SdmaAllreduce outofplace != NCCL")
@@ -566,8 +569,7 @@ def _worker_allgather_max(rank, world_size, port, n_elems, seed):
 
         ok = torch.allclose(sdma_max_result, nccl_max, atol=1e-6)
 
-        del ag
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ag)
 
         if not ok:
             raise AssertionError(f"PE {rank}: sdma_allgather_max != NCCL MAX (n={n_elems})")
@@ -601,8 +603,7 @@ def _worker_allgather_buffer_reuse(rank, world_size, port, seed):
             if not torch.allclose(sdma_gathered, nccl_stacked, atol=1e-6):
                 errors.append(f"PE {rank}: allgather buffer reuse failed at call {call_idx}")
 
-        del ag
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ag)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -637,8 +638,7 @@ def _worker_all2all_buffer_reuse(rank, world_size, port, seed):
             if not torch.equal(sdma_out, nccl_out.view(torch.uint32)):
                 errors.append(f"PE {rank}: all2all buffer reuse failed at call {call_idx}")
 
-        del a2a
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, a2a)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -766,8 +766,7 @@ def _worker_all2all_perf(rank, world_size, port, elems_per_pe, iterations, warmu
                 f"avg={avg_ms:.3f}ms, BW={bandwidth_gb_s:.2f} GB/s"
             )
 
-        del a2a
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, a2a)
 
 
 def _worker_allgather_perf(rank, world_size, port, n_elems, iterations, warmup):
@@ -810,8 +809,7 @@ def _worker_allgather_perf(rank, world_size, port, n_elems, iterations, warmup):
                 f"avg={avg_ms:.3f}ms, BW={bandwidth_gb_s:.2f} GB/s"
             )
 
-        del ag
-        _sdma_cleanup(shmem)
+        _sdma_cleanup(shmem, ag)
 
 
 @_requires_sdma_hw

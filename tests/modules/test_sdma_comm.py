@@ -141,11 +141,13 @@ class _TorchDistContext:
             dist.destroy_process_group()
 
 
-def _sdma_tp_cleanup(shmem_mod):
-    """Release SdmaTpComm / SdmaTpContext singletons and finalize shmem.
+def _sdma_tp_cleanup(shmem_mod, comm):
+    """Release SdmaTpComm handles and finalize shmem (mori cleanup order).
 
-    Must be called *inside* the ``_TorchDistContext`` block (before
-    ``dist.destroy_process_group``), with all comm handles already deleted.
+    Must be called *inside* the ``_TorchDistContext`` block.  Pass the
+    ``SdmaTpComm`` instance so its C++ SDMA handles are released at the
+    correct point — after ``cuda.synchronize()`` + ``barrier``, before
+    ``shmem_finalize()``.
     """
     import torch.distributed as dist
 
@@ -153,6 +155,13 @@ def _sdma_tp_cleanup(shmem_mod):
 
     torch.cuda.synchronize()
     dist.barrier()
+    for attr in ("_ag", "_ag_chunk", "_rs_chunk_ar"):
+        wrapper = getattr(comm, attr, None)
+        if wrapper is not None and hasattr(wrapper, "_handle"):
+            wrapper._handle = None
+    for ar in getattr(comm, "_ar_handles", {}).values():
+        if hasattr(ar, "_handle"):
+            ar._handle = None
     SdmaTpComm.reset()
     SdmaTpContext.reset()
     dist.barrier()
@@ -226,8 +235,7 @@ def _worker_tp_allgather_dim0(rank, world_size, port):
             if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
                 errors.append(f"PE {rank}: allgather_dim0 chunk from PE {pe} mismatch")
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -265,8 +273,7 @@ def _worker_tp_allreduce(rank, world_size, port):
             atol=0.5,
         )
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if not ok:
             raise AssertionError(f"PE {rank}: allreduce_sum mismatch")
@@ -310,8 +317,7 @@ def _worker_tp_reduce_scatter(rank, world_size, port):
         ):
             errors.append(f"PE {rank}: reduce_scatter_dim0 mismatch")
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -352,8 +358,7 @@ def _worker_tp_allgather_last_dim(rank, world_size, port):
             if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
                 errors.append(f"PE {rank}: allgather_last_dim chunk from PE {pe} mismatch")
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -403,8 +408,7 @@ def _worker_tp_allgather_chunk(rank, world_size, port):
             if not torch.allclose(chunk.float(), torch.full_like(chunk.float(), expected), atol=1e-3):
                 errors.append(f"PE {rank}: chunk from PE {pe} mismatch")
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if errors:
             raise AssertionError("\n".join(errors))
@@ -451,9 +455,7 @@ def _worker_tp_reduce_scatter_chunk_allreduce(rank, world_size, port):
             atol=1.0,
         )
 
-        del comm
-        SdmaTpComm.reset()
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if not ok:
             raise AssertionError(
@@ -503,9 +505,7 @@ def _worker_tp_reduce_scatter_chunk_nccl(rank, world_size, port):
             atol=0.5,
         )
 
-        del comm
-        SdmaTpComm.reset()
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
         if not ok:
             raise AssertionError(
@@ -628,8 +628,7 @@ def _worker_tp_perf(rank, world_size, port, op_name, n_elems, iterations, warmup
         if rank == 0:
             print(f"\n  TP {op_name} SDMA PE0: {total_bytes / 1024:.1f} KB, " f"avg={avg_ms:.3f}ms, BW={bw:.2f} GB/s")
 
-        del comm
-        _sdma_tp_cleanup(shmem)
+        _sdma_tp_cleanup(shmem, comm)
 
 
 @_requires_sdma_hw
