@@ -92,18 +92,47 @@ def _init_dist():
     )
 
 
+class _AllGatherFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, group):
+        ctx.group = group
+        world = dist.get_world_size(group)
+        ctx.world = world
+        chunks = [torch.empty_like(tensor) for _ in range(world)]
+        dist.all_gather(chunks, tensor, group=group)
+        return torch.cat(chunks, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        shard = grad_output.shape[0] // ctx.world
+        out = torch.empty(shard, *grad_output.shape[1:], device=grad_output.device, dtype=grad_output.dtype)
+        dist.reduce_scatter_tensor(out, grad_output.contiguous(), group=ctx.group)
+        return out, None
+
+
+class _ReduceScatterFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, world, device, group):
+        ctx.group = group
+        shard = tensor.shape[0] // world
+        out = torch.empty(shard, *tensor.shape[1:], device=device, dtype=tensor.dtype)
+        dist.reduce_scatter_tensor(out, tensor.contiguous(), group=group)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        world = dist.get_world_size(ctx.group)
+        chunks = [torch.empty_like(grad_output) for _ in range(world)]
+        dist.all_gather(chunks, grad_output, group=ctx.group)
+        return torch.cat(chunks, dim=0), None, None, None
+
+
 def _distributed_allgather(tensor, group=None):
-    world = dist.get_world_size(group)
-    chunks = [torch.empty_like(tensor) for _ in range(world)]
-    dist.all_gather(chunks, tensor, group=group)
-    return torch.cat(chunks, dim=0)
+    return _AllGatherFunc.apply(tensor, group)
 
 
 def _reduce_scatter(tensor, world, device, group=None):
-    shard = tensor.shape[0] // world
-    out = torch.empty(shard, *tensor.shape[1:], device=device, dtype=tensor.dtype)
-    dist.reduce_scatter_tensor(out, tensor, group=group)
-    return out
+    return _ReduceScatterFunc.apply(tensor, world, device, group)
 
 
 @_DIST
@@ -188,7 +217,7 @@ class TestE2ETransformerLayerFusion:
 
         if bwd_only:
             x_naive = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
-            y_naive_saved = self._naive_fwd(x_naive, w_up, w_down)
+            y_naive_saved = self._naive_fwd(x_naive, w_up_param, w_down_param)
 
             x_fused = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
             y_fused_saved = self._fused_fwd(
@@ -219,7 +248,7 @@ class TestE2ETransformerLayerFusion:
 
             def _naive():
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
-                y = self._naive_fwd(x, w_up, w_down)
+                y = self._naive_fwd(x, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
                 return y
@@ -504,7 +533,7 @@ class TestTPScaling:
             ag_bytes = B * S * H * 2
             rs_bytes = B * S * H * 2
 
-            def _naive(s_local=S_local, w_u=w_up, w_d=w_down, tp_g=tp_group, tp_s=tp_size):
+            def _naive(s_local=S_local, w_u=w_up_param, w_d=w_down_param, tp_g=tp_group, tp_s=tp_size):
                 x = torch.randn(s_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
                 gathered = _distributed_allgather(x, group=tp_g)
                 up = F.linear(gathered, w_u)
