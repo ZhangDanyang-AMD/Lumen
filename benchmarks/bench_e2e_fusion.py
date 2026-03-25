@@ -348,9 +348,15 @@ class TestE2ETransformerLayerFusion:
                     y.sum().backward()
                 return y
 
+            # Keep the backend transition explicit: some ranks can exit the
+            # NCCL timer slightly earlier than others, so fence before starting
+            # mori SDMA warmup to avoid overlapping the two transports.
+            torch.cuda.synchronize()
+            dist.barrier()
             for _ in range(3):
                 _fused_sdma()
             torch.cuda.synchronize()
+            dist.barrier()
 
             r_sdma = cuda_timer(
                 _fused_sdma,

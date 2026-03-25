@@ -152,6 +152,30 @@ _SDMA = pytest.mark.skipif(
 )
 
 
+def _new_subgroup_for_size(group_size: int):
+    """Create a subgroup in identical global order on every rank.
+
+    ``torch.distributed.new_group`` must be invoked in the same sequence on
+    all processes. Creating only the "local" subgroup on each rank can
+    deadlock during process-group setup.
+    """
+    world = dist.get_world_size()
+    rank = dist.get_rank()
+    if world % group_size != 0:
+        raise ValueError(f"world_size={world} not divisible by group_size={group_size}")
+
+    subgroup = None
+    for start in range(0, world, group_size):
+        ranks = list(range(start, start + group_size))
+        group = dist.new_group(ranks)
+        if rank in ranks:
+            subgroup = group
+
+    if subgroup is None:
+        raise RuntimeError(f"failed to assign subgroup for rank {rank}, group_size={group_size}")
+    return subgroup
+
+
 # ---------------------------------------------------------------------------
 # 1. FP8ParamManager on nn.Linear stacks (matching Lumen shapes)
 # ---------------------------------------------------------------------------
@@ -1337,9 +1361,7 @@ class TestFP8AllGatherScalingEfficiency:
         fp8_results = {}
 
         for gs in group_sizes:
-            group_id = self.rank // gs
-            ranks_in_group = list(range(group_id * gs, group_id * gs + gs))
-            subgroup = dist.new_group(ranks_in_group)
+            subgroup = _new_subgroup_for_size(gs)
 
             local_rank_in_group = self.rank % gs
 
@@ -1454,9 +1476,7 @@ class TestFP8AllGatherScalingEfficiency:
         results = {}
 
         for gs in group_sizes:
-            group_id = self.rank // gs
-            ranks_in_group = list(range(group_id * gs, group_id * gs + gs))
-            subgroup = dist.new_group(ranks_in_group)
+            subgroup = _new_subgroup_for_size(gs)
             local_rank = self.rank % gs
 
             shards = [w.chunk(gs, dim=0)[local_rank].contiguous() for w in weights]

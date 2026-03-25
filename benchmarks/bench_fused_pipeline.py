@@ -97,11 +97,53 @@ def _init_dist():
     )
 
 
+class _AllGatherFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, group):
+        ctx.group = group
+        world = dist.get_world_size(group)
+        ctx.world = world
+        chunks = [torch.empty_like(tensor) for _ in range(world)]
+        dist.all_gather(chunks, tensor.contiguous(), group=group)
+        return torch.cat(chunks, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        shard = grad_output.shape[0] // ctx.world
+        out = torch.empty(
+            shard,
+            *grad_output.shape[1:],
+            device=grad_output.device,
+            dtype=grad_output.dtype,
+        )
+        dist.reduce_scatter_tensor(out, grad_output.contiguous(), group=ctx.group)
+        return out, None
+
+
+class _ReduceScatterFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, world, device, group):
+        ctx.group = group
+        shard = tensor.shape[0] // world
+        out = torch.empty(shard, *tensor.shape[1:], device=device, dtype=tensor.dtype)
+        dist.reduce_scatter_tensor(out, tensor.contiguous(), group=group)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        world = dist.get_world_size(ctx.group)
+        grad_output_contig = grad_output.contiguous()
+        chunks = [torch.empty_like(grad_output_contig) for _ in range(world)]
+        dist.all_gather(chunks, grad_output_contig, group=ctx.group)
+        return torch.cat(chunks, dim=0), None, None, None
+
+
 def _distributed_allgather(tensor, group=None):
-    world = dist.get_world_size(group)
-    chunks = [torch.empty_like(tensor) for _ in range(world)]
-    dist.all_gather(chunks, tensor, group=group)
-    return torch.cat(chunks, dim=0)
+    return _AllGatherFunc.apply(tensor, group)
+
+
+def _reduce_scatter(tensor, world, device, group=None):
+    return _ReduceScatterFunc.apply(tensor, world, device, group)
 
 
 @_DIST
@@ -380,19 +422,13 @@ class TestFusedPipelineRowFwd:
         pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
         pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
 
-        def _reduce_scatter(tensor):
-            shard = tensor.shape[0] // self.world
-            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-            dist.reduce_scatter_tensor(out, tensor)
-            return out
-
         for _ in range(3):
             gemm_out = F.linear(x, w)
-            _reduce_scatter(gemm_out)
+            _reduce_scatter(gemm_out, self.world, self.device)
         torch.cuda.synchronize()
 
         def _seq():
-            return _reduce_scatter(F.linear(x, w))
+            return _reduce_scatter(F.linear(x, w), self.world, self.device)
 
         r_seq = cuda_timer(
             _seq,
@@ -413,7 +449,7 @@ class TestFusedPipelineRowFwd:
 
         gemm_out = F.linear(x, w)
         r_comm = cuda_timer(
-            lambda: _reduce_scatter(gemm_out),
+            lambda: _reduce_scatter(gemm_out, self.world, self.device),
             label="RS alone",
             warmup=_WARMUP,
             iters=_ITERS,
@@ -775,15 +811,9 @@ class TestFusedPipelineBackwardOverlap:
         pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
         pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
 
-        def _reduce_scatter(tensor):
-            shard = tensor.shape[0] // self.world
-            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-            dist.reduce_scatter_tensor(out, tensor)
-            return out
-
         def _seq_bwd():
             x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
-            y = _reduce_scatter(F.linear(x, w))
+            y = _reduce_scatter(F.linear(x, w), self.world, self.device)
             y.sum().backward()
             return x.grad
 
