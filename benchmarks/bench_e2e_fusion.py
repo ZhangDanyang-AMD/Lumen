@@ -99,7 +99,7 @@ class _AllGatherFunc(torch.autograd.Function):
         world = dist.get_world_size(group)
         ctx.world = world
         chunks = [torch.empty_like(tensor) for _ in range(world)]
-        dist.all_gather(chunks, tensor, group=group)
+        dist.all_gather(chunks, tensor.contiguous(), group=group)
         return torch.cat(chunks, dim=0)
 
     @staticmethod
@@ -122,8 +122,9 @@ class _ReduceScatterFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         world = dist.get_world_size(ctx.group)
-        chunks = [torch.empty_like(grad_output) for _ in range(world)]
-        dist.all_gather(chunks, grad_output, group=ctx.group)
+        grad_output_contig = grad_output.contiguous()
+        chunks = [torch.empty_like(grad_output_contig) for _ in range(world)]
+        dist.all_gather(chunks, grad_output_contig, group=ctx.group)
         return torch.cat(chunks, dim=0), None, None, None
 
 
