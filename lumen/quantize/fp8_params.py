@@ -165,6 +165,9 @@ def fp8_allgather_weight_pipelined(
 
     comm_stream = torch.cuda.Stream(device=device)
     compute_stream = torch.cuda.current_stream(device)
+    # Keep NCCL subgroup collectives on `comm_stream` ordered after the scale
+    # all-gathers already enqueued on the current stream.
+    comm_stream.wait_stream(compute_stream)
 
     results = [None] * N
 

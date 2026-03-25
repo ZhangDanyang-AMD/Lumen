@@ -34,6 +34,21 @@ Run TP scaling sweep (requires 8 GPUs)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TPScaling
 
+Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k backend_gap_experiment
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k pipeline_gain_experiment
+
+Override the active profile or individual dimensions::
+
+    # Profiles: default | backend_gap | pipeline_gain
+    export LUMEN_E2E_PROFILE=backend_gap
+    export LUMEN_E2E_BATCH=4
+    export LUMEN_E2E_SEQ=2048
+    export LUMEN_E2E_HIDDEN=4096
+    export LUMEN_E2E_FFN=28672
+    export LUMEN_E2E_NUM_CHUNKS=4
+
 Run all::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s
@@ -56,10 +71,13 @@ from benchmarks.bench_utils import (
     print_bench_warnings,
     print_report_with_table,
 )
+from benchmarks.e2e_fusion_profiles import (
+    E2EFusionProfile,
+    format_e2e_fusion_profile,
+    get_e2e_fusion_profile,
+)
 
-B, S = 2, 2048
-H = 4096
-FFN = 14336
+DEFAULT_PROFILE = get_e2e_fusion_profile()
 _WARMUP = 10
 _ITERS = 30
 _TRIM = 10.0
@@ -169,8 +187,7 @@ def _new_tp_process_group(tp_size: int):
     return tp_group
 
 
-@_DIST
-class TestE2ETransformerLayerFusion:
+class _E2ETransformerLayerFusionBase:
     """E2E single transformer layer: naive vs pure-pipeline NCCL/SDMA.
 
     This benchmark is intentionally single-layer and does not include delayed
@@ -188,9 +205,9 @@ class TestE2ETransformerLayerFusion:
         yield
         dist.barrier()
 
-    def _make_layer(self):
-        w_up = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
-        w_down = torch.randn(H, FFN // self.world, device=self.device, dtype=torch.bfloat16)
+    def _make_layer(self, profile: E2EFusionProfile):
+        w_up = torch.randn(profile.ffn // self.world, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        w_down = torch.randn(profile.hidden, profile.ffn // self.world, device=self.device, dtype=torch.bfloat16)
         return w_up, w_down
 
     def _naive_fwd(self, x_local, w_up, w_down):
@@ -199,14 +216,14 @@ class TestE2ETransformerLayerFusion:
         down = F.linear(up, w_down)
         return _reduce_scatter(down, self.world, self.device)
 
-    def _make_pipelines(self, backend):
+    def _make_pipelines(self, backend, profile: E2EFusionProfile):
         from lumen.modules.comm_overlap import (
             PipelinedAllgatherGemm,
             PipelinedGemmReduceScatter,
         )
 
-        ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
-        rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
+        ag = PipelinedAllgatherGemm(num_chunks=profile.num_chunks, comm=backend)
+        rs = PipelinedGemmReduceScatter(num_chunks=profile.num_chunks, comm=backend)
         return ag, rs
 
     def _fused_fwd(self, x_local, w_up, w_down, ag, rs, w_up_param, w_down_param):
@@ -238,25 +255,25 @@ class TestE2ETransformerLayerFusion:
             None,
         )
 
-    def _run_comparison(self, fwd_only=False, bwd_only=False):
+    def _run_comparison(self, fwd_only=False, bwd_only=False, profile: E2EFusionProfile = DEFAULT_PROFILE):
         from lumen.modules.comm_overlap import NcclCommBackend
 
-        S_local = (B * S) // self.world
-        w_up, w_down = self._make_layer()
+        S_local = profile.tokens // self.world
+        w_up, w_down = self._make_layer(profile)
         w_up_param = torch.nn.Parameter(w_up.clone())
         w_down_param = torch.nn.Parameter(w_down.clone())
         nccl = NcclCommBackend(dist.group.WORLD)
-        ag, rs = self._make_pipelines(nccl)
+        ag, rs = self._make_pipelines(nccl, profile)
 
-        ag_bytes = B * S * H * 2
-        rs_bytes = B * S * H * 2
+        ag_bytes = profile.tokens * profile.hidden * 2
+        rs_bytes = profile.tokens * profile.hidden * 2
         needs_grad = not fwd_only
 
         if bwd_only:
-            x_naive = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            x_naive = torch.randn(S_local, profile.hidden, device=self.device, dtype=torch.bfloat16, requires_grad=True)
             y_naive_saved = self._naive_fwd(x_naive, w_up_param, w_down_param)
 
-            x_fused = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            x_fused = torch.randn(S_local, profile.hidden, device=self.device, dtype=torch.bfloat16, requires_grad=True)
             y_fused_saved = self._fused_fwd(
                 x_fused,
                 w_up,
@@ -284,7 +301,13 @@ class TestE2ETransformerLayerFusion:
             def _naive():
                 w_up_param.grad = None
                 w_down_param.grad = None
-                x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
+                x = torch.randn(
+                    S_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=needs_grad,
+                )
                 y = self._naive_fwd(x, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
@@ -293,7 +316,13 @@ class TestE2ETransformerLayerFusion:
             def _fused_nccl():
                 w_up_param.grad = None
                 w_down_param.grad = None
-                x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
+                x = torch.randn(
+                    S_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=needs_grad,
+                )
                 y = self._fused_fwd(x, w_up, w_down, ag, rs, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
@@ -337,12 +366,18 @@ class TestE2ETransformerLayerFusion:
             os.environ["MORI_ENABLE_SDMA"] = "1"
             sdma_comm = SdmaTpComm(dist.group.WORLD)
             sdma = SdmaCommBackend(sdma_comm)
-            ag_s, rs_s = self._make_pipelines(sdma)
+            ag_s, rs_s = self._make_pipelines(sdma, profile)
 
             def _fused_sdma():
                 w_up_param.grad = None
                 w_down_param.grad = None
-                x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
+                x = torch.randn(
+                    S_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=needs_grad,
+                )
                 y = self._fused_fwd(x, w_up, w_down, ag_s, rs_s, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
@@ -372,13 +407,19 @@ class TestE2ETransformerLayerFusion:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E Transformer Layer Pure Pipeline {label_suffix} (world={self.world})",
+                (
+                    "E2E Transformer Layer Pure Pipeline "
+                    f"{label_suffix} ({format_e2e_fusion_profile(profile)}, world={self.world})"
+                ),
                 results,
             )
             print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r_fused.avg_ms)
             print_bandwidth_summary(label="RS", bytes_transferred=rs_bytes, time_ms=r_fused.avg_ms)
             print_bench_warnings(result=r_fused, speedup=speedup)
 
+
+@_DIST
+class TestE2ETransformerLayerFusion(_E2ETransformerLayerFusionBase):
     def test_single_layer_fwd_bwd(self):
         self._run_comparison(fwd_only=False, bwd_only=False)
 
@@ -387,6 +428,15 @@ class TestE2ETransformerLayerFusion:
 
     def test_single_layer_bwd_only(self):
         self._run_comparison(fwd_only=False, bwd_only=True)
+
+
+@_DIST
+class TestE2EFusionExperiments(_E2ETransformerLayerFusionBase):
+    def test_backend_gap_experiment_fwd_bwd(self):
+        self._run_comparison(fwd_only=False, bwd_only=False, profile=get_e2e_fusion_profile("backend_gap"))
+
+    def test_pipeline_gain_experiment_fwd_bwd(self):
+        self._run_comparison(fwd_only=False, bwd_only=False, profile=get_e2e_fusion_profile("pipeline_gain"))
 
 
 @_SDMA_DIST
@@ -403,7 +453,7 @@ class TestE2ETransformerLayerSdmaOnly:
         yield
         dist.barrier()
 
-    def _run_sdma(self, fwd_only=False, bwd_only=False):
+    def _run_sdma(self, fwd_only=False, bwd_only=False, profile: E2EFusionProfile = DEFAULT_PROFILE):
         from lumen.modules.comm_overlap import (
             PipelinedAllgatherGemm,
             PipelinedGemmReduceScatter,
@@ -413,23 +463,23 @@ class TestE2ETransformerLayerSdmaOnly:
         )
         from lumen.modules.sdma_comm import SdmaTpComm
 
-        S_local = (B * S) // self.world
-        w_up = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
-        w_down = torch.randn(H, FFN // self.world, device=self.device, dtype=torch.bfloat16)
+        S_local = profile.tokens // self.world
+        w_up = torch.randn(profile.ffn // self.world, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        w_down = torch.randn(profile.hidden, profile.ffn // self.world, device=self.device, dtype=torch.bfloat16)
         w_up_param = torch.nn.Parameter(w_up.clone())
         w_down_param = torch.nn.Parameter(w_down.clone())
 
         sdma_comm = SdmaTpComm(dist.group.WORLD)
         sdma = SdmaCommBackend(sdma_comm)
-        ag = PipelinedAllgatherGemm(num_chunks=4, comm=sdma)
-        rs = PipelinedGemmReduceScatter(num_chunks=4, comm=sdma)
+        ag = PipelinedAllgatherGemm(num_chunks=profile.num_chunks, comm=sdma)
+        rs = PipelinedGemmReduceScatter(num_chunks=profile.num_chunks, comm=sdma)
 
-        ag_bytes = B * S * H * 2
-        rs_bytes = B * S * H * 2
+        ag_bytes = profile.tokens * profile.hidden * 2
+        rs_bytes = profile.tokens * profile.hidden * 2
         needs_grad = not fwd_only
 
         if bwd_only:
-            x_saved = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            x_saved = torch.randn(S_local, profile.hidden, device=self.device, dtype=torch.bfloat16, requires_grad=True)
             up = fused_column_parallel_forward(
                 x_saved,
                 w_up,
@@ -464,7 +514,13 @@ class TestE2ETransformerLayerSdmaOnly:
             def _fused():
                 w_up_param.grad = None
                 w_down_param.grad = None
-                x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
+                x = torch.randn(
+                    S_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=needs_grad,
+                )
                 up = fused_column_parallel_forward(
                     x,
                     w_up,
@@ -507,7 +563,7 @@ class TestE2ETransformerLayerSdmaOnly:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E SDMA-Only Pure Pipeline {label} (world={self.world})",
+                f"E2E SDMA-Only Pure Pipeline {label} ({format_e2e_fusion_profile(profile)}, world={self.world})",
                 [r],
             )
             print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r.avg_ms)
@@ -564,29 +620,36 @@ class TestTPScaling:
             fused_row_parallel_forward,
         )
 
+        profile = DEFAULT_PROFILE
         tp_sizes = [2, 4, 8]
         sweep_results: List[dict] = []
 
         for tp_size in tp_sizes:
             tp_group = _new_tp_process_group(tp_size)
 
-            S_local = (B * S) // tp_size
-            w_up = torch.randn(FFN // tp_size, H, device=self.device, dtype=torch.bfloat16)
-            w_down = torch.randn(H, FFN // tp_size, device=self.device, dtype=torch.bfloat16)
+            S_local = profile.tokens // tp_size
+            w_up = torch.randn(profile.ffn // tp_size, profile.hidden, device=self.device, dtype=torch.bfloat16)
+            w_down = torch.randn(profile.hidden, profile.ffn // tp_size, device=self.device, dtype=torch.bfloat16)
             w_up_param = torch.nn.Parameter(w_up.clone())
             w_down_param = torch.nn.Parameter(w_down.clone())
 
             backend = NcclCommBackend(tp_group)
-            ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
-            rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
+            ag = PipelinedAllgatherGemm(num_chunks=profile.num_chunks, comm=backend)
+            rs = PipelinedGemmReduceScatter(num_chunks=profile.num_chunks, comm=backend)
 
-            ag_bytes = B * S * H * 2
-            rs_bytes = B * S * H * 2
+            ag_bytes = profile.tokens * profile.hidden * 2
+            rs_bytes = profile.tokens * profile.hidden * 2
 
             def _naive(s_local=S_local, w_u=w_up_param, w_d=w_down_param, tp_g=tp_group, tp_s=tp_size):
                 w_u.grad = None
                 w_d.grad = None
-                x = torch.randn(s_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+                x = torch.randn(
+                    s_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=True,
+                )
                 gathered = _distributed_allgather(x, group=tp_g)
                 up = F.linear(gathered, w_u)
                 down = F.linear(up, w_d)
@@ -605,7 +668,13 @@ class TestTPScaling:
             ):
                 w_u_p.grad = None
                 w_d_p.grad = None
-                x = torch.randn(s_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+                x = torch.randn(
+                    s_local,
+                    profile.hidden,
+                    device=self.device,
+                    dtype=torch.bfloat16,
+                    requires_grad=True,
+                )
                 up = fused_column_parallel_forward(
                     x,
                     w_u,
@@ -674,7 +743,7 @@ class TestTPScaling:
 
         if self.rank == 0:
             print("\n" + "=" * 72)
-            print("TP Scaling Summary (Llama 8B shapes, fwd+bwd)")
+            print(f"TP Scaling Summary ({format_e2e_fusion_profile(profile)}, fwd+bwd)")
             print("=" * 72)
             print(
                 f"{'TP':>4s}  {'Naive ms':>10s}  {'Fused ms':>10s}  " f"{'Speedup':>8s}  {'AG BW':>10s}  {'RS BW':>10s}"

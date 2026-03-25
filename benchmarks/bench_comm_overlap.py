@@ -93,11 +93,53 @@ def _init_dist():
     )
 
 
+class _AllGatherFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, group):
+        ctx.group = group
+        world = dist.get_world_size(group)
+        ctx.world = world
+        chunks = [torch.empty_like(tensor) for _ in range(world)]
+        dist.all_gather(chunks, tensor.contiguous(), group=group)
+        return torch.cat(chunks, dim=0)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        shard = grad_output.shape[0] // ctx.world
+        out = torch.empty(
+            shard,
+            *grad_output.shape[1:],
+            device=grad_output.device,
+            dtype=grad_output.dtype,
+        )
+        dist.reduce_scatter_tensor(out, grad_output.contiguous(), group=ctx.group)
+        return out, None
+
+
+class _ReduceScatterFunc(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, tensor, world, device, group):
+        ctx.group = group
+        shard = tensor.shape[0] // world
+        out = torch.empty(shard, *tensor.shape[1:], device=device, dtype=tensor.dtype)
+        dist.reduce_scatter_tensor(out, tensor.contiguous(), group=group)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        world = dist.get_world_size(ctx.group)
+        grad_output_contig = grad_output.contiguous()
+        chunks = [torch.empty_like(grad_output_contig) for _ in range(world)]
+        dist.all_gather(chunks, grad_output_contig, group=ctx.group)
+        return torch.cat(chunks, dim=0), None, None, None
+
+
 def _distributed_allgather(tensor, group=None):
-    world = dist.get_world_size(group)
-    chunks = [torch.empty_like(tensor) for _ in range(world)]
-    dist.all_gather(chunks, tensor, group=group)
-    return torch.cat(chunks, dim=0)
+    return _AllGatherFunc.apply(tensor, group)
+
+
+def _reduce_scatter(tensor, world, device, group=None):
+    return _ReduceScatterFunc.apply(tensor, world, device, group)
 
 
 _DIST = pytest.mark.skipif(
@@ -214,10 +256,7 @@ class TestNCCLRowParallelOverlap:
         dist.barrier()
 
     def _reduce_scatter(self, tensor):
-        shard_size = tensor.shape[0] // self.world
-        out = torch.empty(shard_size, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-        dist.reduce_scatter_tensor(out, tensor)
-        return out
+        return _reduce_scatter(tensor, self.world, self.device)
 
     # Expected: overlap_ratio > 0.2. Reduce-scatter aggregates partial GEMM
     # results across ranks, using the NIC while a new GEMM can start on
@@ -770,10 +809,7 @@ class TestNCCLvsSdma:
         compute_stream = torch.cuda.current_stream(self.device)
 
         def _rs_nccl(tensor):
-            shard = tensor.shape[0] // self.world
-            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-            dist.reduce_scatter_tensor(out, tensor)
-            return out
+            return _reduce_scatter(tensor, self.world, self.device)
 
         for _ in range(3):
             gemm_out = x @ w.T
@@ -845,10 +881,7 @@ class TestNCCLvsSdma:
         compute_stream = torch.cuda.current_stream(self.device)
 
         def _rs_nccl(tensor):
-            shard = tensor.shape[0] // self.world
-            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-            dist.reduce_scatter_tensor(out, tensor)
-            return out
+            return _reduce_scatter(tensor, self.world, self.device)
 
         for _ in range(3):
             gemm_out = x @ w.T
@@ -926,10 +959,7 @@ class TestNCCLvsSdma:
         all_results: List[BenchResult] = []
 
         def _rs_nccl(tensor):
-            shard = tensor.shape[0] // self.world
-            out = torch.empty(shard, *tensor.shape[1:], device=self.device, dtype=tensor.dtype)
-            dist.reduce_scatter_tensor(out, tensor)
-            return out
+            return _reduce_scatter(tensor, self.world, self.device)
 
         for gemm_n in sizes:
             w = torch.randn(gemm_n, K_tp, device=self.device, dtype=torch.bfloat16)
