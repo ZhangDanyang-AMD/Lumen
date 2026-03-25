@@ -240,6 +240,9 @@ def _fp8_chunked_linear_pipelined(
     per_rank_scales = _gather_scales_once(scale, fp8_shard.device, group=group)
     comm_stream = torch.cuda.Stream(device=fp8_shard.device)
     compute_stream = torch.cuda.current_stream(fp8_shard.device)
+    # Keep chunk all-gathers on comm_stream ordered after the scale all-gather
+    # already enqueued on the default stream.
+    comm_stream.wait_stream(compute_stream)
     gathered_chunks = [None] * len(fp8_chunks)
     outputs = [None] * len(fp8_chunks)
 
@@ -274,6 +277,9 @@ def _fp8_multi_weight_chunked_pipelined(
     chunk_tasks = [(weight_idx, chunk_idx) for weight_idx in range(len(fp8_shards)) for chunk_idx in range(num_chunks)]
     comm_stream = torch.cuda.Stream(device=fp8_shards[0].device)
     compute_stream = torch.cuda.current_stream(fp8_shards[0].device)
+    # Keep chunk all-gathers on comm_stream ordered after the per-weight scale
+    # all-gathers already enqueued on the default stream.
+    comm_stream.wait_stream(compute_stream)
     gathered_chunks = [[None] * num_chunks for _ in fp8_shards]
     outputs = [[None] * num_chunks for _ in fp8_shards]
 
