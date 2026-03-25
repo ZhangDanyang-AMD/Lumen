@@ -1,0 +1,626 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... ============================= test session starts ==============================
+platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
+rootdir: /workspace/Lumen
+configfile: pyproject.toml
+plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
+collecting ... collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd collected 12 items
+Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd [Gloo] Rank 0 is connected to 7 peer ranks. [Gloo] Rank Expected number of connected peer ranks is : 72
+ is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+
+========================================================================
+  Fused Column-Parallel Forward (world=8)
+========================================================================
+                                       AG alone  avg=   0.234 ms  min=   0.230 ms  max=   0.240 ms  std=  0.002 ms  cv=  1.1%
+                                     GEMM alone  avg=   0.149 ms  min=   0.144 ms  max=   0.161 ms  std=  0.004 ms  cv=  2.9%  [~unstable]
+                          sequential (AG->GEMM)  avg=   0.388 ms  min=   0.379 ms  max=   0.421 ms  std=  0.009 ms  cv=  2.4%  [~unstable]
+                       fused pipeline (AG+GEMM)  avg=   1.713 ms  min=   1.644 ms  max=   1.789 ms  std=  0.044 ms  cv=  2.6%  overlap_ratio=-3.4740  speedup=0.2300  [~unstable]
+========================================================================
+
+
+  Fused Column-Parallel Forward (world=8)
+  ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+  │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+  │ AG alone                 │    0.234 │    0.230 │    0.234 │    0.239 │    0.240 │    1.1 │                                   │
+PASSED  │ GEMM alone               │    0.149 │    0.144 │    0.147 │    0.158 │    0.161 │    2.9 │  ~                                │
+PASSEDPASSED  │ sequential (AG->GEMM)    │    0.388 │    0.379 │    0.385 │    0.401 │    0.421 │    2.4 │  ~                                │
+  │ fused pipeline (AG+GEMM) │    1.713 │    1.644 │    1.716 │    1.785 │    1.789 │    2.6 │ overlap_ratio=-3.47, speedup=0.23 ~│
+  └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+PASSED  ┌── Sequential (──────────────────────────)┐
+  │ ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.149 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░ │ allgather: 0.234 ms
+  │ total = 0.388 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.713 ms
+  └─────────────────────────────────────────┘
+
+PASSED  Hidden GEMM: -1.325 / 0.149 ms (-892% of GEMM hidden)
+  Overlap ratio:  -3.474
+  Speedup:        0.23x
+
+PASSEDPASSEDPASSED
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
+========================================================================
+  Column Fwd Chunk Sweep N=1 (world=8)
+========================================================================
+                                      fused N=1  avg=   0.579 ms  min=   0.558 ms  max=   0.634 ms  std=  0.020 ms  cv=  3.4%  [~unstable]
+========================================================================
+
+
+  Column Fwd Chunk Sweep N=1 (world=8)
+  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
+  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
+  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
+PASSED  │ fused N=1 │    0.579 │    0.558 │    0.575 │    0.624 │    0.634 │    3.4 │  ~     │
+  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2]
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2]
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2] PASSEDPASSEDPASSEDPASSEDPASSED
+========================================================================
+  Column Fwd Chunk Sweep N=2 (world=8)
+========================================================================
+PASSED                                      fused N=2  avg=   1.004 ms  min=   0.983 ms  max=   1.057 ms  std=  0.020 ms  cv=  1.9%
+========================================================================
+
+
+  Column Fwd Chunk Sweep N=2 (world=8)
+  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
+  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
+  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
+  │ fused N=2 │    1.004 │    0.983 │    0.998 │    1.041 │    1.057 │    1.9 │        │
+  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+PASSEDPASSED
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4]
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4]
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4] PASSEDPASSEDPASSED
+========================================================================PASSED
+  Column Fwd Chunk Sweep N=4 (world=8)
+========================================================================
+PASSED                                      fused N=4  avg=   1.679 ms  min=   1.633 ms  max=   1.760 ms  std=  0.037 ms  cv=  2.2%  [~unstable]PASSED
+========================================================================
+
+
+  Column Fwd Chunk Sweep N=4 (world=8)
+  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
+  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
+  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
+  │ fused N=4 │    1.679 │    1.633 │    1.676 │    1.728 │    1.760 │    2.2 │  ~     │
+  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+PASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8]
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8]
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8]
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8] benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8] PASSEDPASSEDPASSEDPASSED
+========================================================================
+  Column Fwd Chunk Sweep N=8 (world=8)
+========================================================================
+                                      fused N=8  avg=   2.943 ms  min=   2.869 ms  max=   3.060 ms  std=  0.058 ms  cv=  2.0%
+========================================================================
+
+
+  Column Fwd Chunk Sweep N=8 (world=8)
+  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
+  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
+  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
+  │ fused N=8 │    2.943 │    2.869 │    2.936 │    3.045 │    3.060 │    2.0 │        │
+  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+PASSEDPASSEDPASSEDPASSED
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
+========================================================================
+  Fused Column Fwd+Bwd (world=8)
+========================================================================
+                             sequential fwd+bwd  avg=   0.812 ms  min=   0.798 ms  max=   0.826 ms  std=  0.009 ms  cv=  1.2%
+                                  fused fwd+bwd  avg=   4.236 ms  min=   4.152 ms  max=   4.549 ms  std=  0.102 ms  cv=  2.4%  speedup=0.1900  [~unstable]
+========================================================================
+
+
+  Fused Column Fwd+Bwd (world=8)
+  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ sequential fwd+bwd │    0.812 │    0.798 │    0.811 │    0.826 │    0.826 │    1.2 │              │
+PASSED  │ fused fwd+bwd      │    4.236 │    4.152 │    4.205 │    4.469 │    4.549 │    2.4 │ speedup=0.19 ~│
+  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
+========================================================================
+  Fused Row-Parallel Forward (world=8)
+========================================================================
+                                       RS alone  avg=   0.453 ms  min=   0.449 ms  max=   0.457 ms  std=  0.002 ms  cv=  0.5%
+                                     GEMM alone  avg=   0.173 ms  min=   0.171 ms  max=   0.175 ms  std=  0.001 ms  cv=  0.7%
+                          sequential (GEMM->RS)  avg=   0.619 ms  min=   0.615 ms  max=   0.625 ms  std=  0.003 ms  cv=  0.4%
+                       fused pipeline (GEMM+RS)  avg=   1.382 ms  min=   1.352 ms  max=   1.429 ms  std=  0.025 ms  cv=  1.8%  overlap_ratio=-1.2100  speedup=0.4500
+========================================================================
+
+
+  Fused Row-Parallel Forward (world=8)
+  ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+PASSED  │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+PASSED  │ RS alone                 │    0.453 │    0.449 │    0.454 │    0.456 │    0.457 │    0.5 │                                   │
+PASSEDPASSED  │ GEMM alone               │    0.173 │    0.171 │    0.173 │    0.174 │    0.175 │    0.7 │                                   │
+  │ sequential (GEMM->RS)    │    0.619 │    0.615 │    0.619 │    0.624 │    0.625 │    0.4 │                                   │
+  │ fused pipeline (GEMM+RS) │    1.382 │    1.352 │    1.378 │    1.425 │    1.429 │    1.8 │ overlap_ratio=-1.21, speedup=0.45 │
+  └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+  ┌── Sequential (──────────────────────────)┐
+PASSED  │ ███████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.173 ms
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░ │ reduce_scatter: 0.453 ms
+  │ total = 0.619 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.382 ms
+  └─────────────────────────────────────────┘
+
+  Hidden GEMM: -0.763 / 0.173 ms (-442% of GEMM hidden)
+  Overlap ratio:  -1.210
+  Speedup:        0.45x
+
+PASSEDPASSEDPASSED
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd rank 0 RDMA devices: None
+rank 7 rankInNode 7 select no device
+rank 4 rankInNode 4 select no device
+rank 3 rankInNode 3 select no device
+rank 6 rankInNode 6 select no device
+rank 2 rankInNode 2 select no device
+rank 0 rankInNode 0 select no device
+rank 1 rankInNode 1 select no device
+rank 5 rankInNode 5 select no device
+AllgatherSdma initialized: PE 7 of 8
+  Flags allocated: 64 bytes at 0x7f5110280000
+AllgatherSdma initialized: PE 5 of 8
+  Input transit buffer: 1.00 MB at 0x7f4c55e00000
+  Output transit buffer: 8.00 MB at 0x7f4c4f400000
+  Flags allocated: 64 bytes at 0x7ebe2de80000
+AllgatherSdma initialized: PE 0 of 8
+  Input transit buffer: 1.00 MB at 0x7eb99d200000
+  Flags allocated: 64 bytes at 0x7efca8680000
+  Output transit buffer: 8.00 MB at 0x7eb996800000
+  Input transit buffer: 1.00 MB at 0x7ef80c400000
+  Output transit buffer: 8.00 MB at 0x7ef805800000
+AllgatherSdma initialized: PE 6 of 8
+  Flags allocated: 64 bytes at 0x7f3449880000
+  Input transit buffer: 1.00 MB at 0x7f2fb6400000
+  Output transit buffer: 8.00 MB at 0x7f2faf400000
+AllgatherSdma initialized: PE 1 of 8
+  Flags allocated: 64 bytes at 0x7f5b03080000
+  Input transit buffer: 1.00 MB at 0x7f5664e00000
+  Output transit buffer: 8.00 MB at 0x7f565e400000
+AllgatherSdma initialized: PE 4 of 8
+  Flags allocated: 64 bytes at 0x7facd3480000
+  Input transit buffer: 1.00 MB at 0x7fa839600000
+  Output transit buffer: 8.00 MB at 0x7fa832c00000
+AllgatherSdma initialized: PE 2 of 8
+  Flags allocated: 64 bytes at 0x7f2b94280000
+  Input transit buffer: 1.00 MB at 0x7f26cb400000
+  Output transit buffer: 8.00 MB at 0x7f26c8c00000
+AllgatherSdma initialized: PE 3 of 8
+  Flags allocated: 64 bytes at 0x7ed1c1880000
+  Input transit buffer: 1.00 MB at 0x7ecd24400000
+  Output transit buffer: 8.00 MB at 0x7ecd1d800000
+AllgatherSdma destroyed: PE 5
+AllgatherSdma destroyed: PE 6
+AllgatherSdma destroyed: PE 7
+
+========================================================================
+  Fused Column Fwd: NCCL vs SDMA (world=8)
+========================================================================
+AllgatherSdma destroyed: PE 4
+AllgatherSdma destroyed: PE 2
+AllgatherSdma destroyed: PE 1
+                          NCCL fused column fwd  avg=   1.301 ms  min=   1.239 ms  max=   1.405 ms  std=  0.050 ms  cv=  3.8%  [~unstable]
+AllgatherSdma destroyed: PE 3
+                          SDMA fused column fwd  avg=   0.758 ms  min=   0.742 ms  max=   0.776 ms  std=  0.010 ms  cv=  1.4%  speedup_vs_nccl=1.7200
+========================================================================
+
+
+  Fused Column Fwd: NCCL vs SDMA (world=8)
+  ┌───────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
+  │ Name                  │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
+  ├───────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
+  │ NCCL fused column fwd │    1.301 │    1.239 │    1.287 │    1.398 │    1.405 │    3.8 │  ~                   │
+  │ SDMA fused column fwd │    0.758 │    0.742 │    0.756 │    0.775 │    0.776 │    1.4 │ speedup_vs_nccl=1.72 │
+  └───────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
+
+AllgatherSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f2fa6200000
+  Barrier: 128 bytes at 0x7f2fa4200000
+  Output transit buffer: 28.00 MB at 0x7f2f9c400000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f4c45e00000
+  Barrier: 128 bytes at 0x7f4c3fc00000
+  Output transit buffer: 28.00 MB at 0x7f4c3c000000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7eb98d200000
+  Barrier: 128 bytes at 0x7eb987000000
+  Output transit buffer: 28.00 MB at 0x7eb983400000
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7ef7fc200000
+  Barrier: 128 bytes at 0x7ef7f6000000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
+  Output transit buffer: 28.00 MB at 0x7ef7f2400000
+  Flags: 64 bytes at 0x7fa829600000
+  Barrier: 128 bytes at 0x7fa823400000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
+  Output transit buffer: 28.00 MB at 0x7fa81f800000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7ecd14200000
+  Barrier: 128 bytes at 0x7ecd0e000000
+  Flags: 64 bytes at 0x7f26bb200000
+  Barrier: 128 bytes at 0x7f26b9200000
+  Output transit buffer: 28.00 MB at 0x7ecd0a400000
+  Output transit buffer: 28.00 MB at 0x7f26b5600000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f5654e00000
+  Barrier: 128 bytes at 0x7f564ec00000
+  Output transit buffer: 28.00 MB at 0x7f564b000000
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 4
+
+========================================================================AllreduceSdma destroyed: PE 3
+
+  Fused Row Fwd: NCCL vs SDMA (world=8)
+========================================================================
+                             NCCL fused row fwd  avg=   1.211 ms  min=   1.172 ms  max=   1.295 ms  std=  0.030 ms  cv=  2.5%  [~unstable]
+                             SDMA fused row fwd  avg=   1.395 ms  min=   1.381 ms  max=   1.433 ms  std=  0.011 ms  cv=  0.8%  speedup_vs_nccl=0.8700
+========================================================================
+
+
+  Fused Row Fwd: NCCL vs SDMA (world=8)
+  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
+  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
+  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
+  │ NCCL fused row fwd │    1.211 │    1.172 │    1.210 │    1.256 │    1.295 │    2.5 │  ~                   │
+  │ SDMA fused row fwd │    1.395 │    1.381 │    1.392 │    1.411 │    1.433 │    0.8 │ speedup_vs_nccl=0.87 │
+  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
+
+  ⚠ WARNING: speedup 0.87x < 1.0 — optimized path is slower than baseline
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd AllgatherSdma initialized: PE 4 of 8
+  Flags allocated: 64 bytes at 0x7fa823400000
+AllgatherSdma initialized: PE 5 of 8
+  Input transit buffer: 1.00 MB at 0x7fa80c800000
+  Flags allocated: 64 bytes at 0x7eb987000000
+  Output transit buffer: 8.00 MB at 0x7fa80a000000
+  Input transit buffer: 1.00 MB at 0x7eb970400000
+  Output transit buffer: 8.00 MB at 0x7eb96dc00000
+AllgatherSdma initialized: PE 1 of 8
+AllgatherSdma initialized: PE 7 of 8
+AllgatherSdma initialized: PE 0 of 8
+  Flags allocated: 64 bytes at 0x7f564ec00000
+  Flags allocated: 64 bytes at 0x7f4c3fc00000
+  Flags allocated: 64 bytes at 0x7ef7f6000000
+  Input transit buffer: 1.00 MB at 0x7f5638000000
+  Input transit buffer: 1.00 MB at 0x7ef7df400000
+  Input transit buffer: 1.00 MB at 0x7f4c29000000
+  Output transit buffer: 8.00 MB at 0x7f5635800000
+  Output transit buffer: 8.00 MB at 0x7ef7dcc00000
+  Output transit buffer: 8.00 MB at 0x7f4c26800000
+AllgatherSdma initialized: PE 6 of 8
+AllgatherSdma initialized: PE 3 of 8
+  Flags allocated: 64 bytes at 0x7f2fa4200000
+  Flags allocated: 64 bytes at 0x7ecd0e000000
+AllgatherSdma initialized: PE 2 of 8
+  Flags allocated: 64 bytes at 0x7f26b9200000
+  Input transit buffer: 1.00 MB at 0x7eccf7400000
+  Input transit buffer: 1.00 MB at 0x7f2f89400000
+  Output transit buffer: 8.00 MB at 0x7eccf4c00000
+  Input transit buffer: 1.00 MB at 0x7f26a2600000
+  Output transit buffer: 8.00 MB at 0x7f2f86c00000
+  Output transit buffer: 8.00 MB at 0x7f269fe00000
+AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
+AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7ef7d4200000
+  Flags: 64 bytes at 0x7eb965200000
+  Barrier: 128 bytes at 0x7ef7d2200000
+  Barrier: 128 bytes at 0x7eb963200000
+  Output transit buffer: 8.00 MB at 0x7ef7cfa00000
+AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
+  Output transit buffer: 8.00 MB at 0x7eb960a00000
+  Flags: 64 bytes at 0x7f2f7e200000
+  Barrier: 128 bytes at 0x7f2f7c200000
+  Output transit buffer: 8.00 MB at 0x7f2f79a00000
+AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f4c1de00000
+  Barrier: 128 bytes at 0x7f4c1be00000
+  Output transit buffer: 8.00 MB at 0x7f4c19600000
+AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f562ce00000
+  Barrier: 128 bytes at 0x7f562ae00000
+  Output transit buffer: 8.00 MB at 0x7f5628600000
+AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7fa801600000
+  Barrier: 128 bytes at 0x7fa7ff600000
+  Output transit buffer: 8.00 MB at 0x7fa7fce00000
+AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7eccec200000
+  Barrier: 128 bytes at 0x7eccea200000
+  Output transit buffer: 8.00 MB at 0x7ecce7a00000
+AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
+  Flags: 64 bytes at 0x7f2697400000
+  Barrier: 128 bytes at 0x7f2695400000
+  Output transit buffer: 8.00 MB at 0x7f2692c00000
+AllgatherSdma destroyed: PE 4
+AllgatherSdma destroyed: PE 3
+AllgatherSdma destroyed: PE 7
+AllgatherSdma destroyed: PE 5
+AllgatherSdma destroyed: PE 2
+AllgatherSdma destroyed: PE 1
+
+========================================================================
+  Fused Column Fwd+Bwd: NCCL vs SDMA (world=8)
+========================================================================
+                             NCCL fused fwd+bwd  avg=   4.108 ms  min=   3.991 ms  max=   4.352 ms  std=  0.098 ms  cv=  2.4%  [~unstable]
+                             SDMA fused fwd+bwd  avg=   2.830 ms  min=   2.774 ms  max=   2.874 ms  std=  0.025 ms  cv=  0.9%  speedup_vs_nccl=1.4500
+========================================================================
+
+AllgatherSdma destroyed: PE 6
+
+  Fused Column Fwd+Bwd: NCCL vs SDMA (world=8)
+  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
+  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
+  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
+  │ NCCL fused fwd+bwd │    4.108 │    3.991 │    4.095 │    4.311 │    4.352 │    2.4 │  ~                   │
+  │ SDMA fused fwd+bwd │    2.830 │    2.774 │    2.833 │    2.866 │    2.874 │    0.9 │ speedup_vs_nccl=1.45 │
+  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
+
+AllgatherSdma destroyed: PE 0
+AllreduceSdma destroyed: PE 7
+AllreduceSdma destroyed: PE 4
+AllreduceSdma destroyed: PE 5
+AllreduceSdma destroyed: PE 1
+AllreduceSdma destroyed: PE 3
+AllreduceSdma destroyed: PE 2
+AllreduceSdma destroyed: PE 6
+AllreduceSdma destroyed: PE 0
+PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
+========================================================================
+  Column Backward Overlap (world=8)
+========================================================================
+                          sequential column bwd  avg=   0.808 ms  min=   0.793 ms  max=   0.823 ms  std=  0.008 ms  cv=  1.0%
+                               fused column bwd  avg=   4.232 ms  min=   4.107 ms  max=   4.728 ms  std=  0.124 ms  cv=  2.9%  speedup=0.1900  overlap_ratio=-4.2400  [~unstable]
+========================================================================
+
+
+  Column Backward Overlap (world=8)
+  ┌───────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+  │ Name                  │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├───────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+  │ sequential column bwd │    0.808 │    0.793 │    0.807 │    0.820 │    0.823 │    1.0 │                                   │
+  │ fused column bwd      │    4.232 │    4.107 │    4.203 │    4.340 │    4.728 │    2.9 │ speedup=0.19, overlap_ratio=-4.24 ~│
+  └───────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+  ┌── Sequential (──────────────────────────)┐
+  │ ████████████████████████████████████████ │ seq bwd: 0.808 ms
+  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ (fused): 0.000 ms
+  │ total = 0.808 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+PASSED  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 4.232 ms
+PASSEDPASSED  └─────────────────────────────────────────┘
+
+PASSED  Hidden seq bwd: -3.424 / 0.808 ms (-424% of seq bwd hidden)
+PASSED  Overlap ratio:  -4.240
+  Speedup:        0.19x
+
+  ⚠ WARNING: overlap ratio -424.0% is negative — fused path is slower than sequential, check for contention
+  ⚠ WARNING: speedup 0.19x < 1.0 — optimized path is slower than baseline
+PASSEDPASSEDPASSED
+
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
+========================================================================
+  Row Backward Overlap (world=8)
+========================================================================
+                             sequential row bwd  avg=   1.360 ms  min=   1.351 ms  max=   1.375 ms  std=  0.007 ms  cv=  0.5%
+                                  fused row bwd  avg=   5.047 ms  min=   4.897 ms  max=   6.204 ms  std=  0.268 ms  cv=  5.3%  speedup=0.2700  overlap_ratio=-2.7120  [!NOISY]
+========================================================================
+
+
+  Row Backward Overlap (world=8)
+  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
+  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
+  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
+PASSED  │ sequential row bwd │    1.360 │    1.351 │    1.358 │    1.371 │    1.375 │    0.5 │                                   │
+  │ fused row bwd      │    5.047 │    4.897 │    4.964 │    5.347 │    6.204 │    5.3 │ speedup=0.27, overlap_ratio=-2.71 *│
+  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
+
+  ┌── Sequential (──────────────────────────)┐PASSED
+  │ ████████████████████████████████████████ │ seq bwd: 1.360 ms
+PASSED  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ (fused): 0.000 ms
+  │ total = 1.360 ms                    │
+  ├── Overlapped (──────────────────────────)┤
+  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 5.047 ms
+PASSED  └─────────────────────────────────────────┘
+
+  Hidden seq bwd: -3.688 / 1.360 ms (-271% of seq bwd hidden)
+  Overlap ratio:  -2.712
+  Speedup:        0.27x
+
+PASSED  ⚠ WARNING: overlap ratio -271.2% is negative — fused path is slower than sequential, check for contention
+  ⚠ WARNING: speedup 0.27x < 1.0 — optimized path is slower than baseline
+PASSEDPASSEDPASSED
+
+============================= 12 passed in 17.52s ==============================
+
+
+============================= 12 passed in 16.90s ==============================
+
+
+============================= 12 passed in 17.00s ==============================
+
+
+============================= 12 passed in 16.91s ==============================
+
+
+============================= 12 passed in 17.02s ==============================
+
+
+============================= 12 passed in 17.21s ==============================
+
+
+============================= 12 passed in 17.50s ==============================
+
+
+============================= 12 passed in 17.12s ==============================

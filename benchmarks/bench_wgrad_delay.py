@@ -47,6 +47,20 @@ Run multi-GPU — NCCL vs SDMA wgrad scaling sweep (requires mori)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k "wgrad_overlap_scaling_summary"
 
+Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k backend_gap_experiment
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k pipeline_gain_experiment
+
+Override the active profile or individual dimensions::
+
+    # Profiles: default | backend_gap | pipeline_gain
+    export LUMEN_E2E_PROFILE=backend_gap
+    export LUMEN_E2E_BATCH=4
+    export LUMEN_E2E_SEQ=2048
+    export LUMEN_E2E_HIDDEN=4096
+    export LUMEN_E2E_FFN=28672
+
 Run multi-GPU — all distributed tests (NCCL + SDMA + comparison, requires mori)::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k "RealComm or SdmaComm or NCCLvsSdma"
@@ -72,6 +86,12 @@ from benchmarks.bench_utils import (
     require_cuda,
 )
 from benchmarks.conftest import AITER, CUDA
+from benchmarks.e2e_fusion_profiles import (
+    E2EFusionProfile,
+    format_e2e_fusion_profile,
+    get_e2e_fusion_profile,
+    wgrad_delay_dims,
+)
 
 # ---------------------------------------------------------------------------
 # Dimensions (Llama 3.1 8B)
@@ -79,11 +99,45 @@ from benchmarks.conftest import AITER, CUDA
 M = 4096  # tokens (B * S)
 K = 4096  # hidden_dim
 N = 14336  # FFN intermediate
+DEFAULT_PROFILE = get_e2e_fusion_profile()
 
 # Timing parameters — overridable via LUMEN_BENCH_WARMUP / LUMEN_BENCH_ITERS
 _WARMUP = 10
 _ITERS = 30
 _TRIM = 10.0
+
+
+def _make_profiled_wgrad_single_layer_inputs(
+    device: torch.device,
+    profile: E2EFusionProfile,
+):
+    tokens, hidden, ffn = wgrad_delay_dims(profile)
+    x = torch.randn(tokens, hidden, device=device, dtype=torch.bfloat16)
+    w = nn.Parameter(torch.randn(ffn, hidden, device=device, dtype=torch.bfloat16) * 0.02)
+    w.main_grad = torch.zeros(ffn, hidden, device=device, dtype=torch.bfloat16)
+    grad_out = torch.randn(tokens, ffn, device=device, dtype=torch.bfloat16)
+    ar_buf = torch.randn(ffn, hidden, device=device, dtype=torch.bfloat16)
+    return x, w, grad_out, ar_buf
+
+
+def _make_profiled_wgrad_multi_layer_inputs(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    n_layers: int,
+):
+    tokens, hidden, ffn = wgrad_delay_dims(profile)
+    x = torch.randn(tokens, hidden, device=device, dtype=torch.bfloat16)
+    weights = [
+        nn.Parameter(torch.randn(ffn, hidden, device=device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
+    ]
+    for w_i in weights:
+        w_i.main_grad = torch.zeros_like(w_i.data)
+    grad_outs = [torch.randn(tokens, ffn, device=device, dtype=torch.bfloat16) for _ in range(n_layers)]
+    return x, weights, grad_outs
+
+
+def _profiled_wgrad_title(prefix: str, profile: E2EFusionProfile, world: int) -> str:
+    return f"{prefix} ({format_e2e_fusion_profile(profile)}, world={world})"
 
 
 # ---------------------------------------------------------------------------
@@ -415,13 +469,8 @@ class TestDeferredWgradRealComm:
     def test_wgrad_overlap_with_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        w = nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02)
-        w.main_grad = torch.zeros(N, K, device=self.device, dtype=torch.bfloat16)
-        grad_out = torch.randn(M, N, device=self.device, dtype=torch.bfloat16)
-
-        # Buffer for allreduce (simulates previous layer's gradient)
-        ar_buf = torch.randn(N, K, device=self.device, dtype=torch.bfloat16)
+        profile = DEFAULT_PROFILE
+        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         dwg = _DeferredWgrad()
         comm_stream = torch.cuda.Stream(device=self.device)
@@ -494,7 +543,7 @@ class TestDeferredWgradRealComm:
 
         if self.rank == 0:
             print_report_with_table(
-                f"_DeferredWgrad + Real NCCL AllReduce (world={self.world})",
+                _profiled_wgrad_title("_DeferredWgrad + Real NCCL AllReduce", profile, self.world),
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
             print_overlap_summary(
@@ -512,15 +561,9 @@ class TestDeferredWgradRealComm:
     def test_multi_layer_pipeline_with_allreduce(self):
         from lumen.modules.parallel_linear import _DeferredWgrad
 
+        profile = DEFAULT_PROFILE
         n_layers = 4
-        weights = [
-            nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
-        ]
-        for w_i in weights:
-            w_i.main_grad = torch.zeros_like(w_i.data)
-
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
+        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
 
         dwg = _DeferredWgrad()
         comm_stream = torch.cuda.Stream(device=self.device)
@@ -591,7 +634,11 @@ class TestDeferredWgradRealComm:
 
         if self.rank == 0:
             print_report_with_table(
-                f"{n_layers}-Layer Pipeline: Eager vs Deferred + AllReduce (world={self.world})",
+                _profiled_wgrad_title(
+                    f"{n_layers}-Layer Pipeline: Eager vs Deferred + AllReduce",
+                    profile,
+                    self.world,
+                ),
                 [r_eager, r_deferred],
             )
             print(f"  Speedup:  {speedup:.2f}x")
@@ -659,17 +706,13 @@ class TestDeferredWgradSdmaComm:
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
+        profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
         comm = SdmaTpComm(dist.group.WORLD)
 
         # ── Part 1: single-layer overlap ─────────────────────────
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        w = nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02)
-        w.main_grad = torch.zeros(N, K, device=self.device, dtype=torch.bfloat16)
-        grad_out = torch.randn(M, N, device=self.device, dtype=torch.bfloat16)
-
-        ar_buf = torch.randn(N, K, device=self.device, dtype=torch.bfloat16)
+        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
@@ -740,7 +783,7 @@ class TestDeferredWgradSdmaComm:
 
         if self.rank == 0:
             print_report_with_table(
-                f"_DeferredWgrad + SDMA AllReduce (world={self.world})",
+                _profiled_wgrad_title("_DeferredWgrad + SDMA AllReduce", profile, self.world),
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
             print_overlap_summary(
@@ -758,13 +801,7 @@ class TestDeferredWgradSdmaComm:
 
         # ── Part 2: multi-layer pipeline ─────────────────────────
         n_layers = 4
-        weights = [
-            nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
-        ]
-        for w_i in weights:
-            w_i.main_grad = torch.zeros_like(w_i.data)
-
-        grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
+        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
         dwg2 = _DeferredWgrad()
 
         # Re-prime the SDMA handle after the idle gap (NCCL-only Part 1
@@ -845,7 +882,11 @@ class TestDeferredWgradSdmaComm:
 
         if self.rank == 0:
             print_report_with_table(
-                f"{n_layers}-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR (world={self.world})",
+                _profiled_wgrad_title(
+                    f"{n_layers}-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR",
+                    profile,
+                    self.world,
+                ),
                 [r_baseline, r_deferred],
             )
             print(f"  Speedup:  {ml_speedup:.2f}x")
@@ -887,16 +928,12 @@ class TestNCCLvsSdmaWgradDelay:
         yield
         dist.barrier()
 
-    def test_single_layer_overlap_comparison(self):
+    def _run_single_layer_overlap_comparison(self, profile: E2EFusionProfile = DEFAULT_PROFILE):
         """Single-layer wgrad + allreduce: NCCL vs SDMA side by side."""
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        w = nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02)
-        w.main_grad = torch.zeros(N, K, device=self.device, dtype=torch.bfloat16)
-        grad_out = torch.randn(M, N, device=self.device, dtype=torch.bfloat16)
-        ar_buf = torch.randn(N, K, device=self.device, dtype=torch.bfloat16)
+        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         torch.cuda.synchronize()
         dist.barrier()
@@ -1046,7 +1083,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         if self.rank == 0:
             print_report_with_table(
-                f"NCCL vs SDMA Wgrad-Delay Overlap (world={self.world})",
+                _profiled_wgrad_title("NCCL vs SDMA Wgrad-Delay Overlap", profile, self.world),
                 [
                     r_wgrad,
                     r_nccl_comm,
@@ -1066,23 +1103,20 @@ class TestNCCLvsSdmaWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
 
+    def test_single_layer_overlap_comparison(self):
+        self._run_single_layer_overlap_comparison()
+
     def test_multi_layer_pipeline_comparison(self):
         """4-layer pipeline: NCCL vs SDMA deferred-wgrad overlap."""
         from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
+        profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm(dist.group.WORLD)
         n_layers = 4
-        weights = [
-            nn.Parameter(torch.randn(N, K, device=self.device, dtype=torch.bfloat16) * 0.02) for _ in range(n_layers)
-        ]
-        for w_i in weights:
-            w_i.main_grad = torch.zeros_like(w_i.data)
-
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        grad_outs = [torch.randn(M, N, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
+        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
@@ -1219,7 +1253,11 @@ class TestNCCLvsSdmaWgradDelay:
 
         if self.rank == 0:
             print_report_with_table(
-                f"NCCL vs SDMA {n_layers}-Layer Wgrad Pipeline (world={self.world})",
+                _profiled_wgrad_title(
+                    f"NCCL vs SDMA {n_layers}-Layer Wgrad Pipeline",
+                    profile,
+                    self.world,
+                ),
                 [r_eager_nccl, r_deferred_nccl, r_eager_sdma, r_deferred_sdma],
             )
             nccl_saved = r_eager_nccl.avg_ms - r_deferred_nccl.avg_ms
@@ -1581,6 +1619,20 @@ class TestNCCLvsSdmaWgradDelay:
         del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
+
+
+@_SDMA
+class TestWgradDelayProfileExperiments(TestNCCLvsSdmaWgradDelay):
+    test_single_layer_overlap_comparison = None
+    test_multi_layer_pipeline_comparison = None
+    test_wgrad_overlap_scaling = None
+    test_wgrad_overlap_scaling_summary = None
+
+    def test_backend_gap_experiment_single_layer_overlap_comparison(self):
+        self._run_single_layer_overlap_comparison(profile=get_e2e_fusion_profile("backend_gap"))
+
+    def test_pipeline_gain_experiment_single_layer_overlap_comparison(self):
+        self._run_single_layer_overlap_comparison(profile=get_e2e_fusion_profile("pipeline_gain"))
 
 
 # ---------------------------------------------------------------------------

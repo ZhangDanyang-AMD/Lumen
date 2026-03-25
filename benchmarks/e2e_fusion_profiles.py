@@ -97,6 +97,31 @@ def get_e2e_fusion_profile(
     )
 
 
+def wgrad_delay_dims(profile: E2EFusionProfile) -> tuple[int, int, int]:
+    return profile.tokens, profile.hidden, profile.ffn
+
+
+def fp8_param_e2e_weight_shape(profile: E2EFusionProfile) -> tuple[int, int]:
+    return profile.ffn, profile.hidden
+
+
+def fp8_param_e2e_input_shape(
+    profile: E2EFusionProfile,
+    in_features: int | None = None,
+) -> tuple[int, int, int]:
+    features = profile.hidden if in_features is None else in_features
+    return profile.batch, profile.seq, features
+
+
+def fp8_param_pipeline_layer_shapes(profile: E2EFusionProfile) -> list[tuple[int, int]]:
+    return [
+        (profile.ffn, profile.hidden),
+        (profile.ffn, profile.hidden),
+        (profile.hidden, profile.ffn),
+        (profile.hidden, profile.hidden),
+    ]
+
+
 def format_e2e_fusion_profile(profile: E2EFusionProfile) -> str:
     return (
         f"profile={profile.name}, B={profile.batch}, S={profile.seq}, "

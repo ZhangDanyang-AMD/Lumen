@@ -49,6 +49,20 @@ Run multi-GPU (8 GPU) — tail latency & scaling::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "TailLatency or Scaling"
 
+Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k backend_gap_experiment
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k pipeline_gain_experiment
+
+Override the active profile or individual dimensions::
+
+    # Profiles: default | backend_gap | pipeline_gain
+    export LUMEN_E2E_PROFILE=backend_gap
+    export LUMEN_E2E_BATCH=4
+    export LUMEN_E2E_SEQ=2048
+    export LUMEN_E2E_HIDDEN=4096
+    export LUMEN_E2E_FFN=28672
+
 Run multi-GPU (8 GPU) — individual sections::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
@@ -78,6 +92,14 @@ from benchmarks.bench_utils import (
     require_cuda,
 )
 from benchmarks.conftest import CUDA
+from benchmarks.e2e_fusion_profiles import (
+    E2EFusionProfile,
+    format_e2e_fusion_profile,
+    fp8_param_e2e_input_shape,
+    fp8_param_e2e_weight_shape,
+    fp8_param_pipeline_layer_shapes,
+    get_e2e_fusion_profile,
+)
 
 # ---------------------------------------------------------------------------
 # Dimensions
@@ -85,11 +107,41 @@ from benchmarks.conftest import CUDA
 HIDDEN = 4096
 FFN_HIDDEN = 14336
 N_LAYERS = 32
+DEFAULT_PROFILE = get_e2e_fusion_profile()
 
 # Timing parameters — overridable via LUMEN_BENCH_WARMUP / LUMEN_BENCH_ITERS
 _WARMUP = 10
 _ITERS = 30
 _TRIM = 10.0
+
+
+def _make_profiled_fp8_e2e_inputs(
+    device: torch.device,
+    profile: E2EFusionProfile,
+):
+    shape = fp8_param_e2e_weight_shape(profile)
+    weight_full = torch.randn(*shape, device=device, dtype=torch.bfloat16)
+    x = torch.randn(*fp8_param_e2e_input_shape(profile), device=device, dtype=torch.bfloat16)
+    return shape, weight_full, x
+
+
+def _make_profiled_fp8_pipeline_inputs(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    n_layers: int,
+):
+    layer_shapes = fp8_param_pipeline_layer_shapes(profile)
+    weights = []
+    xs = []
+    for _ in range(n_layers):
+        for shape in layer_shapes:
+            weights.append(torch.randn(*shape, device=device, dtype=torch.bfloat16))
+            xs.append(torch.randn(*fp8_param_e2e_input_shape(profile, shape[1]), device=device, dtype=torch.bfloat16))
+    return layer_shapes, weights, xs
+
+
+def _profiled_fp8_title(prefix: str, profile: E2EFusionProfile, world: int) -> str:
+    return f"{prefix} ({format_e2e_fusion_profile(profile)}, world={world})"
 
 
 def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
@@ -981,15 +1033,13 @@ class TestFP8ParamE2EDistributed:
             print(f"\n  E2E distributed FP8 param forward SNR: {snr_db:.1f} dB")
         assert snr_db > 10, f"Distributed FP8 param SNR too low: {snr_db:.1f} dB"
 
-    def test_gather_dequant_forward_latency(self):
+    def _run_gather_dequant_forward_latency(self, profile: E2EFusionProfile = DEFAULT_PROFILE):
         """Time the full pipeline: scatter shards → allgather FP8 → dequant → GEMM."""
         from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
 
-        shape = (FFN_HIDDEN, HIDDEN)
-        weight_full = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
+        shape, weight_full, x = _make_profiled_fp8_e2e_inputs(self.device, profile)
         dist.broadcast(weight_full, src=0)
 
-        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
         fp8_full, scale = quantize_param_to_fp8(weight_full)
         fp8_shard = fp8_full.chunk(self.world, dim=0)[self.rank].contiguous()
         bf16_shard = weight_full.chunk(self.world, dim=0)[self.rank].contiguous()
@@ -1028,11 +1078,11 @@ class TestFP8ParamE2EDistributed:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E Gather+Forward {shape} (world={self.world})",
+                _profiled_fp8_title(f"E2E Gather+Forward {shape}", profile, self.world),
                 [r_bf16, r_fp8],
             )
 
-    def test_multi_layer_pipelined_gather_forward(self):
+    def _run_multi_layer_pipelined_gather_forward(self, profile: E2EFusionProfile = DEFAULT_PROFILE):
         """Multi-layer pipeline: overlap allgather(layer i+1) with dequant+GEMM(layer i).
 
         The single-layer E2E test is sequential (gather→dequant→GEMM), so the
@@ -1045,32 +1095,23 @@ class TestFP8ParamE2EDistributed:
         from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
 
         n_layers = 4
-        layer_shapes = [
-            (FFN_HIDDEN, HIDDEN),
-            (FFN_HIDDEN, HIDDEN),
-            (HIDDEN, FFN_HIDDEN),
-            (HIDDEN, HIDDEN),
-        ]
+        _, weights, xs = _make_profiled_fp8_pipeline_inputs(self.device, profile, n_layers)
 
         bf16_shards = []
         fp8_shards = []
         fp8_scales = []
         bf16_outs = []
         fp8_outs = []
-        xs = []
 
-        for _ in range(n_layers):
-            for shape in layer_shapes:
-                w = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
-                dist.broadcast(w, src=0)
-                fp8_w, sc = quantize_param_to_fp8(w)
-                bf16_shards.append(w.chunk(self.world, dim=0)[self.rank].contiguous())
-                fp8_shards.append(fp8_w.chunk(self.world, dim=0)[self.rank].contiguous())
-                fp8_scales.append(sc)
-                bf16_outs.append(torch.empty_like(w))
-                fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
-                in_features = shape[1]
-                xs.append(torch.randn(2, 2048, in_features, device=self.device, dtype=torch.bfloat16))
+        for w in weights:
+            shape = tuple(w.shape)
+            dist.broadcast(w, src=0)
+            fp8_w, sc = quantize_param_to_fp8(w)
+            bf16_shards.append(w.chunk(self.world, dim=0)[self.rank].contiguous())
+            fp8_shards.append(fp8_w.chunk(self.world, dim=0)[self.rank].contiguous())
+            fp8_scales.append(sc)
+            bf16_outs.append(torch.empty_like(w))
+            fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
 
         N = len(bf16_shards)
         comm_stream = torch.cuda.Stream(device=self.device)
@@ -1141,7 +1182,7 @@ class TestFP8ParamE2EDistributed:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E Pipelined Gather+Forward ({n_layers}L, world={self.world})",
+                _profiled_fp8_title(f"E2E Pipelined Gather+Forward ({n_layers}L)", profile, self.world),
                 [r_bf16, r_fp8_seq, r_fp8_pipe],
             )
             saved_ms = r_fp8_seq.avg_ms - r_fp8_pipe.avg_ms
@@ -1152,6 +1193,31 @@ class TestFP8ParamE2EDistributed:
                 gap = r_fp8_pipe.avg_ms - r_bf16.avg_ms
                 print(f"  FP8 pipelined still {gap:.3f} ms behind BF16 " f"(dequant overhead not fully hidden)")
             print()
+
+    def test_gather_dequant_forward_latency(self):
+        self._run_gather_dequant_forward_latency()
+
+    def test_multi_layer_pipelined_gather_forward(self):
+        self._run_multi_layer_pipelined_gather_forward()
+
+
+@_DIST
+class TestFP8ParamProfileExperiments(TestFP8ParamE2EDistributed):
+    test_gather_dequant_forward_correctness = None
+    test_gather_dequant_forward_latency = None
+    test_multi_layer_pipelined_gather_forward = None
+
+    def test_backend_gap_experiment_gather_dequant_forward_latency(self):
+        self._run_gather_dequant_forward_latency(profile=get_e2e_fusion_profile("backend_gap"))
+
+    def test_pipeline_gain_experiment_gather_dequant_forward_latency(self):
+        self._run_gather_dequant_forward_latency(profile=get_e2e_fusion_profile("pipeline_gain"))
+
+    def test_backend_gap_experiment_multi_layer_pipelined_gather_forward(self):
+        self._run_multi_layer_pipelined_gather_forward(profile=get_e2e_fusion_profile("backend_gap"))
+
+    def test_pipeline_gain_experiment_multi_layer_pipelined_gather_forward(self):
+        self._run_multi_layer_pipelined_gather_forward(profile=get_e2e_fusion_profile("pipeline_gain"))
 
 
 # ---------------------------------------------------------------------------
