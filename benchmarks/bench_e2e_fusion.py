@@ -135,6 +135,32 @@ def _reduce_scatter(tensor, world, device, group=None):
     return _ReduceScatterFunc.apply(tensor, world, device, group)
 
 
+def _new_tp_process_group(tp_size: int):
+    """Return this rank's tensor-parallel ``ProcessGroup`` of size *tp_size*.
+
+    **All** global ranks must call this in the same order with the same
+    *tp_size* values.  PyTorch requires :func:`torch.distributed.new_group` to
+    be invoked in **identical sequence** on every process: each call wires one
+    subgroup, and non-members still participate in that collective.  Calling
+    ``new_group`` only with "my" ranks (so different ranks hit different
+    ``new_group`` arguments at the same program point) deadlocks—exactly what
+    the TP scaling benchmark used to do for ``tp_size`` in ``{2, 4}``.
+    """
+    world = dist.get_world_size()
+    rank = dist.get_rank()
+    if world % tp_size != 0:
+        raise ValueError(f"world_size={world} not divisible by tp_size={tp_size}")
+    tp_group = None
+    for start in range(0, world, tp_size):
+        ranks = list(range(start, start + tp_size))
+        g = dist.new_group(ranks)
+        if rank in ranks:
+            tp_group = g
+    if tp_group is None:
+        raise RuntimeError(f"failed to assign TP subgroup for rank {rank}, tp_size={tp_size}")
+    return tp_group
+
+
 @_DIST
 class TestE2ETransformerLayerFusion:
     """E2E single transformer layer: Naive vs Fused NCCL (vs Fused SDMA)."""
@@ -496,7 +522,21 @@ class TestE2ETransformerLayerSdmaOnly:
 
 @_DIST
 class TestTPScaling:
-    """TP scaling sweep: measure fusion benefit at TP=2, 4, 8."""
+    """TP scaling sweep: measure fusion benefit at TP=2, 4, 8.
+
+    For each *tp_size*, this rank joins a disjoint TP subgroup of that width
+    (e.g. with 8 GPUs and TP=2: subgroups ``{0,1}``, ``{2,3}``, …).  It then
+    times a minimal "column + row parallel" FFN block in two ways:
+
+    * **Naive**: monolithic all-gather → two ``F.linear`` → reduce-scatter,
+      with autograd-compatible comm (see :func:`_distributed_allgather`).
+    * **Fused**: pipelined comm–GEMM overlap
+      (:class:`~lumen.modules.comm_overlap.PipelinedAllgatherGemm` /
+      :class:`~lumen.modules.comm_overlap.PipelinedGemmReduceScatter`).
+
+    Forward + backward (including deferred wgrad) are timed; results compare
+    naive vs fused latency and derived AG/RS bandwidth labels.
+    """
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -525,9 +565,7 @@ class TestTPScaling:
         sweep_results: List[dict] = []
 
         for tp_size in tp_sizes:
-            group_start = (self.rank // tp_size) * tp_size
-            group_ranks = list(range(group_start, group_start + tp_size))
-            tp_group = dist.new_group(group_ranks)
+            tp_group = _new_tp_process_group(tp_size)
 
             S_local = (B * S) // tp_size
             w_up = torch.randn(FFN // tp_size, H, device=self.device, dtype=torch.bfloat16)
