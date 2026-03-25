@@ -1,92 +1,93 @@
-NCCL All-Gather BF16 vs FP8 (4096, 4096) (world=8)
-  BF16 avg=0.173 ms, min=0.171 ms, max=0.178 ms, cv=1.0%
-  FP8  avg=0.131 ms, min=0.127 ms, max=0.151 ms, cv=3.8%, speedup=1.33x, bw_reduction=2.0x
+========================================================================
+  FP8 Param Summary - Raw All-Gather (world=8)
+========================================================================
+  +----------------+----------+----------+----------+----------+----------+----------+--------------+
+  | Shape          | BF16 avg | BF16 min | BF16 max | FP8 avg  | FP8 min  | FP8 max  | Speedup      |
+  +----------------+----------+----------+----------+----------+----------+----------+--------------+
+  | (4096, 4096)   |    0.173 |    0.171 |    0.178 |    0.131 |    0.127 |    0.151 | 1.33x, 2.0xB |
+  | (14336, 4096)  |    0.414 |    0.403 |    0.474 |    0.237 |    0.233 |    0.239 | 1.75x, 2.0xB |
+  +----------------+----------+----------+----------+----------+----------+----------+--------------+
+  Notes: last column = latency speedup, bandwidth reduction.
 
-NCCL All-Gather BF16 vs FP8 (14336, 4096) (world=8)
-  BF16 avg=0.414 ms, min=0.403 ms, max=0.474 ms, cv=4.1%
-  FP8  avg=0.237 ms, min=0.233 ms, max=0.239 ms, cv=0.7%, speedup=1.75x, bw_reduction=2.0x
+========================================================================
+  FP8 Param Summary - Full Pipeline (world=8)
+========================================================================
+  +----------------+-------------+-------------+-------------+--------------+-------------+
+  | Shape          | BF16 gather | FP8 seq     | FP8 ovl     | Seq vs BF16  | Ovl vs Seq  |
+  +----------------+-------------+-------------+-------------+--------------+-------------+
+  | (4096, 4096)   |       0.169 |       0.254 |       0.264 | 0.67x        | 0.96x       |
+  | (14336, 4096)  |       0.397 |       0.658 |       0.540 | 0.60x        | 1.22x       |
+  +----------------+-------------+-------------+-------------+--------------+-------------+
 
-Full Pipeline BF16 vs FP8 (4096, 4096) (world=8)
-  BF16 gather     avg=0.169 ms
-  FP8 sequential  avg=0.254 ms, vs_bf16=0.67x
-  FP8 overlapped  avg=0.264 ms, speedup_vs_seq=0.96x
+========================================================================
+  FP8 Param Summary - Multi-Layer And E2E (world=8)
+========================================================================
+  Distributed correctness: SNR = 31.4 dB
 
-Full Pipeline BF16 vs FP8 (14336, 4096) (world=8)
-  BF16 gather     avg=0.397 ms
-  FP8 sequential  avg=0.658 ms, vs_bf16=0.60x
-  FP8 overlapped  avg=0.540 ms, speedup_vs_seq=1.22x
+  +----------------------+----------+----------+----------+----------+----------+----------+----------+----------+
+  | Scenario             | BF16 ms  | FP8 seq  | FP8 pipe | Seq/BF16 | Pipe/BF16| Pipe/Seq | Gain ms  | Gap ms   |
+  +----------------------+----------+----------+----------+----------+----------+----------+----------+----------+
+  | 4L microbench        |    5.019 |    8.741 |    7.119 | 0.57x    | 0.70x    | 1.23x    |    1.622 |    2.100 |
+  | default 4L E2E       |   17.657 |   22.214 |   19.730 | 0.79x    | 0.89x    | 1.13x    |    2.484 |    2.073 |
+  | backend_gap 4L E2E   |   26.872 |   31.604 |   32.041 | 0.85x    | 0.84x    | 0.99x    |   -0.437 |    5.170 |
+  | pipeline_gain 4L E2E |   51.926 |   61.507 |   58.377 | 0.84x    | 0.89x    | 1.05x    |    3.130 |    6.451 |
+  +----------------------+----------+----------+----------+----------+----------+----------+----------+----------+
+  Volumes (4L microbench): BF16 = 184.00 MiB, FP8 = 92.00 MiB
 
-Multi-Layer Pipeline (4L, world=8)
-  BF16 gather 4L    avg=5.019 ms
-  FP8 sequential 4L avg=8.741 ms, vs_bf16=0.57x, bf16_vol=184.00 MiB, fp8_vol=92.00 MiB
-  FP8 pipelined 4L  avg=7.119 ms, speedup_vs_seq=1.23x, vs_bf16=0.70x
+  +----------------+----------+-------+--------+----------+----------+
+  | E2E profile    | Tokens   | FFN   | BF16   | FP8      | Speedup  |
+  +----------------+----------+-------+--------+----------+----------+
+  | default        | 4096     | 14336 |  1.282 |    1.601 | 0.80x    |
+  | backend_gap    | 8192     | 14336 |  1.996 |    2.410 | 0.83x    |
+  | pipeline_gain  | 8192     | 28672 |  3.923 |    4.705 | 0.83x    |
+  +----------------+----------+-------+--------+----------+----------+
 
-E2E distributed FP8 param forward SNR
-  SNR=31.4 dB
+========================================================================
+  FP8 Param Summary - Tail Latency (world=8)
+========================================================================
+  +----------------+-------------------+----------+----------+-----------+
+  | Shape          | Metric            | BF16 ms  | FP8 ms   | Reduction |
+  +----------------+-------------------+----------+----------+-----------+
+  | (4096, 4096)   | Rank-0 avg        |    0.162 |    0.143 | 1.13x     |
+  | (4096, 4096)   | Rank-0 p95        |    0.167 |    0.121 | 1.38x     |
+  | (4096, 4096)   | Rank-0 p99        |    0.170 |    0.131 | 1.30x     |
+  | (4096, 4096)   | Rank-0 max        |    0.170 |    2.875 | 0.06x     |
+  | (4096, 4096)   | Cross-rank p95max |    0.167 |    0.121 | 1.38x     |
+  | (4096, 4096)   | Cross-rank max    |    0.170 |    2.875 | 0.06x     |
+  | (14336, 4096)  | Rank-0 avg        |    0.467 |    0.254 | 1.84x     |
+  | (14336, 4096)  | Rank-0 p95        |    0.399 |    0.235 | 1.70x     |
+  | (14336, 4096)  | Rank-0 p99        |    2.840 |    0.370 | 7.68x     |
+  | (14336, 4096)  | Rank-0 max        |    3.142 |    2.533 | 1.24x     |
+  | (14336, 4096)  | Cross-rank p95max |    0.399 |    0.235 | 1.70x     |
+  | (14336, 4096)  | Cross-rank max    |    3.146 |    2.533 | 1.24x     |
+  +----------------+-------------------+----------+----------+-----------+
 
-E2E Gather+Forward (14336, 4096) (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
-  BF16 gather+GEMM           avg=1.282 ms
-  FP8 gather+dequant+GEMM    avg=1.601 ms, speedup=0.80x
+  +----------------------+--------------------+-------------------+----------------+
+  | Pipeline tail case   | BF16 cross-rank p95| FP8 cross-rank p95| Tail reduction |
+  +----------------------+--------------------+-------------------+----------------+
+  | (14336, 4096)        |              0.396 |             2.336 | 0.17x          |
+  +----------------------+--------------------+-------------------+----------------+
 
-E2E Pipelined Gather+Forward (4L) (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
-  BF16 sequential 4L avg=17.657 ms
-  FP8 sequential 4L  avg=22.214 ms, vs_bf16=0.79x
-  FP8 pipelined 4L   avg=19.730 ms, vs_bf16=0.89x, vs_fp8_seq=1.13x
-  Pipeline saves 2.484 ms vs FP8 sequential
-  FP8 pipelined still 2.073 ms behind BF16
-
-E2E Gather+Forward (14336, 4096) (profile=backend_gap, B=4, S=2048, H=4096, FFN=14336, chunks=4, world=8)
-  BF16 gather+GEMM           avg=1.996 ms
-  FP8 gather+dequant+GEMM    avg=2.410 ms, speedup=0.83x
-
-E2E Gather+Forward (28672, 4096) (profile=pipeline_gain, B=4, S=2048, H=4096, FFN=28672, chunks=4, world=8)
-  BF16 gather+GEMM           avg=3.923 ms
-  FP8 gather+dequant+GEMM    avg=4.705 ms, speedup=0.83x
-
-E2E Pipelined Gather+Forward (4L) (profile=backend_gap, B=4, S=2048, H=4096, FFN=14336, chunks=4, world=8)
-  BF16 sequential 4L avg=26.872 ms
-  FP8 sequential 4L  avg=31.604 ms, vs_bf16=0.85x
-  FP8 pipelined 4L   avg=32.041 ms, vs_bf16=0.84x, vs_fp8_seq=0.99x
-  Pipeline saves -0.437 ms vs FP8 sequential
-  FP8 pipelined still 5.170 ms behind BF16
-
-E2E Pipelined Gather+Forward (4L) (profile=pipeline_gain, B=4, S=2048, H=4096, FFN=28672, chunks=4, world=8)
-  BF16 sequential 4L avg=51.926 ms
-  FP8 sequential 4L  avg=61.507 ms, vs_bf16=0.84x
-  FP8 pipelined 4L   avg=58.377 ms, vs_bf16=0.89x, vs_fp8_seq=1.05x
-  Pipeline saves 3.130 ms vs FP8 sequential
-  FP8 pipelined still 6.451 ms behind BF16
-
-Tail Latency - FP8 vs BF16 All-Gather (4096, 4096) (world=8)
-  Rank-0 avg         BF16=0.162 ms, FP8=0.143 ms, reduction=1.13x
-  Rank-0 p95         BF16=0.167 ms, FP8=0.121 ms, reduction=1.38x
-  Rank-0 p99         BF16=0.170 ms, FP8=0.131 ms, reduction=1.30x
-  Rank-0 max         BF16=0.170 ms, FP8=2.875 ms, reduction=0.06x
-  Cross-rank p95 max BF16=0.167 ms, FP8=0.121 ms, reduction=1.38x
-  Cross-rank max     BF16=0.170 ms, FP8=2.875 ms, reduction=0.06x
-
-Tail Latency - FP8 vs BF16 All-Gather (14336, 4096) (world=8)
-  Rank-0 avg         BF16=0.467 ms, FP8=0.254 ms, reduction=1.84x
-  Rank-0 p95         BF16=0.399 ms, FP8=0.235 ms, reduction=1.70x
-  Rank-0 p99         BF16=2.840 ms, FP8=0.370 ms, reduction=7.68x
-  Rank-0 max         BF16=3.142 ms, FP8=2.533 ms, reduction=1.24x
-  Cross-rank p95 max BF16=0.399 ms, FP8=0.235 ms, reduction=1.70x
-  Cross-rank max     BF16=3.146 ms, FP8=2.533 ms, reduction=1.24x
-
-Full Pipeline Tail - (14336, 4096) (world=8)
-  BF16 cross-rank p95: 0.396 ms
-  FP8  cross-rank p95: 2.336 ms
-  Tail reduction: 0.17x
-
-Scaling Efficiency - FP8 vs BF16 Gather+GEMM (14336, 4096)
+========================================================================
+  FP8 Param Summary - Scaling (world=8)
+========================================================================
+  Scaling Efficiency - FP8 vs BF16 Gather+GEMM (14336, 4096)
   Baseline group size: 2
-  GPUs=2  BF16=2.344 ms  BF16_eff=100.0%  FP8=2.117 ms  FP8_eff=100.0%  FP8_speedup=1.11x
-  GPUs=4  BF16=1.667 ms  BF16_eff=140.6%  FP8=1.778 ms  FP8_eff=119.0%  FP8_speedup=0.94x
-  GPUs=8  BF16=1.335 ms  BF16_eff=175.6%  FP8=1.635 ms  FP8_eff=129.5%  FP8_speedup=0.82x
+  +------+----------+-----------+----------+-----------+-------------+
+  | GPUs | BF16 ms  | BF16 eff  | FP8 ms   | FP8 eff   | FP8 speedup |
+  +------+----------+-----------+----------+-----------+-------------+
+  |    2 |    2.344 | 100.0%    |    2.117 | 100.0%    | 1.11x       |
+  |    4 |    1.667 | 140.6%    |    1.778 | 119.0%    | 0.94x       |
+  |    8 |    1.335 | 175.6%    |    1.635 | 129.5%    | 0.82x       |
+  +------+----------+-----------+----------+-----------+-------------+
 
-FP8 Pipelined Scaling - 4 layers
-  GPUs=2  avg=8.189 ms  scaling_eff=100.0%  p95=8.523 ms
-  GPUs=4  avg=6.603 ms  scaling_eff=124.0%  p95=7.104 ms
-  GPUs=8  avg=6.404 ms  scaling_eff=127.9%  p95=6.714 ms
+  FP8 Pipelined Scaling — 4 layers
+  +------+----------+-------------+----------+
+  | GPUs | Avg ms   | Scaling eff | P95 ms   |
+  +------+----------+-------------+----------+
+  |    2 |    8.189 | 100.0%      |    8.523 |
+  |    4 |    6.603 | 124.0%      |    7.104 |
+  |    8 |    6.404 | 127.9%      |    6.714 |
+  +------+----------+-------------+----------+
 
 ====================== 17 passed, 16 deselected in 37.51s ======================

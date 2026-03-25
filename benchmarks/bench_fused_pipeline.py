@@ -532,14 +532,15 @@ class TestFusedPipelineSdmaColumn:
         rs_sdma = PipelinedGemmReduceScatter(num_chunks=4, comm=sdma)
         return (ag_nccl, rs_nccl), (ag_sdma, rs_sdma)
 
-    def test_nccl_vs_sdma_fused_column_fwd(self):
-        from lumen.modules.comm_overlap import fused_column_parallel_forward
+    def _sync_all_ranks(self):
+        torch.cuda.synchronize()
+        dist.barrier()
 
+    def _bench_fused_column_fwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_column_parallel_forward):
         S_local = (B * S) // self.world
         x_local = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16)
         w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
-        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
 
         def _run(ag, rs):
             return fused_column_parallel_forward(
@@ -587,15 +588,12 @@ class TestFusedPipelineSdmaColumn:
             )
             print_bench_warnings(result=r_sdma, speedup=speedup)
 
-    def test_nccl_vs_sdma_fused_row_fwd(self):
-        from lumen.modules.comm_overlap import fused_row_parallel_forward
-
+    def _bench_fused_row_fwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_row_parallel_forward):
         S_full = B * S
         H_tp = H // self.world
         x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
         w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
-        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
 
         def _run(rs, ag):
             return fused_row_parallel_forward(
@@ -641,13 +639,10 @@ class TestFusedPipelineSdmaColumn:
             )
             print_bench_warnings(result=r_sdma, speedup=speedup)
 
-    def test_nccl_vs_sdma_fused_column_fwd_bwd(self):
-        from lumen.modules.comm_overlap import fused_column_parallel_forward
-
+    def _bench_fused_column_fwd_bwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_column_parallel_forward):
         S_local = (B * S) // self.world
         w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
-        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
 
         def _run(ag, rs):
             x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
@@ -697,6 +692,70 @@ class TestFusedPipelineSdmaColumn:
                 [r_nccl, r_sdma],
             )
             print_bench_warnings(result=r_sdma, speedup=speedup)
+
+    def test_nccl_vs_sdma_fused_suite(self):
+        """Run all SDMA fused benchmarks in one test method.
+
+        Keep one SDMA handle set alive across the suite. Mori allocates KFD
+        queues during handle construction; recreating SDMA handles across
+        separate test methods can exhaust that pool and later surface as
+        AllGather timeouts on 8-GPU runs.
+
+        Set ``LUMEN_FUSED_PIPELINE_SDMA_ONLY`` to one of ``column_fwd``,
+        ``row_fwd``, or ``column_fwd_bwd`` to run a single phase while still
+        keeping one pytest node / one SDMA handle lifecycle.
+        """
+        from lumen.modules.comm_overlap import (
+            fused_column_parallel_forward,
+            fused_row_parallel_forward,
+        )
+
+        selected_phase = os.environ.get("LUMEN_FUSED_PIPELINE_SDMA_ONLY", "all").strip().lower()
+        phase_codes = {"all": 0, "column_fwd": 1, "row_fwd": 2, "column_fwd_bwd": 3}
+        valid_phases = set(phase_codes)
+        phase_code_value = phase_codes.get(selected_phase, -1)
+        phase_code = torch.tensor([phase_code_value], device=self.device, dtype=torch.int32)
+        phase_min = phase_code.clone()
+        phase_max = phase_code.clone()
+        dist.all_reduce(phase_min, op=dist.ReduceOp.MIN)
+        dist.all_reduce(phase_max, op=dist.ReduceOp.MAX)
+        if phase_min.item() != phase_max.item():
+            raise RuntimeError("LUMEN_FUSED_PIPELINE_SDMA_ONLY must match across all ranks")
+        if phase_code_value < 0:
+            raise ValueError(
+                "LUMEN_FUSED_PIPELINE_SDMA_ONLY must be one of " f"{sorted(valid_phases)}, got {selected_phase!r}"
+            )
+
+        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
+
+        if selected_phase in {"all", "column_fwd"}:
+            self._bench_fused_column_fwd(
+                ag_nccl,
+                rs_nccl,
+                ag_sdma,
+                rs_sdma,
+                fused_column_parallel_forward,
+            )
+            self._sync_all_ranks()
+
+        if selected_phase in {"all", "row_fwd"}:
+            self._bench_fused_row_fwd(
+                ag_nccl,
+                rs_nccl,
+                ag_sdma,
+                rs_sdma,
+                fused_row_parallel_forward,
+            )
+            self._sync_all_ranks()
+
+        if selected_phase in {"all", "column_fwd_bwd"}:
+            self._bench_fused_column_fwd_bwd(
+                ag_nccl,
+                rs_nccl,
+                ag_sdma,
+                rs_sdma,
+                fused_column_parallel_forward,
+            )
 
 
 @_DIST

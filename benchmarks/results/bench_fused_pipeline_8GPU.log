@@ -1,501 +1,95 @@
-============================= test session starts ==============================
-collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py ============================= test session starts ==============================
-collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py ============================= test session starts ==============================
-============================= test session starts ==============================
-============================= test session starts ==============================
-============================= test session starts ==============================
-============================= test session starts ==============================
-collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py collected 12 items
-Running 12 items in this shard
-
-benchmarks/bench_fused_pipeline.py ============================= test session starts ==============================
-collecting ... collected 12 items
-Running 12 items in this shard: benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4], benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8], benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap, benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
-
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_fused_vs_sequential_fwd [Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : [Gloo] Rank 7
-6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-
 ========================================================================
-  Fused Column-Parallel Forward (world=8)
+  Fused Column-Parallel Forward (world=2)
 ========================================================================
-                                       AG alone  avg=   0.238 ms  min=   0.224 ms  max=   0.252 ms  std=  0.010 ms  cv=  4.3%  [~unstable]
-                                     GEMM alone  avg=   0.105 ms  min=   0.102 ms  max=   0.110 ms  std=  0.003 ms  cv=  2.6%  [~unstable]
-                          sequential (AG->GEMM)  avg=   0.320 ms  min=   0.315 ms  max=   0.329 ms  std=  0.004 ms  cv=  1.1%
-                       fused pipeline (AG+GEMM)  avg=   1.005 ms  min=   0.912 ms  max=   1.597 ms  std=  0.181 ms  cv= 18.0%  overlap_ratio=-1.9300  speedup=0.3200  [!NOISY]
-========================================================================
-
-
-  Fused Column-Parallel Forward (world=8)
   ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ AG alone                 │    0.238 │    0.224 │    0.241 │    0.252 │    0.252 │    4.3 │  ~                                │
-  │ GEMM alone               │    0.105 │    0.102 │    0.105 │    0.110 │    0.110 │    2.6 │  ~                                │
-  │ sequential (AG->GEMM)    │    0.320 │    0.315 │    0.320 │    0.329 │    0.329 │    1.1 │                                   │
-  │ fused pipeline (AG+GEMM) │    1.005 │    0.912 │    0.961 │    1.597 │    1.597 │   18.0 │ overlap_ratio=-1.93, speedup=0.32 *│
+  │ AG alone                 │    0.632 │    0.627 │    0.631 │    0.641 │    0.641 │    0.7 │                                   │
+  │ GEMM alone               │    0.264 │    0.238 │    0.257 │    0.294 │    0.294 │    7.6 │  *                                │
+  │ sequential (AG->GEMM)    │    0.811 │    0.806 │    0.811 │    0.820 │    0.820 │    0.6 │                                   │
+  │ fused pipeline (AG+GEMM) │    1.446 │    1.429 │    1.449 │    1.464 │    1.464 │    0.8 │ overlap_ratio=-0.61, speedup=0.56 │
   └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
 
-  ┌── Sequential (──────────────────────────)┐
-  │ █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.105 ms
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░ │ allgather: 0.238 ms
-  │ total = 0.320 ms                    │
-  ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 1.005 ms
-  └─────────────────────────────────────────┘
-
-  Hidden GEMM: -0.685 / 0.105 ms (-651% of GEMM hidden)
-  Overlap ratio:  -1.930
-  Speedup:        0.32x
-
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[1]
 ========================================================================
-  Column Fwd Chunk Sweep N=1 (world=8)
+  Column Fwd Chunk Sweep Summary (world=2)
 ========================================================================
-                                      fused N=1  avg=   0.393 ms  min=   0.375 ms  max=   0.435 ms  std=  0.019 ms  cv=  4.9%  [~unstable]
-========================================================================
-
-
-  Column Fwd Chunk Sweep N=1 (world=8)
   ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
   │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
   ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ fused N=1 │    0.393 │    0.375 │    0.384 │    0.435 │    0.435 │    4.9 │  ~     │
+  │ fused N=1 │    0.894 │    0.882 │    0.893 │    0.913 │    0.913 │    1.1 │        │
+  │ fused N=2 │    1.083 │    1.073 │    1.081 │    1.098 │    1.098 │    0.7 │        │
+  │ fused N=4 │    1.415 │    1.395 │    1.414 │    1.451 │    1.451 │    1.1 │        │
+  │ fused N=8 │    1.924 │    1.912 │    1.921 │    1.937 │    1.937 │    0.5 │        │
   └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
 
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[2]
 ========================================================================
-  Column Fwd Chunk Sweep N=2 (world=8)
+  Fused Column Fwd+Bwd (world=2)
 ========================================================================
-                                      fused N=2  avg=   0.602 ms  min=   0.585 ms  max=   0.643 ms  std=  0.017 ms  cv=  2.9%  [~unstable]
-========================================================================
-
-
-  Column Fwd Chunk Sweep N=2 (world=8)
-  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
-  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
-  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ fused N=2 │    0.602 │    0.585 │    0.594 │    0.643 │    0.643 │    2.9 │  ~     │
-  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
-
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[4]
-========================================================================
-  Column Fwd Chunk Sweep N=4 (world=8)
-========================================================================
-                                      fused N=4  avg=   0.984 ms  min=   0.954 ms  max=   1.041 ms  std=  0.029 ms  cv=  3.0%  [~unstable]
-========================================================================
-
-
-  Column Fwd Chunk Sweep N=4 (world=8)
-  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
-  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
-  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ fused N=4 │    0.984 │    0.954 │    0.971 │    1.041 │    1.041 │    3.0 │  ~     │
-  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
-
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineColumnFwd::test_chunk_sweep_fwd[8]
-========================================================================
-  Column Fwd Chunk Sweep N=8 (world=8)
-========================================================================
-                                      fused N=8  avg=   1.569 ms  min=   1.518 ms  max=   1.629 ms  std=  0.037 ms  cv=  2.3%  [~unstable]
-========================================================================
-
-
-  Column Fwd Chunk Sweep N=8 (world=8)
-  ┌───────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
-  │ Name      │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
-  ├───────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ fused N=8 │    1.569 │    1.518 │    1.580 │    1.629 │    1.629 │    2.3 │  ~     │
-  └───────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
-
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineFwdBwd::test_fused_column_fwd_bwd
-========================================================================
-  Fused Column Fwd+Bwd (world=8)
-========================================================================
-                             sequential fwd+bwd  avg=   0.743 ms  min=   0.705 ms  max=   0.943 ms  std=  0.064 ms  cv=  8.7%  [!NOISY]
-                                  fused fwd+bwd  avg=   3.697 ms  min=   3.650 ms  max=   3.793 ms  std=  0.053 ms  cv=  1.4%  speedup=0.2000
-========================================================================
-
-
-  Fused Column Fwd+Bwd (world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ sequential fwd+bwd │    0.743 │    0.705 │    0.724 │    0.943 │    0.943 │    8.7 │  *           │
-  │ fused fwd+bwd      │    3.697 │    3.650 │    3.675 │    3.793 │    3.793 │    1.4 │ speedup=0.20 │
+  │ sequential fwd+bwd │    1.849 │    1.833 │    1.848 │    1.869 │    1.869 │    0.6 │              │
+  │ fused fwd+bwd      │    4.716 │    4.691 │    4.706 │    4.753 │    4.753 │    0.5 │ speedup=0.39 │
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineRowFwd::test_fused_row_vs_sequential_fwd
 ========================================================================
-  Fused Row-Parallel Forward (world=8)
+  Fused Row-Parallel Forward (world=2)
 ========================================================================
-                                       RS alone  avg=   0.374 ms  min=   0.370 ms  max=   0.380 ms  std=  0.003 ms  cv=  0.8%
-                                     GEMM alone  avg=   0.117 ms  min=   0.115 ms  max=   0.121 ms  std=  0.002 ms  cv=  2.1%  [~unstable]
-                          sequential (GEMM->RS)  avg=   0.487 ms  min=   0.474 ms  max=   0.508 ms  std=  0.011 ms  cv=  2.3%  [~unstable]
-                       fused pipeline (GEMM+RS)  avg=   0.917 ms  min=   0.903 ms  max=   0.957 ms  std=  0.017 ms  cv=  1.9%  overlap_ratio=-0.8680  speedup=0.5300
-========================================================================
-
-
-  Fused Row-Parallel Forward (world=8)
   ┌──────────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name                     │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├──────────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ RS alone                 │    0.374 │    0.370 │    0.373 │    0.380 │    0.380 │    0.8 │                                   │
-  │ GEMM alone               │    0.117 │    0.115 │    0.116 │    0.121 │    0.121 │    2.1 │  ~                                │
-  │ sequential (GEMM->RS)    │    0.487 │    0.474 │    0.483 │    0.508 │    0.508 │    2.3 │  ~                                │
-  │ fused pipeline (GEMM+RS) │    0.917 │    0.903 │    0.910 │    0.957 │    0.957 │    1.9 │ overlap_ratio=-0.87, speedup=0.53 │
+  │ RS alone                 │    2.492 │    2.488 │    2.493 │    2.499 │    2.499 │    0.1 │                                   │
+  │ GEMM alone               │    0.290 │    0.268 │    0.281 │    0.327 │    0.327 │    6.5 │  *                                │
+  │ sequential (GEMM->RS)    │    2.717 │    2.706 │    2.716 │    2.730 │    2.730 │    0.3 │                                   │
+  │ fused pipeline (GEMM+RS) │    3.067 │    3.046 │    3.066 │    3.095 │    3.095 │    0.5 │ overlap_ratio=-0.10, speedup=0.89 │
   └──────────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
 
-  ┌── Sequential (──────────────────────────)┐
-  │ █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ GEMM: 0.117 ms
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ │ reduce_scatter: 0.374 ms
-  │ total = 0.487 ms                    │
-  ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 0.917 ms
-  └─────────────────────────────────────────┘
-
-  Hidden GEMM: -0.430 / 0.117 ms (-366% of GEMM hidden)
-  Overlap ratio:  -0.868
-  Speedup:        0.53x
-
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd rank 0 RDMA devices: None
-rank 6 rankInNode 6 select no device
-rank 5 rankInNode 5 select no device
-rank 1 rankInNode 1 select no device
-rank 4 rankInNode 4 select no device
-rank 3 rankInNode 3 select no device
-rank 7 rankInNode 7 select no device
-rank 2 rankInNode 2 select no device
-rank 0 rankInNode 0 select no device
-AllgatherSdma initialized: PE 3 of 8
-AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7f7bc3880000
-  Flags allocated: 64 bytes at 0x7fa347480000
-  Input transit buffer: 1.00 MB at 0x7f7689600000
-  Output transit buffer: 8.00 MB at 0x7f7682c00000
-  Input transit buffer: 1.00 MB at 0x7f9e23800000
-  Output transit buffer: 8.00 MB at 0x7f9e21000000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7f00e4280000
-  Input transit buffer: 1.00 MB at 0x7efe7c800000
-  Output transit buffer: 8.00 MB at 0x7efb8ce00000
-AllgatherSdma initialized: PE 2 of 8
-  Flags allocated: 64 bytes at 0x7ef518a80000
-  Input transit buffer: 1.00 MB at 0x7eef9d200000
-  Output transit buffer: 8.00 MB at 0x7eef96800000
-AllgatherSdma initialized: PE 6 of 8
-  Flags allocated: 64 bytes at 0x7ec44c480000
-  Input transit buffer: 1.00 MB at 0x7ec1b4e00000
-  Output transit buffer: 8.00 MB at 0x7ebecd600000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7faf64280000
-  Input transit buffer: 1.00 MB at 0x7faa2a800000
-  Output transit buffer: 8.00 MB at 0x7faa23400000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f5b00e80000
-  Input transit buffer: 1.00 MB at 0x7f55b4400000
-  Output transit buffer: 8.00 MB at 0x7f55ad800000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f0204280000
-  Input transit buffer: 1.00 MB at 0x7efce4800000
-  Output transit buffer: 8.00 MB at 0x7efcddc00000
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 6
-
 ========================================================================
-  Fused Column Fwd: NCCL vs SDMA (world=8)
+  Fused Column Fwd: NCCL vs SDMA (world=2)
 ========================================================================
-AllgatherSdma destroyed: PE 5
-AllgatherSdma destroyed: PE 2
-AllgatherSdma destroyed: PE 7
-AllgatherSdma destroyed: PE 4
-                          NCCL fused column fwd  avg=   1.062 ms  min=   0.916 ms  max=   1.186 ms  std=  0.115 ms  cv= 10.9%  [!NOISY]AllgatherSdma destroyed: PE 3
-
-                          SDMA fused column fwd  avg=   0.586 ms  min=   0.576 ms  max=   0.596 ms  std=  0.006 ms  cv=  1.0%  speedup_vs_nccl=1.8100
-========================================================================
-
-
-  Fused Column Fwd: NCCL vs SDMA (world=8)
   ┌───────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
   │ Name                  │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
   ├───────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
-  │ NCCL fused column fwd │    1.062 │    0.916 │    1.115 │    1.186 │    1.186 │   10.9 │  *                   │
-  │ SDMA fused column fwd │    0.586 │    0.576 │    0.586 │    0.596 │    0.596 │    1.0 │ speedup_vs_nccl=1.81 │
+  │ NCCL fused column fwd │    1.452 │    1.433 │    1.448 │    1.482 │    1.482 │    1.0 │                      │
+  │ SDMA fused column fwd │    1.001 │    0.989 │    1.001 │    1.015 │    1.015 │    0.9 │ speedup_vs_nccl=1.45 │
   └───────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
 
-AllgatherSdma destroyed: PE 0
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_row_fwd AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f767a000000
-  Flags: 64 bytes at 0x7eef8dc00000
-  Barrier: 128 bytes at 0x7f7673c00000
-  Barrier: 128 bytes at 0x7eef87800000
-  Output transit buffer: 28.00 MB at 0x7f7670000000
-  Output transit buffer: 28.00 MB at 0x7eef83c00000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7ebec0800000
-  Barrier: 128 bytes at 0x7ebeba400000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7efb7bc00000
-  Output transit buffer: 28.00 MB at 0x7ebeb6800000
-  Barrier: 128 bytes at 0x7efb79c00000
-  Flags: 64 bytes at 0x7f9e18400000
-  Barrier: 128 bytes at 0x7f9e12000000
-  Output transit buffer: 28.00 MB at 0x7efb76000000
-  Output transit buffer: 28.00 MB at 0x7f9e0e400000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7faa1b000000
-  Barrier: 128 bytes at 0x7faa19000000
-  Output transit buffer: 28.00 MB at 0x7faa11000000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f55a4c00000
-  Barrier: 128 bytes at 0x7f559e800000
-  Output transit buffer: 28.00 MB at 0x7f559ac00000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7efcd5000000
-  Barrier: 128 bytes at 0x7efccec00000
-  Output transit buffer: 28.00 MB at 0x7efccb000000
-AllreduceSdma destroyed: PE 6
-
-========================================================================AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 3
-
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 1
-  Fused Row Fwd: NCCL vs SDMA (world=8)AllreduceSdma destroyed: PE 7
-
 ========================================================================
-                             NCCL fused row fwd  avg=   0.937 ms  min=   0.913 ms  max=   0.984 ms  std=  0.024 ms  cv=  2.6%  [~unstable]
-                             SDMA fused row fwd  avg=   1.133 ms  min=   1.127 ms  max=   1.141 ms  std=  0.004 ms  cv=  0.3%  speedup_vs_nccl=0.8300
+  Fused Row Fwd: NCCL vs SDMA (world=2)
 ========================================================================
-
-
-  Fused Row Fwd: NCCL vs SDMA (world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
-  │ NCCL fused row fwd │    0.937 │    0.913 │    0.930 │    0.984 │    0.984 │    2.6 │  ~                   │
-  │ SDMA fused row fwd │    1.133 │    1.127 │    1.133 │    1.141 │    1.141 │    0.3 │ speedup_vs_nccl=0.83 │
+  │ NCCL fused row fwd │    3.065 │    3.052 │    3.068 │    3.074 │    3.074 │    0.2 │                      │
+  │ SDMA fused row fwd │    2.558 │    2.550 │    2.555 │    2.573 │    2.573 │    0.3 │ speedup_vs_nccl=1.20 │
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
 
-  ⚠ WARNING: speedup 0.83x < 1.0 — optimized path is slower than baseline
-AllreduceSdma destroyed: PE 0
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineSdmaColumn::test_nccl_vs_sdma_fused_column_fwd_bwd AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7f7673c00000
-  Input transit buffer: 1.00 MB at 0x7f765d600000
-  Output transit buffer: 8.00 MB at 0x7f765ae00000
-AllgatherSdma initialized: PE 2 of 8
-  Flags allocated: 64 bytes at 0x7eef87800000
-  Input transit buffer: 1.00 MB at 0x7eef71200000
-  Output transit buffer: 8.00 MB at 0x7eef6ea00000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7faa19000000
-  Input transit buffer: 1.00 MB at 0x7fa9fe600000
-  Output transit buffer: 8.00 MB at 0x7fa9fbe00000
-AllgatherSdma initialized: PE 4 of 8
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f9e0e400000
-  Flags allocated: 64 bytes at 0x7f559e800000
-  Input transit buffer: 1.00 MB at 0x7f9dfbc00000
-  Output transit buffer: 8.00 MB at 0x7f9df9400000
-  Input transit buffer: 1.00 MB at 0x7f5588200000
-  Output transit buffer: 8.00 MB at 0x7f5585a00000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7efb79c00000
-  Input transit buffer: 1.00 MB at 0x7efb63600000
-  Output transit buffer: 8.00 MB at 0x7efb60e00000
-AllgatherSdma initialized: PE 6 of 8
-  Flags allocated: 64 bytes at 0x7ebeba400000
-  Input transit buffer: 1.00 MB at 0x7ebea3e00000
-  Output transit buffer: 8.00 MB at 0x7ebea1600000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7efccec00000
-  Input transit buffer: 1.00 MB at 0x7efcb8600000
-  Output transit buffer: 8.00 MB at 0x7efcb5e00000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f7652a00000
-  Barrier: 128 bytes at 0x7f7650a00000
-  Output transit buffer: 8.00 MB at 0x7f764e200000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7eef66600000
-  Barrier: 128 bytes at 0x7eef64600000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=256
-  Output transit buffer: 8.00 MB at 0x7eef61e00000
-  Flags: 64 bytes at 0x7f9df1000000
-  Barrier: 128 bytes at 0x7f9def000000
-  Output transit buffer: 8.00 MB at 0x7f9dec800000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7fa9f3a00000
-  Barrier: 128 bytes at 0x7fa9f1a00000
-  Output transit buffer: 8.00 MB at 0x7fa9ef200000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7f557d600000
-  Barrier: 128 bytes at 0x7f557b600000
-  Output transit buffer: 8.00 MB at 0x7f5578e00000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7efb58a00000
-  Barrier: 128 bytes at 0x7efb56a00000
-  Output transit buffer: 8.00 MB at 0x7efb54200000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=256
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=256
-  Flags: 64 bytes at 0x7efcada00000
-  Barrier: 128 bytes at 0x7efcaba00000
-  Flags: 64 bytes at 0x7ebe99200000
-  Barrier: 128 bytes at 0x7ebe97200000
-  Output transit buffer: 8.00 MB at 0x7efca9200000
-  Output transit buffer: 8.00 MB at 0x7ebe94a00000
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 7
-
 ========================================================================
-  Fused Column Fwd+Bwd: NCCL vs SDMA (world=8)
+  Fused Column Fwd+Bwd: NCCL vs SDMA (world=2)
 ========================================================================
-AllgatherSdma destroyed: PE 6
-                             NCCL fused fwd+bwd  avg=   4.664 ms  min=   4.486 ms  max=   5.960 ms  std=  0.394 ms  cv=  8.4%  [!NOISY]AllgatherSdma destroyed: PE 3
-
-                             SDMA fused fwd+bwd  avg=   3.107 ms  min=   3.076 ms  max=   3.152 ms  std=  0.026 ms  cv=  0.8%  speedup_vs_nccl=1.5000
-========================================================================
-
-AllgatherSdma destroyed: PE 5
-
-  Fused Column Fwd+Bwd: NCCL vs SDMA (world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras               │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────────────┤
-  │ NCCL fused fwd+bwd │    4.664 │    4.486 │    4.575 │    5.960 │    5.960 │    8.4 │  *                   │
-  │ SDMA fused fwd+bwd │    3.107 │    3.076 │    3.106 │    3.152 │    3.152 │    0.8 │ speedup_vs_nccl=1.50 │
+  │ NCCL fused fwd+bwd │    5.113 │    4.804 │    5.189 │    5.242 │    5.242 │    3.2 │  ~                   │
+  │ SDMA fused fwd+bwd │    3.882 │    3.856 │    3.883 │    3.907 │    3.907 │    0.4 │ speedup_vs_nccl=1.32 │
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────────────┘
 
-AllgatherSdma destroyed: PE 0
-AllgatherSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 2
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_column_backward_dgrad_rs_overlap
 ========================================================================
-  Column Backward Overlap (world=8)
+  Column Backward Overlap (world=2)
 ========================================================================
-                          sequential column bwd  avg=   0.646 ms  min=   0.639 ms  max=   0.664 ms  std=  0.007 ms  cv=  1.1%
-                               fused column bwd  avg=   4.588 ms  min=   4.372 ms  max=   5.136 ms  std=  0.180 ms  cv=  3.9%  speedup=0.1400  overlap_ratio=-6.0960  [~unstable]
-========================================================================
-
-
-  Column Backward Overlap (world=8)
   ┌───────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name                  │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├───────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ sequential column bwd │    0.646 │    0.639 │    0.646 │    0.664 │    0.664 │    1.1 │                                   │
-  │ fused column bwd      │    4.588 │    4.372 │    4.564 │    5.136 │    5.136 │    3.9 │ speedup=0.14, overlap_ratio=-6.10 ~│
+  │ sequential column bwd │    1.837 │    1.830 │    1.835 │    1.849 │    1.849 │    0.3 │                                   │
+  │ fused column bwd      │    4.820 │    4.787 │    4.813 │    4.869 │    4.869 │    0.5 │ speedup=0.38, overlap_ratio=-1.62 │
   └───────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
 
-  ┌── Sequential (──────────────────────────)┐
-  │ ████████████████████████████████████████ │ seq bwd: 0.646 ms
-  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ (fused): 0.000 ms
-  │ total = 0.646 ms                    │
-  ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 4.588 ms
-  └─────────────────────────────────────────┘
-
-  Hidden seq bwd: -3.941 / 0.646 ms (-610% of seq bwd hidden)
-  Overlap ratio:  -6.096
-  Speedup:        0.14x
-
-  ⚠ WARNING: overlap ratio -609.6% is negative — fused path is slower than sequential, check for contention
-  ⚠ WARNING: speedup 0.14x < 1.0 — optimized path is slower than baseline
-PASSED
-benchmarks/bench_fused_pipeline.py::TestFusedPipelineBackwardOverlap::test_row_backward_ag_dgrad_overlap
 ========================================================================
-  Row Backward Overlap (world=8)
+  Row Backward Overlap (world=2)
 ========================================================================
-                             sequential row bwd  avg=   1.177 ms  min=   1.142 ms  max=   1.489 ms  std=  0.094 ms  cv=  8.0%  [!NOISY]
-                                  fused row bwd  avg=   4.546 ms  min=   4.328 ms  max=   4.782 ms  std=  0.147 ms  cv=  3.2%  speedup=0.2600  overlap_ratio=-2.8630  [~unstable]
-========================================================================
-
-
-  Row Backward Overlap (world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬───────────────────────────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras                            │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼───────────────────────────────────┤
-  │ sequential row bwd │    1.177 │    1.142 │    1.152 │    1.489 │    1.489 │    8.0 │  *                                │
-  │ fused row bwd      │    4.546 │    4.328 │    4.481 │    4.782 │    4.782 │    3.2 │ speedup=0.26, overlap_ratio=-2.86 ~│
+  │ sequential row bwd │    5.155 │    5.135 │    5.157 │    5.184 │    5.184 │    0.3 │                                   │
+  │ fused row bwd      │    9.624 │    9.508 │    9.564 │    9.822 │    9.822 │    1.1 │ speedup=0.54, overlap_ratio=-0.87 │
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴───────────────────────────────────┘
-
-  ┌── Sequential (──────────────────────────)┐
-  │ ████████████████████████████████████████ │ seq bwd: 1.177 ms
-  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │ (fused): 0.000 ms
-  │ total = 1.177 ms                    │
-  ├── Overlapped (──────────────────────────)┤
-  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │ 4.546 ms
-  └─────────────────────────────────────────┘
-
-  Hidden seq bwd: -3.369 / 1.177 ms (-286% of seq bwd hidden)
-  Overlap ratio:  -2.863
-  Speedup:        0.26x
-
-  ⚠ WARNING: overlap ratio -286.3% is negative — fused path is slower than sequential, check for contention
-  ⚠ WARNING: speedup 0.26x < 1.0 — optimized path is slower than baseline
-PASSED                                      [100%]
-
-============================ no tests ran in 13.18s ============================
-                                      [100%]
-
-============================ no tests ran in 13.19s ============================
-
-
-============================= 12 passed in 13.18s ==============================
-                                      [100%]
-
-============================ no tests ran in 13.21s ============================
-                                      [100%]
-
-============================ no tests ran in 13.22s ============================
-                                      [100%]
-
-============================ no tests ran in 14.19s ============================
-                                      [100%]
-
-============================ no tests ran in 13.29s ============================
-                                      [100%]
-
-============================ no tests ran in 13.28s ============================

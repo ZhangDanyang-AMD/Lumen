@@ -412,6 +412,7 @@ class ScalingManager:
         weight_shard: torch.Tensor,
         group=None,
         use_sdma: Optional[bool] = None,
+        num_chunks: int = 1,
     ) -> torch.Tensor:
         """All-gather a weight shard via FP8, dequantize per-shard.
 
@@ -444,6 +445,7 @@ class ScalingManager:
             fp8_dtype=self.fp8_dtype,
             target_dtype=torch.bfloat16,
             use_sdma=use_sdma,
+            num_chunks=num_chunks,
         )
 
     def fp8_allgather_weights_pipelined(
@@ -451,6 +453,7 @@ class ScalingManager:
         weight_shards: list,
         group=None,
         use_sdma: Optional[bool] = None,
+        num_chunks: int = 1,
     ) -> list:
         """Pipelined FP8 all-gather for multiple weight shards.
 
@@ -477,6 +480,7 @@ class ScalingManager:
             fp8_dtype=self.fp8_dtype,
             target_dtype=torch.bfloat16,
             use_sdma=use_sdma,
+            num_chunks=num_chunks,
         )
 
     # ------------------------------------------------------------------

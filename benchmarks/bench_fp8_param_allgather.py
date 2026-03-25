@@ -114,7 +114,11 @@ from benchmarks.e2e_fusion_profiles import (
     get_e2e_fusion_profile,
     get_e2e_fusion_shape_sweep,
 )
-from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
+from lumen.quantize.fp8_params import (
+    _dequantize_gathered_fp8_chunk,
+    _split_dim0_chunks,
+    quantize_param_to_fp8,
+)
 
 # ---------------------------------------------------------------------------
 # Dimensions
@@ -159,6 +163,142 @@ def _profiled_fp8_title(prefix: str, profile: E2EFusionProfile, world: int) -> s
     return f"{prefix} ({format_e2e_fusion_profile(profile)}, world={world})"
 
 
+def _profile_with_num_chunks(profile: E2EFusionProfile, num_chunks: int) -> E2EFusionProfile:
+    return E2EFusionProfile(
+        name=profile.name,
+        batch=profile.batch,
+        seq=profile.seq,
+        hidden=profile.hidden,
+        ffn=profile.ffn,
+        num_chunks=num_chunks,
+    )
+
+
+def _gather_scales_once(
+    scale: torch.Tensor, device: torch.device, group: dist.ProcessGroup | None = None
+) -> torch.Tensor:
+    if group is None:
+        group = dist.group.WORLD
+    world_size = dist.get_world_size(group=group)
+    scale_scalar = scale.float().reshape(1).to(device)
+    all_scales = torch.empty(world_size, dtype=torch.float32, device=device)
+    dist.all_gather_into_tensor(all_scales, scale_scalar, group=group)
+    return all_scales
+
+
+def _allgather_dim0_chunk(chunk: torch.Tensor, group: dist.ProcessGroup | None = None) -> torch.Tensor:
+    if group is None:
+        group = dist.group.WORLD
+    world_size = dist.get_world_size(group=group)
+    full_shape = list(chunk.shape)
+    full_shape[0] *= world_size
+    full_chunk = torch.empty(full_shape, dtype=chunk.dtype, device=chunk.device)
+    dist.all_gather_into_tensor(full_chunk, chunk.contiguous(), group=group)
+    return full_chunk
+
+
+def _bf16_chunked_linear(
+    x: torch.Tensor,
+    bf16_shard: torch.Tensor,
+    *,
+    num_chunks: int,
+    group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    outputs = []
+    for bf16_chunk in _split_dim0_chunks(bf16_shard, num_chunks):
+        gathered_chunk = _allgather_dim0_chunk(bf16_chunk, group=group)
+        outputs.append(torch.nn.functional.linear(x, gathered_chunk))
+    return torch.cat(outputs, dim=-1)
+
+
+def _fp8_chunked_linear_sequential(
+    x: torch.Tensor,
+    fp8_shard: torch.Tensor,
+    scale: torch.Tensor,
+    *,
+    num_chunks: int,
+    group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    per_rank_scales = _gather_scales_once(scale, fp8_shard.device, group=group)
+    outputs = []
+    for fp8_chunk in _split_dim0_chunks(fp8_shard, num_chunks):
+        gathered_chunk = _allgather_dim0_chunk(fp8_chunk, group=group)
+        weight_chunk = _dequantize_gathered_fp8_chunk(gathered_chunk, per_rank_scales, torch.bfloat16)
+        outputs.append(torch.nn.functional.linear(x, weight_chunk))
+    return torch.cat(outputs, dim=-1)
+
+
+def _fp8_chunked_linear_pipelined(
+    x: torch.Tensor,
+    fp8_shard: torch.Tensor,
+    scale: torch.Tensor,
+    *,
+    num_chunks: int,
+    group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    fp8_chunks = _split_dim0_chunks(fp8_shard, num_chunks)
+    per_rank_scales = _gather_scales_once(scale, fp8_shard.device, group=group)
+    comm_stream = torch.cuda.Stream(device=fp8_shard.device)
+    compute_stream = torch.cuda.current_stream(fp8_shard.device)
+    gathered_chunks = [None] * len(fp8_chunks)
+    outputs = [None] * len(fp8_chunks)
+
+    def _launch_gather(chunk_idx: int):
+        gathered_chunks[chunk_idx] = _allgather_dim0_chunk(fp8_chunks[chunk_idx], group=group)
+
+    with torch.cuda.stream(comm_stream):
+        _launch_gather(0)
+
+    for chunk_idx in range(len(fp8_chunks)):
+        compute_stream.wait_stream(comm_stream)
+        if chunk_idx + 1 < len(fp8_chunks):
+            with torch.cuda.stream(comm_stream):
+                _launch_gather(chunk_idx + 1)
+        weight_chunk = _dequantize_gathered_fp8_chunk(gathered_chunks[chunk_idx], per_rank_scales, torch.bfloat16)
+        outputs[chunk_idx] = torch.nn.functional.linear(x, weight_chunk)
+
+    compute_stream.wait_stream(comm_stream)
+    return torch.cat(outputs, dim=-1)
+
+
+def _fp8_multi_weight_chunked_pipelined(
+    xs: list[torch.Tensor],
+    fp8_shards: list[torch.Tensor],
+    fp8_scales: list[torch.Tensor],
+    *,
+    num_chunks: int,
+    group: dist.ProcessGroup | None = None,
+) -> list[torch.Tensor]:
+    chunk_lists = [_split_dim0_chunks(fp8_shard, num_chunks) for fp8_shard in fp8_shards]
+    per_rank_scales = [_gather_scales_once(scale, fp8_shards[0].device, group=group) for scale in fp8_scales]
+    chunk_tasks = [(weight_idx, chunk_idx) for weight_idx in range(len(fp8_shards)) for chunk_idx in range(num_chunks)]
+    comm_stream = torch.cuda.Stream(device=fp8_shards[0].device)
+    compute_stream = torch.cuda.current_stream(fp8_shards[0].device)
+    gathered_chunks = [[None] * num_chunks for _ in fp8_shards]
+    outputs = [[None] * num_chunks for _ in fp8_shards]
+
+    def _launch_gather(weight_idx: int, chunk_idx: int):
+        gathered_chunks[weight_idx][chunk_idx] = _allgather_dim0_chunk(chunk_lists[weight_idx][chunk_idx], group=group)
+
+    with torch.cuda.stream(comm_stream):
+        _launch_gather(*chunk_tasks[0])
+
+    for task_idx, (weight_idx, chunk_idx) in enumerate(chunk_tasks):
+        compute_stream.wait_stream(comm_stream)
+        if task_idx + 1 < len(chunk_tasks):
+            with torch.cuda.stream(comm_stream):
+                _launch_gather(*chunk_tasks[task_idx + 1])
+        weight_chunk = _dequantize_gathered_fp8_chunk(
+            gathered_chunks[weight_idx][chunk_idx],
+            per_rank_scales[weight_idx],
+            torch.bfloat16,
+        )
+        outputs[weight_idx][chunk_idx] = torch.nn.functional.linear(xs[weight_idx], weight_chunk)
+
+    compute_stream.wait_stream(comm_stream)
+    return [torch.cat(weight_outputs, dim=-1) for weight_outputs in outputs]
+
+
 def classify_fp8_tail_note(*, avg_ms: float, p95_ms: float) -> str:
     ratio = p95_ms / max(avg_ms, 1e-6)
     return "tail-heavy" if ratio >= 1.10 else "tail-stable"
@@ -169,6 +309,7 @@ def build_fp8_single_shape_row(
     profile_name: str,
     tokens: int,
     ffn: int,
+    chunks: int = 1,
     bf16_avg_ms: float,
     bf16_p95_ms: float,
     bf16_max_ms: float,
@@ -177,6 +318,7 @@ def build_fp8_single_shape_row(
     fp8_max_ms: float,
     fp8_speedup: float,
     p95_bf16_over_fp8: float,
+    chunk_gain_ms: float = 0.0,
 ) -> dict[str, object]:
     """One sweep row.
 
@@ -187,6 +329,7 @@ def build_fp8_single_shape_row(
         "profile_name": profile_name,
         "tokens": tokens,
         "ffn": ffn,
+        "chunks": chunks,
         "bf16_avg_ms": bf16_avg_ms,
         "bf16_p95_ms": bf16_p95_ms,
         "bf16_max_ms": bf16_max_ms,
@@ -195,6 +338,7 @@ def build_fp8_single_shape_row(
         "fp8_max_ms": fp8_max_ms,
         "fp8_speedup": fp8_speedup,
         "p95_bf16_over_fp8": p95_bf16_over_fp8,
+        "chunk_gain_ms": chunk_gain_ms,
     }
 
 
@@ -203,6 +347,7 @@ def build_fp8_pipeline_shape_row(
     profile_name: str,
     tokens: int,
     ffn: int,
+    chunks: int = 1,
     bf16_avg_ms: float,
     bf16_p95_ms: float,
     fp8_seq_avg_ms: float,
@@ -213,6 +358,7 @@ def build_fp8_pipeline_shape_row(
     pipeline_speedup_vs_bf16: float,
     pipeline_speedup_vs_fp8_seq: float,
     p95_bf16_over_fp8_pipe: float,
+    chunk_gain_ms: float = 0.0,
 ) -> dict[str, object]:
     """One sweep row.
 
@@ -223,6 +369,7 @@ def build_fp8_pipeline_shape_row(
         "profile_name": profile_name,
         "tokens": tokens,
         "ffn": ffn,
+        "chunks": chunks,
         "bf16_avg_ms": bf16_avg_ms,
         "bf16_p95_ms": bf16_p95_ms,
         "fp8_seq_avg_ms": fp8_seq_avg_ms,
@@ -233,6 +380,7 @@ def build_fp8_pipeline_shape_row(
         "pipeline_speedup_vs_bf16": pipeline_speedup_vs_bf16,
         "pipeline_speedup_vs_fp8_seq": pipeline_speedup_vs_fp8_seq,
         "p95_bf16_over_fp8_pipe": p95_bf16_over_fp8_pipe,
+        "chunk_gain_ms": chunk_gain_ms,
         "note": classify_fp8_tail_note(avg_ms=fp8_pipe_avg_ms, p95_ms=fp8_pipe_p95_ms),
     }
 
@@ -246,27 +394,22 @@ def _bench_single_layer_gather_forward_for_profile(
     """Single-layer gather+forward timing shared by E2E tests and the shape sweep (no printing)."""
     shape, weight_full, x = _make_profiled_fp8_e2e_inputs(device, profile)
     dist.broadcast(weight_full, src=0)
+    num_chunks = profile.num_chunks
 
     fp8_full, scale = quantize_param_to_fp8(weight_full)
     fp8_shard = fp8_full.chunk(world, dim=0)[rank].contiguous()
     bf16_shard = weight_full.chunk(world, dim=0)[rank].contiguous()
 
-    bf16_out = torch.empty_like(weight_full)
-    fp8_out_buf = torch.empty(*shape, device=device, dtype=fp8_full.dtype)
-
     for _ in range(3):
-        dist.all_gather_into_tensor(bf16_out, bf16_shard)
-        dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
+        _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks)
+        _fp8_chunked_linear_sequential(x, fp8_shard, scale, num_chunks=num_chunks)
     torch.cuda.synchronize()
 
     def _bf16_pipeline():
-        dist.all_gather_into_tensor(bf16_out, bf16_shard)
-        torch.nn.functional.linear(x, bf16_out)
+        _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks)
 
     def _fp8_pipeline():
-        dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
-        w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
-        torch.nn.functional.linear(x, w)
+        _fp8_chunked_linear_sequential(x, fp8_shard, scale, num_chunks=num_chunks)
 
     r_bf16 = cuda_timer(
         _bf16_pipeline,
@@ -285,7 +428,9 @@ def _bench_single_layer_gather_forward_for_profile(
         dist_barrier=True,
     )
     speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+    r_bf16.extra["chunks"] = num_chunks
     r_fp8.extra["speedup"] = round(speedup, 2)
+    r_fp8.extra["chunks"] = num_chunks
     return shape, r_bf16, r_fp8
 
 
@@ -298,53 +443,41 @@ def _bench_pipelined_gather_forward_for_profile(
     """Multi-layer pipelined gather+forward timing shared by E2E tests and shape sweep (no printing)."""
     n_layers = 4
     _, weights, xs = _make_profiled_fp8_pipeline_inputs(device, profile, n_layers)
+    num_chunks = profile.num_chunks
 
     bf16_shards = []
     fp8_shards = []
     fp8_scales = []
-    bf16_outs = []
-    fp8_outs = []
 
     for w in weights:
-        shape = tuple(w.shape)
         dist.broadcast(w, src=0)
         fp8_w, sc = quantize_param_to_fp8(w)
         bf16_shards.append(w.chunk(world, dim=0)[rank].contiguous())
         fp8_shards.append(fp8_w.chunk(world, dim=0)[rank].contiguous())
         fp8_scales.append(sc)
-        bf16_outs.append(torch.empty_like(w))
-        fp8_outs.append(torch.empty(*shape, device=device, dtype=fp8_w.dtype))
 
     n_weights = len(bf16_shards)
-    comm_stream = torch.cuda.Stream(device=device)
 
     for i in range(n_weights):
-        dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-        dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+        _bf16_chunked_linear(xs[i], bf16_shards[i], num_chunks=num_chunks)
+        _fp8_chunked_linear_sequential(xs[i], fp8_shards[i], fp8_scales[i], num_chunks=num_chunks)
     torch.cuda.synchronize()
 
     def _bf16_sequential():
         for i in range(n_weights):
-            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-            torch.nn.functional.linear(xs[i], bf16_outs[i])
+            _bf16_chunked_linear(xs[i], bf16_shards[i], num_chunks=num_chunks)
 
     def _fp8_sequential():
         for i in range(n_weights):
-            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-            w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-            torch.nn.functional.linear(xs[i], w)
+            _fp8_chunked_linear_sequential(xs[i], fp8_shards[i], fp8_scales[i], num_chunks=num_chunks)
 
     def _fp8_pipelined():
-        dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
-        torch.cuda.synchronize()
-        for i in range(n_weights):
-            if i + 1 < n_weights:
-                with torch.cuda.stream(comm_stream):
-                    dist.all_gather_into_tensor(fp8_outs[i + 1], fp8_shards[i + 1])
-            w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-            torch.nn.functional.linear(xs[i], w)
-            if i + 1 < n_weights:
-                torch.cuda.current_stream().wait_stream(comm_stream)
+        _fp8_multi_weight_chunked_pipelined(
+            xs,
+            fp8_shards,
+            fp8_scales,
+            num_chunks=num_chunks,
+        )
 
     r_bf16 = cuda_timer(
         _bf16_sequential,
@@ -370,6 +503,9 @@ def _bench_pipelined_gather_forward_for_profile(
         trim_pct=_TRIM,
         dist_barrier=True,
     )
+    r_bf16.extra["chunks"] = num_chunks
+    r_fp8_seq.extra["chunks"] = num_chunks
+    r_fp8_pipe.extra["chunks"] = num_chunks
     return r_bf16, r_fp8_seq, r_fp8_pipe
 
 
@@ -398,11 +534,12 @@ def print_fp8_single_layer_shape_sweep_summary(rank: int, rows: list[dict[str, o
         for row in rows:
             print(
                 f"  {row['profile_name']!s:<18}  "
-                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6}  "
+                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6} chunks={row.get('chunks', 1)!s:<2}  "
                 f"BF16 ms avg/p95/max={row['bf16_avg_ms']:.3f}/{row['bf16_p95_ms']:.3f}/{row['bf16_max_ms']:.3f}  "
                 f"FP8 ms avg/p95/max={row['fp8_avg_ms']:.3f}/{row['fp8_p95_ms']:.3f}/{row['fp8_max_ms']:.3f}  "
                 f"speedup={row['fp8_speedup']:.2f}x  "
                 f"p95_BF16/FP8={row['p95_bf16_over_fp8']:.2f}  "
+                f"chunk_gain_ms={row.get('chunk_gain_ms', 0.0):.3f}  "
                 f"(BF16 p95 / FP8 p95)"
             )
     print(sep)
@@ -422,7 +559,7 @@ def print_fp8_pipeline_shape_sweep_summary(rank: int, rows: list[dict[str, objec
         for row in rows:
             print(
                 f"  {row['profile_name']!s:<18}  "
-                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6}  "
+                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6} chunks={row.get('chunks', 1)!s:<2}  "
                 f"BF16 ms avg/p95={row['bf16_avg_ms']:.3f}/{row['bf16_p95_ms']:.3f}  "
                 f"FP8-seq avg/p95={row['fp8_seq_avg_ms']:.3f}/{row['fp8_seq_p95_ms']:.3f}  "
                 f"FP8-pipe avg/p95/max={row['fp8_pipe_avg_ms']:.3f}/"
@@ -430,6 +567,7 @@ def print_fp8_pipeline_shape_sweep_summary(rank: int, rows: list[dict[str, objec
                 f"pipe_spd_BF16={row['pipeline_speedup_vs_bf16']:.2f}x  "
                 f"pipe_spd_FP8seq={row['pipeline_speedup_vs_fp8_seq']:.2f}x  "
                 f"p95_BF16/FP8pipe={row['p95_bf16_over_fp8_pipe']:.2f}  "
+                f"chunk_gain_ms={row.get('chunk_gain_ms', 0.0):.3f}  "
                 f"note={row['note']!s}"
             )
     print(sep)
@@ -977,41 +1115,32 @@ class TestFP8AllGatherNCCL:
              realistic multi-layer pipeline where layer N's gather
              overlaps with layer N-1's dequant.
         """
-        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
-
+        num_chunks = get_e2e_fusion_profile().num_chunks
         weight_bf16 = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
         fp8_w, scale = quantize_param_to_fp8(weight_bf16)
+        x = torch.randn(2, 2048, shape[1], device=self.device, dtype=torch.bfloat16)
 
         bf16_shard = weight_bf16.chunk(self.world)[self.rank].contiguous()
         fp8_shard = fp8_w.chunk(self.world)[self.rank].contiguous()
-        scale_shard = scale.clone()
-
-        bf16_out = torch.empty_like(weight_bf16)
-        fp8_out = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
-
-        comm_stream = torch.cuda.Stream(device=self.device)
-        compute_stream = torch.cuda.current_stream(self.device)
-
-        prev_fp8_gathered = torch.empty(shape, device=self.device, dtype=fp8_w.dtype)
-        dist.all_gather_into_tensor(prev_fp8_gathered, fp8_shard)
 
         for _ in range(3):
-            dist.all_gather_into_tensor(bf16_out, bf16_shard)
-            dist.all_gather_into_tensor(fp8_out, fp8_shard)
+            _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks)
+            _fp8_chunked_linear_sequential(
+                x,
+                fp8_shard,
+                scale,
+                num_chunks=num_chunks,
+            )
         torch.cuda.synchronize()
 
         def _bf16_pipeline():
-            dist.all_gather_into_tensor(bf16_out, bf16_shard)
+            _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks)
 
         def _fp8_sequential():
-            dist.all_gather_into_tensor(fp8_out, fp8_shard)
-            dequantize_param_from_fp8(fp8_out, scale_shard, torch.bfloat16)
+            _fp8_chunked_linear_sequential(x, fp8_shard, scale, num_chunks=num_chunks)
 
         def _fp8_overlapped():
-            with torch.cuda.stream(comm_stream):
-                dist.all_gather_into_tensor(fp8_out, fp8_shard)
-            dequantize_param_from_fp8(prev_fp8_gathered, scale_shard, torch.bfloat16)
-            compute_stream.wait_stream(comm_stream)
+            _fp8_chunked_linear_pipelined(x, fp8_shard, scale, num_chunks=num_chunks)
 
         r_bf16 = cuda_timer(
             _bf16_pipeline,
@@ -1040,12 +1169,16 @@ class TestFP8AllGatherNCCL:
 
         seq_speedup = r_bf16.avg_ms / max(r_seq.avg_ms, 1e-6)
         ovl_speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
+        r_bf16.extra["chunks"] = num_chunks
         r_seq.extra["vs_bf16"] = round(seq_speedup, 2)
+        r_seq.extra["chunks"] = num_chunks
         r_ovl.extra["speedup"] = round(ovl_speedup, 2)
+        r_ovl.extra["chunks"] = num_chunks
+        r_ovl.extra["chunk_gain_ms"] = round(r_seq.avg_ms - r_ovl.avg_ms, 3)
 
         if self.rank == 0:
             print_report_with_table(
-                f"Full Pipeline BF16 vs FP8 {shape} (world={self.world})",
+                f"Full Pipeline BF16 vs FP8 {shape} (world={self.world}, chunks={num_chunks})",
                 [r_bf16, r_seq, r_ovl],
             )
 
@@ -1059,84 +1192,20 @@ class TestFP8AllGatherNCCL:
              dequant[i-1] on compute_stream — hides dequant latency
              behind the next weight's gather
         """
-        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
-
-        layer_shapes = [
-            (FFN_HIDDEN, HIDDEN),
-            (FFN_HIDDEN, HIDDEN),
-            (HIDDEN, FFN_HIDDEN),
-            (HIDDEN, HIDDEN),
-        ]
+        profile = get_e2e_fusion_profile()
         n_layers = 4
-
-        bf16_shards = []
-        fp8_shards = []
-        fp8_scales = []
-        bf16_outs = []
-        fp8_outs = []
-
-        for _ in range(n_layers):
-            for shape in layer_shapes:
-                w = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
-                fp8_w, sc = quantize_param_to_fp8(w)
-                bf16_shards.append(w.chunk(self.world)[self.rank].contiguous())
-                fp8_shards.append(fp8_w.chunk(self.world)[self.rank].contiguous())
-                fp8_scales.append(sc)
-                bf16_outs.append(torch.empty_like(w))
-                fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
-
-        n_weights = len(bf16_shards)
-        comm_stream = torch.cuda.Stream(device=self.device)
-        compute_stream = torch.cuda.current_stream(self.device)
-
-        for i in range(n_weights):
-            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-        torch.cuda.synchronize()
-
-        def _bf16_all():
-            for i in range(n_weights):
-                dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-
-        def _fp8_sequential():
-            for i in range(n_weights):
-                dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-            for i in range(n_weights):
-                dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-
-        def _fp8_pipelined():
-            with torch.cuda.stream(comm_stream):
-                dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
-            for i in range(1, n_weights):
-                compute_stream.wait_stream(comm_stream)
-                with torch.cuda.stream(comm_stream):
-                    dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-                dequantize_param_from_fp8(fp8_outs[i - 1], fp8_scales[i - 1], torch.bfloat16)
-            compute_stream.wait_stream(comm_stream)
-            dequantize_param_from_fp8(fp8_outs[-1], fp8_scales[-1], torch.bfloat16)
-
-        r_bf16 = cuda_timer(
-            _bf16_all, label=f"BF16 gather {n_layers}L", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        r_bf16, r_seq, r_pipe = _bench_pipelined_gather_forward_for_profile(
+            self.device,
+            self.rank,
+            self.world,
+            profile,
         )
-        r_seq = cuda_timer(
-            _fp8_sequential,
-            label=f"FP8 sequential {n_layers}L",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
+        layer_shapes = fp8_param_pipeline_layer_shapes(profile)
+        total_bf16_bytes = (
+            sum(rows * cols * torch.tensor([], dtype=torch.bfloat16).element_size() for rows, cols in layer_shapes)
+            * n_layers
         )
-        r_pipe = cuda_timer(
-            _fp8_pipelined,
-            label=f"FP8 pipelined {n_layers}L",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-
-        total_bf16_bytes = sum(s.nelement() * s.element_size() for s in bf16_shards)
-        total_fp8_bytes = sum(s.nelement() * s.element_size() for s in fp8_shards)
+        total_fp8_bytes = sum(rows * cols for rows, cols in layer_shapes) * n_layers
         seq_vs_bf16 = r_bf16.avg_ms / max(r_seq.avg_ms, 1e-6)
         pipe_speedup = r_seq.avg_ms / max(r_pipe.avg_ms, 1e-6)
         r_seq.extra["vs_bf16"] = round(seq_vs_bf16, 2)
@@ -1144,10 +1213,11 @@ class TestFP8AllGatherNCCL:
         r_seq.extra["fp8_vol"] = format_bytes(total_fp8_bytes)
         r_pipe.extra["speedup"] = round(pipe_speedup, 2)
         r_pipe.extra["vs_bf16"] = round(r_bf16.avg_ms / max(r_pipe.avg_ms, 1e-6), 2)
+        r_pipe.extra["chunk_gain_ms"] = round(r_seq.avg_ms - r_pipe.avg_ms, 3)
 
         if self.rank == 0:
             print_report_with_table(
-                f"Multi-Layer Pipeline ({n_layers}L, world={self.world})",
+                f"Multi-Layer Pipeline ({n_layers}L, world={self.world}, chunks={profile.num_chunks})",
                 [r_bf16, r_seq, r_pipe],
             )
 
@@ -1451,6 +1521,12 @@ class TestFP8ParamShapeSweep:
             _, r_bf16, r_fp8 = _bench_single_layer_gather_forward_for_profile(
                 self.device, self.rank, self.world, profile
             )
+            _, _, r_fp8_unchunked = _bench_single_layer_gather_forward_for_profile(
+                self.device,
+                self.rank,
+                self.world,
+                _profile_with_num_chunks(profile, 1),
+            )
             fp8_speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
             # Cross-path p95 ratio (BF16 vs FP8), not an intrinsic FP8 tail statistic.
             p95_bf16_over_fp8 = r_bf16.p95_ms / max(r_fp8.p95_ms, 1e-6)
@@ -1459,6 +1535,7 @@ class TestFP8ParamShapeSweep:
                     profile_name=profile.name,
                     tokens=profile.tokens,
                     ffn=profile.ffn,
+                    chunks=profile.num_chunks,
                     bf16_avg_ms=r_bf16.avg_ms,
                     bf16_p95_ms=r_bf16.p95_ms,
                     bf16_max_ms=r_bf16.max_ms,
@@ -1467,6 +1544,7 @@ class TestFP8ParamShapeSweep:
                     fp8_max_ms=r_fp8.max_ms,
                     fp8_speedup=fp8_speedup,
                     p95_bf16_over_fp8=p95_bf16_over_fp8,
+                    chunk_gain_ms=r_fp8_unchunked.avg_ms - r_fp8.avg_ms,
                 )
             )
         print_fp8_single_layer_shape_sweep_summary(self.rank, rows)
@@ -1487,6 +1565,7 @@ class TestFP8ParamShapeSweep:
                     profile_name=profile.name,
                     tokens=profile.tokens,
                     ffn=profile.ffn,
+                    chunks=profile.num_chunks,
                     bf16_avg_ms=r_bf16.avg_ms,
                     bf16_p95_ms=r_bf16.p95_ms,
                     fp8_seq_avg_ms=r_fp8_seq.avg_ms,
@@ -1497,6 +1576,7 @@ class TestFP8ParamShapeSweep:
                     pipeline_speedup_vs_bf16=pipeline_speedup_vs_bf16,
                     pipeline_speedup_vs_fp8_seq=pipeline_speedup_vs_fp8_seq,
                     p95_bf16_over_fp8_pipe=p95_bf16_over_fp8_pipe,
+                    chunk_gain_ms=r_fp8_seq.avg_ms - r_fp8_pipe.avg_ms,
                 )
             )
         print_fp8_pipeline_shape_sweep_summary(self.rank, rows)
@@ -1622,11 +1702,13 @@ class TestFP8AllGatherTailLatency:
 
     def test_tail_latency_full_pipeline(self):
         """Tail latency for the full quant→gather→dequant pipeline."""
-        from lumen.quantize.fp8_params import fp8_allgather_weight
-
         shape = (FFN_HIDDEN, HIDDEN)
+        num_chunks = get_e2e_fusion_profile().num_chunks
         weight = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
         shard = weight.chunk(self.world)[self.rank].contiguous()
+        fp8_w, scale = quantize_param_to_fp8(weight)
+        fp8_shard = fp8_w.chunk(self.world)[self.rank].contiguous()
+        x = torch.randn(2, 2048, HIDDEN, device=self.device, dtype=torch.bfloat16)
 
         bf16_out = torch.empty_like(weight)
         bf16_shard = shard.clone()
@@ -1639,7 +1721,7 @@ class TestFP8AllGatherTailLatency:
             iters=iters,
         )
         fp8_times = _per_rank_latencies(
-            lambda: fp8_allgather_weight(shard),
+            lambda: _fp8_chunked_linear_pipelined(x, fp8_shard, scale, num_chunks=num_chunks),
             warmup=_WARMUP,
             iters=iters,
         )
@@ -1655,7 +1737,7 @@ class TestFP8AllGatherTailLatency:
 
         if self.rank == 0:
             print(
-                f"\n  Full Pipeline Tail — {shape} (world={self.world})\n"
+                f"\n  Full Pipeline Tail — {shape} (world={self.world}, chunks={num_chunks})\n"
                 f"  BF16 cross-rank p95: {bf16_p95.item():.3f} ms\n"
                 f"  FP8  cross-rank p95: {fp8_p95.item():.3f} ms\n"
                 f"  Tail reduction: {bf16_p95.item() / max(fp8_p95.item(), 1e-6):.2f}x"
@@ -1694,11 +1776,7 @@ class TestFP8AllGatherScalingEfficiency:
 
     def test_scaling_allgather_gemm(self):
         """Sweep group sizes (2,4,8) for BF16 vs FP8 gather+GEMM."""
-        from lumen.quantize.fp8_params import (
-            dequantize_param_from_fp8,
-            quantize_param_to_fp8,
-        )
-
+        num_chunks = get_e2e_fusion_profile().num_chunks
         shape = (FFN_HIDDEN, HIDDEN)
         weight_full = torch.randn(*shape, device=self.device, dtype=torch.bfloat16)
         dist.broadcast(weight_full, src=0)
@@ -1717,22 +1795,16 @@ class TestFP8AllGatherScalingEfficiency:
             bf16_shard = weight_full.chunk(gs, dim=0)[local_rank_in_group].contiguous()
             fp8_shard = fp8_full.chunk(gs, dim=0)[local_rank_in_group].contiguous()
 
-            bf16_out = torch.empty_like(weight_full)
-            fp8_out = torch.empty(shape, device=self.device, dtype=fp8_full.dtype)
-
             for _ in range(5):
-                dist.all_gather_into_tensor(bf16_out, bf16_shard, group=subgroup)
-                dist.all_gather_into_tensor(fp8_out, fp8_shard, group=subgroup)
+                _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks, group=subgroup)
+                _fp8_chunked_linear_sequential(x, fp8_shard, scale, num_chunks=num_chunks, group=subgroup)
             torch.cuda.synchronize()
 
             def _bf16_fn():
-                dist.all_gather_into_tensor(bf16_out, bf16_shard, group=subgroup)
-                torch.nn.functional.linear(x, bf16_out)
+                _bf16_chunked_linear(x, bf16_shard, num_chunks=num_chunks, group=subgroup)
 
             def _fp8_fn():
-                dist.all_gather_into_tensor(fp8_out, fp8_shard, group=subgroup)
-                w = dequantize_param_from_fp8(fp8_out, scale, torch.bfloat16)
-                torch.nn.functional.linear(x, w)
+                _fp8_chunked_linear_sequential(x, fp8_shard, scale, num_chunks=num_chunks, group=subgroup)
 
             r_bf16 = cuda_timer(
                 _bf16_fn,
@@ -1750,6 +1822,8 @@ class TestFP8AllGatherScalingEfficiency:
                 trim_pct=_TRIM,
                 dist_barrier=True,
             )
+            r_bf16.extra["chunks"] = num_chunks
+            r_fp8.extra["chunks"] = num_chunks
 
             bf16_results[gs] = r_bf16
             fp8_results[gs] = r_fp8
@@ -1763,7 +1837,7 @@ class TestFP8AllGatherScalingEfficiency:
 
             sep = "=" * 80
             print(f"\n{sep}")
-            print(f"  Scaling Efficiency — FP8 vs BF16 Gather+GEMM {shape}")
+            print(f"  Scaling Efficiency — FP8 vs BF16 Gather+GEMM {shape} (chunks={num_chunks})")
             print(f"  Baseline group size: {baseline_gs}")
             print(sep)
             print(
@@ -1803,8 +1877,7 @@ class TestFP8AllGatherScalingEfficiency:
         Uses fp8_allgather_weight_pipelined to overlap communication
         with dequant across multiple layers.
         """
-        from lumen.quantize.fp8_params import fp8_allgather_weight_pipelined
-
+        num_chunks = get_e2e_fusion_profile().num_chunks
         layer_shapes = [
             (FFN_HIDDEN, HIDDEN),
             (FFN_HIDDEN, HIDDEN),
@@ -1828,15 +1901,31 @@ class TestFP8AllGatherScalingEfficiency:
             local_rank = self.rank % gs
 
             shards = [w.chunk(gs, dim=0)[local_rank].contiguous() for w in weights]
+            fp8_shards = []
+            fp8_scales = []
+            for shard in shards:
+                fp8_w, scale = quantize_param_to_fp8(shard)
+                fp8_shards.append(fp8_w)
+                fp8_scales.append(scale)
 
             for _ in range(3):
-                fp8_allgather_weight_pipelined(shards, group=subgroup)
+                _fp8_multi_weight_chunked_pipelined(
+                    xs,
+                    fp8_shards,
+                    fp8_scales,
+                    num_chunks=num_chunks,
+                    group=subgroup,
+                )
             torch.cuda.synchronize()
 
             def _pipeline_fn():
-                full_ws = fp8_allgather_weight_pipelined(shards, group=subgroup)
-                for i, fw in enumerate(full_ws):
-                    torch.nn.functional.linear(xs[i], fw)
+                _fp8_multi_weight_chunked_pipelined(
+                    xs,
+                    fp8_shards,
+                    fp8_scales,
+                    num_chunks=num_chunks,
+                    group=subgroup,
+                )
 
             r = cuda_timer(
                 _pipeline_fn,
@@ -1846,6 +1935,7 @@ class TestFP8AllGatherScalingEfficiency:
                 trim_pct=_TRIM,
                 dist_barrier=True,
             )
+            r.extra["chunks"] = num_chunks
             results[gs] = r
 
             dist.destroy_process_group(subgroup)
@@ -1854,7 +1944,7 @@ class TestFP8AllGatherScalingEfficiency:
             baseline_gs = group_sizes[0]
             base_ms = results[baseline_gs].avg_ms
 
-            print(f"\n  FP8 Pipelined Scaling — {len(layer_shapes)} layers")
+            print(f"\n  FP8 Pipelined Scaling — {len(layer_shapes)} layers (chunks={num_chunks})")
             print(f"  {'GPUs':<6s}  {'Avg (ms)':>10s}  {'Scaling eff':>11s}  {'P95 (ms)':>10s}")
             print(f"  {'─' * 6}  {'─' * 10}  {'─' * 11}  {'─' * 10}")
             for gs in group_sizes:
@@ -1909,11 +1999,13 @@ def main():
         shape = (FFN_HIDDEN, HIDDEN)
         w = torch.randn(*shape, device="cuda", dtype=torch.bfloat16)
         shard = w.chunk(dist.get_world_size())[dist.get_rank()].contiguous()
+        num_chunks = get_e2e_fusion_profile().num_chunks
         r_l2 = cuda_timer(
-            lambda: fp8_allgather_weight(shard),
+            lambda: fp8_allgather_weight(shard, num_chunks=num_chunks),
             label="FP8 allgather Layer 2",
             dist_barrier=True,
         )
+        r_l2.extra["chunks"] = num_chunks
         results.append(r_l2)
 
     print_report("Lumen FP8 Param All-Gather", results)

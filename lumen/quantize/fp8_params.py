@@ -55,12 +55,40 @@ def dequantize_param_from_fp8(
     return (fp8_param.to(torch.float32) / scale).to(target_dtype)
 
 
+def _split_dim0_chunks(tensor: torch.Tensor, num_chunks: int) -> tuple[torch.Tensor, ...]:
+    """Split a dim-0 shard into evenly sized chunks."""
+    if num_chunks < 1:
+        raise ValueError(f"num_chunks must be >= 1, got {num_chunks}")
+
+    rows = tensor.shape[0]
+    if rows % num_chunks != 0:
+        raise ValueError(f"num_chunks={num_chunks} must evenly divide dim0 rows={rows}")
+
+    return tensor.chunk(num_chunks, dim=0)
+
+
+def _dequantize_gathered_fp8_chunk(
+    fp8_chunk: torch.Tensor,
+    per_rank_scales: torch.Tensor,
+    target_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Dequantize one gathered FP8 chunk using its per-rank scales."""
+    world_size = per_rank_scales.numel()
+    gathered_rank_chunks = fp8_chunk.chunk(world_size, dim=0)
+    dequant_chunks = [
+        dequantize_param_from_fp8(gathered_rank_chunks[rank], per_rank_scales[rank], target_dtype)
+        for rank in range(world_size)
+    ]
+    return torch.cat(dequant_chunks, dim=0)
+
+
 def fp8_allgather_weight(
     weight_shard: torch.Tensor,
     group: Optional[dist.ProcessGroup] = None,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
     target_dtype: torch.dtype = torch.bfloat16,
     use_sdma: bool = False,
+    num_chunks: int = 1,
 ) -> torch.Tensor:
     """All-gather a weight shard via FP8, dequantize per-shard to *target_dtype*.
 
@@ -76,6 +104,7 @@ def fp8_allgather_weight(
         fp8_dtype: Target FP8 dtype for quantization.
         target_dtype: Dtype to dequantize into after gathering.
         use_sdma: Use MORI SDMA allgather instead of NCCL.
+        num_chunks: Number of dim-0 chunks to communicate sequentially.
 
     Returns:
         Full weight tensor ``[rows_full, cols]`` in *target_dtype*.
@@ -89,27 +118,30 @@ def fp8_allgather_weight(
 
     fp8_shard, local_scale = quantize_param_to_fp8(weight_shard, fp8_dtype)
 
-    # All-gather FP8 data shards
-    full_shape = list(fp8_shard.shape)
-    full_shape[0] *= world_size
-    fp8_full = torch.empty(full_shape, dtype=fp8_shard.dtype, device=fp8_shard.device)
-
-    if use_sdma:
-        from lumen.modules.sdma_comm import SdmaTpComm
-
-        comm = SdmaTpComm.get(group)
-        fp8_full = comm.allgather_dim0(fp8_shard)
-    else:
-        dist.all_gather_into_tensor(fp8_full, fp8_shard.contiguous(), group=group)
-
     # All-gather per-rank scales (tiny: one float32 scalar per rank)
     scale_scalar = local_scale.float().reshape(1).to(fp8_shard.device)
     all_scales = torch.empty(world_size, dtype=torch.float32, device=fp8_shard.device)
     dist.all_gather_into_tensor(all_scales, scale_scalar, group=group)
 
-    chunks = fp8_full.chunk(world_size, dim=0)
-    dequant_chunks = [dequantize_param_from_fp8(chunks[i], all_scales[i], target_dtype) for i in range(world_size)]
-    return torch.cat(dequant_chunks, dim=0)
+    fp8_shard_chunks = _split_dim0_chunks(fp8_shard, num_chunks)
+    dequantized_full_chunks = []
+
+    for fp8_shard_chunk in fp8_shard_chunks:
+        full_shape = list(fp8_shard_chunk.shape)
+        full_shape[0] *= world_size
+        fp8_full_chunk = torch.empty(full_shape, dtype=fp8_shard_chunk.dtype, device=fp8_shard_chunk.device)
+
+        if use_sdma:
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            comm = SdmaTpComm.get(group)
+            fp8_full_chunk = comm.allgather_dim0(fp8_shard_chunk)
+        else:
+            dist.all_gather_into_tensor(fp8_full_chunk, fp8_shard_chunk.contiguous(), group=group)
+
+        dequantized_full_chunks.append(_dequantize_gathered_fp8_chunk(fp8_full_chunk, all_scales, target_dtype))
+
+    return torch.cat(dequantized_full_chunks, dim=0)
 
 
 def fp8_allgather_weight_pipelined(
@@ -118,6 +150,7 @@ def fp8_allgather_weight_pipelined(
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
     target_dtype: torch.dtype = torch.bfloat16,
     use_sdma: bool = False,
+    num_chunks: int = 1,
 ) -> list:
     """Pipelined FP8 all-gather for multiple weight shards.
 
@@ -130,6 +163,7 @@ def fp8_allgather_weight_pipelined(
         fp8_dtype: Target FP8 dtype.
         target_dtype: Dtype to dequantize into after gathering.
         use_sdma: Use MORI SDMA allgather instead of NCCL.
+        num_chunks: Number of dim-0 chunks to pipeline per weight shard.
 
     Returns:
         List of full (dequantized) weight tensors.
@@ -145,16 +179,22 @@ def fp8_allgather_weight_pipelined(
     device = weight_shards[0].device
     fp8_shards = []
     local_scales = []
-    fp8_outs = []
+    fp8_shard_chunks = []
+    fp8_out_chunks = []
     all_scales_list = []
 
     for shard in weight_shards:
         fp8_s, sc = quantize_param_to_fp8(shard, fp8_dtype)
         fp8_shards.append(fp8_s)
         local_scales.append(sc)
-        full_shape = list(fp8_s.shape)
-        full_shape[0] *= world_size
-        fp8_outs.append(torch.empty(full_shape, dtype=fp8_s.dtype, device=device))
+        shard_chunks = _split_dim0_chunks(fp8_s, num_chunks)
+        fp8_shard_chunks.append(shard_chunks)
+        chunk_outs = []
+        for shard_chunk in shard_chunks:
+            full_shape = list(shard_chunk.shape)
+            full_shape[0] *= world_size
+            chunk_outs.append(torch.empty(full_shape, dtype=shard_chunk.dtype, device=device))
+        fp8_out_chunks.append(chunk_outs)
 
     # All-gather per-rank scales for each weight (batched, tiny payload)
     for sc in local_scales:
@@ -169,35 +209,41 @@ def fp8_allgather_weight_pipelined(
     # all-gathers already enqueued on the current stream.
     comm_stream.wait_stream(compute_stream)
 
-    results = [None] * N
+    results = [[None] * num_chunks for _ in range(N)]
+    chunk_tasks = [(weight_idx, chunk_idx) for weight_idx in range(N) for chunk_idx in range(num_chunks)]
 
-    def _do_gather(idx):
+    def _do_gather(weight_idx: int, chunk_idx: int):
         if use_sdma:
             from lumen.modules.sdma_comm import SdmaTpComm
 
             comm = SdmaTpComm.get(group)
-            fp8_outs[idx] = comm.allgather_dim0(fp8_shards[idx])
+            fp8_out_chunks[weight_idx][chunk_idx] = comm.allgather_dim0(fp8_shard_chunks[weight_idx][chunk_idx])
         else:
-            dist.all_gather_into_tensor(fp8_outs[idx], fp8_shards[idx].contiguous(), group=group)
+            dist.all_gather_into_tensor(
+                fp8_out_chunks[weight_idx][chunk_idx],
+                fp8_shard_chunks[weight_idx][chunk_idx].contiguous(),
+                group=group,
+            )
 
-    def _do_dequant(idx):
-        chunks = fp8_outs[idx].chunk(world_size, dim=0)
-        per_rank_scales = all_scales_list[idx]
-        dq = [dequantize_param_from_fp8(chunks[r], per_rank_scales[r], target_dtype) for r in range(world_size)]
-        results[idx] = torch.cat(dq, dim=0)
+    def _do_dequant(weight_idx: int, chunk_idx: int):
+        results[weight_idx][chunk_idx] = _dequantize_gathered_fp8_chunk(
+            fp8_out_chunks[weight_idx][chunk_idx],
+            all_scales_list[weight_idx],
+            target_dtype,
+        )
 
     with torch.cuda.stream(comm_stream):
-        _do_gather(0)
+        _do_gather(*chunk_tasks[0])
 
-    for i in range(N):
+    for task_idx, (weight_idx, chunk_idx) in enumerate(chunk_tasks):
         compute_stream.wait_stream(comm_stream)
-        if i + 1 < N:
+        if task_idx + 1 < len(chunk_tasks):
             with torch.cuda.stream(comm_stream):
-                _do_gather(i + 1)
-        _do_dequant(i)
+                _do_gather(*chunk_tasks[task_idx + 1])
+        _do_dequant(weight_idx, chunk_idx)
 
     compute_stream.wait_stream(comm_stream)
-    return results
+    return [torch.cat(weight_chunks, dim=0) for weight_chunks in results]
 
 
 class FP8ParamManager:
