@@ -48,11 +48,21 @@ import torch.nn.functional as F
 from benchmarks.bench_utils import compute_bandwidth_gb_s  # noqa: F401
 from benchmarks.bench_utils import print_bandwidth_summary  # noqa: F401
 from benchmarks.bench_utils import (
+    BenchResult,
     cuda_timer,
     print_bench_warnings,
     print_overlap_summary,
     print_report_with_table,
+    print_table,
 )
+from lumen.modules.comm_overlap import (
+    NcclCommBackend,
+    PipelinedAllgatherGemm,
+    PipelinedGemmReduceScatter,
+    fused_row_parallel_forward,
+)
+from lumen.ops.quantize.gemm_primitives import compute_dgrad_bf16, compute_wgrad_bf16
+from lumen.ops.quantize.linear import dispatch_gemm
 
 # Dimensions — Llama 3.1 8B shapes
 B, S = 2, 2048
@@ -144,6 +154,71 @@ def _distributed_allgather(tensor, group=None):
 
 def _reduce_scatter(tensor, world, device, group=None):
     return _ReduceScatterFunc.apply(tensor, world, device, group)
+
+
+def _bf16_dispatch_gemm(inp, weight, bias=None):
+    return dispatch_gemm(inp, weight, None, None, "none", bias=bias)
+
+
+def _clone_chunk(inp, _weight, _bias):
+    return inp.clone()
+
+
+def _run_row_forward_mirrored_baseline(input_parallel, weight, pipeline_rs):
+    return pipeline_rs.forward(input_parallel, weight, _bf16_dispatch_gemm)
+
+
+def _run_row_backward_mirrored_baseline(input_parallel, weight, grad_output, pipeline_ag):
+    grad_input = pipeline_ag.forward(
+        grad_output,
+        weight=None,
+        bias=None,
+        gemm_fn=lambda chunk, _weight, _bias: compute_dgrad_bf16(chunk, weight),
+    )
+    grad_gathered = pipeline_ag.forward(
+        grad_output,
+        weight=None,
+        bias=None,
+        gemm_fn=_clone_chunk,
+    )
+    grad_weight = compute_wgrad_bf16(grad_gathered, input_parallel)
+    return grad_input, grad_weight
+
+
+def _run_row_full_mirrored_baseline(input_parallel, weight, pipeline_rs, pipeline_ag):
+    output = _run_row_forward_mirrored_baseline(input_parallel, weight, pipeline_rs)
+    grad_output = torch.ones_like(output)
+    grad_input, grad_weight = _run_row_backward_mirrored_baseline(
+        input_parallel,
+        weight,
+        grad_output,
+        pipeline_ag,
+    )
+    return output, grad_input, grad_weight
+
+
+def _analysis_result(name, avg_ms, **extra):
+    return BenchResult(name=name, avg_ms=avg_ms, extra=extra)
+
+
+def _print_row_full_analysis_table(*, title, forward_ms, ag_dgrad_ms, ag_wgrad_ms, baseline_total_ms, fused_total_ms):
+    delta_ms = fused_total_ms - baseline_total_ms
+    speedup = baseline_total_ms / max(fused_total_ms, 1e-6)
+    print_table(
+        title,
+        [
+            _analysis_result("baseline forward (GEMM+RS)", forward_ms),
+            _analysis_result("baseline backward (AG+dgrad)", ag_dgrad_ms),
+            _analysis_result("baseline backward (AG+wgrad)", ag_wgrad_ms),
+            _analysis_result("baseline full fwd+bwd", baseline_total_ms),
+            _analysis_result(
+                "fused full fwd+bwd",
+                fused_total_ms,
+                delta_ms=round(delta_ms, 3),
+                speedup=round(speedup, 2),
+            ),
+        ],
+    )
 
 
 @_DIST
@@ -760,7 +835,7 @@ class TestFusedPipelineSdmaColumn:
 
 @_DIST
 class TestFusedPipelineBackwardOverlap:
-    """Isolate backward overlap: dgrad+RS and AG+dgrad measured separately."""
+    """Backward overlap microbenchmarks plus aligned full row fwd+bwd comparison."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -853,82 +928,165 @@ class TestFusedPipelineBackwardOverlap:
             )
             print_bench_warnings(result=r_fused, speedup=speedup, overlap_ratio=overlap_ratio)
 
-    def test_row_backward_ag_dgrad_overlap(self):
-        """Row-parallel backward: AG + dgrad overlap."""
-        from lumen.modules.comm_overlap import (
-            NcclCommBackend,
-            PipelinedAllgatherGemm,
-            PipelinedGemmReduceScatter,
-            fused_row_parallel_forward,
+    def test_row_full_fwd_bwd_mirrored_baseline_matches_fused(self):
+        """Reference full row fwd+bwd path should mirror fused BF16 semantics."""
+        S_full = B * S
+        H_tp = H // self.world
+        torch.manual_seed(2026 + self.rank)
+        x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
+
+        ref_backend = NcclCommBackend(dist.group.WORLD)
+        ref_pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=ref_backend)
+        ref_pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=ref_backend)
+        ref_out, ref_grad_input, ref_grad_weight = _run_row_full_mirrored_baseline(
+            x,
+            w,
+            ref_pipeline_rs,
+            ref_pipeline_ag,
         )
 
+        fused_backend = NcclCommBackend(dist.group.WORLD)
+        fused_pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=fused_backend)
+        fused_pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=fused_backend)
+        x_fused = x.clone().detach().requires_grad_(True)
+        w_param = torch.nn.Parameter(w.clone())
+        y_fused = fused_row_parallel_forward(
+            x_fused,
+            w_param,
+            fused_pipeline_rs,
+            fused_pipeline_ag,
+            w_param,
+            False,
+            False,
+            None,
+        )
+        y_fused.sum().backward()
+
+        torch.testing.assert_close(y_fused.detach(), ref_out, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(x_fused.grad, ref_grad_input, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(w_param.grad, ref_grad_weight, rtol=1e-2, atol=1e-2)
+
+    def test_row_full_fwd_bwd_mirrored_baseline_vs_fused(self):
+        """Row-parallel full fwd+bwd: mirrored baseline vs fused."""
         S_full = B * S
         H_tp = H // self.world
         w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
-        w_param = torch.nn.Parameter(w.clone())
-        backend = NcclCommBackend(dist.group.WORLD)
-        pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
-        pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
 
-        def _seq_bwd():
-            x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
-            y = _reduce_scatter(F.linear(x, w), self.world, self.device)
-            y.sum().backward()
-            return x.grad
+        baseline_backend = NcclCommBackend(dist.group.WORLD)
+        baseline_pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=baseline_backend)
+        baseline_pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=baseline_backend)
 
-        def _fused_bwd():
+        def _baseline_full():
+            x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
+            return _run_row_full_mirrored_baseline(
+                x,
+                w,
+                baseline_pipeline_rs,
+                baseline_pipeline_ag,
+            )
+
+        fused_backend = NcclCommBackend(dist.group.WORLD)
+        fused_pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=fused_backend)
+        fused_pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=fused_backend)
+
+        def _fused_full():
             x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            w_param = torch.nn.Parameter(w.clone())
             y = fused_row_parallel_forward(
                 x,
                 w_param,
-                pipeline_rs,
-                pipeline_ag,
+                fused_pipeline_rs,
+                fused_pipeline_ag,
                 w_param,
                 False,
                 False,
                 None,
             )
             y.sum().backward()
-            return x.grad
+            return y, x.grad, w_param.grad
 
         for _ in range(3):
-            _seq_bwd()
-            _fused_bwd()
+            _baseline_full()
+            _fused_full()
         torch.cuda.synchronize()
 
-        r_seq = cuda_timer(
-            _seq_bwd,
-            label="sequential row bwd",
+        r_baseline = cuda_timer(
+            _baseline_full,
+            label="mirrored baseline fwd+bwd",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
         r_fused = cuda_timer(
-            _fused_bwd,
-            label="fused row bwd",
+            _fused_full,
+            label="fused fwd+bwd",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        speedup = r_seq.avg_ms / max(r_fused.avg_ms, 1e-6)
-        overlap_ratio = 1 - (r_fused.avg_ms / max(r_seq.avg_ms, 1e-6))
+        speedup = r_baseline.avg_ms / max(r_fused.avg_ms, 1e-6)
         r_fused.extra["speedup"] = round(speedup, 2)
-        r_fused.extra["overlap_ratio"] = round(overlap_ratio, 3)
+
+        analysis_backend = NcclCommBackend(dist.group.WORLD)
+        analysis_pipeline_rs = PipelinedGemmReduceScatter(num_chunks=4, comm=analysis_backend)
+        analysis_pipeline_ag = PipelinedAllgatherGemm(num_chunks=4, comm=analysis_backend)
+        x_analysis = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
+        y_analysis = _run_row_forward_mirrored_baseline(x_analysis, w, analysis_pipeline_rs)
+        grad_output_analysis = torch.ones_like(y_analysis)
+
+        r_forward = cuda_timer(
+            lambda: _run_row_forward_mirrored_baseline(x_analysis, w, analysis_pipeline_rs),
+            label="baseline forward (GEMM+RS)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ag_dgrad = cuda_timer(
+            lambda: analysis_pipeline_ag.forward(
+                grad_output_analysis,
+                weight=None,
+                bias=None,
+                gemm_fn=lambda chunk, _weight, _bias: compute_dgrad_bf16(chunk, w),
+            ),
+            label="baseline backward (AG+dgrad)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ag_wgrad = cuda_timer(
+            lambda: compute_wgrad_bf16(
+                analysis_pipeline_ag.forward(
+                    grad_output_analysis,
+                    weight=None,
+                    bias=None,
+                    gemm_fn=_clone_chunk,
+                ),
+                x_analysis,
+            ),
+            label="baseline backward (AG+wgrad)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
 
         if self.rank == 0:
             print_report_with_table(
-                f"Row Backward Overlap (world={self.world})",
-                [r_seq, r_fused],
+                f"Full Row Fwd+Bwd: Mirrored Baseline vs Fused (world={self.world})",
+                [r_baseline, r_fused],
             )
-            print_overlap_summary(
-                t_compute=r_seq.avg_ms,
-                t_comm=0,
-                t_seq=r_seq.avg_ms,
-                t_ovl=r_fused.avg_ms,
-                compute_label="seq bwd",
-                comm_label="(fused)",
+            _print_row_full_analysis_table(
+                title=f"Full Row Fwd+Bwd Breakdown (world={self.world})",
+                forward_ms=r_forward.avg_ms,
+                ag_dgrad_ms=r_ag_dgrad.avg_ms,
+                ag_wgrad_ms=r_ag_wgrad.avg_ms,
+                baseline_total_ms=r_baseline.avg_ms,
+                fused_total_ms=r_fused.avg_ms,
             )
-            print_bench_warnings(result=r_fused, speedup=speedup, overlap_ratio=overlap_ratio)
+            print_bench_warnings(result=r_fused, speedup=speedup)
