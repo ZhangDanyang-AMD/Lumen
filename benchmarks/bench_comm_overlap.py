@@ -48,6 +48,7 @@ Run fixed shape sweep::
 
 from __future__ import annotations
 
+import importlib
 import os
 from typing import List
 
@@ -477,10 +478,12 @@ class TestNCCLRowParallelOverlap:
 def _sdma_available():
     try:
         os.environ.setdefault("MORI_ENABLE_SDMA", "1")
-        import mori  # noqa: F401
+        importlib.import_module("mori")
 
         return True
-    except ImportError:
+    except Exception:
+        # Some environments surface mori load/runtime issues during import.
+        # Treat those as "unavailable" so pytest can skip SDMA tests cleanly.
         return False
 
 

@@ -88,6 +88,10 @@ torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v
 
 # Multi-GPU scaling efficiency (4+ GPUs)
 torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k Scaling
+
+# Fixed-profile FP8 shape sweep (8 GPUs; average + tail summaries on rank 0)
+# Reuses the same fixed six profiles as bench_e2e_fusion.py (tokens × FFN sweep).
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k ShapeSweep
 ```
 
 ### Wgrad Delay — Distributed Overlap
@@ -237,6 +241,7 @@ benchmark and the E2E pure-pipeline benchmark.
 | **Layer 2 FP8 all-gather** | `fp8_allgather_weight`: quant→gather→per-shard-dequant pipeline via NCCL or SDMA |
 | **Tail latency profiling** | Per-rank p95/p99/max latency, cross-rank worst-case tail for BF16 vs FP8 |
 | **Scaling efficiency** | Group-size sweep (2→4→8 GPUs): BF16 vs FP8 gather+GEMM and pipelined FP8 |
+| **Shape sweep** (`-k ShapeSweep`) | 8-GPU-oriented opt-in sweep over the same fixed six profiles as `bench_e2e_fusion.py`; rank-0 tables report average and tail metrics for single-layer and pipelined FP8 gather paths |
 
 ### 4. RoPE Fusion (`bench_rope_fusion.py`)
 

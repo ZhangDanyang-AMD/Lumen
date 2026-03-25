@@ -64,6 +64,13 @@ def test_build_fp8_single_shape_row_docstring_mentions_p95_cross_path_meaning():
     assert "bf16" in doc and "fp8" in doc and "p95" in doc
 
 
+def test_build_fp8_pipeline_shape_row_docstring_mentions_p95_bf16_over_fp8_pipe():
+    funcs = _load_functions("build_fp8_pipeline_shape_row")
+    build_fp8_pipeline_shape_row = funcs["build_fp8_pipeline_shape_row"]
+    doc = (build_fp8_pipeline_shape_row.__doc__ or "").lower()
+    assert "bf16" in doc and "fp8" in doc and "p95" in doc and "pipe" in doc
+
+
 def test_bench_source_uses_p95_bf16_over_fp8_row_key():
     assert "p95_bf16_over_fp8" in _module_source()
 
@@ -85,7 +92,7 @@ def test_build_fp8_pipeline_shape_row_forwards_all_inputs_and_tail_heavy_note():
         "fp8_pipe_max_ms": 18.7,
         "pipeline_speedup_vs_bf16": 1.25,
         "pipeline_speedup_vs_fp8_seq": 1.19,
-        "tail_ratio_vs_bf16": 1.17,
+        "p95_bf16_over_fp8_pipe": 1.17,
     }
     row = build_fp8_pipeline_shape_row(**kwargs)
     assert row["note"] == "tail-heavy"
@@ -110,7 +117,7 @@ def test_build_fp8_pipeline_shape_row_stable_note_matches_pipe_p95_over_avg():
         "fp8_pipe_max_ms": 22.0,
         "pipeline_speedup_vs_bf16": 1.1,
         "pipeline_speedup_vs_fp8_seq": 1.05,
-        "tail_ratio_vs_bf16": 2.0,
+        "p95_bf16_over_fp8_pipe": 2.0,
     }
     row = build_fp8_pipeline_shape_row(**kwargs)
     assert row["note"] == "tail-stable"
@@ -118,8 +125,8 @@ def test_build_fp8_pipeline_shape_row_stable_note_matches_pipe_p95_over_avg():
         assert row[key] == value
 
 
-def test_pipeline_row_note_uses_fp8_pipe_p95_over_avg_not_tail_ratio_vs_bf16():
-    """`note` classifies FP8 pipelined latency tail (p95/avg), not tail_ratio_vs_bf16."""
+def test_pipeline_row_note_uses_fp8_pipe_p95_over_avg_not_p95_bf16_over_fp8_pipe():
+    """`note` classifies FP8 pipelined latency tail (p95/avg), not p95_bf16_over_fp8_pipe."""
     funcs = _load_functions("classify_fp8_tail_note", "build_fp8_pipeline_shape_row")
     build_fp8_pipeline_shape_row = funcs["build_fp8_pipeline_shape_row"]
 
@@ -136,15 +143,15 @@ def test_pipeline_row_note_uses_fp8_pipe_p95_over_avg_not_tail_ratio_vs_bf16():
         "fp8_pipe_max_ms": 11.0,
         "pipeline_speedup_vs_bf16": 1.0,
         "pipeline_speedup_vs_fp8_seq": 1.0,
-        "tail_ratio_vs_bf16": 50.0,
+        "p95_bf16_over_fp8_pipe": 50.0,
     }
     row_a = build_fp8_pipeline_shape_row(**base)
     assert row_a["note"] == "tail-stable"
 
-    row_b = build_fp8_pipeline_shape_row(**{**base, "tail_ratio_vs_bf16": 0.01})
+    row_b = build_fp8_pipeline_shape_row(**{**base, "p95_bf16_over_fp8_pipe": 0.01})
     assert row_b["note"] == row_a["note"]
 
-    row_c = build_fp8_pipeline_shape_row(**{**base, "fp8_pipe_p95_ms": 11.0, "tail_ratio_vs_bf16": 50.0})
+    row_c = build_fp8_pipeline_shape_row(**{**base, "fp8_pipe_p95_ms": 11.0, "p95_bf16_over_fp8_pipe": 50.0})
     assert row_c["note"] == "tail-heavy"
 
 
@@ -183,4 +190,12 @@ def test_pipelined_shape_sweep_summary_keeps_three_way_story():
     sweep_src = _test_pipelined_shape_sweep_function_source()
     assert "pipeline_speedup_vs_bf16" in sweep_src
     assert "pipeline_speedup_vs_fp8_seq" in sweep_src
-    assert "tail_ratio_vs_bf16" in sweep_src
+    assert "p95_bf16_over_fp8_pipe" in sweep_src
+
+
+def test_readme_mentions_fp8_shape_sweep():
+    source = BENCH_PATH.with_name("README.md").read_text()
+
+    assert (
+        "torchrun --nproc_per_node=8 -m pytest " "benchmarks/bench_fp8_param_allgather.py -v -s -k ShapeSweep"
+    ) in source

@@ -49,7 +49,12 @@ Run multi-GPU (8 GPU) — tail latency & scaling::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "TailLatency or Scaling"
 
-Run multi-GPU (8 GPU) — fixed-profile FP8 shape sweep (opt-in; average + tail summary)::
+Run multi-GPU (8 GPU) — fixed-profile FP8 shape sweep (``-k ShapeSweep``).
+Targets eight ranks for the same comparison mode as the other 8-GPU sections.
+The sweep reuses the fixed six profiles from ``bench_e2e_fusion.py`` (via
+``get_e2e_fusion_shape_sweep()``), not a separate shape list.
+Rank 0 prints compact summaries with both average and tail metrics (e.g. p95)
+for the single-layer and pipelined gather paths::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k ShapeSweep
 
@@ -207,8 +212,13 @@ def build_fp8_pipeline_shape_row(
     fp8_pipe_max_ms: float,
     pipeline_speedup_vs_bf16: float,
     pipeline_speedup_vs_fp8_seq: float,
-    tail_ratio_vs_bf16: float,
+    p95_bf16_over_fp8_pipe: float,
 ) -> dict[str, object]:
+    """One sweep row.
+
+    ``p95_bf16_over_fp8_pipe`` is BF16 p95 / FP8-pipelined p95, i.e. a
+    cross-path tail ratio analogous to single-layer ``p95_bf16_over_fp8``.
+    """
     return {
         "profile_name": profile_name,
         "tokens": tokens,
@@ -222,7 +232,7 @@ def build_fp8_pipeline_shape_row(
         "fp8_pipe_max_ms": fp8_pipe_max_ms,
         "pipeline_speedup_vs_bf16": pipeline_speedup_vs_bf16,
         "pipeline_speedup_vs_fp8_seq": pipeline_speedup_vs_fp8_seq,
-        "tail_ratio_vs_bf16": tail_ratio_vs_bf16,
+        "p95_bf16_over_fp8_pipe": p95_bf16_over_fp8_pipe,
         "note": classify_fp8_tail_note(avg_ms=fp8_pipe_avg_ms, p95_ms=fp8_pipe_p95_ms),
     }
 
@@ -419,7 +429,7 @@ def print_fp8_pipeline_shape_sweep_summary(rank: int, rows: list[dict[str, objec
                 f"{row['fp8_pipe_p95_ms']:.3f}/{row['fp8_pipe_max_ms']:.3f}  "
                 f"pipe_spd_BF16={row['pipeline_speedup_vs_bf16']:.2f}x  "
                 f"pipe_spd_FP8seq={row['pipeline_speedup_vs_fp8_seq']:.2f}x  "
-                f"p95_BF16/FP8pipe={row['tail_ratio_vs_bf16']:.2f}  "
+                f"p95_BF16/FP8pipe={row['p95_bf16_over_fp8_pipe']:.2f}  "
                 f"note={row['note']!s}"
             )
     print(sep)
@@ -1471,7 +1481,7 @@ class TestFP8ParamShapeSweep:
             )
             pipeline_speedup_vs_bf16 = r_bf16.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
             pipeline_speedup_vs_fp8_seq = r_fp8_seq.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
-            tail_ratio_vs_bf16 = r_bf16.p95_ms / max(r_fp8_pipe.p95_ms, 1e-6)
+            p95_bf16_over_fp8_pipe = r_bf16.p95_ms / max(r_fp8_pipe.p95_ms, 1e-6)
             rows.append(
                 build_fp8_pipeline_shape_row(
                     profile_name=profile.name,
@@ -1486,7 +1496,7 @@ class TestFP8ParamShapeSweep:
                     fp8_pipe_max_ms=r_fp8_pipe.max_ms,
                     pipeline_speedup_vs_bf16=pipeline_speedup_vs_bf16,
                     pipeline_speedup_vs_fp8_seq=pipeline_speedup_vs_fp8_seq,
-                    tail_ratio_vs_bf16=tail_ratio_vs_bf16,
+                    p95_bf16_over_fp8_pipe=p95_bf16_over_fp8_pipe,
                 )
             )
         print_fp8_pipeline_shape_sweep_summary(self.rank, rows)
