@@ -15,7 +15,8 @@ Measures the latency and overlap ratio of the fused pipeline path
 
 Both column-parallel and row-parallel are benchmarked.
 
-Requires >= 2 GPUs with NCCL.
+Requires >= 2 GPUs with the PyTorch NCCL backend
+(RCCL underneath on AMD).
 
 Run forward-only::
 
@@ -30,6 +31,11 @@ Run forward + backward::
 Run chunk scaling sweep::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k chunk_sweep
+
+Backend matrix envs::
+
+    LUMEN_FUSED_PIPELINE_SDMA_ONLY=column_fwd|row_fwd|column_fwd_bwd|row_fwd_bwd|all
+    LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS=1,2,4,8
 
 Run all::
 
@@ -199,6 +205,73 @@ def _run_row_full_mirrored_baseline(input_parallel, weight, pipeline_rs, pipelin
 
 def _analysis_result(name, avg_ms, **extra):
     return BenchResult(name=name, avg_ms=avg_ms, extra=extra)
+
+
+def _parse_backend_matrix_chunks(default):
+    raw = os.environ.get("LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS")
+    if raw is None:
+        return tuple(default)
+
+    chunks = []
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        try:
+            value = int(token)
+        except ValueError as exc:
+            raise ValueError(
+                f"LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS must be a comma-separated list of integers, got {raw!r}"
+            ) from exc
+        if value < 1:
+            raise ValueError(f"LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS values must be >= 1, got {value}")
+        chunks.append(value)
+
+    if not chunks:
+        raise ValueError("LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS must contain at least one integer")
+    return tuple(chunks)
+
+
+def _backend_matrix_note(result: BenchResult, skipped_reason: str | None = None) -> str:
+    if skipped_reason is not None:
+        return f"skip:{skipped_reason}"
+    if result.cv_pct > 2.0:
+        return "unstable"
+    return "-"
+
+
+def _build_backend_matrix_summary_row(
+    backend,
+    phase,
+    chunks,
+    avg_ms,
+    rccl_avg_ms,
+    note="-",
+):
+    return {
+        "backend": backend,
+        "phase": phase,
+        "chunks": chunks,
+        "avg_ms": avg_ms,
+        "rccl_avg_ms": rccl_avg_ms,
+        "speedup_vs_rccl": rccl_avg_ms / max(avg_ms, 1e-6),
+        "note": note,
+    }
+
+
+def _print_backend_matrix_summary(world: int, rows: list[dict[str, object]]) -> None:
+    sep = "=" * 112
+    print(f"\n{sep}")
+    print(f"Fused Pipeline Backend Matrix (world={world})")
+    print(sep)
+    print(f"{'Backend':<8} {'Phase':<16} {'Chunks':>6} {'Avg ms':>10} {'vs RCCL':>9} {'Note':>12}")
+    print("-" * 112)
+    for row in rows:
+        print(
+            f"{row['backend']:<8} {row['phase']:<16} {row['chunks']:>6} "
+            f"{row['avg_ms']:>10.3f} {row['speedup_vs_rccl']:>8.2f}x {row['note']:>12}"
+        )
+    print(sep)
 
 
 def _print_row_full_analysis_table(*, title, forward_ms, ag_dgrad_ms, ag_wgrad_ms, baseline_total_ms, fused_total_ms):
@@ -576,7 +649,7 @@ class TestFusedPipelineRowFwd:
 
 @_SDMA_DIST
 class TestFusedPipelineSdmaColumn:
-    """NCCL vs SDMA backend for fused pipelined overlap."""
+    """RCCL vs SDMA backend matrix for fused pipelined overlap."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -589,33 +662,86 @@ class TestFusedPipelineSdmaColumn:
         dist.barrier()
 
     def _make_backends(self):
-        from lumen.modules.comm_overlap import (
-            NcclCommBackend,
-            PipelinedAllgatherGemm,
-            PipelinedGemmReduceScatter,
-            SdmaCommBackend,
-        )
+        from lumen.modules.comm_overlap import SdmaCommBackend
         from lumen.modules.sdma_comm import SdmaTpComm
 
-        nccl = NcclCommBackend(dist.group.WORLD)
+        rccl = NcclCommBackend(dist.group.WORLD)
         sdma_comm = SdmaTpComm(dist.group.WORLD)
         sdma = SdmaCommBackend(sdma_comm)
+        return rccl, sdma
 
-        ag_nccl = PipelinedAllgatherGemm(num_chunks=4, comm=nccl)
-        rs_nccl = PipelinedGemmReduceScatter(num_chunks=4, comm=nccl)
-        ag_sdma = PipelinedAllgatherGemm(num_chunks=4, comm=sdma)
-        rs_sdma = PipelinedGemmReduceScatter(num_chunks=4, comm=sdma)
-        return (ag_nccl, rs_nccl), (ag_sdma, rs_sdma)
+    def _make_pipelines(self, comm_backend, num_chunks):
+        return (
+            PipelinedAllgatherGemm(num_chunks=num_chunks, comm=comm_backend),
+            PipelinedGemmReduceScatter(num_chunks=num_chunks, comm=comm_backend),
+        )
 
     def _sync_all_ranks(self):
         torch.cuda.synchronize()
         dist.barrier()
 
-    def _bench_fused_column_fwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_column_parallel_forward):
+    def _require_matching_chunks(self, chunks):
+        expected = [tuple(chunks) if self.rank == 0 else None]
+        dist.broadcast_object_list(expected, src=0)
+        if tuple(chunks) != expected[0]:
+            raise RuntimeError("LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS must match across all ranks")
+        return expected[0]
+
+    def _validate_phase_chunks(self, phase, num_chunks):
+        total_tokens = B * S
+        if phase.startswith("column"):
+            s_local = total_tokens // self.world
+            if s_local % num_chunks != 0:
+                pytest.skip(f"phase={phase} requires S_local={s_local} divisible by chunks={num_chunks}")
+            return
+
+        if total_tokens % num_chunks != 0:
+            pytest.skip(f"phase={phase} requires S_full={total_tokens} divisible by chunks={num_chunks}")
+        chunk_full = total_tokens // num_chunks
+        if chunk_full % self.world != 0:
+            pytest.skip(
+                f"phase={phase} requires chunk_full={chunk_full} divisible by "
+                f"tp_size={self.world} for chunks={num_chunks}"
+            )
+
+    def _bench_backend_pair(self, title, phase, rccl_run, sdma_run):
+        for _ in range(3):
+            rccl_run()
+            sdma_run()
+        torch.cuda.synchronize()
+
+        r_rccl = cuda_timer(
+            rccl_run,
+            label=f"RCCL {phase}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_sdma = cuda_timer(
+            sdma_run,
+            label=f"SDMA {phase}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_rccl.extra["speedup_vs_rccl"] = 1.0
+        r_sdma.extra["speedup_vs_rccl"] = round(r_rccl.avg_ms / max(r_sdma.avg_ms, 1e-6), 2)
+
+        if self.rank == 0:
+            print_report_with_table(title, [r_rccl, r_sdma])
+            print_bench_warnings(result=r_sdma, speedup=r_rccl.avg_ms / max(r_sdma.avg_ms, 1e-6))
+        return r_rccl, r_sdma
+
+    def _bench_fused_column_fwd(self, rccl_backend, sdma_backend, num_chunks, fused_column_parallel_forward):
+        self._validate_phase_chunks("column_fwd", num_chunks)
         S_local = (B * S) // self.world
         x_local = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16)
         w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
+        ag_rccl, rs_rccl = self._make_pipelines(rccl_backend, num_chunks)
+        ag_sdma, rs_sdma = self._make_pipelines(sdma_backend, num_chunks)
 
         def _run(ag, rs):
             return fused_column_parallel_forward(
@@ -631,44 +757,22 @@ class TestFusedPipelineSdmaColumn:
                 False,
             )
 
-        for _ in range(3):
-            _run(ag_nccl, rs_nccl)
-            _run(ag_sdma, rs_sdma)
-        torch.cuda.synchronize()
-
-        r_nccl = cuda_timer(
-            lambda: _run(ag_nccl, rs_nccl),
-            label="NCCL fused column fwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-        r_sdma = cuda_timer(
+        return self._bench_backend_pair(
+            f"Fused Column Fwd: RCCL vs SDMA (world={self.world}, chunks={num_chunks})",
+            "fused column fwd",
+            lambda: _run(ag_rccl, rs_rccl),
             lambda: _run(ag_sdma, rs_sdma),
-            label="SDMA fused column fwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
         )
 
-        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
-        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
-
-        if self.rank == 0:
-            print_report_with_table(
-                f"Fused Column Fwd: NCCL vs SDMA (world={self.world})",
-                [r_nccl, r_sdma],
-            )
-            print_bench_warnings(result=r_sdma, speedup=speedup)
-
-    def _bench_fused_row_fwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_row_parallel_forward):
+    def _bench_fused_row_fwd(self, rccl_backend, sdma_backend, num_chunks, fused_row_parallel_forward):
+        self._validate_phase_chunks("row_fwd", num_chunks)
         S_full = B * S
         H_tp = H // self.world
         x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16)
         w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
+        ag_rccl, rs_rccl = self._make_pipelines(rccl_backend, num_chunks)
+        ag_sdma, rs_sdma = self._make_pipelines(sdma_backend, num_chunks)
 
         def _run(rs, ag):
             return fused_row_parallel_forward(
@@ -682,42 +786,20 @@ class TestFusedPipelineSdmaColumn:
                 None,
             )
 
-        for _ in range(3):
-            _run(rs_nccl, ag_nccl)
-            _run(rs_sdma, ag_sdma)
-        torch.cuda.synchronize()
-
-        r_nccl = cuda_timer(
-            lambda: _run(rs_nccl, ag_nccl),
-            label="NCCL fused row fwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-        r_sdma = cuda_timer(
+        return self._bench_backend_pair(
+            f"Fused Row Fwd: RCCL vs SDMA (world={self.world}, chunks={num_chunks})",
+            "fused row fwd",
+            lambda: _run(rs_rccl, ag_rccl),
             lambda: _run(rs_sdma, ag_sdma),
-            label="SDMA fused row fwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
         )
 
-        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
-        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
-
-        if self.rank == 0:
-            print_report_with_table(
-                f"Fused Row Fwd: NCCL vs SDMA (world={self.world})",
-                [r_nccl, r_sdma],
-            )
-            print_bench_warnings(result=r_sdma, speedup=speedup)
-
-    def _bench_fused_column_fwd_bwd(self, ag_nccl, rs_nccl, ag_sdma, rs_sdma, fused_column_parallel_forward):
+    def _bench_fused_column_fwd_bwd(self, rccl_backend, sdma_backend, num_chunks, fused_column_parallel_forward):
+        self._validate_phase_chunks("column_fwd_bwd", num_chunks)
         S_local = (B * S) // self.world
         w = torch.randn(FFN // self.world, H, device=self.device, dtype=torch.bfloat16)
         w_param = torch.nn.Parameter(w.clone())
+        ag_rccl, rs_rccl = self._make_pipelines(rccl_backend, num_chunks)
+        ag_sdma, rs_sdma = self._make_pipelines(sdma_backend, num_chunks)
 
         def _run(ag, rs):
             x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
@@ -736,40 +818,46 @@ class TestFusedPipelineSdmaColumn:
             y.sum().backward()
             return x.grad
 
-        for _ in range(3):
-            _run(ag_nccl, rs_nccl)
-            _run(ag_sdma, rs_sdma)
-        torch.cuda.synchronize()
-
-        r_nccl = cuda_timer(
-            lambda: _run(ag_nccl, rs_nccl),
-            label="NCCL fused fwd+bwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-        r_sdma = cuda_timer(
+        return self._bench_backend_pair(
+            f"Fused Column Fwd+Bwd: RCCL vs SDMA (world={self.world}, chunks={num_chunks})",
+            "fused column fwd+bwd",
+            lambda: _run(ag_rccl, rs_rccl),
             lambda: _run(ag_sdma, rs_sdma),
-            label="SDMA fused fwd+bwd",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
         )
 
-        speedup = r_nccl.avg_ms / max(r_sdma.avg_ms, 1e-6)
-        r_sdma.extra["speedup_vs_nccl"] = round(speedup, 2)
+    def _bench_fused_row_fwd_bwd(self, rccl_backend, sdma_backend, num_chunks, fused_row_parallel_forward):
+        self._validate_phase_chunks("row_fwd_bwd", num_chunks)
+        S_full = B * S
+        H_tp = H // self.world
+        w = torch.randn(FFN, H_tp, device=self.device, dtype=torch.bfloat16)
+        w_param = torch.nn.Parameter(w.clone())
+        ag_rccl, rs_rccl = self._make_pipelines(rccl_backend, num_chunks)
+        ag_sdma, rs_sdma = self._make_pipelines(sdma_backend, num_chunks)
 
-        if self.rank == 0:
-            print_report_with_table(
-                f"Fused Column Fwd+Bwd: NCCL vs SDMA (world={self.world})",
-                [r_nccl, r_sdma],
+        def _run(rs, ag):
+            x = torch.randn(S_full, H_tp, device=self.device, dtype=torch.bfloat16, requires_grad=True)
+            y = fused_row_parallel_forward(
+                x,
+                w_param,
+                rs,
+                ag,
+                w_param,
+                False,
+                False,
+                None,
             )
-            print_bench_warnings(result=r_sdma, speedup=speedup)
+            y.sum().backward()
+            return y, x.grad, w_param.grad
+
+        return self._bench_backend_pair(
+            f"Fused Row Fwd+Bwd: RCCL vs SDMA (world={self.world}, chunks={num_chunks})",
+            "fused row fwd+bwd",
+            lambda: _run(rs_rccl, ag_rccl),
+            lambda: _run(rs_sdma, ag_sdma),
+        )
 
     def test_nccl_vs_sdma_fused_suite(self):
-        """Run all SDMA fused benchmarks in one test method.
+        """Run all SDMA fused backend-matrix benchmarks in one test method.
 
         Keep one SDMA handle set alive across the suite. Mori allocates KFD
         queues during handle construction; recreating SDMA handles across
@@ -777,16 +865,19 @@ class TestFusedPipelineSdmaColumn:
         AllGather timeouts on 8-GPU runs.
 
         Set ``LUMEN_FUSED_PIPELINE_SDMA_ONLY`` to one of ``column_fwd``,
-        ``row_fwd``, or ``column_fwd_bwd`` to run a single phase while still
-        keeping one pytest node / one SDMA handle lifecycle.
+        ``row_fwd``, ``column_fwd_bwd``, or ``row_fwd_bwd`` to run a single
+        phase while still keeping one pytest node / one SDMA handle lifecycle.
+        Set ``LUMEN_FUSED_PIPELINE_BACKEND_CHUNKS`` to a comma-separated chunk
+        list such as ``1,2,4,8`` to sweep chunk counts.
         """
         from lumen.modules.comm_overlap import (
             fused_column_parallel_forward,
             fused_row_parallel_forward,
         )
 
+        selected_chunks = self._require_matching_chunks(_parse_backend_matrix_chunks((1, 2, 4, 8)))
         selected_phase = os.environ.get("LUMEN_FUSED_PIPELINE_SDMA_ONLY", "all").strip().lower()
-        phase_codes = {"all": 0, "column_fwd": 1, "row_fwd": 2, "column_fwd_bwd": 3}
+        phase_codes = {"all": 0, "column_fwd": 1, "row_fwd": 2, "column_fwd_bwd": 3, "row_fwd_bwd": 4}
         valid_phases = set(phase_codes)
         phase_code_value = phase_codes.get(selected_phase, -1)
         phase_code = torch.tensor([phase_code_value], device=self.device, dtype=torch.int32)
@@ -801,36 +892,76 @@ class TestFusedPipelineSdmaColumn:
                 "LUMEN_FUSED_PIPELINE_SDMA_ONLY must be one of " f"{sorted(valid_phases)}, got {selected_phase!r}"
             )
 
-        (ag_nccl, rs_nccl), (ag_sdma, rs_sdma) = self._make_backends()
+        rccl_backend, sdma_backend = self._make_backends()
+        summary_rows = []
 
-        if selected_phase in {"all", "column_fwd"}:
-            self._bench_fused_column_fwd(
-                ag_nccl,
-                rs_nccl,
-                ag_sdma,
-                rs_sdma,
-                fused_column_parallel_forward,
+        def _record_summary(phase, chunks, rccl_result, sdma_result):
+            if self.rank != 0:
+                return
+            summary_rows.append(
+                _build_backend_matrix_summary_row(
+                    backend="RCCL",
+                    phase=phase,
+                    chunks=chunks,
+                    avg_ms=rccl_result.avg_ms,
+                    rccl_avg_ms=rccl_result.avg_ms,
+                    note=_backend_matrix_note(rccl_result),
+                )
             )
-            self._sync_all_ranks()
+            summary_rows.append(
+                _build_backend_matrix_summary_row(
+                    backend="SDMA",
+                    phase=phase,
+                    chunks=chunks,
+                    avg_ms=sdma_result.avg_ms,
+                    rccl_avg_ms=rccl_result.avg_ms,
+                    note=_backend_matrix_note(sdma_result),
+                )
+            )
 
-        if selected_phase in {"all", "row_fwd"}:
-            self._bench_fused_row_fwd(
-                ag_nccl,
-                rs_nccl,
-                ag_sdma,
-                rs_sdma,
-                fused_row_parallel_forward,
-            )
-            self._sync_all_ranks()
+        for num_chunks in selected_chunks:
+            if selected_phase in {"all", "column_fwd"}:
+                r_rccl, r_sdma = self._bench_fused_column_fwd(
+                    rccl_backend,
+                    sdma_backend,
+                    num_chunks,
+                    fused_column_parallel_forward,
+                )
+                _record_summary("column_fwd", num_chunks, r_rccl, r_sdma)
+                self._sync_all_ranks()
 
-        if selected_phase in {"all", "column_fwd_bwd"}:
-            self._bench_fused_column_fwd_bwd(
-                ag_nccl,
-                rs_nccl,
-                ag_sdma,
-                rs_sdma,
-                fused_column_parallel_forward,
-            )
+            if selected_phase in {"all", "row_fwd"}:
+                r_rccl, r_sdma = self._bench_fused_row_fwd(
+                    rccl_backend,
+                    sdma_backend,
+                    num_chunks,
+                    fused_row_parallel_forward,
+                )
+                _record_summary("row_fwd", num_chunks, r_rccl, r_sdma)
+                self._sync_all_ranks()
+
+            if selected_phase in {"all", "column_fwd_bwd"}:
+                r_rccl, r_sdma = self._bench_fused_column_fwd_bwd(
+                    rccl_backend,
+                    sdma_backend,
+                    num_chunks,
+                    fused_column_parallel_forward,
+                )
+                _record_summary("column_fwd_bwd", num_chunks, r_rccl, r_sdma)
+                self._sync_all_ranks()
+
+            if selected_phase in {"all", "row_fwd_bwd"}:
+                r_rccl, r_sdma = self._bench_fused_row_fwd_bwd(
+                    rccl_backend,
+                    sdma_backend,
+                    num_chunks,
+                    fused_row_parallel_forward,
+                )
+                _record_summary("row_fwd_bwd", num_chunks, r_rccl, r_sdma)
+                self._sync_all_ranks()
+
+        if self.rank == 0 and summary_rows:
+            _print_backend_matrix_summary(self.world, summary_rows)
 
 
 @_DIST

@@ -84,6 +84,7 @@ Run multi-GPU — all distributed tests (NCCL + SDMA + comparison, requires mori
 from __future__ import annotations
 
 import os
+import traceback
 from types import SimpleNamespace
 from typing import Callable, List, Optional
 
@@ -373,15 +374,59 @@ def _build_megatron_style_stack(device, world_size, profile, n_layers=2, use_sdm
     return modules, inputs, outputs, grad_outputs
 
 
+def _run_with_rank_local_diagnostics(label: str, fn):
+    """Run *fn* and print a rank-local traceback on failure."""
+    try:
+        return fn()
+    except Exception as exc:
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            world = dist.get_world_size()
+        else:
+            rank = -1
+            world = -1
+        print(
+            f"\n[{label}] rank={rank}/{world} failed with {type(exc).__name__}: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        raise
+
+
 def _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream):
     """Layer-wise backward with deferred wgrad drained on ``wgrad_stream`` (reverse order)."""
     for idx in range(len(modules) - 1, -1, -1):
-        torch.autograd.backward(outputs[idx], grad_outputs[idx])
-        if not modules[idx]._deferred_wgrad.has_pending:
-            raise AssertionError(f"layer {idx} missing deferred wgrad")
-        wgrad_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(wgrad_stream):
-            modules[idx].backward_dw()
+        try:
+            if idx < len(modules) - 1:
+                # Drain the prior layer's deferred wgrad before the next layer's
+                # backward launches more TP communication. Without this handoff,
+                # different ranks can diverge in SDMA collective ordering.
+                torch.cuda.current_stream().wait_stream(wgrad_stream)
+            torch.autograd.backward(outputs[idx], grad_outputs[idx])
+            if not modules[idx]._deferred_wgrad.has_pending:
+                raise AssertionError(f"layer {idx} missing deferred wgrad")
+            wgrad_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(wgrad_stream):
+                modules[idx].backward_dw()
+        except Exception:
+            try:
+                pending = [m._deferred_wgrad.has_pending for m in modules]
+                module_names = [type(m).__name__ for m in modules]
+                rank = dist.get_rank() if dist.is_initialized() else -1
+                print(
+                    f"[MegatronStyle layerwise] rank={rank} layer={idx} "
+                    f"module={type(modules[idx]).__name__} "
+                    f"output_shape={tuple(outputs[idx].shape)} grad_shape={tuple(grad_outputs[idx].shape)} "
+                    f"pending={pending} modules={module_names}",
+                    flush=True,
+                )
+            except Exception as diag_exc:
+                rank = dist.get_rank() if dist.is_initialized() else -1
+                print(
+                    f"[MegatronStyle layerwise] rank={rank} layer={idx} " f"failed to collect diagnostics: {diag_exc}",
+                    flush=True,
+                )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -978,18 +1023,27 @@ class TestMegatronStyleWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
         wgrad_stream = torch.cuda.Stream(device=self.device)
+        run_counter = {"value": 0}
 
         def _run_once():
-            modules, _inputs, outputs, grad_outputs = _build_megatron_style_stack(
-                self.device,
-                self.world,
-                profile,
-                n_layers=2,
-                use_sdma=True,
+            run_counter["value"] += 1
+
+            def _body():
+                modules, _inputs, outputs, grad_outputs = _build_megatron_style_stack(
+                    self.device,
+                    self.world,
+                    profile,
+                    n_layers=2,
+                    use_sdma=True,
+                )
+                _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream)
+                torch.cuda.synchronize()
+                return modules
+
+            return _run_with_rank_local_diagnostics(
+                f"Megatron-style SDMA call={run_counter['value']}",
+                _body,
             )
-            _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream)
-            torch.cuda.synchronize()
-            return modules
 
         modules = _run_once()
         assert all(not m._deferred_wgrad.has_pending for m in modules)
