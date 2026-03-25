@@ -325,7 +325,8 @@ def _build_megatron_style_stack(device, world_size, profile, n_layers=2, use_sdm
     """Build a Column→Row→… stack on ``dist.group.WORLD`` with sequence parallel.
 
     Megatron-style Tier 2: ``tensor_model_parallel_size == world_size``,
-    independent per-layer autograd graphs (each next input is detached).
+    chained forward activations with independent per-layer autograd graphs
+    (each next input is detached before the next layer runs).
     """
     from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
 
@@ -358,6 +359,13 @@ def _build_megatron_style_stack(device, world_size, profile, n_layers=2, use_sdm
         module.delay_wgrad = True
         module.gradient_accumulation_fusion = True
         module.use_sdma = use_sdma
+        with torch.no_grad():
+            # Tier 2 chains one layer's activations into the next, so unlike the
+            # independent Tier 1 helpers we must seed finite params here instead
+            # of relying on uninitialized storage.
+            module.weight.fill_(0.01)
+            if module.bias is not None:
+                module.bias.zero_()
         module.weight.main_grad = torch.zeros_like(module.weight)
         modules.append(module)
 

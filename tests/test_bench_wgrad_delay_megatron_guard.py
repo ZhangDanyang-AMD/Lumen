@@ -44,6 +44,14 @@ def _load_bench_tree() -> ast.Module:
     return ast.parse(BENCH_PATH.read_text())
 
 
+def _load_function(name: str) -> ast.FunctionDef:
+    tree = _load_bench_tree()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"Missing {name} helper")
+
+
 def _loop_execution_body(loop_body: list[ast.stmt]) -> list[ast.stmt]:
     if len(loop_body) == 1 and isinstance(loop_body[0], ast.Try):
         return loop_body[0].body
@@ -90,3 +98,18 @@ def test_megatron_style_sdma_test_uses_rank_local_diagnostics_wrapper():
     assert validation_helper_present
     assert test_calls_helper
     assert test_calls_validation
+
+
+def test_megatron_style_stack_initializes_chained_module_parameters():
+    fn = _load_function("_build_megatron_style_stack")
+
+    fill_calls = [
+        node for node in ast.walk(fn) if isinstance(node, ast.Call) and ast.unparse(node.func) == "module.weight.fill_"
+    ]
+    zero_calls = [
+        node for node in ast.walk(fn) if isinstance(node, ast.Call) and ast.unparse(node.func) == "module.bias.zero_"
+    ]
+
+    assert len(fill_calls) == 1
+    assert ast.unparse(fill_calls[0].args[0]) == "0.01"
+    assert len(zero_calls) == 1
