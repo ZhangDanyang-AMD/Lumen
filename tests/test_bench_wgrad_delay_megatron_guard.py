@@ -67,8 +67,12 @@ def test_megatron_style_sdma_test_uses_rank_local_diagnostics_wrapper():
     helper_present = any(
         isinstance(node, ast.FunctionDef) and node.name == "_run_with_rank_local_diagnostics" for node in tree.body
     )
+    validation_helper_present = any(
+        isinstance(node, ast.FunctionDef) and node.name == "_validate_megatron_style_modules" for node in tree.body
+    )
 
     test_calls_helper = False
+    test_calls_validation = False
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == "TestMegatronStyleWgradDelay":
             for child in node.body:
@@ -77,6 +81,12 @@ def test_megatron_style_sdma_test_uses_rank_local_diagnostics_wrapper():
                         isinstance(call, ast.Call) and ast.unparse(call.func) == "_run_with_rank_local_diagnostics"
                         for call in ast.walk(child)
                     )
+                    test_calls_validation = any(
+                        isinstance(call, ast.Call) and ast.unparse(call.func) == "_validate_megatron_style_modules"
+                        for call in ast.walk(child)
+                    )
 
     assert helper_present
+    assert validation_helper_present
     assert test_calls_helper
+    assert test_calls_validation

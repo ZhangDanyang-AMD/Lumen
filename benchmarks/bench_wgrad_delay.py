@@ -83,6 +83,7 @@ Run multi-GPU — all distributed tests (NCCL + SDMA + comparison, requires mori
 
 from __future__ import annotations
 
+import math
 import os
 import traceback
 from types import SimpleNamespace
@@ -391,6 +392,25 @@ def _run_with_rank_local_diagnostics(label: str, fn):
         )
         traceback.print_exc()
         raise
+
+
+def _validate_megatron_style_modules(modules, label: str) -> None:
+    """Validate deferred-wgrad drain and main_grad writes for Megatron-style runs."""
+    pending = [m._deferred_wgrad.has_pending for m in modules]
+    grad_abs_sums = [float(m.weight.main_grad.abs().sum().item()) for m in modules]
+    module_names = [f"{idx}:{type(m).__name__}" for idx, m in enumerate(modules)]
+    rank = dist.get_rank() if dist.is_initialized() else -1
+
+    if any(pending):
+        raise AssertionError(
+            f"{label}: rank={rank} still has pending deferred wgrad; "
+            f"pending={pending} grad_abs_sums={grad_abs_sums} modules={module_names}"
+        )
+    if any((not math.isfinite(total)) or total <= 0.0 for total in grad_abs_sums):
+        raise AssertionError(
+            f"{label}: rank={rank} has invalid main_grad after backward_dw; "
+            f"pending={pending} grad_abs_sums={grad_abs_sums} modules={module_names}"
+        )
 
 
 def _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream):
@@ -1024,6 +1044,7 @@ class TestMegatronStyleWgradDelay:
         dist.barrier()
         wgrad_stream = torch.cuda.Stream(device=self.device)
         run_counter = {"value": 0}
+        validate_each_call = os.environ.get("LUMEN_MEGATRON_VALIDATE_EACH_CALL", "0") == "1"
 
         def _run_once():
             run_counter["value"] += 1
@@ -1038,6 +1059,11 @@ class TestMegatronStyleWgradDelay:
                 )
                 _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream)
                 torch.cuda.synchronize()
+                if run_counter["value"] == 1 or validate_each_call:
+                    _validate_megatron_style_modules(
+                        modules,
+                        f"Megatron-style SDMA call={run_counter['value']}",
+                    )
                 return modules
 
             return _run_with_rank_local_diagnostics(
@@ -1045,9 +1071,7 @@ class TestMegatronStyleWgradDelay:
                 _body,
             )
 
-        modules = _run_once()
-        assert all(not m._deferred_wgrad.has_pending for m in modules)
-        assert all(m.weight.main_grad.abs().sum() > 0 for m in modules)
+        _run_once()
 
         r = cuda_timer(
             _run_once,
