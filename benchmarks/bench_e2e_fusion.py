@@ -4,7 +4,7 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Benchmark — End-to-end transformer layer fusion strategies.
+"""Benchmark — End-to-end transformer layer pure-pipeline strategies.
 
 Measures the latency of a single transformer layer (column-parallel +
 row-parallel) under three schemes:
@@ -13,10 +13,17 @@ row-parallel) under three schemes:
   * **Fused NCCL**: Pipelined comm-GEMM overlap with NCCL backend.
   * **Fused SDMA**: Pipelined comm-GEMM overlap with SDMA backend.
 
-Also includes a TP scaling sweep (TP=2, 4, 8) to show how fusion
-benefits change with parallelism width.
+This file intentionally measures the **pure pipeline** path only:
+``PipelinedAllgatherGemm`` / ``PipelinedGemmReduceScatter`` with eager
+wgrad in backward.  It does **not** benchmark delayed wgrad execution in a
+single-layer "backward then immediate execute()" schedule, because that mixes
+two distinct optimizations and can make the results misleading.
 
-Requires >= 2 GPUs with NCCL.  TP scaling requires 8 GPUs.
+For delayed-wgrad benchmarks and multi-layer pipeline schedules, use
+``benchmarks/bench_wgrad_delay.py``. For isolated pipeline micro-benchmarks
+and chunk sweeps, use ``benchmarks/bench_fused_pipeline.py``.
+
+Requires >= 2 GPUs with NCCL. TP scaling requires 8 GPUs.
 
 Run E2E layer benchmarks::
 
@@ -164,7 +171,13 @@ def _new_tp_process_group(tp_size: int):
 
 @_DIST
 class TestE2ETransformerLayerFusion:
-    """E2E single transformer layer: Naive vs Fused NCCL (vs Fused SDMA)."""
+    """E2E single transformer layer: naive vs pure-pipeline NCCL/SDMA.
+
+    This benchmark is intentionally single-layer and does not include delayed
+    wgrad scheduling. Delayed wgrad is benchmarked separately in
+    ``benchmarks/bench_wgrad_delay.py`` where its overlap can be measured in a
+    realistic multi-layer or comm-overlap schedule.
+    """
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -196,13 +209,12 @@ class TestE2ETransformerLayerFusion:
         rs = PipelinedGemmReduceScatter(num_chunks=4, comm=backend)
         return ag, rs
 
-    def _fused_fwd(self, x_local, w_up, w_down, ag, rs, w_up_param, w_down_param, deferred=None):
+    def _fused_fwd(self, x_local, w_up, w_down, ag, rs, w_up_param, w_down_param):
         from lumen.modules.comm_overlap import (
             fused_column_parallel_forward,
             fused_row_parallel_forward,
         )
 
-        delay = deferred is not None
         up = fused_column_parallel_forward(
             x_local,
             w_up,
@@ -211,8 +223,8 @@ class TestE2ETransformerLayerFusion:
             rs,
             w_up_param,
             False,
-            delay,
-            deferred,
+            False,
+            None,
             False,
         )
         return fused_row_parallel_forward(
@@ -222,13 +234,12 @@ class TestE2ETransformerLayerFusion:
             ag,
             w_down_param,
             False,
-            delay,
-            deferred,
+            False,
+            None,
         )
 
     def _run_comparison(self, fwd_only=False, bwd_only=False):
         from lumen.modules.comm_overlap import NcclCommBackend
-        from lumen.modules.parallel_linear import _DeferredWgrad
 
         S_local = (B * S) // self.world
         w_up, w_down = self._make_layer()
@@ -236,7 +247,6 @@ class TestE2ETransformerLayerFusion:
         w_down_param = torch.nn.Parameter(w_down.clone())
         nccl = NcclCommBackend(dist.group.WORLD)
         ag, rs = self._make_pipelines(nccl)
-        deferred = _DeferredWgrad()
 
         ag_bytes = B * S * H * 2
         rs_bytes = B * S * H * 2
@@ -255,7 +265,6 @@ class TestE2ETransformerLayerFusion:
                 rs,
                 w_up_param,
                 w_down_param,
-                deferred=deferred,
             )
 
             def _naive():
@@ -269,7 +278,6 @@ class TestE2ETransformerLayerFusion:
                 w_up_param.grad = None
                 w_down_param.grad = None
                 y_fused_saved.sum().backward(retain_graph=True)
-                deferred.execute()
 
         else:
 
@@ -286,12 +294,9 @@ class TestE2ETransformerLayerFusion:
                 w_up_param.grad = None
                 w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
-                y = self._fused_fwd(
-                    x, w_up, w_down, ag, rs, w_up_param, w_down_param, deferred=deferred if needs_grad else None
-                )
+                y = self._fused_fwd(x, w_up, w_down, ag, rs, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
-                    deferred.execute()
                 return y
 
         for _ in range(3):
@@ -338,12 +343,9 @@ class TestE2ETransformerLayerFusion:
                 w_up_param.grad = None
                 w_down_param.grad = None
                 x = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=needs_grad)
-                y = self._fused_fwd(
-                    x, w_up, w_down, ag_s, rs_s, w_up_param, w_down_param, deferred=deferred if needs_grad else None
-                )
+                y = self._fused_fwd(x, w_up, w_down, ag_s, rs_s, w_up_param, w_down_param)
                 if needs_grad:
                     y.sum().backward()
-                    deferred.execute()
                 return y
 
             for _ in range(3):
@@ -364,7 +366,7 @@ class TestE2ETransformerLayerFusion:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E Transformer Layer {label_suffix} (world={self.world})",
+                f"E2E Transformer Layer Pure Pipeline {label_suffix} (world={self.world})",
                 results,
             )
             print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r_fused.avg_ms)
@@ -383,7 +385,7 @@ class TestE2ETransformerLayerFusion:
 
 @_SDMA_DIST
 class TestE2ETransformerLayerSdmaOnly:
-    """Isolated SDMA measurement — no NCCL comparison overhead."""
+    """Isolated SDMA pure-pipeline measurement — no NCCL comparison overhead."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
@@ -403,7 +405,6 @@ class TestE2ETransformerLayerSdmaOnly:
             fused_column_parallel_forward,
             fused_row_parallel_forward,
         )
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
         S_local = (B * S) // self.world
@@ -411,7 +412,6 @@ class TestE2ETransformerLayerSdmaOnly:
         w_down = torch.randn(H, FFN // self.world, device=self.device, dtype=torch.bfloat16)
         w_up_param = torch.nn.Parameter(w_up.clone())
         w_down_param = torch.nn.Parameter(w_down.clone())
-        deferred = _DeferredWgrad()
 
         sdma_comm = SdmaTpComm(dist.group.WORLD)
         sdma = SdmaCommBackend(sdma_comm)
@@ -421,7 +421,6 @@ class TestE2ETransformerLayerSdmaOnly:
         ag_bytes = B * S * H * 2
         rs_bytes = B * S * H * 2
         needs_grad = not fwd_only
-        delay = needs_grad
 
         if bwd_only:
             x_saved = torch.randn(S_local, H, device=self.device, dtype=torch.bfloat16, requires_grad=True)
@@ -433,8 +432,8 @@ class TestE2ETransformerLayerSdmaOnly:
                 rs,
                 w_up_param,
                 False,
-                True,
-                deferred,
+                False,
+                None,
                 False,
             )
             y_saved = fused_row_parallel_forward(
@@ -444,8 +443,8 @@ class TestE2ETransformerLayerSdmaOnly:
                 ag,
                 w_down_param,
                 False,
-                True,
-                deferred,
+                False,
+                None,
             )
 
             def _fused():
@@ -453,7 +452,6 @@ class TestE2ETransformerLayerSdmaOnly:
                 w_up_param.grad = None
                 w_down_param.grad = None
                 y_saved.sum().backward(retain_graph=True)
-                deferred.execute()
 
         else:
 
@@ -469,8 +467,8 @@ class TestE2ETransformerLayerSdmaOnly:
                     rs,
                     w_up_param,
                     False,
-                    delay,
-                    deferred if delay else None,
+                    False,
+                    None,
                     False,
                 )
                 y = fused_row_parallel_forward(
@@ -480,12 +478,11 @@ class TestE2ETransformerLayerSdmaOnly:
                     ag,
                     w_down_param,
                     False,
-                    delay,
-                    deferred if delay else None,
+                    False,
+                    None,
                 )
                 if needs_grad:
                     y.sum().backward()
-                    deferred.execute()
                 return y
 
         for _ in range(3):
@@ -504,7 +501,7 @@ class TestE2ETransformerLayerSdmaOnly:
 
         if self.rank == 0:
             print_report_with_table(
-                f"E2E SDMA-Only {label} (world={self.world})",
+                f"E2E SDMA-Only Pure Pipeline {label} (world={self.world})",
                 [r],
             )
             print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r.avg_ms)
@@ -523,7 +520,7 @@ class TestE2ETransformerLayerSdmaOnly:
 
 @_DIST
 class TestTPScaling:
-    """TP scaling sweep: measure fusion benefit at TP=2, 4, 8.
+    """TP scaling sweep: measure pure pipeline benefit at TP=2, 4, 8.
 
     For each *tp_size*, this rank joins a disjoint TP subgroup of that width
     (e.g. with 8 GPUs and TP=2: subgroups ``{0,1}``, ``{2,3}``, …).  It then
@@ -535,8 +532,8 @@ class TestTPScaling:
       (:class:`~lumen.modules.comm_overlap.PipelinedAllgatherGemm` /
       :class:`~lumen.modules.comm_overlap.PipelinedGemmReduceScatter`).
 
-    Forward + backward (including deferred wgrad) are timed; results compare
-    naive vs fused latency and derived AG/RS bandwidth labels.
+    Forward + backward are timed with eager wgrad in backward. Delayed wgrad is
+    benchmarked separately in ``benchmarks/bench_wgrad_delay.py``.
     """
 
     @pytest.fixture(autouse=True)
@@ -560,7 +557,6 @@ class TestTPScaling:
             fused_column_parallel_forward,
             fused_row_parallel_forward,
         )
-        from lumen.modules.parallel_linear import _DeferredWgrad
 
         tp_sizes = [2, 4, 8]
         sweep_results: List[dict] = []
@@ -573,7 +569,6 @@ class TestTPScaling:
             w_down = torch.randn(H, FFN // tp_size, device=self.device, dtype=torch.bfloat16)
             w_up_param = torch.nn.Parameter(w_up.clone())
             w_down_param = torch.nn.Parameter(w_down.clone())
-            deferred = _DeferredWgrad()
 
             backend = NcclCommBackend(tp_group)
             ag = PipelinedAllgatherGemm(num_chunks=4, comm=backend)
@@ -601,7 +596,6 @@ class TestTPScaling:
                 _rs=rs,
                 w_u_p=w_up_param,
                 w_d_p=w_down_param,
-                _def=deferred,
             ):
                 w_u_p.grad = None
                 w_d_p.grad = None
@@ -614,8 +608,8 @@ class TestTPScaling:
                     _rs,
                     w_u_p,
                     False,
-                    True,
-                    _def,
+                    False,
+                    None,
                     False,
                 )
                 y = fused_row_parallel_forward(
@@ -625,11 +619,10 @@ class TestTPScaling:
                     _ag,
                     w_d_p,
                     False,
-                    True,
-                    _def,
+                    False,
+                    None,
                 )
                 y.sum().backward()
-                _def.execute()
                 return y
 
             for _ in range(3):

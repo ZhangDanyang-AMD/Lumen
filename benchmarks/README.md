@@ -14,9 +14,9 @@ All benchmarks use **Llama 3.1 8B** dimensions by default:
 | 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison | 2+ GPUs |
 | 3 | `bench_fp8_param_allgather.py` | FP8ParamManager, dequant hooks, param compression SNR, **Layer 2 FP8 all-gather** (quant→gather→dequant), tail latency profiling, multi-GPU scaling efficiency | 1 GPU (sections 1-5), 2+ GPUs (sections 6-8), 4+ GPUs (sections 9-10) |
 | 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
-| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU |
+| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU / 2+ GPUs for distributed overlap |
 | 6 | `bench_fused_pipeline.py` | Pipelined AG+GEMM / GEMM+RS overlap, NCCL vs SDMA backend, backward overlap isolation, chunk sweep | 2+ GPUs |
-| 7 | `bench_e2e_fusion.py` | End-to-end transformer layer with all fusion strategies, TP scaling sweep, bandwidth reporting | 2+ GPUs (8 for TP scaling) |
+| 7 | `bench_e2e_fusion.py` | Single-layer end-to-end **pure pipeline** transformer layer, TP scaling sweep, bandwidth reporting | 2+ GPUs (8 for TP scaling) |
 
 ## Quick Start
 
@@ -67,10 +67,20 @@ torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v
 ### E2E Transformer Layer
 
 ```bash
-# Single layer with all fusion strategies
+# Single-layer end-to-end pure pipeline benchmark
 torchrun --nproc_per_node=2 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TransformerLayer
 # TP scaling sweep (requires 8 GPUs)
 torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TPScaling
+```
+
+Use the other two files for the complementary cases:
+
+```bash
+# Isolated AG+GEMM / GEMM+RS pipeline micro-benchmarks
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k fwd
+
+# Delayed-wgrad / multi-layer overlap benchmarks
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k "Pipeline or RealComm or SdmaComm"
 ```
 
 ## Tracing
@@ -177,8 +187,13 @@ Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
 
 | Feature | What's Measured |
 |---------|----------------|
-| Single-layer fwd+bwd | Naive vs Fused NCCL vs Fused SDMA total latency |
+| Single-layer fwd+bwd | Naive vs Fused NCCL vs Fused SDMA total latency for the **pure pipeline** path |
 | Forward-only | Isolated forward with all fusion strategies |
-| Backward-only | Isolated backward with dgrad+RS overlap + deferred wgrad |
+| Backward-only | Isolated backward for the pure pipeline path (no delayed wgrad) |
 | TP scaling | TP=2/4/8 latency, speedup, bandwidth at each scale |
 | Bandwidth utilization | AG and RS effective bandwidth in GB/s |
+
+`bench_e2e_fusion.py` intentionally excludes delayed-wgrad scheduling so the
+results reflect only the chunked comm-GEMM pipeline itself. For delayed-wgrad
+benefits, use `bench_wgrad_delay.py`. For isolated AG/RS pipeline micro-
+benchmarks and chunk sensitivity, use `bench_fused_pipeline.py`.
