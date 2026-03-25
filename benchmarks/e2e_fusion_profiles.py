@@ -109,8 +109,24 @@ def get_e2e_fusion_profile(
     )
 
 
-def get_e2e_fusion_shape_sweep() -> list[E2EFusionProfile]:
-    return list(_SHAPE_SWEEP_PROFILES)
+def get_e2e_fusion_shape_sweep(
+    env: Mapping[str, str] | None = None,
+) -> list[E2EFusionProfile]:
+    source_env = os.environ if env is None else env
+    return [
+        E2EFusionProfile(
+            name=profile.name,
+            batch=profile.batch,
+            seq=profile.seq,
+            hidden=profile.hidden,
+            ffn=profile.ffn,
+            num_chunks=_require_positive(
+                "LUMEN_E2E_NUM_CHUNKS",
+                _env_int(source_env, "LUMEN_E2E_NUM_CHUNKS", profile.num_chunks),
+            ),
+        )
+        for profile in _SHAPE_SWEEP_PROFILES
+    ]
 
 
 def format_e2e_shape_tag(profile: E2EFusionProfile) -> str:
