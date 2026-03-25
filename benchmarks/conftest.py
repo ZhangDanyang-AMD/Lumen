@@ -6,6 +6,7 @@
 
 """Shared pytest fixtures and markers for benchmarks."""
 
+import os
 import warnings
 
 import pytest
@@ -34,6 +35,34 @@ AITER = pytest.mark.skipif(
     not torch.cuda.is_available() or not _HAS_AITER,
     reason="CUDA + AITER required for benchmarks",
 )
+
+
+def _dist_rank():
+    rank = os.environ.get("RANK")
+    if rank is None:
+        return None
+    return int(rank)
+
+
+def pytest_configure(config):
+    rank = _dist_rank()
+    if rank is None:
+        return
+
+    config.option.no_header = True
+    config.option.no_summary = True
+
+    if rank != 0:
+        config.option.verbose = 0
+        config.option.capture = "fd"
+        config.option.quiet = max(getattr(config.option, "quiet", 0), 2)
+
+
+def pytest_report_teststatus(report, config):
+    rank = _dist_rank()
+    if rank is None or rank == 0 or getattr(report, "outcome", None) != "passed":
+        return None
+    return "", "", ""
 
 
 @pytest.fixture(scope="session", autouse=True)

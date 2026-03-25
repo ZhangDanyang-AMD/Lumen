@@ -26,10 +26,10 @@ overrides still apply.
 | # | File | Lumen Features Exercised | Requirements |
 |---|------|--------------------------|-------------|
 | 1 | `bench_kernel_launch.py` | FP8 quantized_linear (7 scaling modes), fused MoE, FP8 activation store, attention backends (csrc/triton), norm+GEMM pipeline | 1 GPU + AITER |
-| 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison | 2+ GPUs |
+| 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison, fixed-profile shape sweep | 2+ GPUs |
 | 3 | `bench_fp8_param_allgather.py` | FP8ParamManager, dequant hooks, param compression SNR, **Layer 2 FP8 all-gather** (quant→gather→dequant), profiled E2E gather+forward / pipeline experiments, tail latency profiling, multi-GPU scaling efficiency | 1 GPU (sections 1-5), 2+ GPUs (sections 6-8), 4+ GPUs (sections 9-10) |
 | 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
-| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, profiled distributed NCCL/SDMA overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU / 2+ GPUs for distributed overlap |
+| 5 | `bench_wgrad_delay.py` | **Tier 0** explicit `defer(weight, ...)` / `execute()` mechanism (single-GPU); **Tier 1** real-module overlap (`LumenColumnParallelLinear`, `backward_dw()`); **Tier 2** Megatron-style (`-k MegatronStyle`); `NCCLvsSdma`/profile selectors use the same real-module path (not legacy `defer(weight, ...)`); multi-layer `_DeferredWgrad` demo; `gradient_accumulation_fusion` | 1 GPU / 2+ GPUs for distributed overlap |
 | 6 | `bench_fused_pipeline.py` | Pipelined AG+GEMM / GEMM+RS overlap, NCCL vs SDMA backend, backward overlap isolation, chunk sweep | 2+ GPUs |
 | 7 | `bench_e2e_fusion.py` | Single-layer end-to-end **pure pipeline** transformer layer, fixed six-profile **shape sweep**, TP scaling sweep, explicit size/profile experiments, bandwidth reporting | 2+ GPUs (8 for TP scaling / shape sweep) |
 
@@ -56,6 +56,9 @@ torchrun --nproc_per_node=2 -m benchmarks.bench_comm_overlap
 
 # 8-GPU
 torchrun --nproc_per_node=8 -m benchmarks.bench_comm_overlap
+
+# Fixed shape sweep summary (NCCL always, SDMA when available)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_comm_overlap.py -v -s -k ShapeSweep
 ```
 
 ### Fused Pipeline
@@ -88,6 +91,18 @@ torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v
 ```
 
 ### Wgrad Delay — Distributed Overlap
+
+`bench_wgrad_delay.py` is organized in three tiers:
+
+- **Tier 0**: Low-level ``_DeferredWgrad`` mechanism checks and sanity.
+- **Tier 1**: Real Lumen module APIs (e.g. ``LumenColumnParallelLinear``) and
+  ``backward_dw()`` overlap benchmarks — not the legacy ``dwg.defer(weight, ...)`` API.
+- **Tier 2**: Megatron-style stacks via ``TestMegatronStyleWgradDelay``; run under
+  ``torchrun`` and select with ``-k MegatronStyle``, for example:
+
+```bash
+torchrun --nproc_per_node=2 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k MegatronStyle
+```
 
 ```bash
 # Default NCCL vs SDMA comparison
@@ -202,8 +217,14 @@ Trace files are written to `benchmarks/traces/` (git-ignored). Open them at
 | Row-parallel overlap | Reduce-scatter on comm stream, GEMM on compute stream |
 | `SdmaTpComm` async | `allgather_dim0_async` / `reduce_scatter_dim0_async` with true SDMA hardware |
 | NCCL vs SDMA | Direct comparison of overlap ratios |
+| **Shape sweep** (`-k ShapeSweep`) | Fixed six-profile summary across `tokens x ffn`: rank-0 column/row tables for NCCL, plus SDMA when available |
 
 Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
+
+The comm-overlap sweep reuses the same fixed six representative profiles as
+`bench_e2e_fusion.py`, so `comm_bound_small`, `default`, `backend_gap`, and the
+other shape labels keep the same `tokens x ffn` meaning across the micro-
+benchmark and the E2E pure-pipeline benchmark.
 
 ### 3. FP8 Param All-Gather (`bench_fp8_param_allgather.py`)
 
@@ -229,13 +250,13 @@ Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
 
 ### 5. Wgrad Delay (`bench_wgrad_delay.py`)
 
-| Feature | What's Measured |
-|---------|----------------|
-| `_DeferredWgrad` API | `defer()` + `execute()` vs eager wgrad |
-| Wgrad-forward overlap | Deferred dW on secondary stream while next-layer forward runs |
-| Two-layer pipeline | End-to-end: layer-2 dW overlaps layer-1 dX |
-| `gradient_accumulation_fusion` | `w.main_grad.add_(dw)` vs `w.grad = dw` |
-| Wgrad-comm overlap | Deferred dW overlaps with reduce-scatter |
+| Tier / area | What's measured |
+|-------------|-----------------|
+| **Tier 0** | `_DeferredWgrad` `defer`/`execute` vs eager; stream overlap demos; multi-layer `_DeferredWgrad` pipeline scheduling |
+| **Tier 1** | Real `LumenColumnParallelLinear` + `backward_dw()` vs NCCL allreduce; multi-layer pipelined wgrad + comm |
+| **Tier 2** (`-k MegatronStyle`) | Megatron-style column/row TP + sequence parallel; NCCL and SDMA realism paths |
+| Distributed comparisons | Real-module + SDMA allreduce (`SdmaComm`); NCCL vs SDMA (`NCCLvsSdma`); E2E profile experiment selectors |
+| `gradient_accumulation_fusion` | `w.main_grad.add_(dw)` vs `w.grad = dw` in `quantized_linear` backward |
 
 ### 6. Fused Pipeline Comm-GEMM Overlap (`bench_fused_pipeline.py`)
 

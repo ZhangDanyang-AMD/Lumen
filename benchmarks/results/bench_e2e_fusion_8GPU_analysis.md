@@ -1,18 +1,16 @@
 # E2E Transformer Layer Pure-Pipeline Benchmark Analysis — 8 GPU
 
-**Source log**: `bench_e2e_fusion_8GPU.log`
+**Source log**: `bench_e2e_fusion_8GPU.log:1-150`
 **Benchmark**: `benchmarks/bench_e2e_fusion.py`
-**Configuration**: 8 GPUs, BF16, `B=2`, `S=2048`, `H=4096`, `FFN=14336`, `num_chunks=4`
-**Test suite**: 7 benchmark tests, all PASSED
-**Runtime**: about 20 seconds total
+**Scope**: performance summary only. This cleaned log contains timing tables, bandwidth, memory, and TP-scaling results, but not pytest/runtime metadata.
 
-This benchmark measures the **pure pipeline** path only:
+The benchmark covers:
 
-- **Naive**: monolithic all-gather -> GEMM_up -> GEMM_down -> reduce-scatter
-- **Fused NCCL**: chunked `PipelinedAllgatherGemm` / `PipelinedGemmReduceScatter` over NCCL
-- **Fused SDMA**: the same chunked pipeline over mori SDMA
-
-It intentionally does **not** include delayed wgrad scheduling. For delayed-wgrad overlap, the relevant benchmark is `bench_wgrad_delay.py`. For more isolated pipeline micro-benchmarks, use `bench_fused_pipeline.py`.
+- single-layer pure-pipeline `fwd+bwd`, `fwd`, and `bwd-only`
+- two additional end-to-end profiles: `backend_gap` and `pipeline_gain`
+- a six-profile shape sweep
+- isolated `SDMA only` reference numbers
+- a `TP=2/4/8` scaling sweep
 
 ---
 
@@ -20,260 +18,268 @@ It intentionally does **not** include delayed wgrad scheduling. For delayed-wgra
 
 | Category | Key Finding |
 |---|---|
-| Functional status | **All 7 tests passed**; the earlier 8-GPU SDMA timeout no longer appears in this log |
-| Fastest end-to-end path | **Naive** is still the fastest in every measured end-to-end case |
-| Best fused backend | **SDMA beats NCCL** in single-layer `fwd` and `fwd+bwd` |
-| Main performance result | Pure pipeline fusion is **not profitable** at these 8-GPU Llama-8B shapes |
-| Backward-only signal | `fused NCCL bwd-only` is the weakest path; isolated `SDMA only bwd-only` is better, but still much slower than naive |
-| TP scaling | Fused speedup degrades from **0.37x -> 0.26x -> 0.16x** as TP increases from 2 to 8 |
+| Fastest path | `naive` is the fastest path in every measured end-to-end case |
+| Best fused backend | `SDMA` consistently outperforms `NCCL` inside the fused path |
+| Best fused result | The best SDMA case is `backend_gap` at **0.42x** speedup vs naive, which is still a loss |
+| Shape sweep result | All six shape-sweep profiles are labeled **negative optimization** for both NCCL and SDMA |
+| Memory result | There is **no memory-saving case** in this log; fused peak delta is always higher than naive |
+| TP scaling result | Fused speedup degrades from **0.34x -> 0.22x -> 0.14x** as TP increases from 2 to 8 |
 
-**Bottom line**: the stability issue appears resolved, but the performance story is unchanged. On this single-layer pure-pipeline benchmark, **SDMA is the better fused backend**, yet **the fused pipeline itself still loses to the naive baseline**. That means the dominant limitation is the chunked single-layer schedule, not just the transport choice.
-
----
-
-## 1. Stability and Correctness
-
-The most important functional result is that the full 8-GPU run now completes:
-
-- `TestE2ETransformerLayerFusion`: `fwd+bwd`, `fwd-only`, and `bwd-only` all pass
-- `TestE2ETransformerLayerSdmaOnly`: `fwd+bwd`, `fwd-only`, and `bwd-only` all pass
-- `TestTPScaling::test_tp_scaling_sweep` also passes for `TP=2,4,8`
-
-There are **no** `AllGather timeout waiting for peer ...` lines anywhere in this log. That matters because the earlier failing 8-GPU run was a transport-transition problem; this log shows that the benchmark is now stable enough to finish all timed sections and the TP scaling sweep.
-
-The repeated `============================== 7 passed ... ==============================` footer appears once per torchrun rank, not because the suite ran 56 distinct tests. The actual suite still contains 7 benchmark tests.
+**Bottom line**: transport choice matters, because SDMA is clearly better than NCCL, but the main conclusion does not change. On this 8-GPU pure-pipeline benchmark, the fused schedule itself is still slower than the naive baseline, and the shape sweep does not show a compensating memory win.
 
 ---
 
-## 2. Single-Layer End-to-End Results
+## 1. Default Profile Results
 
-### 2.1 Forward + Backward
+Default profile:
 
-| Variant | Avg (ms) | CV (%) | Relative to Naive |
-|---|---:|---:|---:|
-| naive fwd+bwd | 1.486 | 1.4 | 1.00x |
-| fused NCCL fwd+bwd | 8.599 | 1.3 | **5.79x slower** |
-| fused SDMA fwd+bwd | 5.381 | 0.3 | **3.62x slower** |
+- `B=2`
+- `S=2048`
+- `H=4096`
+- `FFN=14336`
+- `chunks=4`
+- `world=8`
 
-**Key comparisons**
+### 1.1 Main End-to-End Numbers
 
-- SDMA is **1.60x faster than NCCL** within the fused path (`8.599 / 5.381`)
-- But even the better fused backend is still **far slower than naive**
+| Mode | Naive (ms) | Fused NCCL (ms) | Fused SDMA (ms) | Main Reading |
+|---|---:|---:|---:|---|
+| `fwd+bwd` | 1.772 | 11.895 | 6.284 | SDMA is better than NCCL, but both lose badly to naive |
+| `fwd` | 0.772 | 2.808 | 2.002 | Same pattern: SDMA helps, but naive is still much faster |
+| `bwd-only` | 1.088 | 4.769 | n/a | NCCL backward-only remains clearly slower than naive |
 
-**Interpretation**
+### 1.2 SDMA-Only Reference Numbers
 
-This is the clearest result in the log: **backend choice matters, but it does not change the overall conclusion**. Switching from NCCL to SDMA reduces fused latency substantially, yet the fused pipeline still loses badly to the simple monolithic baseline.
-
-That tells us the main bottleneck is not just collective implementation quality. The deeper issue is that, for this workload, the single-layer chunked pipeline adds more overhead than it hides.
-
----
-
-### 2.2 Forward Only
-
-| Variant | Avg (ms) | CV (%) | Relative to Naive |
-|---|---:|---:|---:|
-| naive fwd | 0.529 | 0.9 | 1.00x |
-| fused NCCL fwd | 1.621 | 1.9 | **3.06x slower** |
-| fused SDMA fwd | 1.248 | 1.1 | **2.36x slower** |
-
-**Key comparisons**
-
-- SDMA is **1.30x faster than NCCL** within the fused forward path
-- The naive forward path is still the clear winner
-
-**Interpretation**
-
-The forward-only numbers confirm that the loss is not coming only from backward. Even before backward enters the picture, the 8-GPU pure pipeline path is already slower than the naive path.
-
-This strongly suggests that the chunking/control overhead is too large for this shape:
-
-- global sequence: `B * S = 4096`
-- at `world=8`, each rank holds `S_local = 512`
-- with `num_chunks=4`, each rank processes only `128` local rows per chunk
-
-That means the pipeline is paying the fixed cost of:
-
-- four all-gather launches instead of one
-- four reduce-scatter launches instead of one
-- stream/event coordination
-- staging-buffer traffic
-- chunk layout reorder
-
-but each chunk is small enough that there is not much compute to hide behind the communication.
-
----
-
-## 3. Backward-Only Behavior
-
-### 3.1 Main Mixed Benchmark
-
-| Variant | Avg (ms) | CV (%) | Relative to Naive |
-|---|---:|---:|---:|
-| naive bwd-only | 0.876 | 0.4 | 1.00x |
-| fused NCCL bwd-only | 6.333 | 4.1 | **7.23x slower** |
-
-The main `TestE2ETransformerLayerFusion` benchmark does **not** emit a `fused SDMA bwd-only` row. That is expected from the benchmark code: the mixed SDMA comparison is only run when `not bwd_only`.
-
-The backward-only result is therefore especially important for NCCL:
-
-- it is the slowest mixed-path result in the file
-- it carries the highest variability (`CV=4.1%`, marked `~unstable`)
-
-This indicates that backward is where the pure pipeline schedule is most fragile on 8 GPUs.
-
----
-
-### 3.2 Isolated SDMA Backward
-
-| Variant | Avg (ms) | CV (%) | Relative to Naive |
-|---|---:|---:|---:|
-| SDMA only bwd-only | 4.214 | 1.0 | **4.81x slower** |
-
-Compared with `fused NCCL bwd-only`, the isolated SDMA backward path is:
-
-- **1.50x faster than fused NCCL backward** (`6.333 / 4.214`)
-- still **far slower than naive backward**
-
-**Interpretation**
-
-Again, SDMA improves the fused path, but does not rescue the benchmark. The transport backend is a secondary factor; the primary factor is the cost structure of the single-layer chunked backward path itself.
-
----
-
-## 4. SDMA-Only Results
-
-The standalone SDMA measurements are:
-
-| Variant | Avg (ms) | CV (%) |
+| Mode | SDMA only (ms) | Relative to Naive |
 |---|---:|---:|
-| SDMA only fwd+bwd | 5.902 | 1.2 |
-| SDMA only fwd | 1.281 | 1.2 |
-| SDMA only bwd-only | 4.214 | 1.0 |
+| `fwd+bwd` | 5.409 | 3.05x slower than naive `fwd+bwd` |
+| `fwd` | 1.621 | 2.10x slower than naive `fwd` |
+| `bwd-only` | 3.538 | 3.25x slower than naive `bwd-only` |
 
-These numbers are directionally consistent with the mixed benchmark:
+### 1.3 What the Default Profile Says
 
-- SDMA forward is around `1.25-1.28 ms`
-- SDMA full forward+backward is around `5.4-5.9 ms`
-- SDMA backward dominates the total cost
+- For `fwd+bwd`, SDMA is about **1.89x faster than NCCL** inside the fused path (`11.895 / 6.284`), but `fused SDMA` is still about **3.55x slower than naive**.
+- For `fwd`, SDMA is about **1.40x faster than NCCL** (`2.808 / 2.002`), but `fused SDMA` is still about **2.59x slower than naive**.
+- For `bwd-only`, the mixed benchmark only exposes the NCCL fused path, and that path is still about **4.38x slower than naive**.
+- The isolated `SDMA only bwd-only` result (`3.538 ms`) is better than `fused NCCL bwd-only` (`4.769 ms`), but it still does not approach the naive baseline.
 
-The absolute numbers differ slightly from the mixed `fused SDMA` rows, but the conclusion does not change:
+This means the default shape already shows the core pattern of the entire log:
 
-1. the SDMA path is **stable**
-2. the SDMA path is **faster than fused NCCL**
-3. the SDMA path is **still slower than naive**
-
----
-
-## 5. TP Scaling Sweep
-
-### 5.1 Summary Table
-
-| TP | Naive (ms) | Fused (ms) | Fused vs Naive | AG BW | RS BW |
-|---|---:|---:|---:|---:|---:|
-| 2 | 3.916 | 10.585 | **0.37x** | 3.2 GB/s | 3.2 GB/s |
-| 4 | 1.970 | 7.444 | **0.26x** | 4.5 GB/s | 4.5 GB/s |
-| 8 | 1.439 | 8.938 | **0.16x** | 3.8 GB/s | 3.8 GB/s |
-
-### 5.2 What the Sweep Means
-
-The naive path behaves as expected: as TP increases, each rank has less local work and the end-to-end time drops:
-
-- `3.916 ms` at TP=2
-- `1.970 ms` at TP=4
-- `1.439 ms` at TP=8
-
-The fused path behaves differently:
-
-- it improves from TP=2 to TP=4 (`10.585 -> 7.444 ms`)
-- then regresses again at TP=8 (`8.938 ms`)
-
-The relative slowdown also gets steadily worse:
-
-- fused is **2.70x slower** than naive at TP=2
-- **3.78x slower** at TP=4
-- **6.21x slower** at TP=8
-
-**Interpretation**
-
-As TP increases, the local compute per rank shrinks, but the benchmark keeps the same `num_chunks=4`. That makes the fixed per-chunk overhead increasingly expensive relative to useful compute.
-
-For this benchmark:
-
-- `TP=2` -> `S_local = 2048`
-- `TP=4` -> `S_local = 1024`
-- `TP=8` -> `S_local = 512`
-
-At `TP=8`, each rank handles only `128` local rows per chunk. That is too little work to amortize the pipeline machinery, so the fused path loses the most precisely where TP is highest.
-
-The bandwidth numbers reinforce that point. The best fused bandwidth appears at `TP=4` (`4.5 GB/s`), not at `TP=8`. So the highest TP setting does not turn the extra chunking into better communication efficiency; it mostly amplifies overhead.
+1. `SDMA > NCCL` inside the fused implementation.
+2. `naive > fused` even after switching to the better transport backend.
 
 ---
 
-## 6. Why Pure Pipeline Loses Here
+## 2. Shape Sweep Results
 
-This log is a good example of why **single-layer pure-pipeline** benchmarks can understate the value of overlap:
+### 2.1 Performance Table
 
-1. **The benchmark is intentionally single-layer**
-   - there is no downstream layer to hide overhead behind
-   - delayed wgrad is intentionally excluded
+| Profile | Tokens | FFN | Naive (ms) | NCCL (ms) | NCCL Speedup | SDMA (ms) | SDMA Speedup |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `comm_bound_small` | 4096 | 8192 | 1.584 | 13.913 | 0.11x | 5.548 | 0.29x |
+| `default` | 4096 | 14336 | 1.861 | 14.314 | 0.13x | 6.096 | 0.31x |
+| `compute_bound_small` | 4096 | 28672 | 2.427 | 17.309 | 0.14x | 8.557 | 0.28x |
+| `comm_bound_large` | 8192 | 8192 | 2.401 | 13.360 | 0.18x | 6.862 | 0.35x |
+| `backend_gap` | 8192 | 14336 | 3.042 | 13.273 | 0.23x | 7.190 | 0.42x |
+| `pipeline_gain` | 8192 | 28672 | 4.279 | 16.032 | 0.27x | 11.165 | 0.38x |
 
-2. **The chunk size is small at 8 GPUs**
-   - `S_local = 512`
-   - `num_chunks = 4`
-   - only `128` local rows per chunk
+### 2.2 Main Sweep Takeaways
 
-3. **The pipeline overhead is fixed**
-   - extra chunk launches
-   - extra synchronization
-   - extra staging/copy/reorder work
+- All six profiles are classified as **negative optimization** for both NCCL and SDMA.
+- The best SDMA case is `backend_gap` at **0.42x**, which still means the fused path is about **2.38x slower** than naive.
+- The best NCCL case is `pipeline_gain` at **0.27x**, which still means the fused path is about **3.70x slower** than naive.
+- The worst case is `comm_bound_small`, where NCCL drops to **0.11x** and SDMA to **0.29x**.
 
-4. **The benchmark asks one layer to pay all overhead immediately**
-   - there is no multi-layer schedule to amortize setup cost
-   - there is no delayed-wgrad schedule to recover backward time elsewhere
+### 2.3 How Shape Changes Affect the Result
 
-So the right conclusion is **not** that SDMA is bad. The right conclusion is:
+Two trends stand out:
 
-- **SDMA is the better fused backend**
-- **but this benchmark configuration does not provide enough useful overlap opportunity for the fused path to beat naive**
+1. **Larger token count helps relative fused efficiency, but not enough to win.**
+   - With `Tokens=4096`, SDMA speedup stays in the `0.28x-0.31x` range.
+   - With `Tokens=8192`, SDMA improves to `0.35x-0.42x`.
+   - NCCL also improves when tokens increase, from `0.11x-0.14x` to `0.18x-0.27x`.
+
+2. **SDMA remains better than NCCL across the whole sweep.**
+   - At every profile, the SDMA latency is lower than the NCCL latency.
+   - The transport backend matters, but it does not reverse the sign of the optimization.
+
+So the sweep does show a real amortization effect: larger shapes make the fused pipeline less bad. But even the best shape in this log still loses to the naive baseline.
 
 ---
 
-## 7. Practical Takeaways
+## 3. Bandwidth and Memory Behavior
 
-### What this log proves
+### 3.1 Effective Communication Bandwidth
 
-- The 8-GPU benchmark is now **functionally stable**
-- SDMA is consistently **better than NCCL** inside the fused path
-- The current single-layer pure-pipeline benchmark is **not performance-positive** on Llama-8B shapes at 8 GPUs
+| Profile | NCCL AG/RS BW (GB/s) | SDMA AG/RS BW (GB/s) | Better Backend |
+|---|---:|---:|---|
+| `comm_bound_small` | 2.4 / 2.4 | 6.0 / 6.0 | SDMA |
+| `default` | 2.3 / 2.3 | 5.5 / 5.5 | SDMA |
+| `compute_bound_small` | 1.9 / 1.9 | 3.9 / 3.9 | SDMA |
+| `comm_bound_large` | 5.0 / 5.0 | 9.8 / 9.8 | SDMA |
+| `backend_gap` | 5.1 / 5.1 | 9.3 / 9.3 | SDMA |
+| `pipeline_gain` | 4.2 / 4.2 | 6.0 / 6.0 | SDMA |
 
-### What this log does not prove
+The communication story is straightforward:
 
-- It does **not** prove that chunked overlap is useless in general
-- It does **not** measure delayed-wgrad schedules
-- It does **not** represent a multi-layer training pipeline where communication and compute from neighboring layers can overlap more effectively
+- SDMA delivers **higher effective AG/RS bandwidth than NCCL in every profile**.
+- Larger-token profiles generally improve bandwidth for both backends.
+- However, higher bandwidth alone does **not** produce an end-to-end latency win.
 
-### Recommended interpretation
+That means communication transport is only part of the cost. The remaining loss must come from the structure of the pure-pipeline schedule itself: chunking, staging, synchronization, and other fixed overheads that are not eliminated by faster transport.
 
-Use this log as:
+### 3.2 Peak Working-Set Memory
 
-- a **correctness/stability checkpoint** for the pure pipeline implementation
-- a **backend comparison** showing SDMA > NCCL for the fused path
-- a warning that **single-layer pure-pipeline E2E latency is not enough, by itself, to justify the fused schedule**
+| Profile | Naive Peak Delta (MiB) | NCCL Peak Delta (MiB) | SDMA Peak Delta (MiB) |
+|---|---:|---:|---:|
+| `comm_bound_small` | 100 | 120 | 120 |
+| `default` | 94 | 132 | 132 |
+| `compute_bound_small` | 100 | 184 | 184 |
+| `comm_bound_large` | 216 | 240 | 240 |
+| `backend_gap` | 216 | 264 | 264 |
+| `pipeline_gain` | 228 | 340 | 340 |
 
-For deeper performance questions:
+This table gives a very important negative result:
 
-- use `bench_fused_pipeline.py` to isolate chunked AG/RS pipeline behavior
-- use `bench_wgrad_delay.py` to evaluate schedules where overlap has a real chance to pay off
+- There is **no "memory win only" case** in this log.
+- The fused path always uses **more** peak working-set memory than the naive path.
+- NCCL and SDMA show the **same peak delta** for every profile.
+
+That last point is especially useful. It suggests the extra peak memory is not caused by NCCL vs SDMA backend choice. It is coming from the shared fused-pipeline structure itself, such as chunk staging and additional temporary buffers.
+
+The largest penalty appears at `pipeline_gain`:
+
+- naive peak delta: `228 MiB`
+- fused peak delta: `340 MiB`
+- extra peak working set: **+112 MiB**
+
+So this sweep does **not** support the claim that the current pure-pipeline implementation can trade latency loss for memory savings on these shapes.
+
+---
+
+## 4. TP Scaling Sweep
+
+### 4.1 Summary
+
+| TP | Naive (ms) | Fused (ms) | Speedup | Fused Slower Than Naive | AG BW | RS BW |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 | 4.972 | 14.809 | 0.34x | 2.98x slower | 2.3 GB/s | 2.3 GB/s |
+| 4 | 2.768 | 12.482 | 0.22x | 4.51x slower | 2.7 GB/s | 2.7 GB/s |
+| 8 | 1.788 | 12.486 | 0.14x | 6.98x slower | 2.7 GB/s | 2.7 GB/s |
+
+### 4.2 Interpretation
+
+The TP sweep shows the clearest structural problem in the benchmark:
+
+- The naive path improves strongly with higher TP: `4.972 -> 2.768 -> 1.788 ms`.
+- The fused path improves only once, then becomes almost flat: `14.809 -> 12.482 -> 12.486 ms`.
+- Relative fused efficiency gets steadily worse: `0.34x -> 0.22x -> 0.14x`.
+
+So as TP increases, local useful work shrinks faster than the fused overhead shrinks. In other words, the benchmark is increasingly dominated by fixed pipeline cost rather than by communication bandwidth.
+
+The bandwidth numbers support the same reading:
+
+- AG/RS bandwidth rises only from `2.3` to `2.7 GB/s` and then stops improving.
+- End-to-end fused latency does not meaningfully benefit from the highest TP setting.
+
+This means higher TP is not turning the pure pipeline into a better overlap schedule for this workload. It is mainly exposing how expensive the fixed chunked schedule becomes when per-rank work gets smaller.
+
+---
+
+## 5. Overall Interpretation
+
+This cleaned 8-GPU log supports four conclusions.
+
+### 5.1 Transport Choice Matters
+
+SDMA is consistently better than NCCL:
+
+- lower latency in the default single-layer benchmarks
+- better latency across the full shape sweep
+- higher effective AG/RS bandwidth in every profile
+
+So there is a genuine backend advantage here.
+
+### 5.2 The Schedule Still Loses
+
+Even after switching to SDMA:
+
+- the default `fwd+bwd` path is still much slower than naive
+- all six shape-sweep cases remain negative optimization
+- TP scaling gets worse rather than better
+
+So the dominant limitation is not just "NCCL is slow". The dominant limitation is that this single-layer pure-pipeline schedule still carries too much fixed overhead for these shapes.
+
+### 5.3 There Is No Memory Compensation in This Log
+
+The shape sweep was designed to reveal either:
+
+- a latency win, or
+- a memory-only advantage when latency does not improve
+
+This log shows neither:
+
+- no latency win
+- no memory-only win
+
+The fused pipeline increases peak working-set memory for every measured profile.
+
+### 5.4 Larger Shapes Help, But Do Not Flip the Result
+
+The best relative numbers appear at the larger-token profiles, especially `backend_gap`, which indicates that more work can amortize part of the pipeline cost. But the improvement is only from "very bad" to "still clearly negative". The log does not contain a crossover point where the fused path becomes faster than naive.
+
+---
+
+## 6. Cross-Benchmark Reconciliation With `bench_comm_overlap`
+
+The statement "SDMA is consistently better than NCCL" in this document is
+**scope-limited**. It refers to the current **fused pure-pipeline backend**
+inside `bench_e2e_fusion`, not to every SDMA collective in isolation.
+
+That distinction matters because `bench_comm_overlap` measures individual
+collective paths and overlap patterns, while this benchmark measures the total
+single-layer schedule.
+
+| Benchmark | Unit under test | What "SDMA better/worse" means |
+|-----------|-----------------|--------------------------------|
+| `bench_comm_overlap` | raw AG/RS path or overlap micro-benchmark | the collective path itself is faster/slower |
+| `bench_e2e_fusion` | full chunked layer schedule | the backend gives lower **end-to-end fused layer latency** |
+
+This is why the two files can both be correct:
+
+1. `bench_comm_overlap` shows that the **raw 8-GPU RS path** is faster with
+   NCCL than with SDMA.
+2. This file shows that the **fused pure-pipeline backend** is faster with
+   SDMA than with NCCL.
+3. Both files still show that the **naive layer path** is faster than either
+   fused backend.
+
+So the safe ranking is:
+
+- **raw RS primitive at 8 GPUs**: `NCCL > SDMA`
+- **fused single-layer pure-pipeline backend**: `SDMA > NCCL`
+- **against the naive E2E baseline**: `naive > SDMA > NCCL`
+
+One more reporting detail is easy to miss: this document's AG/RS bandwidth
+columns are derived from the **fused layer latency**, not from standalone AG/RS
+timings. They should be read as schedule-level effective bandwidth, not raw
+collective bandwidth.
+
+That is why these tables should be interpreted as:
+
+- transport/backend behavior **inside the current fused layer schedule**
+- not proof that every SDMA collective is faster than its NCCL counterpart
 
 ---
 
 ## Final Conclusion
 
-The 8-GPU `bench_e2e_fusion` run is now healthy and complete, but its performance message is clear:
+The current 8-GPU `bench_e2e_fusion` performance summary says:
 
-> On this benchmark, **SDMA is the best fused backend, but the pure pipeline schedule itself is still slower than the naive baseline**.
+> **SDMA is the better fused backend, but the fused pure-pipeline schedule is still slower than the naive baseline across all measured shapes, and it also increases peak working-set memory.**
 
-That makes this log valuable for two reasons:
+That makes the next optimization question much narrower:
 
-1. it confirms that the 8-GPU benchmark is stable again
-2. it shows that the next optimization question is **not "NCCL or SDMA?"**, but rather **"what schedule gives the pipeline enough real work to hide its own overhead?"**
+1. keep treating **SDMA as the preferred fused backend**
+2. focus future work on **reducing or amortizing the fixed cost of the pure-pipeline schedule itself**
+3. do not assume the current fused path provides a hidden memory advantage, because this log does not show one

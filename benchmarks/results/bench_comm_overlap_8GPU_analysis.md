@@ -346,7 +346,47 @@ The SDMA RS overlap is the sole case where SDMA achieves positive overlap on 8 G
 
 ---
 
-## 13. Raw Benchmark Timing Reference
+## 13. Cross-Benchmark Reconciliation With `bench_e2e_fusion`
+
+This log and `bench_e2e_fusion_8GPU_analysis.md` do **not** answer the same
+question, so their SDMA/NCCL conclusions are not directly interchangeable.
+
+| Benchmark | Unit under test | What "SDMA better/worse" means |
+|-----------|-----------------|--------------------------------|
+| `bench_comm_overlap` | individual overlap pattern or collective path | the specific AG/RS path itself is faster/slower |
+| `bench_e2e_fusion` | full single-layer pure-pipeline schedule | the fused backend yields lower **end-to-end layer latency** |
+
+The most important example is reduce-scatter:
+
+- This file's RS scaling summary says the **raw 8-GPU RS path** is slower with
+  SDMA than with NCCL.
+- That does **not** contradict `bench_e2e_fusion`, where SDMA is the better
+  fused backend, because the E2E benchmark measures the total chunked schedule:
+  AG + GEMM-up + GEMM-down + RS + chunk staging + synchronization + backward.
+
+So there are three valid statements that can all be true at once:
+
+1. **Raw RS primitive at 8 GPUs**: `NCCL > SDMA`
+2. **Fused single-layer pure-pipeline backend**: `SDMA > NCCL`
+3. **Against the naive baseline**: `naive > SDMA > NCCL`
+
+One more reporting detail matters here: this file's RS head-to-head tables use
+standalone overlap timings for the measured collective path, while
+`bench_e2e_fusion` reports AG/RS "bandwidth" from the **fused layer latency**.
+Those E2E bandwidth numbers are therefore schedule-level effective bandwidth,
+not raw collective bandwidth.
+
+The safe interpretation is:
+
+- use this file to decide which **collective path** is better in isolation
+- use `bench_e2e_fusion` to decide which **backend behaves better inside the
+  current fused layer schedule**
+- do not infer from the E2E tables that every SDMA primitive is faster than its
+  NCCL counterpart
+
+---
+
+## 14. Raw Benchmark Timing Reference
 
 ### Per-Section Results
 

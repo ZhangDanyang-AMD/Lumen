@@ -6,17 +6,26 @@
 
 """Benchmark 5 — Wgrad delay improves overlap.
 
+**Benchmark tiers**
+
+  * **Tier 0**: Legacy mechanism checks and low-level sanity for ``_DeferredWgrad``
+    basics (``defer`` / ``execute``, stream overlap, etc.).
+  * **Tier 1**: Real-module API overlap benchmarks using ``LumenColumnParallelLinear``
+    and ``backward_dw()`` (not the legacy ``dwg.defer(weight, ...)`` path).
+  * **Tier 2**: Megatron-style realism via ``TestMegatronStyleWgradDelay``; select
+    with ``-k MegatronStyle`` under ``torchrun``.
+
 Tests **actual Lumen implementations** only:
 
-  * **_DeferredWgrad API**: ``defer(weight, compute_fn)`` / ``execute()``
-    from ``lumen.modules.parallel_linear``.
-  * **_DeferredWgrad + stream overlap**: Executes the deferred wgrad on a
-    secondary CUDA stream while the main stream does other work — this is
-    how the API is *intended* to be used in a real training loop.
-  * **_DeferredWgrad + real NCCL allreduce** (multi-GPU): Overlaps the
+  * **Tier 0 — _DeferredWgrad API**: ``defer(weight, compute_fn)`` / ``execute()``
+    from ``lumen.modules.parallel_linear`` (mechanism / overhead checks).
+  * **Tier 0 — stream overlap**: Deferred ``execute()`` on a secondary stream
+    while the default stream runs other work — illustrates scheduling only;
+    training-style overlap is benchmarked in Tier 1 / Tier 2.
+  * **Tier 1 — real-module wgrad + NCCL allreduce** (multi-GPU): Overlaps the
     deferred wgrad GEMM with a real NCCL allreduce on a separate stream,
     demonstrating true hardware parallelism (compute SMs vs NIC/RDMA).
-  * **_DeferredWgrad + SDMA allreduce** (multi-GPU): Overlaps the deferred
+  * **Tier 1 — real-module wgrad + SDMA allreduce** (multi-GPU): Overlaps the deferred
     wgrad GEMM with Lumen's ``SdmaTpComm`` async allreduce.  SDMA uses
     dedicated DMA engines with zero SM contention — expected to yield
     higher overlap ratios than NCCL.
@@ -47,6 +56,11 @@ Run multi-GPU — NCCL vs SDMA wgrad scaling sweep (requires mori)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k "wgrad_overlap_scaling_summary"
 
+Run multi-GPU — Tier 2 Megatron-style realism (``LumenColumnParallelLinear`` /
+``LumenRowParallelLinear``, sequence parallel, real TP)::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k MegatronStyle
+
 Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k backend_gap_experiment
@@ -70,7 +84,8 @@ Run multi-GPU — all distributed tests (NCCL + SDMA + comparison, requires mori
 from __future__ import annotations
 
 import os
-from typing import List
+from types import SimpleNamespace
+from typing import Callable, List, Optional
 
 import pytest
 import torch
@@ -107,6 +122,23 @@ _ITERS = 30
 _TRIM = 10.0
 
 
+def _make_bench_linear_config(*, sequence_parallel: bool, tp_size: int):
+    return SimpleNamespace(
+        params_dtype=torch.bfloat16,
+        perform_initialization=False,
+        use_cpu_initialization=False,
+        sequence_parallel=sequence_parallel,
+        tensor_model_parallel_size=tp_size,
+        expert_model_parallel_size=1,
+        lumen_tp_comm_overlap=False,
+    )
+
+
+def _validate_megatron_style_world_size(world_size: int) -> None:
+    if world_size < 2:
+        raise ValueError(f"Tier 2 Megatron-style benchmark requires world_size >= 2, got {world_size}")
+
+
 def _make_profiled_wgrad_single_layer_inputs(
     device: torch.device,
     profile: E2EFusionProfile,
@@ -141,13 +173,225 @@ def _profiled_wgrad_title(prefix: str, profile: E2EFusionProfile, world: int) ->
 
 
 # ---------------------------------------------------------------------------
-# 1. Lumen _DeferredWgrad API — basic overhead
+# Tier 1 real-module API helpers (rank-local group + LumenColumnParallelLinear)
+# ---------------------------------------------------------------------------
+
+_RANK_LOCAL_GROUP = None
+_RANK_LOCAL_GROUPS = None
+
+
+def _get_or_create_rank_local_group():
+    global _RANK_LOCAL_GROUP, _RANK_LOCAL_GROUPS
+    if _RANK_LOCAL_GROUP is not None:
+        return _RANK_LOCAL_GROUP, _RANK_LOCAL_GROUPS
+
+    rank = dist.get_rank()
+    world = dist.get_world_size()
+    groups = []
+    mine = None
+    for r in range(world):
+        group = dist.new_group(ranks=[r])
+        groups.append(group)
+        if r == rank:
+            mine = group
+    _RANK_LOCAL_GROUP = mine
+    _RANK_LOCAL_GROUPS = groups
+    return _RANK_LOCAL_GROUP, _RANK_LOCAL_GROUPS
+
+
+def _build_real_api_single_layer(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    tp_group,
+    *,
+    tokens: int | None = None,
+    hidden: int | None = None,
+    out_features: int | None = None,
+):
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear
+
+    t, h, ff = wgrad_delay_dims(profile)
+    tok = tokens if tokens is not None else t
+    hid = hidden if hidden is not None else h
+    fout = out_features if out_features is not None else ff
+    config = _make_bench_linear_config(sequence_parallel=False, tp_size=1)
+    module = LumenColumnParallelLinear(
+        hid,
+        fout,
+        config=config,
+        init_method=lambda w: None,
+        tp_group=tp_group,
+    )
+    module.delay_wgrad = True
+    module.gradient_accumulation_fusion = True
+    module.weight.main_grad = torch.zeros_like(module.weight)
+    x = torch.randn(tok, hid, device=device, dtype=torch.bfloat16, requires_grad=True)
+    grad_out = torch.randn(tok, module.weight.shape[0], device=device, dtype=torch.bfloat16)
+    return module, x, grad_out
+
+
+def _build_real_api_layer_stack(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    n_layers: int,
+    *,
+    tokens: int | None = None,
+    hidden: int | None = None,
+    out_features: int | None = None,
+):
+    tp_group, groups = _get_or_create_rank_local_group()
+    modules = []
+    xs = []
+    grad_outs = []
+    for _ in range(n_layers):
+        module, x, grad_out = _build_real_api_single_layer(
+            device,
+            profile,
+            tp_group,
+            tokens=tokens,
+            hidden=hidden,
+            out_features=out_features,
+        )
+        modules.append(module)
+        xs.append(x)
+        grad_outs.append(grad_out)
+    return modules, xs, grad_outs, groups
+
+
+def _run_real_api_backward_then_queue(module, x, grad_out):
+    y, _ = module(x)
+    torch.autograd.backward(y, grad_out)
+    if not module._deferred_wgrad.has_pending:
+        raise AssertionError("expected pending deferred wgrad after backward")
+
+
+def _run_real_api_single_layer_wgrad_queue_and_drain(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    *,
+    tokens: int | None = None,
+    hidden: int | None = None,
+    out_features: int | None = None,
+):
+    """Tier 1 compute baseline: same deferred-wgrad API as overlap paths, drained immediately (no comm)."""
+    tp_group, _ = _get_or_create_rank_local_group()
+    module, x_m, g_m = _build_real_api_single_layer(
+        device,
+        profile,
+        tp_group,
+        tokens=tokens,
+        hidden=hidden,
+        out_features=out_features,
+    )
+    _run_real_api_backward_then_queue(module, x_m, g_m)
+    module.backward_dw()
+
+
+def _run_real_api_multi_layer_sequential_per_layer(
+    device: torch.device,
+    profile: E2EFusionProfile,
+    n_layers: int,
+    *,
+    tokens: int | None = None,
+    hidden: int | None = None,
+    out_features: int | None = None,
+    after_each_layer: Optional[Callable[[int, nn.Module], None]] = None,
+):
+    """Per layer: forward → backward (defer wgrad) → backward_dw(); optional hook after each layer (e.g. AR)."""
+    modules, xs, g_outs, _ = _build_real_api_layer_stack(
+        device,
+        profile,
+        n_layers,
+        tokens=tokens,
+        hidden=hidden,
+        out_features=out_features,
+    )
+    for i in range(n_layers):
+        y, _ = modules[i](xs[i])
+        torch.autograd.backward(y, g_outs[i])
+        modules[i].backward_dw()
+        if after_each_layer is not None:
+            after_each_layer(i, modules[i])
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 Megatron-style stack (WORLD TP + sequence parallel)
+# ---------------------------------------------------------------------------
+
+
+def _build_megatron_style_stack(device, world_size, profile, n_layers=2, use_sdma=False):
+    """Build a Column→Row→… stack on ``dist.group.WORLD`` with sequence parallel.
+
+    Megatron-style Tier 2: ``tensor_model_parallel_size == world_size``,
+    independent per-layer autograd graphs (each next input is detached).
+    """
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+
+    _validate_megatron_style_world_size(world_size)
+    tokens, hidden, ffn = wgrad_delay_dims(profile)
+    if tokens % world_size != 0:
+        raise ValueError(f"Megatron-style stack: token count {tokens} not divisible by world_size={world_size}")
+    if ffn % world_size != 0:
+        raise ValueError(f"Megatron-style stack: FFN dim {ffn} not divisible by world_size={world_size}")
+    config = _make_bench_linear_config(sequence_parallel=True, tp_size=world_size)
+    modules = []
+    for idx in range(n_layers):
+        if idx % 2 == 0:
+            module = LumenColumnParallelLinear(
+                hidden,
+                ffn,
+                config=config,
+                init_method=lambda w: None,
+                tp_group=dist.group.WORLD,
+            )
+        else:
+            module = LumenRowParallelLinear(
+                ffn,
+                hidden,
+                config=config,
+                init_method=lambda w: None,
+                input_is_parallel=True,
+                tp_group=dist.group.WORLD,
+            )
+        module.delay_wgrad = True
+        module.gradient_accumulation_fusion = True
+        module.use_sdma = use_sdma
+        module.weight.main_grad = torch.zeros_like(module.weight)
+        modules.append(module)
+
+    inputs = []
+    outputs = []
+    grad_outputs = []
+    current = torch.randn(tokens // world_size, hidden, device=device, dtype=torch.bfloat16)
+    for module in modules:
+        layer_input = current.detach().requires_grad_(True)
+        layer_output, _ = module(layer_input)
+        inputs.append(layer_input)
+        outputs.append(layer_output)
+        grad_outputs.append(torch.randn_like(layer_output))
+        current = layer_output
+    return modules, inputs, outputs, grad_outputs
+
+
+def _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream):
+    """Layer-wise backward with deferred wgrad drained on ``wgrad_stream`` (reverse order)."""
+    for idx in range(len(modules) - 1, -1, -1):
+        torch.autograd.backward(outputs[idx], grad_outputs[idx])
+        if not modules[idx]._deferred_wgrad.has_pending:
+            raise AssertionError(f"layer {idx} missing deferred wgrad")
+        wgrad_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(wgrad_stream):
+            modules[idx].backward_dw()
+
+
+# ---------------------------------------------------------------------------
+# 1. Tier 0 — Lumen _DeferredWgrad API (mechanism / overhead)
 # ---------------------------------------------------------------------------
 
 
 @CUDA
 class TestDeferredWgradAPI:
-    """Test Lumen's _DeferredWgrad class for wgrad deferral."""
+    """Tier 0: ``_DeferredWgrad`` defer/execute overhead and accumulation paths."""
 
     # Expected: Deferred wgrad (defer + execute) should have nearly identical
     # total latency to eager wgrad. The purpose of deferral is NOT to speed up
@@ -224,15 +468,16 @@ class TestDeferredWgradAPI:
 
 
 # ---------------------------------------------------------------------------
-# 2. _DeferredWgrad with stream overlap (intended usage pattern)
+# 2. Tier 0 — _DeferredWgrad stream overlap (scheduling demos)
 # ---------------------------------------------------------------------------
 
 
 @CUDA
 class TestDeferredWgradStreamOverlap:
-    """Use _DeferredWgrad.execute() on a secondary stream to overlap with
-    other work on the compute stream — this is the actual usage pattern
-    that produces the overlap benefit in Lumen training.
+    """Tier 0: ``execute()`` on a secondary stream vs other stream work.
+
+    Micro-benchmarks for the deferral mechanism; module-level training overlap
+    is covered in Tier 1 / Tier 2.
     """
 
     # NOTE: Two large GEMMs on the same GPU typically saturate HBM bandwidth,
@@ -288,10 +533,10 @@ class TestDeferredWgradStreamOverlap:
         )
         print(f"  Overlap ratio: {overlap_ratio:.3f}")
 
-    # Expected: overlap_ratio > 0.3. In real training, _DeferredWgrad.execute()
-    # (a GEMM on compute SMs) runs concurrently with communication (allreduce /
-    # reduce-scatter on SDMA/NIC hardware). Since they use different hardware
-    # resources, true parallelism is achieved. We simulate the communication
+    # Expected: overlap_ratio > 0.3. Under distributed training (Tier 1/2),
+    # _DeferredWgrad.execute() (a GEMM on compute SMs) can run concurrently with
+    # communication (allreduce / reduce-scatter on SDMA/NIC hardware). Since they
+    # use different hardware resources, true parallelism is achieved. We simulate the communication
     # latency with torch.cuda._sleep() which blocks the stream without using
     # compute SMs or HBM bandwidth, mimicking SDMA/NIC behaviour.
     def test_overlap_with_simulated_comm(self):
@@ -410,7 +655,7 @@ class TestDeferredWgradStreamOverlap:
 
 
 # ---------------------------------------------------------------------------
-# 3. Multi-GPU: _DeferredWgrad + real NCCL allreduce overlap
+# 3. Tier 1 — Multi-GPU: real-module deferred wgrad + NCCL allreduce overlap
 # ---------------------------------------------------------------------------
 
 
@@ -435,13 +680,12 @@ _DIST = pytest.mark.skipif(
 
 @_DIST
 class TestDeferredWgradRealComm:
-    """Overlap _DeferredWgrad.execute() with real NCCL allreduce.
+    """Overlap real ``LumenColumnParallelLinear`` deferred wgrad (``backward_dw``) with NCCL allreduce.
 
-    This is the closest benchmark to the actual training loop: after each
-    layer's backward, the weight gradient is deferred and then executed on
-    the wgrad stream while the main stream launches an allreduce for the
-    *previous* layer's gradient.  NCCL allreduce uses NIC/RDMA hardware
-    while the wgrad GEMM uses compute SMs — true hardware parallelism.
+    After each layer's backward, the weight gradient is deferred inside the
+    module and then drained via ``backward_dw()`` while the main stream
+    launches an allreduce for the *previous* layer's gradient.  NCCL
+    allreduce uses NIC/RDMA hardware while the wgrad path uses compute SMs.
 
     Run::
 
@@ -458,8 +702,9 @@ class TestDeferredWgradRealComm:
         yield
         dist.barrier()
 
-    # Expected: The wgrad GEMM (grad_out^T @ x, on compute SMs) runs
-    # concurrently with NCCL allreduce (on NIC/RDMA hardware).
+    # Expected: The deferred wgrad work (real LumenColumnParallelLinear path,
+    # drained via backward_dw) runs on compute SMs concurrently with NCCL
+    # allreduce (on NIC/RDMA hardware).
     # Total time ≈ max(T_wgrad, T_allreduce) instead of their sum.
     # When allreduce >> wgrad (common with small TP-local matrices),
     # the overlap_ratio formula yields a low value because the hidden
@@ -467,25 +712,22 @@ class TestDeferredWgradRealComm:
     #   speedup = T_seq / T_ovl  (should be > 1.0)
     #   hidden_ms = T_seq - T_ovl  (should be close to T_wgrad)
     def test_wgrad_overlap_with_allreduce(self):
-        from lumen.modules.parallel_linear import _DeferredWgrad
-
         profile = DEFAULT_PROFILE
-        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
+        _, _, _, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
-        dwg = _DeferredWgrad()
         comm_stream = torch.cuda.Stream(device=self.device)
 
         # Warmup
         for _ in range(3):
             dist.all_reduce(ar_buf.clone())
-            _ = grad_out.T @ x
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
 
         # Measure components individually
         r_wgrad = cuda_timer(
-            lambda: grad_out.T @ x,
-            label="wgrad GEMM alone",
+            lambda: _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile),
+            label="real module: wgrad (queue+drain, no comm)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -501,34 +743,36 @@ class TestDeferredWgradRealComm:
 
         # Sequential: wgrad then allreduce
         def _sequential():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            dwg.execute()
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
+            module.backward_dw()
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
         r_seq = cuda_timer(
             _sequential,
-            label="sequential: wgrad then allreduce",
+            label="sequential: real module wgrad then allreduce",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        # Overlapped: allreduce on comm_stream, wgrad on default stream
+        # Overlapped: allreduce on comm_stream, backward_dw on default stream
         def _overlapped():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
             with torch.cuda.stream(comm_stream):
                 buf = ar_buf.clone()
                 dist.all_reduce(buf)
-            dwg.execute()
+            module.backward_dw()
             torch.cuda.current_stream().wait_stream(comm_stream)
 
         r_ovl = cuda_timer(
             _overlapped,
-            label="overlapped: wgrad || allreduce",
+            label="overlapped: real module wgrad || allreduce",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -543,7 +787,7 @@ class TestDeferredWgradRealComm:
 
         if self.rank == 0:
             print_report_with_table(
-                _profiled_wgrad_title("_DeferredWgrad + Real NCCL AllReduce", profile, self.world),
+                _profiled_wgrad_title("Real module wgrad-delay + NCCL AllReduce", profile, self.world),
                 [r_wgrad, r_comm, r_seq, r_ovl],
             )
             print_overlap_summary(
@@ -551,7 +795,7 @@ class TestDeferredWgradRealComm:
                 t_comm=r_comm.avg_ms,
                 t_seq=r_seq.avg_ms,
                 t_ovl=r_ovl.avg_ms,
-                compute_label="wgrad",
+                compute_label="wgrad (real API)",
                 comm_label="allreduce",
             )
 
@@ -559,33 +803,31 @@ class TestDeferredWgradRealComm:
     # with the allreduce of the previous layer's gradient. Cumulative
     # savings ≈ N × T_wgrad (all wgrads hidden behind allreduces).
     def test_multi_layer_pipeline_with_allreduce(self):
-        from lumen.modules.parallel_linear import _DeferredWgrad
-
         profile = DEFAULT_PROFILE
         n_layers = 4
-        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
+        _, _, _, ar_ref = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
-        dwg = _DeferredWgrad()
         comm_stream = torch.cuda.Stream(device=self.device)
 
         # Warmup
         for _ in range(3):
-            dist.all_reduce(weights[0].data.clone())
-            _ = grad_outs[0].T @ x
+            dist.all_reduce(ar_ref.clone())
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
 
-        # Eager: sequential wgrad + allreduce per layer
+        # Sequential baseline: real module per layer (queue+drain) + allreduce (no cross-layer overlap)
         def _eager():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]  # dX
-                weights[i].main_grad.add_(grad_outs[i].T @ x)  # dW
-                dist.all_reduce(weights[i].main_grad)
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
+            )
 
         r_eager = cuda_timer(
             _eager,
-            label=f"{n_layers}-layer eager+allreduce",
+            label=f"{n_layers}L sequential real-module+NCCL AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -594,33 +836,34 @@ class TestDeferredWgradRealComm:
 
         # Deferred: overlap wgrad with allreduce of previous layer
         def _deferred():
+            modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = None
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-
-                if dwg.has_pending:
-                    dwg.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
 
                 if pending_ar is not None:
                     torch.cuda.current_stream().wait_stream(comm_stream)
 
-                _ = grad_outs[i] @ weights[i]  # dX on compute stream
-                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs[i])
+                torch.autograd.backward(y, g_outs[i])
 
                 if i > 0:
+                    comm_stream.wait_stream(torch.cuda.current_stream())
                     with torch.cuda.stream(comm_stream):
-                        dist.all_reduce(weights[i - 1].main_grad)
+                        dist.all_reduce(modules[i - 1].weight.main_grad)
                     pending_ar = i - 1
 
-            if dwg.has_pending:
-                dwg.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
+            comm_stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(comm_stream):
-                dist.all_reduce(weights[-1].main_grad)
+                dist.all_reduce(modules[n_layers - 1].weight.main_grad)
             torch.cuda.current_stream().wait_stream(comm_stream)
 
         r_deferred = cuda_timer(
             _deferred,
-            label=f"{n_layers}-layer deferred+allreduce",
+            label=f"{n_layers}L pipelined deferred wgrad+NCCL AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -635,7 +878,7 @@ class TestDeferredWgradRealComm:
         if self.rank == 0:
             print_report_with_table(
                 _profiled_wgrad_title(
-                    f"{n_layers}-Layer Pipeline: Eager vs Deferred + AllReduce",
+                    f"{n_layers}-Layer Pipeline: Sequential vs Pipelined (real module + NCCL)",
                     profile,
                     self.world,
                 ),
@@ -647,7 +890,7 @@ class TestDeferredWgradRealComm:
 
 
 # ---------------------------------------------------------------------------
-# 4. Multi-GPU: _DeferredWgrad + SDMA allreduce overlap
+# SDMA / mori helpers: MegatronStyle SDMA test + Tier 1-style SdmaComm below
 # ---------------------------------------------------------------------------
 
 
@@ -667,15 +910,118 @@ _SDMA = pytest.mark.skipif(
 )
 
 
+# ---------------------------------------------------------------------------
+# 4. Tier 2 — Megatron-style wgrad-delay realism (-k MegatronStyle)
+# ---------------------------------------------------------------------------
+
+
+@_DIST
+class TestMegatronStyleWgradDelay:
+    """Tier 2 Megatron-style wgrad-delay realism: Column/Row TP + sequence parallel.
+
+    Uses real ``LumenColumnParallelLinear`` / ``LumenRowParallelLinear`` on
+    ``dist.group.WORLD`` with ``sequence_parallel=True``.  Select with pytest
+    ``-k MegatronStyle``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, request):
+        # Match other SDMA benchmarks: MORI must be enabled before process-group init.
+        if request.node.name == "test_megatron_style_pipeline_sdma":
+            os.environ["MORI_ENABLE_SDMA"] = "1"
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def test_megatron_style_pipeline_nccl(self):
+        profile = DEFAULT_PROFILE
+        torch.cuda.synchronize()
+        dist.barrier()
+        wgrad_stream = torch.cuda.Stream(device=self.device)
+
+        def _run_once():
+            modules, _inputs, outputs, grad_outputs = _build_megatron_style_stack(
+                self.device,
+                self.world,
+                profile,
+                n_layers=2,
+                use_sdma=False,
+            )
+            _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream)
+            torch.cuda.synchronize()
+            return modules
+
+        modules = _run_once()
+        assert all(not m._deferred_wgrad.has_pending for m in modules)
+        assert all(m.weight.main_grad.abs().sum() > 0 for m in modules)
+
+        r = cuda_timer(
+            _run_once,
+            label="Megatron-style NCCL realism",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        if self.rank == 0:
+            print_report_with_table(
+                _profiled_wgrad_title("Tier 2 Megatron-style NCCL", profile, self.world),
+                [r],
+            )
+
+    @_SDMA
+    def test_megatron_style_pipeline_sdma(self):
+        profile = DEFAULT_PROFILE
+        torch.cuda.synchronize()
+        dist.barrier()
+        wgrad_stream = torch.cuda.Stream(device=self.device)
+
+        def _run_once():
+            modules, _inputs, outputs, grad_outputs = _build_megatron_style_stack(
+                self.device,
+                self.world,
+                profile,
+                n_layers=2,
+                use_sdma=True,
+            )
+            _run_megatron_style_layerwise_backward(modules, outputs, grad_outputs, wgrad_stream)
+            torch.cuda.synchronize()
+            return modules
+
+        modules = _run_once()
+        assert all(not m._deferred_wgrad.has_pending for m in modules)
+        assert all(m.weight.main_grad.abs().sum() > 0 for m in modules)
+
+        r = cuda_timer(
+            _run_once,
+            label="Megatron-style SDMA realism",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        if self.rank == 0:
+            print_report_with_table(
+                _profiled_wgrad_title("Tier 2 Megatron-style SDMA", profile, self.world),
+                [r],
+            )
+
+
+# ---------------------------------------------------------------------------
+# 5. Multi-GPU: real-module deferred wgrad + SDMA allreduce overlap
+# ---------------------------------------------------------------------------
+
+
 @_SDMA
 class TestDeferredWgradSdmaComm:
-    """Overlap _DeferredWgrad.execute() with SDMA allreduce.
+    """Overlap real ``LumenColumnParallelLinear`` deferred wgrad with SDMA allreduce.
 
-    SDMA uses dedicated hardware DMA engines that are completely independent
-    of compute SMs, providing higher overlap ratios than NCCL which may
-    contend for GPU resources.  This test validates the primary design goal
-    of Lumen's comm-compute overlap: wgrad GEMM on compute SMs while
-    gradient allreduce runs on SDMA hardware with zero contention.
+    SDMA uses dedicated hardware DMA engines that are often independent of
+    compute SMs.  This test validates comm-compute overlap using the same
+    module/autograd path as training, with wgrad drained via ``backward_dw()``.
 
     Run::
 
@@ -703,7 +1049,6 @@ class TestDeferredWgradSdmaComm:
         ``shmem_finalize`` in between) exhausts the queue pool and
         causes AllGather timeouts.
         """
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
         profile = DEFAULT_PROFILE
@@ -712,41 +1057,63 @@ class TestDeferredWgradSdmaComm:
         comm = SdmaTpComm.get(dist.group.WORLD)
 
         # ── Part 1: single-layer overlap ─────────────────────────
-        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
+        _, _, _, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         sdma_stream = torch.cuda.Stream(device=self.device)
-        dwg = _DeferredWgrad()
 
         # Warmup both NCCL and SDMA paths
         for _ in range(3):
             dist.all_reduce(ar_buf.clone())
             comm.allreduce_sum(ar_buf.clone())
-            _ = grad_out.T @ x
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
 
         r_wgrad = cuda_timer(
-            lambda: grad_out.T @ x, label="wgrad GEMM alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM
+            lambda: _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile),
+            label="real module: wgrad (queue+drain, no comm)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
         )
 
         def _nccl_ar():
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
-        r_comm = cuda_timer(
-            _nccl_ar, label="NCCL allreduce alone", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        r_nccl_comm = cuda_timer(
+            _nccl_ar,
+            label="NCCL allreduce alone (reference)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+
+        def _sdma_ar_sync():
+            buf = ar_buf.clone()
+            comm.allreduce_sum_inplace(buf)
+
+        r_sdma_comm = cuda_timer(
+            _sdma_ar_sync,
+            label="SDMA allreduce alone (sync)",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
         )
 
         def _sequential():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            dwg.execute()
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
+            module.backward_dw()
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
         r_seq = cuda_timer(
             _sequential,
-            label="sequential: wgrad then NCCL AR",
+            label="sequential: real module wgrad then NCCL AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -757,25 +1124,26 @@ class TestDeferredWgradSdmaComm:
         dist.barrier()
 
         def _overlapped():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
             buf = ar_buf.clone()
             sdma_stream.wait_stream(torch.cuda.current_stream())
             comm.allreduce_sum_async(buf, stream=sdma_stream)
-            dwg.execute()
+            module.backward_dw()
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_ovl = cuda_timer(
             _overlapped,
-            label="overlapped: wgrad || SDMA AR",
+            label="overlapped: real module wgrad || SDMA AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        T_parts = r_wgrad.avg_ms + r_comm.avg_ms
+        T_parts = r_wgrad.avg_ms + r_sdma_comm.avg_ms
         overlap_ratio = 1 - (r_ovl.avg_ms / max(T_parts, 1e-6))
         speedup = r_seq.avg_ms / max(r_ovl.avg_ms, 1e-6)
         r_ovl.extra["speedup"] = round(speedup, 2)
@@ -783,16 +1151,16 @@ class TestDeferredWgradSdmaComm:
 
         if self.rank == 0:
             print_report_with_table(
-                _profiled_wgrad_title("_DeferredWgrad + SDMA AllReduce", profile, self.world),
-                [r_wgrad, r_comm, r_seq, r_ovl],
+                _profiled_wgrad_title("Real module wgrad-delay + SDMA AllReduce", profile, self.world),
+                [r_wgrad, r_nccl_comm, r_sdma_comm, r_seq, r_ovl],
             )
             print_overlap_summary(
                 t_compute=r_wgrad.avg_ms,
-                t_comm=r_comm.avg_ms,
+                t_comm=r_sdma_comm.avg_ms,
                 t_seq=r_seq.avg_ms,
                 t_ovl=r_ovl.avg_ms,
-                compute_label="wgrad",
-                comm_label="SDMA AR",
+                compute_label="wgrad (real API)",
+                comm_label="SDMA AR (sync alone)",
             )
 
         sdma_stream.synchronize()
@@ -801,30 +1169,30 @@ class TestDeferredWgradSdmaComm:
 
         # ── Part 2: multi-layer pipeline ─────────────────────────
         n_layers = 4
-        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
-        dwg2 = _DeferredWgrad()
+        _, _, _, ar_ml = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         # Re-prime the SDMA handle after the idle gap (NCCL-only Part 1
         # baselines).  The mori ccl reference tests always barrier+sync
         # around every SDMA operation; a long idle gap can leave the
         # SDMA transport in an inconsistent state across peers.
         for _ in range(3):
-            dist.all_reduce(weights[0].data.clone())
-            comm.allreduce_sum(weights[0].main_grad.clone())
-            _ = grad_outs[0].T @ x
+            dist.all_reduce(ar_ml.clone())
+            comm.allreduce_sum(ar_ml.clone())
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
 
         def _nccl_sequential():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]
-                weights[i].main_grad.add_(grad_outs[i].T @ x)
-                dist.all_reduce(weights[i].main_grad)
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
+            )
 
         r_baseline = cuda_timer(
             _nccl_sequential,
-            label=f"{n_layers}-layer sequential (NCCL AR)",
+            label=f"{n_layers}L sequential real-module+NCCL AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -835,40 +1203,39 @@ class TestDeferredWgradSdmaComm:
         dist.barrier()
 
         def _deferred():
+            modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = False
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-
-                if dwg2.has_pending:
-                    dwg2.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
 
                 if pending_ar:
                     comm.wait_allreduce_sum(stream=sdma_stream)
                     torch.cuda.current_stream().wait_stream(sdma_stream)
 
-                _ = grad_outs[i] @ weights[i]
-                dwg2.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs[i])
+                torch.autograd.backward(y, g_outs[i])
 
                 if i > 0:
                     sdma_stream.wait_stream(torch.cuda.current_stream())
                     comm.allreduce_sum_async(
-                        weights[i - 1].main_grad,
+                        modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
                     pending_ar = True
 
-            if dwg2.has_pending:
-                dwg2.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
             if pending_ar:
                 comm.wait_allreduce_sum(stream=sdma_stream)
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)
+            comm.allreduce_sum_async(modules[n_layers - 1].weight.main_grad, stream=sdma_stream)
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_deferred = cuda_timer(
             _deferred,
-            label=f"{n_layers}-layer deferred+SDMA AR",
+            label=f"{n_layers}L pipelined deferred wgrad+SDMA AR",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -883,7 +1250,7 @@ class TestDeferredWgradSdmaComm:
         if self.rank == 0:
             print_report_with_table(
                 _profiled_wgrad_title(
-                    f"{n_layers}-Layer Pipeline: NCCL Seq vs Deferred + SDMA AR",
+                    f"{n_layers}-Layer Pipeline: sequential vs pipelined (real module + SDMA)",
                     profile,
                     self.world,
                 ),
@@ -899,7 +1266,7 @@ class TestDeferredWgradSdmaComm:
 
 
 # ---------------------------------------------------------------------------
-# 5. Direct comparison: NCCL vs SDMA wgrad overlap
+# 6. Direct comparison: NCCL vs SDMA wgrad overlap (+ profile experiment selectors)
 # ---------------------------------------------------------------------------
 
 
@@ -930,21 +1297,19 @@ class TestNCCLvsSdmaWgradDelay:
 
     def _run_single_layer_overlap_comparison(self, profile: E2EFusionProfile = DEFAULT_PROFILE):
         """Single-layer wgrad + allreduce: NCCL vs SDMA side by side."""
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
-        x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
+        _, _, _, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm.get(dist.group.WORLD)
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
-        dwg = _DeferredWgrad()
 
         for _ in range(3):
             dist.all_reduce(ar_buf.clone())
-            _ = grad_out.T @ x
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
         for _ in range(3):
@@ -952,10 +1317,10 @@ class TestNCCLvsSdmaWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
 
-        # Shared: wgrad alone
+        # Shared: real-module wgrad path (queue + immediate drain), no comm
         r_wgrad = cuda_timer(
-            lambda: grad_out.T @ x,
-            label="wgrad GEMM alone",
+            lambda: _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile),
+            label="real module: wgrad (queue+drain, no comm)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -977,15 +1342,16 @@ class TestNCCLvsSdmaWgradDelay:
         )
 
         def _nccl_seq():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            dwg.execute()
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
+            module.backward_dw()
             buf = ar_buf.clone()
             dist.all_reduce(buf)
 
         r_nccl_seq = cuda_timer(
             _nccl_seq,
-            label="NCCL sequential",
+            label="NCCL sequential (real module wgrad + AR)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -993,17 +1359,18 @@ class TestNCCLvsSdmaWgradDelay:
         )
 
         def _nccl_ovl():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
             with torch.cuda.stream(nccl_stream):
                 buf = ar_buf.clone()
                 dist.all_reduce(buf)
-            dwg.execute()
+            module.backward_dw()
             torch.cuda.current_stream().wait_stream(nccl_stream)
 
         r_nccl_ovl = cuda_timer(
             _nccl_ovl,
-            label="NCCL overlapped",
+            label="NCCL overlapped (real module)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1034,15 +1401,16 @@ class TestNCCLvsSdmaWgradDelay:
         )
 
         def _sdma_seq():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
-            dwg.execute()
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
+            module.backward_dw()
             buf = ar_buf.clone()
             sdma_comm.allreduce_sum_inplace(buf)  # noqa: F821
 
         r_sdma_seq = cuda_timer(
             _sdma_seq,
-            label="SDMA sequential",
+            label="SDMA sequential (real module wgrad + AR)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1055,18 +1423,19 @@ class TestNCCLvsSdmaWgradDelay:
         sdma_comm.reset_allreduce_flags()  # noqa: F821
 
         def _sdma_ovl():
-            w.main_grad.zero_()
-            dwg.defer(w, lambda: grad_out.T @ x)
+            tp_group, _ = _get_or_create_rank_local_group()
+            module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
+            _run_real_api_backward_then_queue(module, x_m, g_m)
             buf = ar_buf.clone()
             sdma_stream.wait_stream(torch.cuda.current_stream())
             sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)  # noqa: F821
-            dwg.execute()
+            module.backward_dw()
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_sdma_ovl = cuda_timer(
             _sdma_ovl,
-            label="SDMA overlapped",
+            label="SDMA overlapped (real module)",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1083,7 +1452,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         if self.rank == 0:
             print_report_with_table(
-                _profiled_wgrad_title("NCCL vs SDMA Wgrad-Delay Overlap", profile, self.world),
+                _profiled_wgrad_title("NCCL vs SDMA real-module wgrad-delay overlap", profile, self.world),
                 [
                     r_wgrad,
                     r_nccl_comm,
@@ -1107,7 +1476,6 @@ class TestNCCLvsSdmaWgradDelay:
 
     def test_multi_layer_pipeline_comparison(self):
         """4-layer pipeline: NCCL vs SDMA deferred-wgrad overlap."""
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
         profile = DEFAULT_PROFILE
@@ -1115,33 +1483,33 @@ class TestNCCLvsSdmaWgradDelay:
         dist.barrier()
         sdma_comm = SdmaTpComm.get(dist.group.WORLD)
         n_layers = 4
-        x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
+        _, _, _, ar_ref = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
-        dwg = _DeferredWgrad()
 
         for _ in range(3):
-            dist.all_reduce(weights[0].data.clone())
-            _ = grad_outs[0].T @ x
+            dist.all_reduce(ar_ref.clone())
+            _run_real_api_single_layer_wgrad_queue_and_drain(self.device, profile)
         torch.cuda.synchronize()
         dist.barrier()
         for _ in range(3):
-            sdma_comm.allreduce_sum(weights[0].data.clone())
+            sdma_comm.allreduce_sum(ar_ref.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
-        # Eager baseline (identical for NCCL)
+        # Sequential baseline: real module per layer + NCCL AR (no pipeline overlap)
         def _eager_nccl():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]
-                weights[i].main_grad.add_(grad_outs[i].T @ x)
-                dist.all_reduce(weights[i].main_grad)
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
+            )
 
         r_eager_nccl = cuda_timer(
             _eager_nccl,
-            label=f"{n_layers}L eager NCCL",
+            label=f"{n_layers}L sequential real-module+NCCL",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1150,28 +1518,30 @@ class TestNCCLvsSdmaWgradDelay:
 
         # Deferred NCCL pipeline
         def _deferred_nccl():
+            modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = None
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                if dwg.has_pending:
-                    dwg.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
                 if pending_ar is not None:
                     torch.cuda.current_stream().wait_stream(nccl_stream)
-                _ = grad_outs[i] @ weights[i]
-                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs[i])
+                torch.autograd.backward(y, g_outs[i])
                 if i > 0:
+                    nccl_stream.wait_stream(torch.cuda.current_stream())
                     with torch.cuda.stream(nccl_stream):
-                        dist.all_reduce(weights[i - 1].main_grad)
+                        dist.all_reduce(modules[i - 1].weight.main_grad)
                     pending_ar = i - 1
-            if dwg.has_pending:
-                dwg.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
+            nccl_stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(nccl_stream):
-                dist.all_reduce(weights[-1].main_grad)
+                dist.all_reduce(modules[n_layers - 1].weight.main_grad)
             torch.cuda.current_stream().wait_stream(nccl_stream)
 
         r_deferred_nccl = cuda_timer(
             _deferred_nccl,
-            label=f"{n_layers}L deferred NCCL",
+            label=f"{n_layers}L pipelined deferred+NCCL",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1185,17 +1555,18 @@ class TestNCCLvsSdmaWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
 
-        # Eager baseline (identical for SDMA)
+        # Sequential baseline: real module per layer + synchronous SDMA AR
         def _eager_sdma():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]
-                weights[i].main_grad.add_(grad_outs[i].T @ x)
-                sdma_comm.allreduce_sum_inplace(weights[i].main_grad)  # noqa: F821
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                after_each_layer=lambda _i, m: sdma_comm.allreduce_sum_inplace(m.weight.main_grad),  # noqa: F821
+            )
 
         r_eager_sdma = cuda_timer(
             _eager_sdma,
-            label=f"{n_layers}L eager SDMA",
+            label=f"{n_layers}L sequential real-module+SDMA",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1209,35 +1580,35 @@ class TestNCCLvsSdmaWgradDelay:
 
         # Deferred SDMA pipeline
         def _deferred_sdma():
+            modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = False
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                if dwg.has_pending:
-                    dwg.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
                 if pending_ar:
                     sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                     torch.cuda.current_stream().wait_stream(sdma_stream)
-                _ = grad_outs[i] @ weights[i]
-                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs[i])
+                torch.autograd.backward(y, g_outs[i])
                 if i > 0:
                     sdma_stream.wait_stream(torch.cuda.current_stream())
                     sdma_comm.allreduce_sum_async(  # noqa: F821
-                        weights[i - 1].main_grad,
+                        modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
                     pending_ar = True
-            if dwg.has_pending:
-                dwg.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
             if pending_ar:
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+            sdma_comm.allreduce_sum_async(modules[n_layers - 1].weight.main_grad, stream=sdma_stream)  # noqa: F821
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
         r_deferred_sdma = cuda_timer(
             _deferred_sdma,
-            label=f"{n_layers}L deferred SDMA",
+            label=f"{n_layers}L pipelined deferred+SDMA",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1278,70 +1649,76 @@ class TestNCCLvsSdmaWgradDelay:
         """4-layer pipeline sweep: vary gemm_n to measure effective overlap.
 
         Uses a realistic 4-layer deferred-wgrad pipeline where layer i's
-        allreduce overlaps with layer i+1's wgrad GEMM.  This captures the
-        true pipeline benefit that single-layer overlap tests miss.
+        allreduce overlaps with layer i+1's real-module wgrad (queued in
+        backward, drained via ``backward_dw()``).
 
-        Each layer executes forward GEMM + deferred wgrad to match the
-        workload profile of ``test_multi_layer_pipeline_comparison``.
+        Baselines use the same ``LumenColumnParallelLinear`` stack: a
+        compute-only timer (per-layer fwd + bwd queue + drain, no AR) and a
+        sequential timer (+ NCCL AR each layer), matching
+        ``test_multi_layer_pipeline_comparison``.
         """
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
         n_layers = 4
+        profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm.get(dist.group.WORLD)
 
-        x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-        weights = [
-            nn.Parameter(torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02)
-            for _ in range(n_layers)
-        ]
-        for w_i in weights:
-            w_i.main_grad = torch.zeros_like(w_i.data)
-        grad_outs = [torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
+        _, _, _, ar_scale = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
+        # Use gemm_n-shaped buffer for comm warmup (matches deferred path tensor sizes)
+        ar_n = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
-        dwg = _DeferredWgrad()
 
         for _ in range(3):
-            dist.all_reduce(weights[0].data.clone())
-            _ = grad_outs[0].T @ x
+            dist.all_reduce(ar_scale.clone())
+            _run_real_api_single_layer_wgrad_queue_and_drain(
+                self.device, profile, tokens=M, hidden=K, out_features=gemm_n
+            )
         torch.cuda.synchronize()
         dist.barrier()
         for _ in range(3):
-            sdma_comm.allreduce_sum(weights[0].data.clone())
+            sdma_comm.allreduce_sum(ar_n.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
-        # ── wgrad-only baseline (theoretical lower bound) ──
+        # ── Compute-only baseline: real module, no AR (fwd + bwd queue + drain per layer) ──
         def _wgrad_only():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]
-                weights[i].main_grad.add_(grad_outs[i].T @ x)
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                tokens=M,
+                hidden=K,
+                out_features=gemm_n,
+            )
 
         r_wgrad = cuda_timer(
             _wgrad_only,
-            label=f"4L wgrad N={gemm_n}",
+            label=f"4L real-module compute N={gemm_n}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
             dist_barrier=True,
         )
 
-        # ── eager baseline (sequential fwd + wgrad + allreduce) ──
+        # ── Sequential baseline: real module + NCCL AR per layer ──
         def _eager():
-            for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                _ = grad_outs[i] @ weights[i]
-                weights[i].main_grad.add_(grad_outs[i].T @ x)
-                dist.all_reduce(weights[i].main_grad)
+            _run_real_api_multi_layer_sequential_per_layer(
+                self.device,
+                profile,
+                n_layers,
+                tokens=M,
+                hidden=K,
+                out_features=gemm_n,
+                after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
+            )
 
         r_eager = cuda_timer(
             _eager,
-            label=f"4L eager N={gemm_n}",
+            label=f"4L sequential real-module+NCCL N={gemm_n}",
             warmup=_WARMUP,
             iters=_ITERS,
             trim_pct=_TRIM,
@@ -1353,23 +1730,32 @@ class TestNCCLvsSdmaWgradDelay:
 
         # ── NCCL deferred pipeline ──
         def _deferred_nccl():
+            modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
+                self.device,
+                profile,
+                n_layers,
+                tokens=M,
+                hidden=K,
+                out_features=gemm_n,
+            )
             pending_ar = None
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                if dwg.has_pending:
-                    dwg.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
                 if pending_ar is not None:
                     torch.cuda.current_stream().wait_stream(nccl_stream)
-                _ = grad_outs[i] @ weights[i]
-                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs_m[i])
+                torch.autograd.backward(y, g_outs[i])
                 if i > 0:
+                    nccl_stream.wait_stream(torch.cuda.current_stream())
                     with torch.cuda.stream(nccl_stream):
-                        dist.all_reduce(weights[i - 1].main_grad)
+                        dist.all_reduce(modules[i - 1].weight.main_grad)
                     pending_ar = i - 1
-            if dwg.has_pending:
-                dwg.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
+            nccl_stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(nccl_stream):
-                dist.all_reduce(weights[-1].main_grad)
+                dist.all_reduce(modules[n_layers - 1].weight.main_grad)
             torch.cuda.current_stream().wait_stream(nccl_stream)
 
         r_nccl = cuda_timer(
@@ -1387,29 +1773,36 @@ class TestNCCLvsSdmaWgradDelay:
 
         # ── SDMA deferred pipeline ──
         def _deferred_sdma():
+            modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
+                self.device,
+                profile,
+                n_layers,
+                tokens=M,
+                hidden=K,
+                out_features=gemm_n,
+            )
             pending_ar = False
             for i in range(n_layers):
-                weights[i].main_grad.zero_()
-                if dwg.has_pending:
-                    dwg.execute()
+                if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                    modules[i - 1].backward_dw()
                 if pending_ar:
                     sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                     torch.cuda.current_stream().wait_stream(sdma_stream)
-                _ = grad_outs[i] @ weights[i]
-                dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                y, _ = modules[i](xs_m[i])
+                torch.autograd.backward(y, g_outs[i])
                 if i > 0:
                     sdma_stream.wait_stream(torch.cuda.current_stream())
                     sdma_comm.allreduce_sum_async(  # noqa: F821
-                        weights[i - 1].main_grad,
+                        modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
                     pending_ar = True
-            if dwg.has_pending:
-                dwg.execute()
+            if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                modules[n_layers - 1].backward_dw()
             if pending_ar:
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             sdma_stream.wait_stream(torch.cuda.current_stream())
-            sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+            sdma_comm.allreduce_sum_async(modules[n_layers - 1].weight.main_grad, stream=sdma_stream)  # noqa: F821
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
 
@@ -1447,10 +1840,10 @@ class TestNCCLvsSdmaWgradDelay:
 
     def test_wgrad_overlap_scaling_summary(self):
         """All GEMM sizes in a single 4-layer pipeline summary table."""
-        from lumen.modules.parallel_linear import _DeferredWgrad
         from lumen.modules.sdma_comm import SdmaTpComm
 
         n_layers = 4
+        profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm.get(dist.group.WORLD)
@@ -1459,55 +1852,58 @@ class TestNCCLvsSdmaWgradDelay:
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
-        dwg = _DeferredWgrad()
 
         for gemm_n in gemm_sizes:
-            x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
-            weights = [
-                nn.Parameter(torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16) * 0.02)
-                for _ in range(n_layers)
-            ]
-            for w_i in weights:
-                w_i.main_grad = torch.zeros_like(w_i.data)
-            grad_outs = [torch.randn(M, gemm_n, device=self.device, dtype=torch.bfloat16) for _ in range(n_layers)]
+            _, _, _, ar_scale = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
+            ar_n = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
 
             for _ in range(3):
-                dist.all_reduce(weights[0].data.clone())
-                _ = grad_outs[0].T @ x
+                dist.all_reduce(ar_scale.clone())
+                _run_real_api_single_layer_wgrad_queue_and_drain(
+                    self.device, profile, tokens=M, hidden=K, out_features=gemm_n
+                )
             torch.cuda.synchronize()
             dist.barrier()
             for _ in range(3):
-                sdma_comm.allreduce_sum(weights[0].data.clone())
+                sdma_comm.allreduce_sum(ar_n.clone())
             torch.cuda.synchronize()
             dist.barrier()
 
-            # ── wgrad-only (for overlap efficiency calculation) ──
-            def _wgrad_only(weights=weights, grad_outs=grad_outs, x=x):
-                for i in range(n_layers):
-                    weights[i].main_grad.zero_()
-                    _ = grad_outs[i] @ weights[i]
-                    weights[i].main_grad.add_(grad_outs[i].T @ x)
+            # ── Real-module compute only (for overlap efficiency vs +NCCL) ──
+            def _wgrad_only(gn=gemm_n):
+                _run_real_api_multi_layer_sequential_per_layer(
+                    self.device,
+                    profile,
+                    n_layers,
+                    tokens=M,
+                    hidden=K,
+                    out_features=gn,
+                )
 
             r_wgrad = cuda_timer(
                 _wgrad_only,
-                label=f"wgrad N={gemm_n}",
+                label=f"real-module compute N={gemm_n}",
                 warmup=_WARMUP,
                 iters=_ITERS,
                 trim_pct=_TRIM,
                 dist_barrier=True,
             )
 
-            # ── eager baseline ──
-            def _eager(weights=weights, grad_outs=grad_outs, x=x):
-                for i in range(n_layers):
-                    weights[i].main_grad.zero_()
-                    _ = grad_outs[i] @ weights[i]
-                    weights[i].main_grad.add_(grad_outs[i].T @ x)
-                    dist.all_reduce(weights[i].main_grad)
+            # ── Sequential real module + NCCL AR per layer ──
+            def _eager(gn=gemm_n):
+                _run_real_api_multi_layer_sequential_per_layer(
+                    self.device,
+                    profile,
+                    n_layers,
+                    tokens=M,
+                    hidden=K,
+                    out_features=gn,
+                    after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
+                )
 
             r_eager = cuda_timer(
                 _eager,
-                label=f"eager N={gemm_n}",
+                label=f"sequential real-module+NCCL N={gemm_n}",
                 warmup=_WARMUP,
                 iters=_ITERS,
                 trim_pct=_TRIM,
@@ -1518,24 +1914,33 @@ class TestNCCLvsSdmaWgradDelay:
             dist.barrier()
 
             # ── NCCL deferred pipeline ──
-            def _deferred_nccl(weights=weights, grad_outs=grad_outs, x=x):
+            def _deferred_nccl(gn=gemm_n):
+                modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
+                    self.device,
+                    profile,
+                    n_layers,
+                    tokens=M,
+                    hidden=K,
+                    out_features=gn,
+                )
                 pending_ar = None
                 for i in range(n_layers):
-                    weights[i].main_grad.zero_()
-                    if dwg.has_pending:
-                        dwg.execute()
+                    if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                        modules[i - 1].backward_dw()
                     if pending_ar is not None:
                         torch.cuda.current_stream().wait_stream(nccl_stream)
-                    _ = grad_outs[i] @ weights[i]
-                    dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                    y, _ = modules[i](xs_m[i])
+                    torch.autograd.backward(y, g_outs[i])
                     if i > 0:
+                        nccl_stream.wait_stream(torch.cuda.current_stream())
                         with torch.cuda.stream(nccl_stream):
-                            dist.all_reduce(weights[i - 1].main_grad)
+                            dist.all_reduce(modules[i - 1].weight.main_grad)
                         pending_ar = i - 1
-                if dwg.has_pending:
-                    dwg.execute()
+                if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                    modules[n_layers - 1].backward_dw()
+                nccl_stream.wait_stream(torch.cuda.current_stream())
                 with torch.cuda.stream(nccl_stream):
-                    dist.all_reduce(weights[-1].main_grad)
+                    dist.all_reduce(modules[n_layers - 1].weight.main_grad)
                 torch.cuda.current_stream().wait_stream(nccl_stream)
 
             r_nccl = cuda_timer(
@@ -1552,30 +1957,37 @@ class TestNCCLvsSdmaWgradDelay:
             sdma_comm.reset_allreduce_flags()  # noqa: F821
 
             # ── SDMA deferred pipeline ──
-            def _deferred_sdma(weights=weights, grad_outs=grad_outs, x=x):
+            def _deferred_sdma(gn=gemm_n):
+                modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
+                    self.device,
+                    profile,
+                    n_layers,
+                    tokens=M,
+                    hidden=K,
+                    out_features=gn,
+                )
                 pending_ar = False
                 for i in range(n_layers):
-                    weights[i].main_grad.zero_()
-                    if dwg.has_pending:
-                        dwg.execute()
+                    if i > 0 and modules[i - 1]._deferred_wgrad.has_pending:
+                        modules[i - 1].backward_dw()
                     if pending_ar:
                         sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                         torch.cuda.current_stream().wait_stream(sdma_stream)
-                    _ = grad_outs[i] @ weights[i]
-                    dwg.defer(weights[i], lambda i=i: grad_outs[i].T @ x)
+                    y, _ = modules[i](xs_m[i])
+                    torch.autograd.backward(y, g_outs[i])
                     if i > 0:
                         sdma_stream.wait_stream(torch.cuda.current_stream())
                         sdma_comm.allreduce_sum_async(  # noqa: F821
-                            weights[i - 1].main_grad,
+                            modules[i - 1].weight.main_grad,
                             stream=sdma_stream,
                         )
                         pending_ar = True
-                if dwg.has_pending:
-                    dwg.execute()
+                if modules[n_layers - 1]._deferred_wgrad.has_pending:
+                    modules[n_layers - 1].backward_dw()
                 if pending_ar:
                     sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                 sdma_stream.wait_stream(torch.cuda.current_stream())
-                sdma_comm.allreduce_sum_async(weights[-1].main_grad, stream=sdma_stream)  # noqa: F821
+                sdma_comm.allreduce_sum_async(modules[n_layers - 1].weight.main_grad, stream=sdma_stream)  # noqa: F821
                 sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
                 torch.cuda.current_stream().wait_stream(sdma_stream)
 
@@ -1632,7 +2044,7 @@ class TestWgradDelayProfileExperiments(TestNCCLvsSdmaWgradDelay):
 
 
 # ---------------------------------------------------------------------------
-# 6. gradient_accumulation_fusion via quantized_linear backward
+# 7. gradient_accumulation_fusion via quantized_linear backward
 # ---------------------------------------------------------------------------
 
 

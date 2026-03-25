@@ -1,941 +1,149 @@
-============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-7.3.2, pluggy-1.6.0 -- /opt/venv/bin/python
-cachedir: .pytest_cache
-hypothesis profile 'default' -> database=DirectoryBasedExampleDatabase('/workspace/Lumen/.hypothesis/examples')
-rootdir: /workspace/Lumen
-configfile: pyproject.toml
-plugins: anyio-4.12.1, flakefinder-1.1.0, rerunfailures-14.0, xdoctest-1.1.0, subtests-0.13.1, hypothesis-5.35.1, cpp-2.3.0, shard-0.1.2, xdist-3.3.1
-collecting ... collected 9 items
-Running 9 items in this shard: benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only, benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only, benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_bwd [Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-rank 0 RDMA devices: None
-rank 4 rankInNode 4 select no device
-rank 2 rankInNode 2 select no device
-rank 3 rankInNode 3 select no device
-rank 6 rankInNode 6 select no device
-rank 7 rankInNode 7 select no device
-rank 5 rankInNode 5 select no device
-rank 0 rankInNode 0 select no device
-rank 1 rankInNode 1 select no device
-AllgatherSdma initialized: PE 2 of 8
-AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7ebc78a80000
-AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7f8f8e880000
-  Flags allocated: 64 bytes at 0x7ed10c480000
-AllgatherSdma initialized: PE 1 of 8
-  Input transit buffer: 1.00 MB at 0x7ecc4bc00000
-  Input transit buffer: 1.00 MB at 0x7eb796800000
-AllgatherSdma initialized: PE 5 of 8
-  Input transit buffer: 1.00 MB at 0x7f8de8a00000
-  Output transit buffer: 8.00 MB at 0x7ecc49400000
-  Flags allocated: 64 bytes at 0x7f7d00280000
-  Output transit buffer: 8.00 MB at 0x7eb794000000
-  Flags allocated: 64 bytes at 0x7fb93ca80000
-  Output transit buffer: 8.00 MB at 0x7f8af7000000
-  Input transit buffer: 1.00 MB at 0x7f780bc00000
-  Input transit buffer: 1.00 MB at 0x7fb738e00000
-  Output transit buffer: 8.00 MB at 0x7f7809400000
-  Output transit buffer: 8.00 MB at 0x7fb46a400000
-AllgatherSdma initialized: PE 6 of 8
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f90c1880000
-  Flags allocated: 64 bytes at 0x7f519f680000
-  Input transit buffer: 1.00 MB at 0x7f8c33c00000
-  Input transit buffer: 1.00 MB at 0x7f4d12400000
-  Output transit buffer: 8.00 MB at 0x7f8c31400000
-  Output transit buffer: 8.00 MB at 0x7f4d0b400000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f7d4c480000
-  Input transit buffer: 1.00 MB at 0x7f78ae800000
-  Output transit buffer: 8.00 MB at 0x7f78a7400000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8c1f200000
-  Barrier: 128 bytes at 0x7f8c1d200000
-  Output transit buffer: 8.00 MB at 0x7f8c1aa00000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7eb78a400000
-  Flags: 64 bytes at 0x7f77f7200000
-  Barrier: 128 bytes at 0x7eb788400000
-  Barrier: 128 bytes at 0x7f77f5200000
-  Output transit buffer: 8.00 MB at 0x7eb781800000
-  Output transit buffer: 8.00 MB at 0x7f77f2a00000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8ae9000000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Barrier: 128 bytes at 0x7f8ae2c00000
-  Flags: 64 bytes at 0x7fb45c400000
-  Barrier: 128 bytes at 0x7fb456000000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Output transit buffer: 8.00 MB at 0x7f8ae0400000
-  Flags: 64 bytes at 0x7ecc37200000
-  Barrier: 128 bytes at 0x7ecc35200000
-  Output transit buffer: 8.00 MB at 0x7fb453800000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f789e000000
-  Barrier: 128 bytes at 0x7f7897c00000
-  Output transit buffer: 8.00 MB at 0x7ecc32a00000
-  Flags: 64 bytes at 0x7f4d01c00000
-  Barrier: 128 bytes at 0x7f4cfb800000
-  Output transit buffer: 8.00 MB at 0x7f7895400000
-  Output transit buffer: 8.00 MB at 0x7f4cf9000000
-AllgatherSdma destroyed: PE 1
-
-========================================================================
+﻿========================================================================
   E2E Transformer Layer Pure Pipeline fwd+bwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-AllgatherSdma destroyed: PE 7
-                                  naive fwd+bwd  avg=   1.742 ms  min=   1.713 ms  max=   1.773 ms  std=  0.018 ms  cv=  1.0%AllgatherSdma destroyed: PE 4
-
-AllgatherSdma destroyed: PE 6
-                             fused NCCL fwd+bwd  avg=   9.248 ms  min=   7.910 ms  max=  11.710 ms  std=  1.386 ms  cv= 15.0%  speedup=0.1900  [!NOISY]
-                             fused SDMA fwd+bwd  avg=   6.464 ms  min=   6.315 ms  max=   6.619 ms  std=  0.081 ms  cv=  1.2%  speedup=0.2700AllgatherSdma destroyed: PE 2
-
-========================================================================
-
-
-  E2E Transformer Layer Pure Pipeline fwd+bwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ naive fwd+bwd      │    1.742 │    1.713 │    1.743 │    1.770 │    1.773 │    1.0 │              │AllgatherSdma destroyed: PE 5
-
-  │ fused NCCL fwd+bwd │    9.248 │    7.910 │    8.414 │   11.275 │   11.710 │   15.0 │ speedup=0.19 *│
-  │ fused SDMA fwd+bwd │    6.464 │    6.315 │    6.459 │    6.589 │    6.619 │    1.2 │ speedup=0.27 │
+  │ naive fwd+bwd      │    1.772 │    1.752 │    1.768 │    1.800 │    1.858 │    1.2 │              │
+  │ fused NCCL fwd+bwd │   11.895 │   10.702 │   11.896 │   13.209 │   13.972 │    6.9 │ speedup=0.15 *│
+  │ fused SDMA fwd+bwd │    6.284 │    5.898 │    6.013 │    6.883 │    6.888 │    6.6 │ speedup=0.28 *│
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-  AG: 3.6 GB/s (33.6 MB in 9.248 ms)
-  RS: 3.6 GB/s (33.6 MB in 9.248 ms)
-  ⚠ WARNING: speedup 0.19x < 1.0 — optimized path is slower than baseline
-AllgatherSdma destroyed: PE 3
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 3
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
+  AG: 2.8 GB/s (33.6 MB in 11.895 ms)
+  RS: 2.8 GB/s (33.6 MB in 11.895 ms)
+  ⚠ WARNING: speedup 0.15x < 1.0 — optimized path is slower than baseline
 
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_fwd_only AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7f8ae9000000
-  Input transit buffer: 1.00 MB at 0x7f8ad3800000
-  Output transit buffer: 8.00 MB at 0x7f8ad1000000
-AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7ecc37200000
-  Input transit buffer: 1.00 MB at 0x7ecc25e00000
-  Output transit buffer: 8.00 MB at 0x7ecc23600000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7fb456000000
-AllgatherSdma initialized: PE 6 of 8
-  Input transit buffer: 1.00 MB at 0x7fb447000000
-  Flags allocated: 64 bytes at 0x7f8c1f200000
-  Output transit buffer: 8.00 MB at 0x7fb444800000
-  Input transit buffer: 1.00 MB at 0x7f8c0de00000
-  Output transit buffer: 8.00 MB at 0x7f8c0b600000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4d01c00000
-  Input transit buffer: 1.00 MB at 0x7f4cec400000
-  Output transit buffer: 8.00 MB at 0x7f4ce9c00000
-AllgatherSdma initialized: PE 2 of 8
-  Flags allocated: 64 bytes at 0x7eb78a400000
-  Input transit buffer: 1.00 MB at 0x7eb775000000
-  Output transit buffer: 8.00 MB at 0x7eb772800000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77f7200000
-  Input transit buffer: 1.00 MB at 0x7f77e5e00000
-  Output transit buffer: 8.00 MB at 0x7f77e3600000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f789e000000
-  Input transit buffer: 1.00 MB at 0x7f7888800000
-  Output transit buffer: 8.00 MB at 0x7f7886000000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8acae00000
-  Barrier: 128 bytes at 0x7f8ac8e00000
-  Output transit buffer: 8.00 MB at 0x7f8ac6600000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb43e600000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-  Barrier: 128 bytes at 0x7fb43c600000
-  Flags: 64 bytes at 0x7f8c05400000
-  Barrier: 128 bytes at 0x7f8c03400000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Output transit buffer: 8.00 MB at 0x7fb439e00000
-  Flags: 64 bytes at 0x7eb76c600000
-  Output transit buffer: 8.00 MB at 0x7f8c00c00000
-  Barrier: 128 bytes at 0x7eb76a600000
-  Output transit buffer: 8.00 MB at 0x7eb767e00000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f77dd400000
-  Barrier: 128 bytes at 0x7f77db400000
-  Output transit buffer: 8.00 MB at 0x7f77d8c00000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7ecc1d400000
-  Barrier: 128 bytes at 0x7ecc1b400000
-  Output transit buffer: 8.00 MB at 0x7ecc18c00000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f787fe00000
-  Barrier: 128 bytes at 0x7f787de00000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f4ce3a00000
-  Output transit buffer: 8.00 MB at 0x7f787b600000
-  Barrier: 128 bytes at 0x7f4ce1a00000
-  Output transit buffer: 8.00 MB at 0x7f4cdf200000
-AllgatherSdma destroyed: PE 7
-
-========================================================================AllgatherSdma destroyed: PE 6
-
+========================================================================
   E2E Transformer Layer Pure Pipeline fwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 5
-AllgatherSdma destroyed: PE 2
-                                      naive fwd  avg=   0.814 ms  min=   0.807 ms  max=   0.821 ms  std=  0.004 ms  cv=  0.5%
-AllgatherSdma destroyed: PE 1
-                                 fused NCCL fwd  avg=   2.245 ms  min=   2.202 ms  max=   2.355 ms  std=  0.038 ms  cv=  1.7%  speedup=0.3600
-                                 fused SDMA fwd  avg=   1.784 ms  min=   1.753 ms  max=   1.820 ms  std=  0.020 ms  cv=  1.1%  speedup=0.4600
-========================================================================
-
-
-  E2E Transformer Layer Pure Pipeline fwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name           │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
-AllgatherSdma destroyed: PE 3
   ├────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ naive fwd      │    0.814 │    0.807 │    0.814 │    0.821 │    0.821 │    0.5 │              │
-  │ fused NCCL fwd │    2.245 │    2.202 │    2.235 │    2.325 │    2.355 │    1.7 │ speedup=0.36 │
-  │ fused SDMA fwd │    1.784 │    1.753 │    1.785 │    1.811 │    1.820 │    1.1 │ speedup=0.46 │
+  │ naive fwd      │    0.772 │    0.752 │    0.762 │    0.843 │    0.853 │    3.6 │  ~           │
+  │ fused NCCL fwd │    2.808 │    2.695 │    2.823 │    2.937 │    3.065 │    3.2 │ speedup=0.27 ~│
+  │ fused SDMA fwd │    2.002 │    1.973 │    1.997 │    2.052 │    2.059 │    1.2 │ speedup=0.39 │
   └────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-  AG: 14.9 GB/s (33.6 MB in 2.245 ms)
-  RS: 14.9 GB/s (33.6 MB in 2.245 ms)
-  ⚠ WARNING: speedup 0.36x < 1.0 — optimized path is slower than baseline
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only
+  AG: 11.9 GB/s (33.6 MB in 2.808 ms)
+  RS: 11.9 GB/s (33.6 MB in 2.808 ms)
+  ⚠ WARNING: speedup 0.27x < 1.0 — optimized path is slower than baseline
 
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only
-
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerFusion::test_single_layer_bwd_only PASSEDPASSED
 ========================================================================
   E2E Transformer Layer Pure Pipeline bwd-only (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-                                 naive bwd-only  avg=   1.078 ms  min=   1.071 ms  max=   1.089 ms  std=  0.005 ms  cv=  0.5%
-                            fused NCCL bwd-only  avg=   5.671 ms  min=   5.532 ms  max=   6.112 ms  std=  0.161 ms  cv=  2.8%  speedup=0.1900  [~unstable]
-========================================================================
-
-
-  E2E Transformer Layer Pure Pipeline bwd-only (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌─────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name                │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├─────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ naive bwd-only      │    1.078 │    1.071 │    1.076 │    1.087 │    1.089 │    0.5 │              │
-  │ fused NCCL bwd-only │    5.671 │    5.532 │    5.613 │    6.025 │    6.112 │    2.8 │ speedup=0.19 ~│
+  │ naive bwd-only      │    1.088 │    1.047 │    1.080 │    1.161 │    1.184 │    3.4 │  ~           │
+  │ fused NCCL bwd-only │    4.769 │    4.694 │    4.750 │    4.914 │    5.036 │    1.8 │ speedup=0.23 │
   └─────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-  AG: 5.9 GB/s (33.6 MB in 5.671 ms)
-  RS: 5.9 GB/s (33.6 MB in 5.671 ms)
-  ⚠ WARNING: speedup 0.19x < 1.0 — optimized path is slower than baseline
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_backend_gap_experiment_fwd_bwd AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7f8ac8e00000
-  Input transit buffer: 2.00 MB at 0x7f8ab0a00000
-  Output transit buffer: 16.00 MB at 0x7f8aacc00000
-AllgatherSdma initialized: PE 3 of 8
-AllgatherSdma initialized: PE 2 of 8
-  Flags allocated: 64 bytes at 0x7ecc1b400000
-  Flags allocated: 64 bytes at 0x7eb76a600000
-  Input transit buffer: 2.00 MB at 0x7ecc03000000
-  Input transit buffer: 2.00 MB at 0x7eb752200000
-AllgatherSdma initialized: PE 5 of 8
-  Output transit buffer: 16.00 MB at 0x7ecbff200000
-  Output transit buffer: 16.00 MB at 0x7eb74e400000
-  Flags allocated: 64 bytes at 0x7fb43c600000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77db400000
-AllgatherSdma initialized: PE 6 of 8
-  Input transit buffer: 2.00 MB at 0x7fb424200000
-  Flags allocated: 64 bytes at 0x7f8c03400000
-  Output transit buffer: 16.00 MB at 0x7fb420400000
-  Input transit buffer: 2.00 MB at 0x7f77c3000000
-  Output transit buffer: 16.00 MB at 0x7f77bf200000
-  Input transit buffer: 2.00 MB at 0x7f8beb000000
-  Output transit buffer: 16.00 MB at 0x7f8be7200000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4ce1a00000
-  Input transit buffer: 2.00 MB at 0x7f4cc9600000
-  Output transit buffer: 16.00 MB at 0x7f4cc5800000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f787de00000
-  Input transit buffer: 2.00 MB at 0x7f7865a00000
-  Output transit buffer: 16.00 MB at 0x7f7861c00000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8aa0a00000
-  Barrier: 128 bytes at 0x7f8a9ea00000
-  Output transit buffer: 16.00 MB at 0x7f8a9ba00000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb414200000
-  Barrier: 128 bytes at 0x7fb412200000
-  Output transit buffer: 16.00 MB at 0x7fb40f200000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7ecbf3000000
-  Barrier: 128 bytes at 0x7ecbf1000000
-  Output transit buffer: 16.00 MB at 0x7ecbee000000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8bdb000000
-  Barrier: 128 bytes at 0x7f8bd9000000
-  Flags: 64 bytes at 0x7f4cb9600000
-  Barrier: 128 bytes at 0x7f4cb7600000
-  Output transit buffer: 16.00 MB at 0x7f8bd6000000
-  Output transit buffer: 16.00 MB at 0x7f4cb4600000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7eb742200000
-  Barrier: 128 bytes at 0x7eb740200000
-  Output transit buffer: 16.00 MB at 0x7eb73d200000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f77b3000000
-  Barrier: 128 bytes at 0x7f77b1000000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-  Output transit buffer: 16.00 MB at 0x7f77ae000000
-  Flags: 64 bytes at 0x7f7855a00000
-  Barrier: 128 bytes at 0x7f7853a00000
-  Output transit buffer: 16.00 MB at 0x7f7850a00000
-AllgatherSdma destroyed: PE 6
-AllgatherSdma destroyed: PE 7
+  AG: 7.0 GB/s (33.6 MB in 4.769 ms)
+  RS: 7.0 GB/s (33.6 MB in 4.769 ms)
+  ⚠ WARNING: speedup 0.23x < 1.0 — optimized path is slower than baseline
 
 ========================================================================
-AllgatherSdma destroyed: PE 1
   E2E Transformer Layer Pure Pipeline fwd+bwd (profile=backend_gap, B=4, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-AllgatherSdma destroyed: PE 5
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 2
-AllgatherSdma destroyed: PE 3
-                                  naive fwd+bwd  avg=   3.007 ms  min=   2.990 ms  max=   3.020 ms  std=  0.010 ms  cv=  0.3%
-                             fused NCCL fwd+bwd  avg=  11.793 ms  min=   9.620 ms  max=  15.386 ms  std=  1.477 ms  cv= 12.5%  speedup=0.2600  [!NOISY]
-                             fused SDMA fwd+bwd  avg=   7.274 ms  min=   7.199 ms  max=   7.417 ms  std=  0.058 ms  cv=  0.8%  speedup=0.4100
-========================================================================
-
-
-  E2E Transformer Layer Pure Pipeline fwd+bwd (profile=backend_gap, B=4, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ naive fwd+bwd      │    3.007 │    2.990 │    3.009 │    3.019 │    3.020 │    0.3 │              │
-  │ fused NCCL fwd+bwd │   11.793 │    9.620 │   11.332 │   14.875 │   15.386 │   12.5 │ speedup=0.26 *│
-  │ fused SDMA fwd+bwd │    7.274 │    7.199 │    7.269 │    7.376 │    7.417 │    0.8 │ speedup=0.41 │
+  │ naive fwd+bwd      │    3.053 │    3.029 │    3.054 │    3.079 │    3.079 │    0.4 │              │
+  │ fused NCCL fwd+bwd │   12.279 │   10.485 │   11.953 │   14.760 │   14.806 │   11.8 │ speedup=0.25 *│
+  │ fused SDMA fwd+bwd │    7.607 │    7.216 │    7.676 │    7.920 │    8.090 │    3.4 │ speedup=0.40 ~│
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
 
-  AG: 5.7 GB/s (67.1 MB in 11.793 ms)
-  RS: 5.7 GB/s (67.1 MB in 11.793 ms)
+  AG: 5.5 GB/s (67.1 MB in 12.279 ms)
+  RS: 5.5 GB/s (67.1 MB in 12.279 ms)
+  ⚠ WARNING: speedup 0.25x < 1.0 — optimized path is slower than baseline
+
+========================================================================
+  E2E Transformer Layer Pure Pipeline fwd+bwd (profile=pipeline_gain, B=4, S=2048, H=4096, FFN=28672, chunks=4, world=8)
+========================================================================
+  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
+  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
+  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
+  │ naive fwd+bwd      │    4.329 │    4.284 │    4.315 │    4.405 │    4.423 │    1.0 │              │
+  │ fused NCCL fwd+bwd │   16.547 │   15.326 │   16.401 │   17.803 │   17.821 │    5.5 │ speedup=0.26 *│
+  │ fused SDMA fwd+bwd │   11.991 │   11.306 │   11.965 │   12.978 │   12.983 │    4.2 │ speedup=0.36 ~│
+  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
+
+  AG: 4.1 GB/s (67.1 MB in 16.547 ms)
+  RS: 4.1 GB/s (67.1 MB in 16.547 ms)
   ⚠ WARNING: speedup 0.26x < 1.0 — optimized path is slower than baseline
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
 
+====================================================================================================================================
+E2E Fusion Shape Sweep — performance (fwd+bwd)
+====================================================================================================================================
+Profile               Tokens     FFN   Naive ms    NCCL ms   NCCL sp NCCL note             SDMA ms   SDMA sp SDMA note            Comm MB
+------------------------------------------------------------------------------------------------------------------------------------
+comm_bound_small        4096    8192      1.584     13.913     0.11x negative optimization      5.548     0.29x negative optimization      67.1
+default                 4096   14336      1.861     14.314     0.13x negative optimization      6.096     0.31x negative optimization      67.1
+compute_bound_small     4096   28672      2.427     17.309     0.14x negative optimization      8.557     0.28x negative optimization      67.1
+comm_bound_large        8192    8192      2.401     13.360     0.18x negative optimization      6.862     0.35x negative optimization     134.2
+backend_gap             8192   14336      3.042     13.273     0.23x negative optimization      7.190     0.42x negative optimization     134.2
+pipeline_gain           8192   28672      4.279     16.032     0.27x negative optimization     11.165     0.38x negative optimization     134.2
+====================================================================================================================================
 
-
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd
-
-
-
-benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2EFusionExperiments::test_pipeline_gain_experiment_fwd_bwd AllgatherSdma initialized: PE 6 of 8
-  Flags allocated: 64 bytes at 0x7f8bdb000000
-  Input transit buffer: 2.00 MB at 0x7f8bbc600000
-  Output transit buffer: 16.00 MB at 0x7f8bb8800000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4cb9600000
-  Input transit buffer: 2.00 MB at 0x7f4c9ac00000
-  Output transit buffer: 16.00 MB at 0x7f4c96e00000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77b3000000
-  Input transit buffer: 2.00 MB at 0x7f7794600000
-  Output transit buffer: 16.00 MB at 0x7f7790800000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f7855a00000
-  Input transit buffer: 2.00 MB at 0x7f7837000000
-  Output transit buffer: 16.00 MB at 0x7f7833200000
-AllgatherSdma initialized: PE 2 of 8
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7eb742200000
-  Flags allocated: 64 bytes at 0x7fb414200000
-  Input transit buffer: 2.00 MB at 0x7eb723800000
-  Input transit buffer: 2.00 MB at 0x7fb3f5800000
-  Output transit buffer: 16.00 MB at 0x7eb71fa00000
-AllgatherSdma initialized: PE 4 of 8
-  Output transit buffer: 16.00 MB at 0x7fb3f1a00000
-  Flags allocated: 64 bytes at 0x7f8aa0a00000
-  Input transit buffer: 2.00 MB at 0x7f8a82000000
-  Output transit buffer: 16.00 MB at 0x7f8a7e200000
-AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7ecbf3000000
-  Input transit buffer: 2.00 MB at 0x7ecbd4600000
-  Output transit buffer: 16.00 MB at 0x7ecbd0800000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8a74800000
-  Flags: 64 bytes at 0x7ecbc6e00000
-  Barrier: 128 bytes at 0x7f8a72800000
-  Barrier: 128 bytes at 0x7ecbc4e00000
-  Output transit buffer: 16.00 MB at 0x7ecbc1e00000
-  Output transit buffer: 16.00 MB at 0x7f8a6f800000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb3e8000000
-  Barrier: 128 bytes at 0x7fb3e6000000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7eb716000000
-  Output transit buffer: 16.00 MB at 0x7fb3e3000000
-  Barrier: 128 bytes at 0x7eb714000000
-  Output transit buffer: 16.00 MB at 0x7eb711000000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8baee00000
-  Barrier: 128 bytes at 0x7f8bace00000
-  Output transit buffer: 16.00 MB at 0x7f8ba9e00000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f7786e00000
-  Barrier: 128 bytes at 0x7f7784e00000
-  Flags: 64 bytes at 0x7f4c8d400000
-  Barrier: 128 bytes at 0x7f4c8b400000
-  Output transit buffer: 16.00 MB at 0x7f7781e00000
-  Output transit buffer: 16.00 MB at 0x7f4c88400000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f7829800000
-  Barrier: 128 bytes at 0x7f7827800000
-  Output transit buffer: 16.00 MB at 0x7f7824800000
-AllgatherSdma destroyed: PE 3
-AllgatherSdma destroyed: PE 7
-AllgatherSdma destroyed: PE 6
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 2
-AllgatherSdma destroyed: PE 5
-
-========================================================================
-  E2E Transformer Layer Pure Pipeline fwd+bwd (profile=pipeline_gain, B=4, S=2048, H=4096, FFN=28672, chunks=4, world=8)
-========================================================================
-                                  naive fwd+bwd  avg=   4.286 ms  min=   4.236 ms  max=   4.362 ms  std=  0.036 ms  cv=  0.8%
-                             fused NCCL fwd+bwd  avg=  15.279 ms  min=  13.141 ms  max=  17.158 ms  std=  1.019 ms  cv=  6.7%  speedup=0.2800  [!NOISY]
-                             fused SDMA fwd+bwd  avg=  11.134 ms  min=   9.941 ms  max=  11.782 ms  std=  0.582 ms  cv=  5.2%  speedup=0.3800  [!NOISY]
-========================================================================
-
-
-  E2E Transformer Layer Pure Pipeline fwd+bwd (profile=pipeline_gain, B=4, S=2048, H=4096, FFN=28672, chunks=4, world=8)
-  ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬──────────────┐
-  │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras       │
-  ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼──────────────┤
-  │ naive fwd+bwd      │    4.286 │    4.236 │    4.281 │    4.357 │    4.362 │    0.8 │              │
-PASSEDPASSEDPASSED  │ fused NCCL fwd+bwd │   15.279 │   13.141 │   15.541 │   16.545 │   17.158 │    6.7 │ speedup=0.28 *│
-PASSED  │ fused SDMA fwd+bwd │   11.134 │    9.941 │   11.352 │   11.676 │   11.782 │    5.2 │ speedup=0.38 *│
-  └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴──────────────┘
-
-  AG: 4.4 GB/s (67.1 MB in 15.279 ms)
-  RS: 4.4 GB/s (67.1 MB in 15.279 ms)
-  ⚠ WARNING: speedup 0.28x < 1.0 — optimized path is slower than baseline
-PASSEDPASSEDAllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 0
-PASSEDPASSED
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_bwd AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7ecbf3000000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7fb414200000
-  Input transit buffer: 1.00 MB at 0x7ecbc2e00000
-AllgatherSdma initialized: PE 4 of 8
-AllgatherSdma initialized: PE 2 of 8
-  Output transit buffer: 8.00 MB at 0x7ecbb5c00000
-  Flags allocated: 64 bytes at 0x7f8aa0a00000
-  Flags allocated: 64 bytes at 0x7eb742200000
-  Input transit buffer: 1.00 MB at 0x7fb3e4000000
-AllgatherSdma initialized: PE 6 of 8
-  Output transit buffer: 8.00 MB at 0x7fb3d6e00000
-  Flags allocated: 64 bytes at 0x7f8bdb000000
-  Input transit buffer: 1.00 MB at 0x7f8a70800000
-  Input transit buffer: 1.00 MB at 0x7eb712000000
-  Output transit buffer: 8.00 MB at 0x7f8a63600000
-  Output transit buffer: 8.00 MB at 0x7eb704e00000
-  Input transit buffer: 1.00 MB at 0x7f8baae00000
-  Output transit buffer: 8.00 MB at 0x7f8b9dc00000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77b3000000
-  Input transit buffer: 1.00 MB at 0x7f7782e00000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4cb9600000
-  Output transit buffer: 8.00 MB at 0x7f7775c00000
-  Input transit buffer: 1.00 MB at 0x7f4c89400000
-  Output transit buffer: 8.00 MB at 0x7f4c7c200000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f7855a00000
-  Input transit buffer: 1.00 MB at 0x7f7825800000
-  Output transit buffer: 8.00 MB at 0x7f7818600000
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8a5d400000
-  Barrier: 128 bytes at 0x7f8a5b400000
-  Output transit buffer: 8.00 MB at 0x7f8a58c00000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7ecbafa00000
-  Barrier: 128 bytes at 0x7ecbada00000
-  Output transit buffer: 8.00 MB at 0x7ecbab200000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb3d0c00000
-  Barrier: 128 bytes at 0x7fb3cec00000
-  Output transit buffer: 8.00 MB at 0x7fb3cc400000
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7eb6fec00000
-  Barrier: 128 bytes at 0x7eb6fcc00000
-  Output transit buffer: 8.00 MB at 0x7eb6fa400000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8b97a00000
-  Barrier: 128 bytes at 0x7f8b95a00000
-  Output transit buffer: 8.00 MB at 0x7f8b93200000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f4c76000000
-  Flags: 64 bytes at 0x7f7812400000
-  Barrier: 128 bytes at 0x7f4c74000000
-  Barrier: 128 bytes at 0x7f7810400000
-  Output transit buffer: 8.00 MB at 0x7f4c71800000
-  Output transit buffer: 8.00 MB at 0x7f780dc00000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f776fa00000
-  Barrier: 128 bytes at 0x7f776da00000
-  Output transit buffer: 8.00 MB at 0x7f776b200000
-AllgatherSdma destroyed: PE 3
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 6
-AllgatherSdma destroyed: PE 7
+================================================================================================================================
+E2E Fusion Shape Sweep — bandwidth + memory
+(AG/RS columns: effective step-normalized BW, GB/s; peak columns: track_cuda_memory peak_delta, MiB)
+================================================================================================================================
+Profile               NCCL AG eff BW  NCCL RS eff BW  SDMA AG eff BW  SDMA RS eff BW   Naive peak ΔMB    NCCL peak ΔMB    SDMA peak ΔMB
+--------------------------------------------------------------------------------------------------------------------------------
+comm_bound_small                 2.4             2.4             6.0             6.0            100.0            120.0            120.0
+default                          2.3             2.3             5.5             5.5             94.0            132.0            132.0
+compute_bound_small              1.9             1.9             3.9             3.9            100.0            184.0            184.0
+comm_bound_large                 5.0             5.0             9.8             9.8            216.0            240.0            240.0
+backend_gap                      5.1             5.1             9.3             9.3            216.0            264.0            264.0
+pipeline_gain                    4.2             4.2             6.0             6.0            228.0            340.0            340.0
+================================================================================================================================
 
 ========================================================================
   E2E SDMA-Only Pure Pipeline fwd+bwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-AllgatherSdma destroyed: PE 5
-                              SDMA only fwd+bwd  avg=   5.621 ms  min=   5.555 ms  max=   5.701 ms  std=  0.040 ms  cv=  0.7%
-========================================================================AllgatherSdma destroyed: PE 2
-
-
-
-  E2E SDMA-Only Pure Pipeline fwd+bwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)AllgatherSdma destroyed: PE 4
-
   ┌───────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
   │ Name              │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
   ├───────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ SDMA only fwd+bwd │    5.621 │    5.555 │    5.611 │    5.685 │    5.701 │    0.7 │        │
+  │ SDMA only fwd+bwd │    5.409 │    5.364 │    5.397 │    5.466 │    5.478 │    0.7 │        │
   └───────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
 
-  AG: 6.0 GB/s (33.6 MB in 5.621 ms)
-  RS: 6.0 GB/s (33.6 MB in 5.621 ms)
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only
+  AG: 6.2 GB/s (33.6 MB in 5.409 ms)
+  RS: 6.2 GB/s (33.6 MB in 5.409 ms)
 
-
-
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_fwd_only AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7f8aa0a00000
-  Input transit buffer: 1.00 MB at 0x7f8a53400000
-  Output transit buffer: 8.00 MB at 0x7f8a50c00000
-AllgatherSdma initialized: PE 3 of 8
-  Flags allocated: 64 bytes at 0x7ecbf3000000
-  Input transit buffer: 1.00 MB at 0x7ecba5a00000
-  Output transit buffer: 8.00 MB at 0x7ecba3200000
-AllgatherSdma initialized: PE 6 of 8
-  Flags allocated: 64 bytes at 0x7f8bdb000000
-  Input transit buffer: 1.00 MB at 0x7f8b8da00000
-  Output transit buffer: 8.00 MB at 0x7f8b8b200000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7fb414200000
-  Input transit buffer: 1.00 MB at 0x7fb3c6c00000
-AllgatherSdma initialized: PE 2 of 8
-  Output transit buffer: 8.00 MB at 0x7fb3c4400000
-  Flags allocated: 64 bytes at 0x7eb742200000
-  Input transit buffer: 1.00 MB at 0x7eb6f4c00000
-  Output transit buffer: 8.00 MB at 0x7eb6f2400000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77b3000000
-  Input transit buffer: 1.00 MB at 0x7f7765a00000
-  Output transit buffer: 8.00 MB at 0x7f7763200000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4cb9600000
-  Input transit buffer: 1.00 MB at 0x7f4c6c000000
-  Output transit buffer: 8.00 MB at 0x7f4c69800000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f7855a00000
-  Input transit buffer: 1.00 MB at 0x7f7808400000
-  Output transit buffer: 8.00 MB at 0x7f7805c00000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb3be200000
-  Flags: 64 bytes at 0x7f8a4aa00000
-  Flags: 64 bytes at 0x7f8b85000000
-  Barrier: 128 bytes at 0x7fb3bc200000
-  Barrier: 128 bytes at 0x7f8a48a00000
-  Barrier: 128 bytes at 0x7f8b83000000
-  Output transit buffer: 8.00 MB at 0x7fb3b9a00000
-  Output transit buffer: 8.00 MB at 0x7f8a46200000
-  Output transit buffer: 8.00 MB at 0x7f8b80800000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f775d000000
-  Barrier: 128 bytes at 0x7f775b000000
-  Flags: 64 bytes at 0x7eb6ec200000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Barrier: 128 bytes at 0x7eb6ea200000
-  Output transit buffer: 8.00 MB at 0x7f7758800000
-  Flags: 64 bytes at 0x7f4c63600000
-  Barrier: 128 bytes at 0x7f4c61600000
-  Output transit buffer: 8.00 MB at 0x7eb6e7a00000
-  Output transit buffer: 8.00 MB at 0x7f4c5ee00000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f77ffa00000
-  Flags: 64 bytes at 0x7ecb9d000000
-  Barrier: 128 bytes at 0x7f77fda00000
-  Barrier: 128 bytes at 0x7ecb9b000000
-  Output transit buffer: 8.00 MB at 0x7ecb98800000
-  Output transit buffer: 8.00 MB at 0x7f77fb200000
-AllgatherSdma destroyed: PE 3
-AllgatherSdma destroyed: PE 5
-AllgatherSdma destroyed: PE 7
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 6
-
-========================================================================AllgatherSdma destroyed: PE 2
-
+========================================================================
   E2E SDMA-Only Pure Pipeline fwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-                                  SDMA only fwd  avg=   1.702 ms  min=   1.611 ms  max=   1.795 ms  std=  0.061 ms  cv=  3.6%  [~unstable]
-========================================================================
-
-
-  E2E SDMA-Only Pure Pipeline fwd (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌───────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
   │ Name          │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
   ├───────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ SDMA only fwd │    1.702 │    1.611 │    1.688 │    1.793 │    1.795 │    3.6 │  ~     │
+  │ SDMA only fwd │    1.621 │    1.592 │    1.618 │    1.666 │    1.668 │    1.3 │        │
   └───────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
 
-  AG: 19.7 GB/s (33.6 MB in 1.702 ms)
-  RS: 19.7 GB/s (33.6 MB in 1.702 ms)
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 3
-AllreduceSdma destroyed: PE 4
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 7
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only
-
-
-
-
-
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only
-benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only benchmarks/bench_e2e_fusion.py::TestE2ETransformerLayerSdmaOnly::test_single_layer_bwd_only AllgatherSdma initialized: PE 3 of 8
-AllgatherSdma initialized: PE 4 of 8
-  Flags allocated: 64 bytes at 0x7f8aa0a00000
-  Flags allocated: 64 bytes at 0x7ecbf3000000
-  Input transit buffer: 1.00 MB at 0x7ecb93000000
-  Input transit buffer: 1.00 MB at 0x7f8a40a00000
-  Output transit buffer: 8.00 MB at 0x7ecb90800000
-  Output transit buffer: 8.00 MB at 0x7f8a3e200000
-AllgatherSdma initialized: PE 5 of 8
-  Flags allocated: 64 bytes at 0x7fb414200000
-AllgatherSdma initialized: PE 2 of 8
-  Flags allocated: 64 bytes at 0x7eb742200000
-  Input transit buffer: 1.00 MB at 0x7fb3b4200000
-  Output transit buffer: 8.00 MB at 0x7fb3b1a00000
-  Input transit buffer: 1.00 MB at 0x7eb6e2200000
-  Output transit buffer: 8.00 MB at 0x7eb6dfa00000
-AllgatherSdma initialized: PE 6 of 8
-  Flags allocated: 64 bytes at 0x7f8bdb000000
-  Input transit buffer: 1.00 MB at 0x7f8b7b000000
-  Output transit buffer: 8.00 MB at 0x7f8b78800000
-AllgatherSdma initialized: PE 1 of 8
-  Flags allocated: 64 bytes at 0x7f77b3000000
-  Input transit buffer: 1.00 MB at 0x7f7753000000
-  Output transit buffer: 8.00 MB at 0x7f7750800000
-AllgatherSdma initialized: PE 7 of 8
-  Flags allocated: 64 bytes at 0x7f4cb9600000
-  Input transit buffer: 1.00 MB at 0x7f4c59600000
-  Output transit buffer: 8.00 MB at 0x7f4c56e00000
-AllgatherSdma initialized: PE 0 of 8
-  Flags allocated: 64 bytes at 0x7f7855a00000
-  Input transit buffer: 1.00 MB at 0x7f77f5a00000
-  Output transit buffer: 8.00 MB at 0x7f77f3200000
-AllreduceSdma(SDMA) initialized: PE 1 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 2 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f774a600000
-  Barrier: 128 bytes at 0x7f7748600000
-  Flags: 64 bytes at 0x7eb6d9800000
-  Barrier: 128 bytes at 0x7eb6d7800000
-  Output transit buffer: 8.00 MB at 0x7f7745e00000
-  Output transit buffer: 8.00 MB at 0x7eb6d5000000
-AllreduceSdma(SDMA) initialized: PE 3 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7ecb8a600000
-  Barrier: 128 bytes at 0x7ecb88600000
-  Output transit buffer: 8.00 MB at 0x7ecb85e00000
-AllreduceSdma(SDMA) initialized: PE 6 of 8, max_blocks=304
-AllreduceSdma(SDMA) initialized: PE 4 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8b72600000
-AllreduceSdma(SDMA) initialized: PE 7 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f8a38000000
-  Barrier: 128 bytes at 0x7f8b70600000
-  Barrier: 128 bytes at 0x7f8a36000000
-  Flags: 64 bytes at 0x7f4c50c00000
-  Barrier: 128 bytes at 0x7f4c4ec00000
-  Output transit buffer: 8.00 MB at 0x7f8b6de00000
-  Output transit buffer: 8.00 MB at 0x7f8a33800000
-  Output transit buffer: 8.00 MB at 0x7f4c4c400000
-AllreduceSdma(SDMA) initialized: PE 0 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7f77ed000000
-  Barrier: 128 bytes at 0x7f77eb000000
-  Output transit buffer: 8.00 MB at 0x7f77e8800000
-AllreduceSdma(SDMA) initialized: PE 5 of 8, max_blocks=304
-  Flags: 64 bytes at 0x7fb3ab800000
-  Barrier: 128 bytes at 0x7fb3a9800000
-  Output transit buffer: 8.00 MB at 0x7fb3a7000000
-AllgatherSdma destroyed: PE 3
-AllgatherSdma destroyed: PE 2
-AllgatherSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 5
-AllgatherSdma destroyed: PE 1
-AllgatherSdma destroyed: PE 6
-AllgatherSdma destroyed: PE 7
+  AG: 20.7 GB/s (33.6 MB in 1.621 ms)
+  RS: 20.7 GB/s (33.6 MB in 1.621 ms)
 
 ========================================================================
   E2E SDMA-Only Pure Pipeline bwd-only (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
 ========================================================================
-                             SDMA only bwd-only  avg=   3.752 ms  min=   3.701 ms  max=   3.834 ms  std=  0.033 ms  cv=  0.9%
-========================================================================
-
-
-  E2E SDMA-Only Pure Pipeline bwd-only (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, world=8)
   ┌────────────────────┬──────────┬──────────┬──────────┬──────────┬──────────┬────────┬────────┐
   │ Name               │ Avg(ms)  │ Min(ms)  │ Med(ms)  │ P95(ms)  │ Max(ms)  │ CV(%)  │ Extras │
   ├────────────────────┼──────────┼──────────┼──────────┼──────────┼──────────┼────────┼────────┤
-  │ SDMA only bwd-only │    3.752 │    3.701 │    3.744 │    3.807 │    3.834 │    0.9 │        │AllreduceSdma destroyed: PE 3
-
+  │ SDMA only bwd-only │    3.538 │    3.476 │    3.523 │    3.674 │    3.710 │    1.8 │        │
   └────────────────────┴──────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
 
-  AG: 8.9 GB/s (33.6 MB in 3.752 ms)
-  RS: 8.9 GB/s (33.6 MB in 3.752 ms)
-AllreduceSdma destroyed: PE 2
-AllreduceSdma destroyed: PE 4
-AllgatherSdma destroyed: PE 0
-AllreduceSdma destroyed: PE 5
-AllreduceSdma destroyed: PE 1
-AllreduceSdma destroyed: PE 6
-AllreduceSdma destroyed: PE 7
-PASSEDPASSEDAllreduceSdma destroyed: PE 0
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep
-benchmarks/bench_e2e_fusion.py::TestTPScaling::test_tp_scaling_sweep [Gloo] Rank 1[Gloo] Rank  is connected to 10 peer ranks.  is connected to Expected number of connected peer ranks is : 11 peer ranks. Expected number of connected peer ranks is : 1
-
-[Gloo] Rank 1 is connected to 1 peer ranks. Expected number of connected peer ranks is : 1
-[Gloo] Rank 0 is connected to 1 peer ranks. Expected number of connected peer ranks is : 1
-[Gloo] Rank [Gloo] Rank 10 is connected to  is connected to 11 peer ranks.  peer ranks. Expected number of connected peer ranks is : Expected number of connected peer ranks is : 11
-
-[Gloo] Rank 0 is connected to 1 peer ranks. Expected number of connected peer ranks is : 1
-[Gloo] Rank 1 is connected to 1 peer ranks. Expected number of connected peer ranks is : 1
-[Gloo] Rank 0 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 2 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 1 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 3 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 0 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 2 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 1 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 3 is connected to 3 peer ranks. Expected number of connected peer ranks is : 3
-[Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 6 is connected to [Gloo] Rank 7 peer ranks. 2Expected number of connected peer ranks is :  is connected to 77 peer ranks.
-Expected number of connected peer ranks is : 7
-[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
-[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+  AG: 9.5 GB/s (33.6 MB in 3.538 ms)
+  RS: 9.5 GB/s (33.6 MB in 3.538 ms)
 
 ========================================================================
 TP Scaling Summary (profile=default, B=2, S=2048, H=4096, FFN=14336, chunks=4, fwd+bwd)
 ========================================================================
   TP    Naive ms    Fused ms   Speedup       AG BW       RS BW
 ------------------------------------------------------------------------
-   2       4.895      14.397     0.34x       2.3 GB/s       2.3 GB/s
-   4       2.795      10.504     0.27x       3.2 GB/s       3.2 GB/s
-   8       1.768      10.120     0.17x       3.3 GB/s       3.3 GB/s
+   2       4.972      14.809     0.34x       2.3 GB/s       2.3 GB/s
+   4       2.768      12.482     0.22x       2.7 GB/s       2.7 GB/s
+   8       1.788      12.486     0.14x       2.7 GB/s       2.7 GB/s
 ========================================================================
   ⚠ WARNING: TP=2 — fused is slower than naive (0.34x)
-  ⚠ WARNING: TP=4 — fused is slower than naive (0.27x)
-  ⚠ WARNING: TP=8 — fused is slower than naive (0.17x)
-PASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSEDPASSED
-
-============================== 9 passed in 27.42s ==============================
-
-
-============================== 9 passed in 27.58s ==============================
-
-
-============================== 9 passed in 27.55s ==============================
-
-
-============================== 9 passed in 27.74s ==============================
-
-
-
-============================== 9 passed in 28.03s ==============================
-
-============================== 9 passed in 27.48s ==============================
-
-
-============================== 9 passed in 27.78s ==============================
-
-
-============================== 9 passed in 26.90s ==============================
+  ⚠ WARNING: TP=4 — fused is slower than naive (0.22x)
+  ⚠ WARNING: TP=8 — fused is slower than naive (0.14x)

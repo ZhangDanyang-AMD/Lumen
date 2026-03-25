@@ -49,6 +49,10 @@ Run multi-GPU (8 GPU) — tail latency & scaling::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k "TailLatency or Scaling"
 
+Run multi-GPU (8 GPU) — fixed-profile FP8 shape sweep (opt-in; average + tail summary)::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k ShapeSweep
+
 Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k backend_gap_experiment
@@ -68,10 +72,14 @@ Run multi-GPU (8 GPU) — individual sections::
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k NCCL
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k SDMA
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s \
+        -k "NCCL or E2E or TailLatency or Scaling or backend_gap_experiment or \
+        pipeline_gain_experiment"
 """
 
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import statistics
@@ -99,7 +107,9 @@ from benchmarks.e2e_fusion_profiles import (
     fp8_param_e2e_weight_shape,
     fp8_param_pipeline_layer_shapes,
     get_e2e_fusion_profile,
+    get_e2e_fusion_shape_sweep,
 )
+from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
 
 # ---------------------------------------------------------------------------
 # Dimensions
@@ -144,6 +154,277 @@ def _profiled_fp8_title(prefix: str, profile: E2EFusionProfile, world: int) -> s
     return f"{prefix} ({format_e2e_fusion_profile(profile)}, world={world})"
 
 
+def classify_fp8_tail_note(*, avg_ms: float, p95_ms: float) -> str:
+    ratio = p95_ms / max(avg_ms, 1e-6)
+    return "tail-heavy" if ratio >= 1.10 else "tail-stable"
+
+
+def build_fp8_single_shape_row(
+    *,
+    profile_name: str,
+    tokens: int,
+    ffn: int,
+    bf16_avg_ms: float,
+    bf16_p95_ms: float,
+    bf16_max_ms: float,
+    fp8_avg_ms: float,
+    fp8_p95_ms: float,
+    fp8_max_ms: float,
+    fp8_speedup: float,
+    p95_bf16_over_fp8: float,
+) -> dict[str, object]:
+    """One sweep row.
+
+    ``p95_bf16_over_fp8`` is BF16 p95 / FP8 p95
+    (cross-path tail comparison, not an FP8-only tail metric).
+    """
+    return {
+        "profile_name": profile_name,
+        "tokens": tokens,
+        "ffn": ffn,
+        "bf16_avg_ms": bf16_avg_ms,
+        "bf16_p95_ms": bf16_p95_ms,
+        "bf16_max_ms": bf16_max_ms,
+        "fp8_avg_ms": fp8_avg_ms,
+        "fp8_p95_ms": fp8_p95_ms,
+        "fp8_max_ms": fp8_max_ms,
+        "fp8_speedup": fp8_speedup,
+        "p95_bf16_over_fp8": p95_bf16_over_fp8,
+    }
+
+
+def build_fp8_pipeline_shape_row(
+    *,
+    profile_name: str,
+    tokens: int,
+    ffn: int,
+    bf16_avg_ms: float,
+    bf16_p95_ms: float,
+    fp8_seq_avg_ms: float,
+    fp8_seq_p95_ms: float,
+    fp8_pipe_avg_ms: float,
+    fp8_pipe_p95_ms: float,
+    fp8_pipe_max_ms: float,
+    pipeline_speedup_vs_bf16: float,
+    pipeline_speedup_vs_fp8_seq: float,
+    tail_ratio_vs_bf16: float,
+) -> dict[str, object]:
+    return {
+        "profile_name": profile_name,
+        "tokens": tokens,
+        "ffn": ffn,
+        "bf16_avg_ms": bf16_avg_ms,
+        "bf16_p95_ms": bf16_p95_ms,
+        "fp8_seq_avg_ms": fp8_seq_avg_ms,
+        "fp8_seq_p95_ms": fp8_seq_p95_ms,
+        "fp8_pipe_avg_ms": fp8_pipe_avg_ms,
+        "fp8_pipe_p95_ms": fp8_pipe_p95_ms,
+        "fp8_pipe_max_ms": fp8_pipe_max_ms,
+        "pipeline_speedup_vs_bf16": pipeline_speedup_vs_bf16,
+        "pipeline_speedup_vs_fp8_seq": pipeline_speedup_vs_fp8_seq,
+        "tail_ratio_vs_bf16": tail_ratio_vs_bf16,
+        "note": classify_fp8_tail_note(avg_ms=fp8_pipe_avg_ms, p95_ms=fp8_pipe_p95_ms),
+    }
+
+
+def _bench_single_layer_gather_forward_for_profile(
+    device: torch.device,
+    rank: int,
+    world: int,
+    profile: E2EFusionProfile,
+) -> tuple[tuple[int, ...], BenchResult, BenchResult]:
+    """Single-layer gather+forward timing shared by E2E tests and the shape sweep (no printing)."""
+    shape, weight_full, x = _make_profiled_fp8_e2e_inputs(device, profile)
+    dist.broadcast(weight_full, src=0)
+
+    fp8_full, scale = quantize_param_to_fp8(weight_full)
+    fp8_shard = fp8_full.chunk(world, dim=0)[rank].contiguous()
+    bf16_shard = weight_full.chunk(world, dim=0)[rank].contiguous()
+
+    bf16_out = torch.empty_like(weight_full)
+    fp8_out_buf = torch.empty(*shape, device=device, dtype=fp8_full.dtype)
+
+    for _ in range(3):
+        dist.all_gather_into_tensor(bf16_out, bf16_shard)
+        dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
+    torch.cuda.synchronize()
+
+    def _bf16_pipeline():
+        dist.all_gather_into_tensor(bf16_out, bf16_shard)
+        torch.nn.functional.linear(x, bf16_out)
+
+    def _fp8_pipeline():
+        dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
+        w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
+        torch.nn.functional.linear(x, w)
+
+    r_bf16 = cuda_timer(
+        _bf16_pipeline,
+        label="BF16 gather+GEMM",
+        warmup=_WARMUP,
+        iters=_ITERS,
+        trim_pct=_TRIM,
+        dist_barrier=True,
+    )
+    r_fp8 = cuda_timer(
+        _fp8_pipeline,
+        label="FP8 gather+dequant+GEMM",
+        warmup=_WARMUP,
+        iters=_ITERS,
+        trim_pct=_TRIM,
+        dist_barrier=True,
+    )
+    speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+    r_fp8.extra["speedup"] = round(speedup, 2)
+    return shape, r_bf16, r_fp8
+
+
+def _bench_pipelined_gather_forward_for_profile(
+    device: torch.device,
+    rank: int,
+    world: int,
+    profile: E2EFusionProfile,
+) -> tuple[BenchResult, BenchResult, BenchResult]:
+    """Multi-layer pipelined gather+forward timing shared by E2E tests and shape sweep (no printing)."""
+    n_layers = 4
+    _, weights, xs = _make_profiled_fp8_pipeline_inputs(device, profile, n_layers)
+
+    bf16_shards = []
+    fp8_shards = []
+    fp8_scales = []
+    bf16_outs = []
+    fp8_outs = []
+
+    for w in weights:
+        shape = tuple(w.shape)
+        dist.broadcast(w, src=0)
+        fp8_w, sc = quantize_param_to_fp8(w)
+        bf16_shards.append(w.chunk(world, dim=0)[rank].contiguous())
+        fp8_shards.append(fp8_w.chunk(world, dim=0)[rank].contiguous())
+        fp8_scales.append(sc)
+        bf16_outs.append(torch.empty_like(w))
+        fp8_outs.append(torch.empty(*shape, device=device, dtype=fp8_w.dtype))
+
+    n_weights = len(bf16_shards)
+    comm_stream = torch.cuda.Stream(device=device)
+
+    for i in range(n_weights):
+        dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+        dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+    torch.cuda.synchronize()
+
+    def _bf16_sequential():
+        for i in range(n_weights):
+            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
+            torch.nn.functional.linear(xs[i], bf16_outs[i])
+
+    def _fp8_sequential():
+        for i in range(n_weights):
+            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
+            w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+            torch.nn.functional.linear(xs[i], w)
+
+    def _fp8_pipelined():
+        dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
+        torch.cuda.synchronize()
+        for i in range(n_weights):
+            if i + 1 < n_weights:
+                with torch.cuda.stream(comm_stream):
+                    dist.all_gather_into_tensor(fp8_outs[i + 1], fp8_shards[i + 1])
+            w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
+            torch.nn.functional.linear(xs[i], w)
+            if i + 1 < n_weights:
+                torch.cuda.current_stream().wait_stream(comm_stream)
+
+    r_bf16 = cuda_timer(
+        _bf16_sequential,
+        label=f"BF16 sequential {n_layers}L",
+        warmup=_WARMUP,
+        iters=_ITERS,
+        trim_pct=_TRIM,
+        dist_barrier=True,
+    )
+    r_fp8_seq = cuda_timer(
+        _fp8_sequential,
+        label=f"FP8 sequential {n_layers}L",
+        warmup=_WARMUP,
+        iters=_ITERS,
+        trim_pct=_TRIM,
+        dist_barrier=True,
+    )
+    r_fp8_pipe = cuda_timer(
+        _fp8_pipelined,
+        label=f"FP8 pipelined {n_layers}L",
+        warmup=_WARMUP,
+        iters=_ITERS,
+        trim_pct=_TRIM,
+        dist_barrier=True,
+    )
+    return r_bf16, r_fp8_seq, r_fp8_pipe
+
+
+_SHAPE_SWEEP_EXPECTED_WORLD = 8
+
+
+def _skip_shape_sweep_unless_8gpu(world: int) -> None:
+    if world != _SHAPE_SWEEP_EXPECTED_WORLD:
+        pytest.skip(
+            "ShapeSweep is defined for the 8-GPU comparison mode "
+            f"(world_size={world}); rerun with torchrun --nproc_per_node=8"
+        )
+
+
+def print_fp8_single_layer_shape_sweep_summary(rank: int, rows: list[dict[str, object]]) -> None:
+    """Emit a compact rank-0 summary for the single-layer shape sweep."""
+    if rank != 0:
+        return
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print("  FP8 Param Shape Sweep — single-layer gather+forward")
+    print(sep)
+    if not rows:
+        print("  (no summary rows yet — sweep timing collection pending)")
+    else:
+        for row in rows:
+            print(
+                f"  {row['profile_name']!s:<18}  "
+                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6}  "
+                f"BF16 ms avg/p95/max={row['bf16_avg_ms']:.3f}/{row['bf16_p95_ms']:.3f}/{row['bf16_max_ms']:.3f}  "
+                f"FP8 ms avg/p95/max={row['fp8_avg_ms']:.3f}/{row['fp8_p95_ms']:.3f}/{row['fp8_max_ms']:.3f}  "
+                f"speedup={row['fp8_speedup']:.2f}x  "
+                f"p95_BF16/FP8={row['p95_bf16_over_fp8']:.2f}  "
+                f"(BF16 p95 / FP8 p95)"
+            )
+    print(sep)
+
+
+def print_fp8_pipeline_shape_sweep_summary(rank: int, rows: list[dict[str, object]]) -> None:
+    """Emit a compact rank-0 summary for the pipelined shape sweep (BF16 vs FP8-seq vs FP8-pipe)."""
+    if rank != 0:
+        return
+    sep = "=" * 72
+    print(f"\n{sep}")
+    print("  FP8 Param Shape Sweep — pipelined gather+forward")
+    print(sep)
+    if not rows:
+        print("  (no summary rows yet — sweep timing collection pending)")
+    else:
+        for row in rows:
+            print(
+                f"  {row['profile_name']!s:<18}  "
+                f"T={row['tokens']!s:<5} FFN={row['ffn']!s:<6}  "
+                f"BF16 ms avg/p95={row['bf16_avg_ms']:.3f}/{row['bf16_p95_ms']:.3f}  "
+                f"FP8-seq avg/p95={row['fp8_seq_avg_ms']:.3f}/{row['fp8_seq_p95_ms']:.3f}  "
+                f"FP8-pipe avg/p95/max={row['fp8_pipe_avg_ms']:.3f}/"
+                f"{row['fp8_pipe_p95_ms']:.3f}/{row['fp8_pipe_max_ms']:.3f}  "
+                f"pipe_spd_BF16={row['pipeline_speedup_vs_bf16']:.2f}x  "
+                f"pipe_spd_FP8seq={row['pipeline_speedup_vs_fp8_seq']:.2f}x  "
+                f"p95_BF16/FP8pipe={row['tail_ratio_vs_bf16']:.2f}  "
+                f"note={row['note']!s}"
+            )
+    print(sep)
+
+
 def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
     """Build an nn.Linear stack mimicking transformer MLP layers.
 
@@ -169,6 +450,27 @@ def _build_mlp_stack(n_layers=4, hidden=HIDDEN, ffn=FFN_HIDDEN):
 # ---------------------------------------------------------------------------
 
 
+@contextlib.contextmanager
+def _suppress_dist_stderr():
+    if os.environ.get("LUMEN_BENCH_VERBOSE_DIST") == "1":
+        yield
+        return
+
+    try:
+        saved_stderr = os.dup(2)
+    except OSError:
+        yield
+        return
+
+    try:
+        with open(os.devnull, "w", encoding="utf-8") as devnull:
+            os.dup2(devnull.fileno(), 2)
+            yield
+    finally:
+        os.dup2(saved_stderr, 2)
+        os.close(saved_stderr)
+
+
 def _init_dist():
     if dist.is_initialized():
         return
@@ -176,10 +478,11 @@ def _init_dist():
         return
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
-    dist.init_process_group(
-        backend="cpu:gloo,cuda:nccl",
-        device_id=torch.device(f"cuda:{local_rank}"),
-    )
+    with _suppress_dist_stderr():
+        dist.init_process_group(
+            backend="cpu:gloo,cuda:nccl",
+            device_id=torch.device(f"cuda:{local_rank}"),
+        )
 
 
 _DIST = pytest.mark.skipif(
@@ -219,7 +522,8 @@ def _new_subgroup_for_size(group_size: int):
     subgroup = None
     for start in range(0, world, group_size):
         ranks = list(range(start, start + group_size))
-        group = dist.new_group(ranks)
+        with _suppress_dist_stderr():
+            group = dist.new_group(ranks)
         if rank in ranks:
             subgroup = group
 
@@ -1035,46 +1339,9 @@ class TestFP8ParamE2EDistributed:
 
     def _run_gather_dequant_forward_latency(self, profile: E2EFusionProfile = DEFAULT_PROFILE):
         """Time the full pipeline: scatter shards → allgather FP8 → dequant → GEMM."""
-        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
-
-        shape, weight_full, x = _make_profiled_fp8_e2e_inputs(self.device, profile)
-        dist.broadcast(weight_full, src=0)
-
-        fp8_full, scale = quantize_param_to_fp8(weight_full)
-        fp8_shard = fp8_full.chunk(self.world, dim=0)[self.rank].contiguous()
-        bf16_shard = weight_full.chunk(self.world, dim=0)[self.rank].contiguous()
-
-        bf16_out = torch.empty_like(weight_full)
-        fp8_out_buf = torch.empty(*shape, device=self.device, dtype=fp8_full.dtype)
-
-        for _ in range(3):
-            dist.all_gather_into_tensor(bf16_out, bf16_shard)
-            dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
-        torch.cuda.synchronize()
-
-        def _bf16_pipeline():
-            dist.all_gather_into_tensor(bf16_out, bf16_shard)
-            torch.nn.functional.linear(x, bf16_out)
-
-        def _fp8_pipeline():
-            dist.all_gather_into_tensor(fp8_out_buf, fp8_shard)
-            w = dequantize_param_from_fp8(fp8_out_buf, scale, torch.bfloat16)
-            torch.nn.functional.linear(x, w)
-
-        r_bf16 = cuda_timer(
-            _bf16_pipeline, label="BF16 gather+GEMM", warmup=_WARMUP, iters=_ITERS, trim_pct=_TRIM, dist_barrier=True
+        shape, r_bf16, r_fp8 = _bench_single_layer_gather_forward_for_profile(
+            self.device, self.rank, self.world, profile
         )
-        r_fp8 = cuda_timer(
-            _fp8_pipeline,
-            label="FP8 gather+dequant+GEMM",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-
-        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
-        r_fp8.extra["speedup"] = round(speedup, 2)
 
         if self.rank == 0:
             print_report_with_table(
@@ -1092,85 +1359,9 @@ class TestFP8ParamE2EDistributed:
         the comm stream pre-fetches layer i+1's FP8 shard via allgather.
         The dequant cost is hidden behind the overlapped communication.
         """
-        from lumen.quantize.fp8_params import dequantize_param_from_fp8, quantize_param_to_fp8
-
         n_layers = 4
-        _, weights, xs = _make_profiled_fp8_pipeline_inputs(self.device, profile, n_layers)
-
-        bf16_shards = []
-        fp8_shards = []
-        fp8_scales = []
-        bf16_outs = []
-        fp8_outs = []
-
-        for w in weights:
-            shape = tuple(w.shape)
-            dist.broadcast(w, src=0)
-            fp8_w, sc = quantize_param_to_fp8(w)
-            bf16_shards.append(w.chunk(self.world, dim=0)[self.rank].contiguous())
-            fp8_shards.append(fp8_w.chunk(self.world, dim=0)[self.rank].contiguous())
-            fp8_scales.append(sc)
-            bf16_outs.append(torch.empty_like(w))
-            fp8_outs.append(torch.empty(*shape, device=self.device, dtype=fp8_w.dtype))
-
-        N = len(bf16_shards)
-        comm_stream = torch.cuda.Stream(device=self.device)
-
-        # Warmup
-        for i in range(N):
-            dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-            dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-        torch.cuda.synchronize()
-
-        # BF16 baseline: sequential gather + GEMM per layer
-        def _bf16_sequential():
-            for i in range(N):
-                dist.all_gather_into_tensor(bf16_outs[i], bf16_shards[i])
-                torch.nn.functional.linear(xs[i], bf16_outs[i])
-
-        # FP8 sequential: gather + dequant + GEMM per layer (no overlap)
-        def _fp8_sequential():
-            for i in range(N):
-                dist.all_gather_into_tensor(fp8_outs[i], fp8_shards[i])
-                w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-                torch.nn.functional.linear(xs[i], w)
-
-        # FP8 pipelined: allgather(i+1) on comm_stream while dequant+GEMM(i)
-        def _fp8_pipelined():
-            dist.all_gather_into_tensor(fp8_outs[0], fp8_shards[0])
-            torch.cuda.synchronize()
-            for i in range(N):
-                if i + 1 < N:
-                    with torch.cuda.stream(comm_stream):
-                        dist.all_gather_into_tensor(fp8_outs[i + 1], fp8_shards[i + 1])
-                w = dequantize_param_from_fp8(fp8_outs[i], fp8_scales[i], torch.bfloat16)
-                torch.nn.functional.linear(xs[i], w)
-                if i + 1 < N:
-                    torch.cuda.current_stream().wait_stream(comm_stream)
-
-        r_bf16 = cuda_timer(
-            _bf16_sequential,
-            label=f"BF16 sequential {n_layers}L",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-        r_fp8_seq = cuda_timer(
-            _fp8_sequential,
-            label=f"FP8 sequential {n_layers}L",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
-        )
-        r_fp8_pipe = cuda_timer(
-            _fp8_pipelined,
-            label=f"FP8 pipelined {n_layers}L",
-            warmup=_WARMUP,
-            iters=_ITERS,
-            trim_pct=_TRIM,
-            dist_barrier=True,
+        r_bf16, r_fp8_seq, r_fp8_pipe = _bench_pipelined_gather_forward_for_profile(
+            self.device, self.rank, self.world, profile
         )
 
         sp_seq = r_bf16.avg_ms / max(r_fp8_seq.avg_ms, 1e-6)
@@ -1218,6 +1409,87 @@ class TestFP8ParamProfileExperiments(TestFP8ParamE2EDistributed):
 
     def test_pipeline_gain_experiment_multi_layer_pipelined_gather_forward(self):
         self._run_multi_layer_pipelined_gather_forward(profile=get_e2e_fusion_profile("pipeline_gain"))
+
+
+# ---------------------------------------------------------------------------
+# 8b. Shape sweep — six fixed E2E fusion profiles (opt-in: ``-k ShapeSweep``)
+# ---------------------------------------------------------------------------
+
+
+@_DIST
+class TestFP8ParamShapeSweep:
+    """Sweep FP8 param gather paths across ``get_e2e_fusion_shape_sweep()`` profiles.
+
+    Matches the 8-GPU-oriented workflow used for TailLatency / E2E sections.
+    Select with ``pytest ... -k ShapeSweep`` (see module docstring).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+        yield
+        dist.barrier()
+
+    def test_single_layer_shape_sweep(self):
+        _skip_shape_sweep_unless_8gpu(self.world)
+        rows: list[dict[str, object]] = []
+        for profile in get_e2e_fusion_shape_sweep():
+            assert profile.name
+            _, r_bf16, r_fp8 = _bench_single_layer_gather_forward_for_profile(
+                self.device, self.rank, self.world, profile
+            )
+            fp8_speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+            # Cross-path p95 ratio (BF16 vs FP8), not an intrinsic FP8 tail statistic.
+            p95_bf16_over_fp8 = r_bf16.p95_ms / max(r_fp8.p95_ms, 1e-6)
+            rows.append(
+                build_fp8_single_shape_row(
+                    profile_name=profile.name,
+                    tokens=profile.tokens,
+                    ffn=profile.ffn,
+                    bf16_avg_ms=r_bf16.avg_ms,
+                    bf16_p95_ms=r_bf16.p95_ms,
+                    bf16_max_ms=r_bf16.max_ms,
+                    fp8_avg_ms=r_fp8.avg_ms,
+                    fp8_p95_ms=r_fp8.p95_ms,
+                    fp8_max_ms=r_fp8.max_ms,
+                    fp8_speedup=fp8_speedup,
+                    p95_bf16_over_fp8=p95_bf16_over_fp8,
+                )
+            )
+        print_fp8_single_layer_shape_sweep_summary(self.rank, rows)
+
+    def test_pipelined_shape_sweep(self):
+        _skip_shape_sweep_unless_8gpu(self.world)
+        rows: list[dict[str, object]] = []
+        for profile in get_e2e_fusion_shape_sweep():
+            assert profile.name
+            r_bf16, r_fp8_seq, r_fp8_pipe = _bench_pipelined_gather_forward_for_profile(
+                self.device, self.rank, self.world, profile
+            )
+            pipeline_speedup_vs_bf16 = r_bf16.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
+            pipeline_speedup_vs_fp8_seq = r_fp8_seq.avg_ms / max(r_fp8_pipe.avg_ms, 1e-6)
+            tail_ratio_vs_bf16 = r_bf16.p95_ms / max(r_fp8_pipe.p95_ms, 1e-6)
+            rows.append(
+                build_fp8_pipeline_shape_row(
+                    profile_name=profile.name,
+                    tokens=profile.tokens,
+                    ffn=profile.ffn,
+                    bf16_avg_ms=r_bf16.avg_ms,
+                    bf16_p95_ms=r_bf16.p95_ms,
+                    fp8_seq_avg_ms=r_fp8_seq.avg_ms,
+                    fp8_seq_p95_ms=r_fp8_seq.p95_ms,
+                    fp8_pipe_avg_ms=r_fp8_pipe.avg_ms,
+                    fp8_pipe_p95_ms=r_fp8_pipe.p95_ms,
+                    fp8_pipe_max_ms=r_fp8_pipe.max_ms,
+                    pipeline_speedup_vs_bf16=pipeline_speedup_vs_bf16,
+                    pipeline_speedup_vs_fp8_seq=pipeline_speedup_vs_fp8_seq,
+                    tail_ratio_vs_bf16=tail_ratio_vs_bf16,
+                )
+            )
+        print_fp8_pipeline_shape_sweep_summary(self.rank, rows)
 
 
 # ---------------------------------------------------------------------------

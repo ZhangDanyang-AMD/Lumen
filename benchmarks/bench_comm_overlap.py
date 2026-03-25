@@ -14,6 +14,9 @@ and SDMA backends.  All tests require ``torchrun`` with at least 2 GPUs.
   * **Section 2 — Multi-GPU SDMA overlap**: ``SdmaTpComm`` async primitives
     with dedicated hardware DMA engines.
   * **Section 3 — NCCL vs SDMA comparison**: Direct head-to-head.
+  * **Section 4 — Fixed shape sweep**: Compact rank-0 summaries across the
+    same representative ``tokens x ffn`` profiles used by
+    ``bench_e2e_fusion.py``.
 
 The *overlap ratio* is defined as::
 
@@ -36,6 +39,11 @@ Run NCCL vs SDMA head-to-head (requires mori)::
 Run all tests::
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s
+
+Run fixed shape sweep::
+
+    torchrun --nproc_per_node=2 -m pytest benchmarks/bench_comm_overlap.py -v -s -k ShapeSweep
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_comm_overlap.py -v -s -k ShapeSweep
 """
 
 from __future__ import annotations
@@ -56,6 +64,11 @@ from benchmarks.bench_utils import (
     print_overlap_summary,
     print_report_with_table,
 )
+from benchmarks.e2e_fusion_profiles import (
+    E2EFusionProfile,
+    format_e2e_shape_tag,
+    get_e2e_fusion_shape_sweep,
+)
 
 # ---------------------------------------------------------------------------
 # Dimensions — Llama 3.1 8B column-parallel shape
@@ -73,6 +86,124 @@ N = FFN_HIDDEN  # FFN intermediate (sharded by TP)
 _WARMUP = 10
 _ITERS = 30
 _TRIM = 10.0  # trim 10% outliers from both tails
+
+
+def classify_overlap_note(speedup: float | None) -> str:
+    if speedup is None:
+        return "n/a"
+    if speedup >= 1.03:
+        return "latency win"
+    if speedup < 0.97:
+        return "negative optimization"
+    return "neutral"
+
+
+def shape_sweep_comm_mb(*, tokens: int, width: int) -> float:
+    return (tokens * width * 2) / 1e6
+
+
+def build_overlap_shape_row(
+    *,
+    profile_name: str,
+    tokens: int,
+    ffn: int,
+    comm_mb: float,
+    gemm_ms: float,
+    nccl_comm_ms: float,
+    nccl_seq_ms: float,
+    nccl_ovl_ms: float,
+    nccl_speedup: float,
+    nccl_overlap_ratio: float,
+    sdma_comm_ms: float | None,
+    sdma_seq_ms: float | None,
+    sdma_ovl_ms: float | None,
+    sdma_speedup: float | None,
+    sdma_overlap_ratio: float | None,
+    sdma_vs_nccl: float | None,
+) -> dict[str, object]:
+    return {
+        "profile_name": profile_name,
+        "tokens": tokens,
+        "ffn": ffn,
+        "comm_mb": comm_mb,
+        "gemm_ms": gemm_ms,
+        "nccl_comm_ms": nccl_comm_ms,
+        "nccl_seq_ms": nccl_seq_ms,
+        "nccl_ovl_ms": nccl_ovl_ms,
+        "nccl_speedup": nccl_speedup,
+        "nccl_overlap_ratio": nccl_overlap_ratio,
+        "nccl_note": classify_overlap_note(nccl_speedup),
+        "sdma_comm_ms": sdma_comm_ms,
+        "sdma_seq_ms": sdma_seq_ms,
+        "sdma_ovl_ms": sdma_ovl_ms,
+        "sdma_speedup": sdma_speedup,
+        "sdma_overlap_ratio": sdma_overlap_ratio,
+        "sdma_note": classify_overlap_note(sdma_speedup),
+        "sdma_vs_nccl": sdma_vs_nccl,
+    }
+
+
+def _compute_overlap_stats(
+    *,
+    comm_ms: float,
+    gemm_ms: float,
+    seq_ms: float,
+    ovl_ms: float,
+) -> tuple[float, float]:
+    t_parts = comm_ms + gemm_ms
+    overlap_ratio = 1 - (ovl_ms / max(t_parts, 1e-6))
+    speedup = seq_ms / max(ovl_ms, 1e-6)
+    return round(speedup, 2), round(overlap_ratio, 3)
+
+
+def _format_shape_sweep_ms(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.3f}"
+
+
+def _format_shape_sweep_speedup(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.2f}x"
+
+
+def _format_shape_sweep_ratio(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.2f}"
+
+
+def _print_overlap_shape_sweep_summary(title: str, rows: list[dict[str, object]]) -> None:
+    print("\n" + "=" * 186)
+    print(title)
+    print("=" * 186)
+    print(
+        f"{'Profile':<20} {'Tokens':>7} {'FFN':>7} {'Comm MB':>9} {'GEMM':>8} "
+        f"{'NCCL c':>8} {'NCCL o':>8} {'NCCL sp':>9} {'NCCL ov':>9} {'NCCL note':<22} "
+        f"{'SDMA c':>8} {'SDMA o':>8} {'SDMA sp':>9} {'SDMA ov':>9} {'SDMA note':<22} {'SDMA/NCCL':>10}"
+    )
+    print("-" * 186)
+    for row in rows:
+        print(
+            f"{str(row['profile_name']):<20} {int(row['tokens']):>7d} {int(row['ffn']):>7d} "
+            f"{float(row['comm_mb']):>9.1f} {float(row['gemm_ms']):>8.3f} "
+            f"{float(row['nccl_comm_ms']):>8.3f} {float(row['nccl_ovl_ms']):>8.3f} "
+            f"{_format_shape_sweep_speedup(float(row['nccl_speedup'])):>9} "
+            f"{_format_shape_sweep_ratio(float(row['nccl_overlap_ratio'])):>9} "
+            f"{str(row['nccl_note']):<22} "
+            f"{_format_shape_sweep_ms(row['sdma_comm_ms'] if row['sdma_comm_ms'] is not None else None):>8} "
+            f"{_format_shape_sweep_ms(row['sdma_ovl_ms'] if row['sdma_ovl_ms'] is not None else None):>8} "
+            f"{_format_shape_sweep_speedup(row['sdma_speedup'] if row['sdma_speedup'] is not None else None):>9} "
+            f"{_format_shape_sweep_ratio(
+                row['sdma_overlap_ratio']
+                if row['sdma_overlap_ratio'] is not None
+                else None
+            ):>9} "
+            f"{str(row['sdma_note']):<22} "
+            f"{_format_shape_sweep_speedup(row['sdma_vs_nccl'] if row['sdma_vs_nccl'] is not None else None):>10}"
+        )
+    print("=" * 186)
 
 
 # ---------------------------------------------------------------------------
@@ -1013,4 +1144,401 @@ class TestNCCLvsSdma:
             print_report_with_table(
                 f"NCCL vs SDMA RS Scaling Summary (world={self.world})",
                 all_results,
+            )
+
+
+@_DIST
+class TestCommOverlapShapeSweep:
+    """Fixed-profile shape sweep for column and row overlap summaries."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.device = torch.device(f"cuda:{self.local_rank}")
+        self.sdma_available = _sdma_available()
+        if self.sdma_available:
+            os.environ["MORI_ENABLE_SDMA"] = "1"
+        yield
+        dist.barrier()
+
+    def _validate_profile(self, profile: E2EFusionProfile) -> None:
+        if profile.tokens % self.world != 0:
+            raise ValueError(f"tokens={profile.tokens} not divisible by world={self.world}")
+        if profile.hidden % self.world != 0:
+            raise ValueError(f"hidden={profile.hidden} not divisible by world={self.world}")
+        if profile.ffn % self.world != 0:
+            raise ValueError(f"ffn={profile.ffn} not divisible by world={self.world}")
+
+    def _measure_nccl_column(self, profile: E2EFusionProfile) -> dict[str, float]:
+        self._validate_profile(profile)
+        tag = format_e2e_shape_tag(profile)
+        shard_m = profile.tokens // self.world
+        x_local = torch.randn(shard_m, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(profile.ffn // self.world, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        comm_stream = torch.cuda.Stream(device=self.device)
+
+        for _ in range(3):
+            _distributed_allgather(x_local)
+            _ = x_local @ w.T
+        torch.cuda.synchronize()
+
+        r_comm = cuda_timer(
+            lambda: _distributed_allgather(x_local),
+            label=f"NCCL AG {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_gemm = cuda_timer(
+            lambda: x_local @ w.T,
+            label=f"GEMM {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _seq():
+            _distributed_allgather(x_local)
+            _ = x_local @ w.T
+
+        def _ovl():
+            with torch.cuda.stream(comm_stream):
+                _distributed_allgather(x_local)
+            _ = x_local @ w.T
+            comm_stream.synchronize()
+
+        r_seq = cuda_timer(
+            _seq,
+            label=f"NCCL seq {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ovl = cuda_timer(
+            _ovl,
+            label=f"NCCL ovl {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        speedup, overlap_ratio = _compute_overlap_stats(
+            comm_ms=r_comm.avg_ms,
+            gemm_ms=r_gemm.avg_ms,
+            seq_ms=r_seq.avg_ms,
+            ovl_ms=r_ovl.avg_ms,
+        )
+        return {
+            "comm_ms": r_comm.avg_ms,
+            "gemm_ms": r_gemm.avg_ms,
+            "seq_ms": r_seq.avg_ms,
+            "ovl_ms": r_ovl.avg_ms,
+            "speedup": speedup,
+            "overlap_ratio": overlap_ratio,
+        }
+
+    def _measure_sdma_column(self, profile: E2EFusionProfile) -> dict[str, float] | None:
+        if not self.sdma_available:
+            return None
+
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        self._validate_profile(profile)
+        tag = format_e2e_shape_tag(profile)
+        shard_m = profile.tokens // self.world
+        x_local = torch.randn(shard_m, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(profile.ffn // self.world, profile.hidden, device=self.device, dtype=torch.bfloat16)
+        comm = SdmaTpComm(dist.group.WORLD)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        for _ in range(3):
+            comm.allgather_dim0(x_local)
+            _ = x_local @ w.T
+        torch.cuda.synchronize()
+
+        r_comm = cuda_timer(
+            lambda: comm.allgather_dim0(x_local),
+            label=f"SDMA AG {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_gemm = cuda_timer(
+            lambda: x_local @ w.T,
+            label=f"GEMM {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _seq():
+            comm.allgather_dim0(x_local)
+            _ = x_local @ w.T
+
+        def _ovl():
+            comm.allgather_dim0_async(x_local, stream=sdma_stream)
+            _ = x_local @ w.T
+            comm.wait_allgather_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_seq = cuda_timer(
+            _seq,
+            label=f"SDMA seq {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ovl = cuda_timer(
+            _ovl,
+            label=f"SDMA ovl {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        speedup, overlap_ratio = _compute_overlap_stats(
+            comm_ms=r_comm.avg_ms,
+            gemm_ms=r_gemm.avg_ms,
+            seq_ms=r_seq.avg_ms,
+            ovl_ms=r_ovl.avg_ms,
+        )
+        return {
+            "comm_ms": r_comm.avg_ms,
+            "gemm_ms": r_gemm.avg_ms,
+            "seq_ms": r_seq.avg_ms,
+            "ovl_ms": r_ovl.avg_ms,
+            "speedup": speedup,
+            "overlap_ratio": overlap_ratio,
+        }
+
+    def _measure_nccl_row(self, profile: E2EFusionProfile) -> dict[str, float]:
+        self._validate_profile(profile)
+        tag = format_e2e_shape_tag(profile)
+        k_tp = profile.hidden // self.world
+        x = torch.randn(profile.tokens, k_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(profile.ffn, k_tp, device=self.device, dtype=torch.bfloat16)
+        gemm_output = x @ w.T
+        comm_stream = torch.cuda.Stream(device=self.device)
+
+        def _rs_nccl(tensor):
+            return _reduce_scatter(tensor, self.world, self.device)
+
+        for _ in range(3):
+            _rs_nccl(gemm_output)
+            _ = x @ w.T
+        torch.cuda.synchronize()
+
+        r_comm = cuda_timer(
+            lambda: _rs_nccl(gemm_output),
+            label=f"NCCL RS {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_gemm = cuda_timer(
+            lambda: x @ w.T,
+            label=f"GEMM {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _seq():
+            _rs_nccl(gemm_output)
+            _ = x @ w.T
+
+        def _ovl():
+            with torch.cuda.stream(comm_stream):
+                _rs_nccl(gemm_output)
+            _ = x @ w.T
+            comm_stream.synchronize()
+
+        r_seq = cuda_timer(
+            _seq,
+            label=f"NCCL RS seq {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ovl = cuda_timer(
+            _ovl,
+            label=f"NCCL RS ovl {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        speedup, overlap_ratio = _compute_overlap_stats(
+            comm_ms=r_comm.avg_ms,
+            gemm_ms=r_gemm.avg_ms,
+            seq_ms=r_seq.avg_ms,
+            ovl_ms=r_ovl.avg_ms,
+        )
+        return {
+            "comm_ms": r_comm.avg_ms,
+            "gemm_ms": r_gemm.avg_ms,
+            "seq_ms": r_seq.avg_ms,
+            "ovl_ms": r_ovl.avg_ms,
+            "speedup": speedup,
+            "overlap_ratio": overlap_ratio,
+        }
+
+    def _measure_sdma_row(self, profile: E2EFusionProfile) -> dict[str, float] | None:
+        if not self.sdma_available:
+            return None
+
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        self._validate_profile(profile)
+        tag = format_e2e_shape_tag(profile)
+        k_tp = profile.hidden // self.world
+        x = torch.randn(profile.tokens, k_tp, device=self.device, dtype=torch.bfloat16)
+        w = torch.randn(profile.ffn, k_tp, device=self.device, dtype=torch.bfloat16)
+        gemm_output = x @ w.T
+        comm = SdmaTpComm(dist.group.WORLD)
+        sdma_stream = torch.cuda.Stream(device=self.device)
+        compute_stream = torch.cuda.current_stream(self.device)
+
+        for _ in range(3):
+            comm.reduce_scatter_dim0(gemm_output)
+            _ = x @ w.T
+        torch.cuda.synchronize()
+
+        r_comm = cuda_timer(
+            lambda: comm.reduce_scatter_dim0(gemm_output),
+            label=f"SDMA RS {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_gemm = cuda_timer(
+            lambda: x @ w.T,
+            label=f"GEMM {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+        )
+
+        def _seq():
+            comm.reduce_scatter_dim0(gemm_output)
+            _ = x @ w.T
+
+        def _ovl():
+            comm.reduce_scatter_dim0_async(gemm_output, stream=sdma_stream)
+            _ = x @ w.T
+            comm.wait_reduce_scatter_dim0(stream=sdma_stream)
+            compute_stream.wait_stream(sdma_stream)
+
+        r_seq = cuda_timer(
+            _seq,
+            label=f"SDMA RS seq {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        r_ovl = cuda_timer(
+            _ovl,
+            label=f"SDMA RS ovl {tag}",
+            warmup=_WARMUP,
+            iters=_ITERS,
+            trim_pct=_TRIM,
+            dist_barrier=True,
+        )
+        speedup, overlap_ratio = _compute_overlap_stats(
+            comm_ms=r_comm.avg_ms,
+            gemm_ms=r_gemm.avg_ms,
+            seq_ms=r_seq.avg_ms,
+            ovl_ms=r_ovl.avg_ms,
+        )
+        return {
+            "comm_ms": r_comm.avg_ms,
+            "gemm_ms": r_gemm.avg_ms,
+            "seq_ms": r_seq.avg_ms,
+            "ovl_ms": r_ovl.avg_ms,
+            "speedup": speedup,
+            "overlap_ratio": overlap_ratio,
+        }
+
+    def test_column_shape_sweep(self):
+        rows: list[dict[str, object]] = []
+        for profile in get_e2e_fusion_shape_sweep():
+            nccl = self._measure_nccl_column(profile)
+            sdma = self._measure_sdma_column(profile)
+            sdma_vs_nccl = None
+            if sdma is not None:
+                sdma_vs_nccl = round(nccl["ovl_ms"] / max(sdma["ovl_ms"], 1e-6), 2)
+            rows.append(
+                build_overlap_shape_row(
+                    profile_name=profile.name,
+                    tokens=profile.tokens,
+                    ffn=profile.ffn,
+                    comm_mb=shape_sweep_comm_mb(tokens=profile.tokens, width=profile.hidden),
+                    gemm_ms=nccl["gemm_ms"],
+                    nccl_comm_ms=nccl["comm_ms"],
+                    nccl_seq_ms=nccl["seq_ms"],
+                    nccl_ovl_ms=nccl["ovl_ms"],
+                    nccl_speedup=nccl["speedup"],
+                    nccl_overlap_ratio=nccl["overlap_ratio"],
+                    sdma_comm_ms=None if sdma is None else sdma["comm_ms"],
+                    sdma_seq_ms=None if sdma is None else sdma["seq_ms"],
+                    sdma_ovl_ms=None if sdma is None else sdma["ovl_ms"],
+                    sdma_speedup=None if sdma is None else sdma["speedup"],
+                    sdma_overlap_ratio=None if sdma is None else sdma["overlap_ratio"],
+                    sdma_vs_nccl=sdma_vs_nccl,
+                )
+            )
+            dist.barrier()
+
+        if self.rank == 0:
+            _print_overlap_shape_sweep_summary(
+                f"Comm Overlap Shape Sweep — Column Parallel (world={self.world})",
+                rows,
+            )
+
+    def test_row_shape_sweep(self):
+        rows: list[dict[str, object]] = []
+        for profile in get_e2e_fusion_shape_sweep():
+            nccl = self._measure_nccl_row(profile)
+            sdma = self._measure_sdma_row(profile)
+            sdma_vs_nccl = None
+            if sdma is not None:
+                sdma_vs_nccl = round(nccl["ovl_ms"] / max(sdma["ovl_ms"], 1e-6), 2)
+            rows.append(
+                build_overlap_shape_row(
+                    profile_name=profile.name,
+                    tokens=profile.tokens,
+                    ffn=profile.ffn,
+                    comm_mb=shape_sweep_comm_mb(tokens=profile.tokens, width=profile.ffn),
+                    gemm_ms=nccl["gemm_ms"],
+                    nccl_comm_ms=nccl["comm_ms"],
+                    nccl_seq_ms=nccl["seq_ms"],
+                    nccl_ovl_ms=nccl["ovl_ms"],
+                    nccl_speedup=nccl["speedup"],
+                    nccl_overlap_ratio=nccl["overlap_ratio"],
+                    sdma_comm_ms=None if sdma is None else sdma["comm_ms"],
+                    sdma_seq_ms=None if sdma is None else sdma["seq_ms"],
+                    sdma_ovl_ms=None if sdma is None else sdma["ovl_ms"],
+                    sdma_speedup=None if sdma is None else sdma["speedup"],
+                    sdma_overlap_ratio=None if sdma is None else sdma["overlap_ratio"],
+                    sdma_vs_nccl=sdma_vs_nccl,
+                )
+            )
+            dist.barrier()
+
+        if self.rank == 0:
+            _print_overlap_shape_sweep_summary(
+                f"Comm Overlap Shape Sweep — Row Parallel (world={self.world})",
+                rows,
             )
