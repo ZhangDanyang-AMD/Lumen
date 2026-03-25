@@ -709,7 +709,7 @@ class TestDeferredWgradSdmaComm:
         profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
-        comm = SdmaTpComm(dist.group.WORLD)
+        comm = SdmaTpComm.get(dist.group.WORLD)
 
         # ── Part 1: single-layer overlap ─────────────────────────
         x, w, grad_out, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
@@ -937,7 +937,7 @@ class TestNCCLvsSdmaWgradDelay:
 
         torch.cuda.synchronize()
         dist.barrier()
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma_comm = SdmaTpComm.get(dist.group.WORLD)
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
         dwg = _DeferredWgrad()
@@ -1099,7 +1099,6 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL:          {sdma_vs_nccl:.2f}x")
             print()
 
-        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1114,7 +1113,7 @@ class TestNCCLvsSdmaWgradDelay:
         profile = DEFAULT_PROFILE
         torch.cuda.synchronize()
         dist.barrier()
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma_comm = SdmaTpComm.get(dist.group.WORLD)
         n_layers = 4
         x, weights, grad_outs = _make_profiled_wgrad_multi_layer_inputs(self.device, profile, n_layers)
 
@@ -1267,7 +1266,6 @@ class TestNCCLvsSdmaWgradDelay:
             print(f"  SDMA vs NCCL (deferred):  {sdma_vs_nccl:.2f}x")
             print()
 
-        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1292,7 +1290,7 @@ class TestNCCLvsSdmaWgradDelay:
         n_layers = 4
         torch.cuda.synchronize()
         dist.barrier()
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma_comm = SdmaTpComm.get(dist.group.WORLD)
 
         x = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
         weights = [
@@ -1444,7 +1442,6 @@ class TestNCCLvsSdmaWgradDelay:
                 [r_wgrad, r_eager, r_nccl, r_sdma],
             )
 
-        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1456,7 +1453,7 @@ class TestNCCLvsSdmaWgradDelay:
         n_layers = 4
         torch.cuda.synchronize()
         dist.barrier()
-        sdma_comm = SdmaTpComm(dist.group.WORLD)
+        sdma_comm = SdmaTpComm.get(dist.group.WORLD)
         gemm_sizes = [1024, 4096, 7168, 14336, 28672, 57344]
         all_results: List[BenchResult] = []
 
@@ -1616,7 +1613,6 @@ class TestNCCLvsSdmaWgradDelay:
                 all_results,
             )
 
-        del sdma_comm
         torch.cuda.synchronize()
         dist.barrier()
 

@@ -23,7 +23,16 @@ For delayed-wgrad benchmarks and multi-layer pipeline schedules, use
 ``benchmarks/bench_wgrad_delay.py``. For isolated pipeline micro-benchmarks
 and chunk sweeps, use ``benchmarks/bench_fused_pipeline.py``.
 
+The built-in **shape sweep** compares fixed ``tokens`` / ``ffn`` combinations
+(``hidden=4096``, ``num_chunks=4``). ``batch`` and ``seq`` matter only through
+``tokens = batch * seq``; the benchmark sees flattened ``[tokens, hidden]``
+activations.
+
 Requires >= 2 GPUs with NCCL. TP scaling requires 8 GPUs.
+
+Run shape sweep (8 GPUs recommended for the full NCCL vs SDMA comparison)::
+
+    torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k ShapeSweep
 
 Run E2E layer benchmarks::
 
@@ -57,7 +66,6 @@ Run all::
 from __future__ import annotations
 
 import os
-from typing import List
 
 import pytest
 import torch
@@ -70,11 +78,13 @@ from benchmarks.bench_utils import (
     print_bandwidth_summary,
     print_bench_warnings,
     print_report_with_table,
+    track_cuda_memory,
 )
 from benchmarks.e2e_fusion_profiles import (
     E2EFusionProfile,
     format_e2e_fusion_profile,
     get_e2e_fusion_profile,
+    get_e2e_fusion_shape_sweep,
 )
 
 DEFAULT_PROFILE = get_e2e_fusion_profile()
@@ -88,6 +98,163 @@ _DIST = pytest.mark.skipif(
 )
 
 
+def peak_delta_mb(mem_info: dict[str, int]) -> float:
+    """Convert ``peak_delta`` bytes to **mebibytes** (MiB), i.e. divide by 1024².
+
+    Memory sweep columns use MiB for working-set deltas; comm volume uses decimal MB
+    (see :func:`shape_comm_mb`).
+    """
+    return round(mem_info["peak_delta"] / (1024 * 1024), 1)
+
+
+def shape_comm_mb(profile: E2EFusionProfile) -> float:
+    """Logical AG+RS payload size in **decimal megabytes** (1e6 bytes), not MiB.
+
+    Matches the shape-sweep ``total_comm_mb`` definition (bf16 activations, / 1e6).
+    """
+    ag_bytes = profile.tokens * profile.hidden * 2
+    rs_bytes = profile.tokens * profile.hidden * 2
+    return (ag_bytes + rs_bytes) / 1e6
+
+
+def validate_tokens_divisible(*, tokens: int, world_size: int) -> None:
+    if tokens % world_size != 0:
+        raise ValueError(f"tokens={tokens} not divisible by world_size={world_size}")
+
+
+def classify_backend_note(
+    *,
+    speedup: float | None,
+    mem_savings_mb: float | None,
+) -> str:
+    if speedup is None or mem_savings_mb is None:
+        return "n/a"
+    if speedup >= 1.03:
+        return "latency win"
+    if speedup < 0.97:
+        return "negative optimization"
+    if mem_savings_mb >= 32.0:
+        return "memory win only"
+    return "neutral"
+
+
+def _measure_peak_delta_mb(fn, *, device: torch.device) -> float:
+    torch.cuda.empty_cache()
+    with track_cuda_memory(device=device) as mem_info:
+        fn()
+    return peak_delta_mb(mem_info)
+
+
+def build_shape_sweep_row(
+    *,
+    profile_name: str,
+    tokens: int,
+    ffn: int,
+    naive_ms: float,
+    nccl_ms: float,
+    nccl_speedup: float,
+    nccl_ag_bw: float,
+    nccl_rs_bw: float,
+    nccl_peak_delta_mb: float,
+    nccl_mem_savings_mb: float,
+    sdma_ms: float | None,
+    sdma_speedup: float | None,
+    sdma_ag_bw: float | None,
+    sdma_rs_bw: float | None,
+    sdma_peak_delta_mb: float | None,
+    sdma_mem_savings_mb: float | None,
+    naive_peak_delta_mb: float,
+    total_comm_mb: float,
+) -> dict[str, object]:
+    nccl_note = classify_backend_note(speedup=nccl_speedup, mem_savings_mb=nccl_mem_savings_mb)
+    if sdma_ms is None:
+        sdma_note = "n/a"
+    else:
+        sdma_note = classify_backend_note(speedup=sdma_speedup, mem_savings_mb=sdma_mem_savings_mb)
+    return {
+        "profile_name": profile_name,
+        "tokens": tokens,
+        "ffn": ffn,
+        "naive_ms": naive_ms,
+        "nccl_ms": nccl_ms,
+        "nccl_speedup": nccl_speedup,
+        "nccl_ag_bw": nccl_ag_bw,
+        "nccl_rs_bw": nccl_rs_bw,
+        "nccl_peak_delta_mb": nccl_peak_delta_mb,
+        "nccl_mem_savings_mb": nccl_mem_savings_mb,
+        "sdma_ms": sdma_ms,
+        "sdma_speedup": sdma_speedup,
+        "sdma_ag_bw": sdma_ag_bw,
+        "sdma_rs_bw": sdma_rs_bw,
+        "sdma_peak_delta_mb": sdma_peak_delta_mb,
+        "sdma_mem_savings_mb": sdma_mem_savings_mb,
+        "naive_peak_delta_mb": naive_peak_delta_mb,
+        "total_comm_mb": total_comm_mb,
+        "nccl_note": nccl_note,
+        "sdma_note": sdma_note,
+        "comm_mb": total_comm_mb,
+    }
+
+
+def _print_shape_sweep_summary(measurements: list[dict[str, object]]) -> None:
+    """Emit two compact rank-0 tables: latency/speedup/notes and eff. BW + peak_delta."""
+    rows = [m["shape_sweep_row"] for m in measurements]
+
+    print("\n" + "=" * 132)
+    print("E2E Fusion Shape Sweep — performance (fwd+bwd)")
+    print("=" * 132)
+    print(
+        f"{'Profile':<20} {'Tokens':>7} {'FFN':>7} {'Naive ms':>10} {'NCCL ms':>10} "
+        f"{'NCCL sp':>9} {'NCCL note':<18} {'SDMA ms':>10} {'SDMA sp':>9} {'SDMA note':<18} {'Comm MB':>9}"
+    )
+    print("-" * 132)
+    for r in rows:
+        sdma_ms = r["sdma_ms"]
+        if sdma_ms is None:
+            sdma_ms_s = "n/a"
+            sdma_sp_s = "n/a"
+            sdma_note_s = "n/a"
+        else:
+            sdma_ms_s = f"{float(sdma_ms):.3f}"
+            sdma_sp_s = f"{float(r['sdma_speedup']):.2f}x"
+            sdma_note_s = str(r["sdma_note"])
+        print(
+            f"{str(r['profile_name']):<20} {int(r['tokens']):>7d} {int(r['ffn']):>7d} "
+            f"{float(r['naive_ms']):>10.3f} {float(r['nccl_ms']):>10.3f} "
+            f"{float(r['nccl_speedup']):>8.2f}x {str(r['nccl_note']):<18} "
+            f"{sdma_ms_s:>10} {sdma_sp_s:>9} {sdma_note_s:<18} {float(r['comm_mb']):>9.1f}"
+        )
+    print("=" * 132)
+
+    print("\n" + "=" * 128)
+    print("E2E Fusion Shape Sweep — bandwidth + memory")
+    print("(AG/RS columns: effective step-normalized BW, GB/s; peak columns: track_cuda_memory peak_delta, MiB)")
+    print("=" * 128)
+    print(
+        f"{'Profile':<20} {'NCCL AG eff BW':>15} {'NCCL RS eff BW':>15} "
+        f"{'SDMA AG eff BW':>15} {'SDMA RS eff BW':>15} "
+        f"{'Naive peak ΔMB':>16} {'NCCL peak ΔMB':>16} {'SDMA peak ΔMB':>16}"
+    )
+    print("-" * 128)
+    for r in rows:
+        nccl_ag = float(r["nccl_ag_bw"])
+        nccl_rs = float(r["nccl_rs_bw"])
+        if r["sdma_ag_bw"] is None:
+            sdma_ag_cell = "n/a"
+            sdma_rs_cell = "n/a"
+            sdma_peak_cell = "n/a"
+        else:
+            sdma_ag_cell = f"{float(r['sdma_ag_bw']):.1f}"
+            sdma_rs_cell = f"{float(r['sdma_rs_bw']):.1f}"
+            sdma_peak_cell = f"{float(r['sdma_peak_delta_mb']):.1f}"
+        print(
+            f"{str(r['profile_name']):<20} {nccl_ag:>15.1f} {nccl_rs:>15.1f} "
+            f"{sdma_ag_cell:>15} {sdma_rs_cell:>15} "
+            f"{float(r['naive_peak_delta_mb']):>16.1f} {float(r['nccl_peak_delta_mb']):>16.1f} {sdma_peak_cell:>16}"
+        )
+    print("=" * 128)
+
+
 def _sdma_available():
     try:
         os.environ.setdefault("MORI_ENABLE_SDMA", "1")
@@ -99,7 +266,7 @@ def _sdma_available():
 
 
 _SDMA_DIST = pytest.mark.skipif(
-    "RANK" not in os.environ or not _sdma_available(),
+    '"RANK" not in os.environ or not _sdma_available()',
     reason="Multi-GPU + mori SDMA required",
 )
 
@@ -201,7 +368,8 @@ class _E2ETransformerLayerFusionBase:
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
-        self.device = torch.device(f"cuda:{self.rank}")
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.device = torch.device(f"cuda:{self.local_rank}")
         yield
         dist.barrier()
 
@@ -255,9 +423,15 @@ class _E2ETransformerLayerFusionBase:
             None,
         )
 
-    def _run_comparison(self, fwd_only=False, bwd_only=False, profile: E2EFusionProfile = DEFAULT_PROFILE):
+    def _measure_comparison(
+        self,
+        fwd_only=False,
+        bwd_only=False,
+        profile: E2EFusionProfile = DEFAULT_PROFILE,
+    ) -> dict[str, object]:
         from lumen.modules.comm_overlap import NcclCommBackend
 
+        validate_tokens_divisible(tokens=profile.tokens, world_size=self.world)
         S_local = profile.tokens // self.world
         w_up, w_down = self._make_layer(profile)
         w_up_param = torch.nn.Parameter(w_up.clone())
@@ -358,6 +532,7 @@ class _E2ETransformerLayerFusionBase:
         r_fused.extra["speedup"] = round(speedup, 2)
 
         results = [r_naive, r_fused]
+        r_sdma = None
 
         if _sdma_available() and not bwd_only:
             from lumen.modules.comm_overlap import SdmaCommBackend
@@ -405,17 +580,117 @@ class _E2ETransformerLayerFusionBase:
             r_sdma.extra["speedup"] = round(sdma_speedup, 2)
             results.append(r_sdma)
 
-        if self.rank == 0:
-            print_report_with_table(
-                (
-                    "E2E Transformer Layer Pure Pipeline "
-                    f"{label_suffix} ({format_e2e_fusion_profile(profile)}, world={self.world})"
-                ),
-                results,
-            )
-            print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r_fused.avg_ms)
-            print_bandwidth_summary(label="RS", bytes_transferred=rs_bytes, time_ms=r_fused.avg_ms)
-            print_bench_warnings(result=r_fused, speedup=speedup)
+        torch.cuda.synchronize()
+        dist.barrier()
+
+        for _ in range(3):
+            _naive()
+        torch.cuda.synchronize()
+        naive_peak_delta_mb = _measure_peak_delta_mb(_naive, device=self.device)
+        dist.barrier()
+
+        for _ in range(3):
+            _fused_nccl()
+        torch.cuda.synchronize()
+        nccl_peak_delta_mb = _measure_peak_delta_mb(_fused_nccl, device=self.device)
+        dist.barrier()
+
+        nccl_mem_savings_mb = round(naive_peak_delta_mb - nccl_peak_delta_mb, 1)
+
+        sdma_ms = None
+        sdma_speedup_val = None
+        sdma_peak_delta_mb = None
+        sdma_mem_savings_mb = None
+
+        if r_sdma is not None:
+            torch.cuda.synchronize()
+            dist.barrier()
+            for _ in range(3):
+                _fused_sdma()
+            torch.cuda.synchronize()
+            sdma_peak_delta_mb = _measure_peak_delta_mb(_fused_sdma, device=self.device)
+            dist.barrier()
+            sdma_ms = r_sdma.avg_ms
+            sdma_speedup_val = r_naive.avg_ms / max(r_sdma.avg_ms, 1e-6)
+            sdma_mem_savings_mb = round(naive_peak_delta_mb - sdma_peak_delta_mb, 1)
+
+        total_comm_mb = shape_comm_mb(profile)
+        ag_bw_nccl = compute_bandwidth_gb_s(ag_bytes, r_fused.avg_ms)
+        rs_bw_nccl = compute_bandwidth_gb_s(rs_bytes, r_fused.avg_ms)
+        ag_bw_sdma = compute_bandwidth_gb_s(ag_bytes, r_sdma.avg_ms) if r_sdma is not None else None
+        rs_bw_sdma = compute_bandwidth_gb_s(rs_bytes, r_sdma.avg_ms) if r_sdma is not None else None
+
+        shape_sweep_row = build_shape_sweep_row(
+            profile_name=profile.name,
+            tokens=profile.tokens,
+            ffn=profile.ffn,
+            naive_ms=r_naive.avg_ms,
+            nccl_ms=r_fused.avg_ms,
+            nccl_speedup=speedup,
+            nccl_ag_bw=ag_bw_nccl,
+            nccl_rs_bw=rs_bw_nccl,
+            nccl_peak_delta_mb=nccl_peak_delta_mb,
+            nccl_mem_savings_mb=nccl_mem_savings_mb,
+            sdma_ms=sdma_ms,
+            sdma_speedup=sdma_speedup_val,
+            sdma_ag_bw=ag_bw_sdma,
+            sdma_rs_bw=rs_bw_sdma,
+            sdma_peak_delta_mb=sdma_peak_delta_mb,
+            sdma_mem_savings_mb=sdma_mem_savings_mb,
+            naive_peak_delta_mb=naive_peak_delta_mb,
+            total_comm_mb=total_comm_mb,
+        )
+
+        return {
+            "profile": profile,
+            "label_suffix": label_suffix,
+            "rank": self.rank,
+            "world": self.world,
+            "results": results,
+            "ag_bytes": ag_bytes,
+            "rs_bytes": rs_bytes,
+            "naive_ms": r_naive.avg_ms,
+            "nccl_ms": r_fused.avg_ms,
+            "nccl_speedup": speedup,
+            "ag_bw_nccl_gb_s": ag_bw_nccl,
+            "rs_bw_nccl_gb_s": rs_bw_nccl,
+            "sdma_ms": sdma_ms,
+            "sdma_speedup": sdma_speedup_val,
+            "ag_bw_sdma_gb_s": ag_bw_sdma,
+            "rs_bw_sdma_gb_s": rs_bw_sdma,
+            "total_comm_mb": total_comm_mb,
+            "peak_delta_naive_mb": naive_peak_delta_mb,
+            "peak_delta_nccl_mb": nccl_peak_delta_mb,
+            "peak_delta_sdma_mb": sdma_peak_delta_mb,
+            "nccl_mem_savings_mb_vs_naive": nccl_mem_savings_mb,
+            "sdma_mem_savings_mb_vs_naive": sdma_mem_savings_mb,
+            "shape_sweep_row": shape_sweep_row,
+        }
+
+    def _print_detailed_comparison(self, measurement: dict[str, object]) -> None:
+        if self.rank != 0:
+            return
+        profile = measurement["profile"]
+        label_suffix = measurement["label_suffix"]
+        results = measurement["results"]
+        ag_bytes = measurement["ag_bytes"]
+        rs_bytes = measurement["rs_bytes"]
+        r_fused = results[1]
+        speedup = measurement["nccl_speedup"]
+        print_report_with_table(
+            (
+                "E2E Transformer Layer Pure Pipeline "
+                f"{label_suffix} ({format_e2e_fusion_profile(profile)}, world={self.world})"
+            ),
+            results,
+        )
+        print_bandwidth_summary(label="AG", bytes_transferred=ag_bytes, time_ms=r_fused.avg_ms)
+        print_bandwidth_summary(label="RS", bytes_transferred=rs_bytes, time_ms=r_fused.avg_ms)
+        print_bench_warnings(result=r_fused, speedup=speedup)
+
+    def _run_comparison(self, fwd_only=False, bwd_only=False, profile: E2EFusionProfile = DEFAULT_PROFILE):
+        m = self._measure_comparison(fwd_only=fwd_only, bwd_only=bwd_only, profile=profile)
+        self._print_detailed_comparison(m)
 
 
 @_DIST
@@ -439,6 +714,18 @@ class TestE2EFusionExperiments(_E2ETransformerLayerFusionBase):
         self._run_comparison(fwd_only=False, bwd_only=False, profile=get_e2e_fusion_profile("pipeline_gain"))
 
 
+@_DIST
+class TestE2EShapeSweep(_E2ETransformerLayerFusionBase):
+    def test_shape_sweep_fwd_bwd(self):
+        rows: list[dict[str, object]] = []
+        for profile in get_e2e_fusion_shape_sweep():
+            rows.append(self._measure_comparison(fwd_only=False, bwd_only=False, profile=profile))
+            dist.barrier()
+
+        if self.rank == 0:
+            _print_shape_sweep_summary(rows)
+
+
 @_SDMA_DIST
 class TestE2ETransformerLayerSdmaOnly:
     """Isolated SDMA pure-pipeline measurement — no NCCL comparison overhead."""
@@ -449,7 +736,8 @@ class TestE2ETransformerLayerSdmaOnly:
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
-        self.device = torch.device(f"cuda:{self.rank}")
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.device = torch.device(f"cuda:{self.local_rank}")
         yield
         dist.barrier()
 
@@ -463,6 +751,7 @@ class TestE2ETransformerLayerSdmaOnly:
         )
         from lumen.modules.sdma_comm import SdmaTpComm
 
+        validate_tokens_divisible(tokens=profile.tokens, world_size=self.world)
         S_local = profile.tokens // self.world
         w_up = torch.randn(profile.ffn // self.world, profile.hidden, device=self.device, dtype=torch.bfloat16)
         w_down = torch.randn(profile.hidden, profile.ffn // self.world, device=self.device, dtype=torch.bfloat16)
@@ -603,7 +892,8 @@ class TestTPScaling:
         _init_dist()
         self.rank = dist.get_rank()
         self.world = dist.get_world_size()
-        self.device = torch.device(f"cuda:{self.rank}")
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.device = torch.device(f"cuda:{self.local_rank}")
         yield
         dist.barrier()
 
@@ -622,11 +912,12 @@ class TestTPScaling:
 
         profile = DEFAULT_PROFILE
         tp_sizes = [2, 4, 8]
-        sweep_results: List[dict] = []
+        sweep_results: list[dict[str, object]] = []
 
         for tp_size in tp_sizes:
             tp_group = _new_tp_process_group(tp_size)
 
+            validate_tokens_divisible(tokens=profile.tokens, world_size=tp_size)
             S_local = profile.tokens // tp_size
             w_up = torch.randn(profile.ffn // tp_size, profile.hidden, device=self.device, dtype=torch.bfloat16)
             w_down = torch.randn(profile.hidden, profile.ffn // tp_size, device=self.device, dtype=torch.bfloat16)

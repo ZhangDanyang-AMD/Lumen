@@ -58,12 +58,24 @@ _BASE_PROFILES = {
     ),
 }
 
+_SHAPE_SWEEP_PROFILES = (
+    E2EFusionProfile("comm_bound_small", batch=2, seq=2048, hidden=4096, ffn=8192, num_chunks=4),
+    _BASE_PROFILES[DEFAULT_E2E_FUSION_PROFILE],
+    E2EFusionProfile("compute_bound_small", batch=2, seq=2048, hidden=4096, ffn=28672, num_chunks=4),
+    E2EFusionProfile("comm_bound_large", batch=4, seq=2048, hidden=4096, ffn=8192, num_chunks=4),
+    _BASE_PROFILES["backend_gap"],
+    _BASE_PROFILES["pipeline_gain"],
+)
+
 
 def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
     value = env.get(name)
     if value is None:
         return default
-    return int(value)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from exc
 
 
 def _require_positive(name: str, value: int) -> int:
@@ -95,6 +107,14 @@ def get_e2e_fusion_profile(
             _env_int(source_env, "LUMEN_E2E_NUM_CHUNKS", base.num_chunks),
         ),
     )
+
+
+def get_e2e_fusion_shape_sweep() -> list[E2EFusionProfile]:
+    return list(_SHAPE_SWEEP_PROFILES)
+
+
+def format_e2e_shape_tag(profile: E2EFusionProfile) -> str:
+    return f"T{profile.tokens}_H{profile.hidden}_F{profile.ffn}_C{profile.num_chunks}"
 
 
 def wgrad_delay_dims(profile: E2EFusionProfile) -> tuple[int, int, int]:

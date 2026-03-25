@@ -6,17 +6,32 @@ All benchmarks use **Llama 3.1 8B** dimensions by default:
 `hidden_size=4096`, `intermediate_size=14336`, `num_attention_heads=32`,
 `num_key_value_heads=8`, `head_dim=128`.
 
+The three E2E-style distributed benchmarks share a common profile helper:
+`bench_e2e_fusion.py`, `bench_wgrad_delay.py`, and
+`bench_fp8_param_allgather.py`.
+
+- Base profile: `LUMEN_E2E_PROFILE=default|backend_gap|pipeline_gain`
+- Dimension overrides: `LUMEN_E2E_BATCH`, `LUMEN_E2E_SEQ`,
+  `LUMEN_E2E_HIDDEN`, `LUMEN_E2E_FFN`
+- `LUMEN_E2E_NUM_CHUNKS` applies only to `bench_e2e_fusion.py`
+
+Default selectors keep their original collection scope. If
+`LUMEN_E2E_PROFILE` is set before launch, those selectors use that profile.
+The explicit `backend_gap_experiment` and `pipeline_gain_experiment`
+selectors pin those base profiles directly, while per-dimension env
+overrides still apply.
+
 ## Benchmarks
 
 | # | File | Lumen Features Exercised | Requirements |
 |---|------|--------------------------|-------------|
 | 1 | `bench_kernel_launch.py` | FP8 quantized_linear (7 scaling modes), fused MoE, FP8 activation store, attention backends (csrc/triton), norm+GEMM pipeline | 1 GPU + AITER |
 | 2 | `bench_comm_overlap.py` | SdmaTpComm async allgather/reduce-scatter, column/row parallel overlap patterns, NCCL vs SDMA comparison | 2+ GPUs |
-| 3 | `bench_fp8_param_allgather.py` | FP8ParamManager, dequant hooks, param compression SNR, **Layer 2 FP8 all-gather** (quant→gather→dequant), tail latency profiling, multi-GPU scaling efficiency | 1 GPU (sections 1-5), 2+ GPUs (sections 6-8), 4+ GPUs (sections 9-10) |
+| 3 | `bench_fp8_param_allgather.py` | FP8ParamManager, dequant hooks, param compression SNR, **Layer 2 FP8 all-gather** (quant→gather→dequant), profiled E2E gather+forward / pipeline experiments, tail latency profiling, multi-GPU scaling efficiency | 1 GPU (sections 1-5), 2+ GPUs (sections 6-8), 4+ GPUs (sections 9-10) |
 | 4 | `bench_rope_fusion.py` | apply_rotary_pos_emb (1D), fused_rope (Q+K), 2D vision RoPE, 3D video RoPE, GQA configs, NeoX vs GPT-J | 1 GPU + AITER |
-| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU / 2+ GPUs for distributed overlap |
+| 5 | `bench_wgrad_delay.py` | _DeferredWgrad API, wgrad-forward overlap, profiled distributed NCCL/SDMA overlap, two-layer pipeline, gradient_accumulation_fusion, wgrad-comm overlap | 1 GPU / 2+ GPUs for distributed overlap |
 | 6 | `bench_fused_pipeline.py` | Pipelined AG+GEMM / GEMM+RS overlap, NCCL vs SDMA backend, backward overlap isolation, chunk sweep | 2+ GPUs |
-| 7 | `bench_e2e_fusion.py` | Single-layer end-to-end **pure pipeline** transformer layer, TP scaling sweep, bandwidth reporting | 2+ GPUs (8 for TP scaling) |
+| 7 | `bench_e2e_fusion.py` | Single-layer end-to-end **pure pipeline** transformer layer, fixed six-profile **shape sweep**, TP scaling sweep, explicit size/profile experiments, bandwidth reporting | 2+ GPUs (8 for TP scaling / shape sweep) |
 
 ## Quick Start
 
@@ -54,9 +69,17 @@ torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -
 torchrun --nproc_per_node=2 -m pytest benchmarks/bench_fused_pipeline.py -v -s -k BackwardOverlap
 ```
 
-### FP8 Param All-Gather — Tail Latency & Scaling
+### FP8 Param All-Gather — E2E / Tail Latency / Scaling
 
 ```bash
+# Default E2E distributed FP8 param tests
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k E2E
+
+# Explicit size experiments (separate from -k E2E)
+# These currently cover latency + pipelined gather only, not correctness.
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k backend_gap_experiment
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k pipeline_gain_experiment
+
 # Tail latency profiling (8 GPUs recommended)
 torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k TailLatency
 
@@ -64,14 +87,55 @@ torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v
 torchrun --nproc_per_node=8 -m pytest benchmarks/bench_fp8_param_allgather.py -v -s -k Scaling
 ```
 
-### E2E Transformer Layer
+### Wgrad Delay — Distributed Overlap
 
 ```bash
-# Single-layer end-to-end pure pipeline benchmark
+# Default NCCL vs SDMA comparison
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k NCCLvsSdma
+
+# Other distributed overlap sections follow LUMEN_E2E_PROFILE too
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k RealComm
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k SdmaComm
+
+# Explicit size experiments on the single-layer NCCL vs SDMA comparison
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k backend_gap_experiment
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k pipeline_gain_experiment
+```
+
+### E2E Transformer Layer
+
+These `torchrun` commands need a working `torch.distributed` environment: matching process/GPU count, suitable backends, and a rendezvous that your PyTorch build and OS support. If launch fails before tests run—e.g. `DistStoreError` or libuv/TCP-store messages during rendezvous—that is usually an environment or PyTorch runtime configuration issue, not evidence that the benchmark implementation is wrong.
+
+```bash
+# Default single-layer end-to-end pure pipeline benchmark
 torchrun --nproc_per_node=2 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TransformerLayer
+
+# Explicit size experiments (separate from -k TransformerLayer)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k backend_gap_experiment
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k pipeline_gain_experiment
+
 # TP scaling sweep (requires 8 GPUs)
 torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k TPScaling
+
+# Shape sweep: see how tokens/FFN change comm overlap and memory behavior (8 GPUs)
+torchrun --nproc_per_node=8 -m pytest benchmarks/bench_e2e_fusion.py -v -s -k ShapeSweep
 ```
+
+### Shared E2E Profile Overrides
+
+```bash
+export LUMEN_E2E_PROFILE=backend_gap
+export LUMEN_E2E_BATCH=4
+export LUMEN_E2E_SEQ=2048
+export LUMEN_E2E_HIDDEN=4096
+export LUMEN_E2E_FFN=28672
+export LUMEN_E2E_NUM_CHUNKS=4  # bench_e2e_fusion.py only
+```
+
+The default selectors `TransformerLayer`, `RealComm`, `SdmaComm`,
+`NCCLvsSdma`, and `E2E` keep their original scope. The explicit
+`backend_gap_experiment` / `pipeline_gain_experiment` selectors live in
+separate classes, so they are opt-in.
 
 Use the other two files for the complementary cases:
 
@@ -192,6 +256,9 @@ Overlap ratio: `1 - (T_overlapped / (T_comm + T_compute))`
 | Backward-only | Isolated backward for the pure pipeline path (no delayed wgrad) |
 | TP scaling | TP=2/4/8 latency, speedup, bandwidth at each scale |
 | Bandwidth utilization | AG and RS effective bandwidth in GB/s |
+| **Shape sweep** (`-k ShapeSweep`) | Fixed profiles across tokens/FFN: rank-0 tables for latency, effective comm bandwidth, and `peak_delta` working-set memory |
+
+The sweep shows when fusion is communication-bound, when compute amortizes overlap overhead, and when the benefit is primarily `peak_delta` memory reduction rather than latency.
 
 `bench_e2e_fusion.py` intentionally excludes delayed-wgrad scheduling so the
 results reflect only the chunked comm-GEMM pipeline itself. For delayed-wgrad
