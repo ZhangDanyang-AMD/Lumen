@@ -3,48 +3,52 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /workspace
 
-RUN pip install pybind11
-RUN pip install ninja
-RUN pip install packaging
-RUN /usr/bin/python3 -m pip install pyYAML
+# System build tools + mori build dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git ninja-build cmake \
+        libopenmpi-dev libibverbs-dev rdma-core libpci-dev && \
+    rm -rf /var/lib/apt/lists/*
 
-# ---------------------------------------------------------------------------
-# Install library dependencies
-# ---------------------------------------------------------------------------
-WORKDIR /workspace/deps
+COPY . /workspace/Lumen
 
-# Megatron-LM-AMD (for Megatron backend)
+# AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt).
+RUN cd /workspace/Lumen/third_party/aiter && \
+    PREBUILD_KERNELS=1 pip install -e .
+
+# mori — SDMA communication library (editable from third_party).
+RUN cd /workspace/Lumen/third_party/mori && \
+    git submodule update --init --recursive && \
+    pip install setuptools-scm && \
+    pip install -e .
+
+# torchao (quantization reference).
+RUN pip install torchao>=0.8
+
+# Megatron-LM-AMD (for Megatron backend).
 ARG MEGATRON_COMMIT=8dd45f5a51378ec1ee7937dee3c20d8626df4763
 RUN git clone --recursive https://github.com/ROCm/Megatron-LM.git megatron_lm
 RUN pip uninstall -y megatron-core
 RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
-    && pip install -e . && cd megatron/core/datasets && make
+    && pip install -e .  -U --force-reinstall --no-deps \
+    && cd megatron/core/datasets && make
 
-ENV PYTHONPATH="/workspace/deps/megatron_lm:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/megatron_lm:"
+ENV PYTHONPATH="/workspace/Lumen/third_party/mori:${PYTHONPATH:-}"
+ENV PYTHONPATH="/workspace/Lumen/third_party/aiter:${PYTHONPATH:-}"
 
-# ---------------------------------------------------------------------------
-# Python dependencies
-# ---------------------------------------------------------------------------
-COPY examples/llama31/requirements.txt /tmp/requirements.txt
-RUN pip3 install -r /tmp/requirements.txt
+# Lumen + example dependencies.
+RUN cd /workspace/Lumen && pip install -e ".[dev]"
+RUN pip install -r /workspace/Lumen/requirements.txt
+RUN pip install -r /workspace/Lumen/examples/llama31/requirements.txt
 
-# ---------------------------------------------------------------------------
-# Install Lumen (includes aiter submodule)
-# ---------------------------------------------------------------------------
-WORKDIR /workspace
-COPY . /workspace/Lumen
+ENV PYTHONPATH="/workspace/Lumen:${PYTHONPATH}"
+ENV HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+# Launcher/config decides whether --use-sdma is active at runtime.
+ENV MORI_ENABLE_SDMA=0
+RUN python -c "import torch, pathlib; print(pathlib.Path(torch.__file__).parent / 'lib')" \
+        > /etc/ld.so.conf.d/torch.conf && ldconfig
 
-# AITER — AMD-optimised kernels (CK attention backend, FP8 quant, hipBLASLt)
-RUN cd /workspace/Lumen/third_party/aiter && \
-    PREBUILD_KERNELS=1 pip install -e . --force-reinstall
-
-RUN cd /workspace/Lumen && pip install -e ".[all]"
-
-ENV PYTHONPATH="/workspace/Lumen:/workspace/Lumen/third_party/aiter:${PYTHONPATH:-}"
-
-# ---------------------------------------------------------------------------
-# AMD MI GPU performance tuning (from perf_env.sh)
-# ---------------------------------------------------------------------------
+# AMD MI GPU performance tuning (from perf_env.sh).
 ENV NCCL_MIN_P2P_NCHANNELS=32
 ENV NCCL_MIN_CTAS=32
 ENV NCCL_NCHANNELS_PER_NET_PEER=32
@@ -57,7 +61,7 @@ ENV PYTORCH_TUNABLEOP_ENABLED=1
 ENV PYTORCH_TUNABLEOP_FILENAME=tunableop_results.csv
 ENV OMP_NUM_THREADS=1
 
-# MLPerf / training defaults
+# MLPerf / training defaults.
 ENV TRANSFORMERS_OFFLINE=0
 ENV TOKENIZERS_PARALLELISM=false
 

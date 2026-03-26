@@ -23,6 +23,7 @@ source "${CONFIG}"
 
 # ---- Performance tuning (model-agnostic, from common module) -----------------
 source "${REPO_ROOT}/lumen/models/perf_env.sh"
+export MORI_ENABLE_SDMA="${USE_SDMA}"
 
 # ---- Compute EVAL_INTERVAL from EVAL_EVERY if not explicitly set -------------
 if [ "${EVAL_EVERY}" -gt 0 ] && [ "${EVAL_INTERVAL}" -eq 0 ]; then
@@ -49,6 +50,10 @@ fi
 
 if [ "${FP8_PARAMS}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --fp8-params"
+fi
+
+if [ "${USE_SDMA}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"
 fi
 
 
@@ -137,6 +142,7 @@ run_megatron() {
     echo "  LR:       max=${MAX_LR} min=${MIN_LR} warmup=${LR_WARMUP_STEPS}"
     echo "  Lumen attn: ${LUMEN_ATTN_BACKEND} (fp8_quant=${LUMEN_FP8_QUANT}) rmsnorm=${LUMEN_RMSNORM}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
+    echo "  SDMA:     use=${USE_SDMA} mori=${MORI_ENABLE_SDMA}"
     echo "  LoRA:     rank=${LORA_RANK}"
     echo "  Target:   log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
     echo "  Ckpt:     use=${USE_CKPT} save=${SAVE_CKPT} fp8_params=${FP8_PARAMS} start_step=${CKPT_START_STEP}"
@@ -289,6 +295,7 @@ run_fsdp() {
     echo "  Batch:      MBS=${MBS} x accum=${GRAD_ACCUM} | seq_len=${SEQ_LEN}"
     echo "  Sharding:   ${SHARDING}"
     echo "  FP8:        training=${FP8_TRAINING} format=${FP8_FORMAT}"
+    echo "  SDMA:       use=${USE_SDMA} mori=${MORI_ENABLE_SDMA}"
     echo "  LoRA:       rank=${LORA_RANK}"
     echo "  Primus:     fp8_attn=${PRIMUS_FP8_ATTN} mxfp8_attn=${PRIMUS_MXFP8_ATTN} dbg=${DBG_ATTN_OUTPUT}"
     echo "  Target:     log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"

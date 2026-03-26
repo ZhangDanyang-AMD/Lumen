@@ -10,9 +10,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+LLAMA2_DOCKERFILE = REPO_ROOT / "examples" / "llama2" / "Dockerfile"
 LLAMA31_LAUNCHER = REPO_ROOT / "examples" / "llama31" / "run_pretrain.sh"
 LLAMA31_CONFIG = REPO_ROOT / "examples" / "llama31" / "config_MI355X_1x8x1.sh"
 LLAMA31_MI300X_CONFIG = REPO_ROOT / "examples" / "llama31" / "config_MI300X_1x8x1.sh"
+LLAMA31_DOCKERFILE = REPO_ROOT / "examples" / "llama31" / "Dockerfile"
 LLAMA2_LAUNCHER = REPO_ROOT / "examples" / "llama2" / "run_finetune.sh"
 LLAMA2_CONFIG = REPO_ROOT / "examples" / "llama2" / "config_MI355X_1x8x1.sh"
 LLAMA2_MI300X_CONFIG = REPO_ROOT / "examples" / "llama2" / "config_MI300X_1x8x1.sh"
@@ -32,6 +34,33 @@ class TestLauncherParity:
         source = _source(LLAMA31_MI300X_CONFIG)
         assert 'source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"' in source
         assert 'export MLPERF_SUBMISSION_PLATFORM="MI300X"' in source
+        assert 'export LUMEN_ATTN_BACKEND="aiter_csrc"' in source
+
+    def test_llama31_mi300x_config_uses_lf_line_endings(self):
+        assert b"\r\n" not in LLAMA31_MI300X_CONFIG.read_bytes()
+
+    def test_example_dockerfiles_align_root_training_stack_contract(self):
+        for dockerfile in (LLAMA2_DOCKERFILE, LLAMA31_DOCKERFILE):
+            source = _source(dockerfile)
+            for snippet in (
+                "apt-get update && apt-get install -y --no-install-recommends",
+                "libopenmpi-dev libibverbs-dev rdma-core libpci-dev",
+                "PREBUILD_KERNELS=1 pip install -e .",
+                "third_party/mori",
+                "pip install setuptools-scm",
+                "pip install torchao>=0.8",
+                "--force-reinstall --no-deps",
+                "pip install -r /workspace/Lumen/requirements.txt",
+                "ldconfig",
+            ):
+                assert snippet in source
+
+    def test_example_launchers_expose_use_sdma_switch(self):
+        for launcher in (LLAMA2_LAUNCHER, LLAMA31_LAUNCHER):
+            source = _source(launcher)
+            assert 'if [ "${USE_SDMA}" -gt 0 ]; then' in source
+            assert 'CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"' in source
+            assert 'export MORI_ENABLE_SDMA="${USE_SDMA}"' in source
 
     def test_llama2_launcher_builds_shared_checkpoint_suffix(self):
         source = _source(LLAMA2_LAUNCHER)
@@ -92,6 +121,7 @@ class TestLauncherParity:
         for env_name in (
             "SEED",
             "EVAL_ITERS",
+            "USE_SDMA",
             "LR_WARMUP_STEPS",
             "USE_CKPT",
             "FROM_HF",
@@ -109,6 +139,13 @@ class TestLauncherParity:
         ):
             assert f"export {env_name}" in source
 
-    def test_llama2_mi300x_config_uses_eval_every_contract(self):
+    def test_llama2_mi300x_config_is_overlay_with_mi300x_contract(self):
         source = _source(LLAMA2_MI300X_CONFIG)
+        assert 'source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"' in source
         assert "export EVAL_EVERY=" in source
+        assert 'export LUMEN_ATTN_BACKEND="aiter_csrc"' in source
+        assert 'export MLPERF_SUBMISSION_PLATFORM="MI300X"' in source
+
+    def test_llama31_config_defines_use_sdma_default(self):
+        source = _source(LLAMA31_CONFIG)
+        assert "export USE_SDMA=0" in source

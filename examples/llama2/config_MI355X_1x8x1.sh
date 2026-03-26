@@ -76,6 +76,7 @@ export EVAL_INTERVAL=0
 export START_EVAL_AT=0
 
 # ---- Launcher compatibility --------------------------------------------------
+export USE_SDMA=0
 export PRIMUS_FP8_ATTN=0
 export PRIMUS_MXFP8_ATTN=0
 export DBG_ATTN_OUTPUT=0
