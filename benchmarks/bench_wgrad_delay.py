@@ -136,6 +136,15 @@ def _make_bench_linear_config(*, sequence_parallel: bool, tp_size: int):
     )
 
 
+def _tp_sharded_out_features(out_features: int, world_size: int) -> int:
+    """Return the per-rank output width for TP-style communication modeling."""
+    if out_features % world_size != 0:
+        raise ValueError(
+            f"TP-sharded wgrad overlap requires out_features={out_features} divisible by world_size={world_size}"
+        )
+    return out_features // world_size
+
+
 def _validate_megatron_style_world_size(world_size: int) -> None:
     if world_size < 2:
         raise ValueError(f"Tier 2 Megatron-style benchmark requires world_size >= 2, got {world_size}")
@@ -1741,7 +1750,9 @@ class TestNCCLvsSdmaWgradDelay:
         Baselines use the same ``LumenColumnParallelLinear`` stack: a
         compute-only timer (per-layer fwd + bwd queue + drain, no AR) and a
         sequential timer (+ NCCL AR each layer), matching
-        ``test_multi_layer_pipeline_comparison``.
+        ``test_multi_layer_pipeline_comparison``. ``gemm_n`` is the global
+        FFN width; each rank uses the TP-sharded local width for module
+        compute and communication size.
         """
         from lumen.modules.sdma_comm import SdmaTpComm
 
@@ -1750,23 +1761,23 @@ class TestNCCLvsSdmaWgradDelay:
         torch.cuda.synchronize()
         dist.barrier()
         sdma_comm = SdmaTpComm.get(dist.group.WORLD)
+        local_n = _tp_sharded_out_features(gemm_n, self.world)
 
-        _, _, _, ar_scale = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
-        # Use gemm_n-shaped buffer for comm warmup (matches deferred path tensor sizes)
-        ar_n = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+        # Warm up the same per-rank shard geometry used by the timed paths.
+        ar_buf = torch.randn(local_n, K, device=self.device, dtype=torch.bfloat16)
 
         nccl_stream = torch.cuda.Stream(device=self.device)
         sdma_stream = torch.cuda.Stream(device=self.device)
 
         for _ in range(3):
-            dist.all_reduce(ar_scale.clone())
+            dist.all_reduce(ar_buf.clone())
             _run_real_api_single_layer_wgrad_queue_and_drain(
-                self.device, profile, tokens=M, hidden=K, out_features=gemm_n
+                self.device, profile, tokens=M, hidden=K, out_features=local_n
             )
         torch.cuda.synchronize()
         dist.barrier()
         for _ in range(3):
-            sdma_comm.allreduce_sum(ar_n.clone())
+            sdma_comm.allreduce_sum(ar_buf.clone())
         torch.cuda.synchronize()
         dist.barrier()
 
@@ -1778,7 +1789,7 @@ class TestNCCLvsSdmaWgradDelay:
                 n_layers,
                 tokens=M,
                 hidden=K,
-                out_features=gemm_n,
+                out_features=local_n,
             )
 
         r_wgrad = cuda_timer(
@@ -1798,7 +1809,7 @@ class TestNCCLvsSdmaWgradDelay:
                 n_layers,
                 tokens=M,
                 hidden=K,
-                out_features=gemm_n,
+                out_features=local_n,
                 after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
             )
 
@@ -1822,7 +1833,7 @@ class TestNCCLvsSdmaWgradDelay:
                 n_layers,
                 tokens=M,
                 hidden=K,
-                out_features=gemm_n,
+                out_features=local_n,
             )
             pending_ar = None
             for i in range(n_layers):
@@ -1865,7 +1876,7 @@ class TestNCCLvsSdmaWgradDelay:
                 n_layers,
                 tokens=M,
                 hidden=K,
-                out_features=gemm_n,
+                out_features=local_n,
             )
             pending_ar = False
             for i in range(n_layers):
@@ -1925,7 +1936,11 @@ class TestNCCLvsSdmaWgradDelay:
         dist.barrier()
 
     def test_wgrad_overlap_scaling_summary(self):
-        """All GEMM sizes in a single 4-layer pipeline summary table."""
+        """All GEMM sizes in a single 4-layer pipeline summary table.
+
+        The reported ``gemm_n`` values are global FFN widths; each rank uses
+        the TP-sharded local width for module compute and communication size.
+        """
         from lumen.modules.sdma_comm import SdmaTpComm
 
         n_layers = 4
@@ -1940,30 +1955,30 @@ class TestNCCLvsSdmaWgradDelay:
         sdma_stream = torch.cuda.Stream(device=self.device)
 
         for gemm_n in gemm_sizes:
-            _, _, _, ar_scale = _make_profiled_wgrad_single_layer_inputs(self.device, profile)
-            ar_n = torch.randn(gemm_n, K, device=self.device, dtype=torch.bfloat16)
+            local_n = _tp_sharded_out_features(gemm_n, self.world)
+            ar_buf = torch.randn(local_n, K, device=self.device, dtype=torch.bfloat16)
 
             for _ in range(3):
-                dist.all_reduce(ar_scale.clone())
+                dist.all_reduce(ar_buf.clone())
                 _run_real_api_single_layer_wgrad_queue_and_drain(
-                    self.device, profile, tokens=M, hidden=K, out_features=gemm_n
+                    self.device, profile, tokens=M, hidden=K, out_features=local_n
                 )
             torch.cuda.synchronize()
             dist.barrier()
             for _ in range(3):
-                sdma_comm.allreduce_sum(ar_n.clone())
+                sdma_comm.allreduce_sum(ar_buf.clone())
             torch.cuda.synchronize()
             dist.barrier()
 
             # ── Real-module compute only (for overlap efficiency vs +NCCL) ──
-            def _wgrad_only(gn=gemm_n):
+            def _wgrad_only():
                 _run_real_api_multi_layer_sequential_per_layer(
                     self.device,
                     profile,
                     n_layers,
                     tokens=M,
                     hidden=K,
-                    out_features=gn,
+                    out_features=local_n,
                 )
 
             r_wgrad = cuda_timer(
@@ -1976,14 +1991,14 @@ class TestNCCLvsSdmaWgradDelay:
             )
 
             # ── Sequential real module + NCCL AR per layer ──
-            def _eager(gn=gemm_n):
+            def _eager():
                 _run_real_api_multi_layer_sequential_per_layer(
                     self.device,
                     profile,
                     n_layers,
                     tokens=M,
                     hidden=K,
-                    out_features=gn,
+                    out_features=local_n,
                     after_each_layer=lambda _i, m: dist.all_reduce(m.weight.main_grad),
                 )
 
@@ -2000,14 +2015,14 @@ class TestNCCLvsSdmaWgradDelay:
             dist.barrier()
 
             # ── NCCL deferred pipeline ──
-            def _deferred_nccl(gn=gemm_n):
+            def _deferred_nccl():
                 modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
                     self.device,
                     profile,
                     n_layers,
                     tokens=M,
                     hidden=K,
-                    out_features=gn,
+                    out_features=local_n,
                 )
                 pending_ar = None
                 for i in range(n_layers):
@@ -2043,14 +2058,14 @@ class TestNCCLvsSdmaWgradDelay:
             sdma_comm.reset_allreduce_flags()  # noqa: F821
 
             # ── SDMA deferred pipeline ──
-            def _deferred_sdma(gn=gemm_n):
+            def _deferred_sdma():
                 modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
                     self.device,
                     profile,
                     n_layers,
                     tokens=M,
                     hidden=K,
-                    out_features=gn,
+                    out_features=local_n,
                 )
                 pending_ar = False
                 for i in range(n_layers):
