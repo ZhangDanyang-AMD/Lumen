@@ -18,6 +18,7 @@ Covers:
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
 import torch
 
 from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
@@ -83,6 +84,78 @@ class TestSdmaTpCommAsync:
             comm.allreduce_sum_async(t)
             comm.wait_allreduce_sum()
             mock_ar_instance.wait_async.assert_called_once()
+
+    def test_allreduce_sum_async_raises_when_start_fails(self, mock_ctx):
+        mock_ctx.get.return_value = SimpleNamespace(my_pe=0, npes=2)
+        with mock.patch("lumen.modules.sdma_comm._TpSdmaAllreduce") as mock_ar:
+            mock_ar_instance = mock.MagicMock()
+            mock_ar.return_value = mock_ar_instance
+            mock_ar_instance.start_async_inplace.return_value = False
+
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            SdmaTpComm.reset()
+            comm = SdmaTpComm(mock.MagicMock())
+            comm._ar_handles = {torch.float32: mock_ar_instance}
+
+            t = torch.randn(64, dtype=torch.float32, device="cuda")
+            with pytest.raises(RuntimeError, match="async start failed"):
+                comm.allreduce_sum_async(t)
+            assert not hasattr(comm, "_ar_async_dtype")
+
+    def test_wait_allreduce_sum_clears_dtype_on_wait_failure(self, mock_ctx):
+        mock_ctx.get.return_value = SimpleNamespace(my_pe=0, npes=2)
+        with mock.patch("lumen.modules.sdma_comm._TpSdmaAllreduce") as mock_ar:
+            mock_ar_instance = mock.MagicMock()
+            mock_ar.return_value = mock_ar_instance
+            mock_ar_instance.wait_async.side_effect = RuntimeError("boom")
+
+            from lumen.modules.sdma_comm import SdmaTpComm
+
+            SdmaTpComm.reset()
+            comm = SdmaTpComm(mock.MagicMock())
+            comm._ar_handles = {torch.float32: mock_ar_instance}
+            comm._ar_async_dtype = torch.float32
+
+            with pytest.raises(RuntimeError, match="boom"):
+                comm.wait_allreduce_sum()
+            assert not hasattr(comm, "_ar_async_dtype")
+
+    def test_tp_sdma_allreduce_wait_async_raises_on_negative_status(self, mock_ctx):
+        from lumen.modules.sdma_comm import _TpSdmaAllreduce
+
+        ar = _TpSdmaAllreduce(SimpleNamespace(my_pe=0, npes=2), dtype=torch.bfloat16)
+        ar._handle = mock.MagicMock()
+        ar._handle.wait_async.return_value = -1.0
+        ar._async_output_buf = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_tensor = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_flat = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_orig_shape = torch.Size([4])
+        ar._async_stream = None
+
+        with pytest.raises(RuntimeError, match="wait_async failed"):
+            ar.wait_async()
+        assert not hasattr(ar, "_async_tensor")
+        assert not hasattr(ar, "_async_flat")
+        assert not hasattr(ar, "_async_orig_shape")
+
+    def test_tp_sdma_allreduce_wait_async_clears_state_when_handle_raises(self, mock_ctx):
+        from lumen.modules.sdma_comm import _TpSdmaAllreduce
+
+        ar = _TpSdmaAllreduce(SimpleNamespace(my_pe=0, npes=2), dtype=torch.bfloat16)
+        ar._handle = mock.MagicMock()
+        ar._handle.wait_async.side_effect = RuntimeError("native boom")
+        ar._async_output_buf = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_tensor = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_flat = torch.zeros(4, dtype=torch.bfloat16)
+        ar._async_orig_shape = torch.Size([4])
+        ar._async_stream = None
+
+        with pytest.raises(RuntimeError, match="native boom"):
+            ar.wait_async()
+        assert not hasattr(ar, "_async_tensor")
+        assert not hasattr(ar, "_async_flat")
+        assert not hasattr(ar, "_async_orig_shape")
 
     def test_reduce_scatter_dim0_async_wait_returns_chunk(self, mock_ctx):
         mock_ctx.get.return_value = SimpleNamespace(my_pe=0, npes=2)

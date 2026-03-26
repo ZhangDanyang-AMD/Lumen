@@ -312,29 +312,46 @@ class _TpSdmaAllreduce:
             self._async_buf = wire_flat
             self._async_tensor = tensor
             out = self._ensure_async_output(wire_flat.numel(), wire_flat.device)
-            return self._handle.start_async(wire_flat, out, wire_flat.numel(), s)
+            started = self._handle.start_async(wire_flat, out, wire_flat.numel(), s)
+            if not started:
+                self._clear_async_state()
+            return started
         self._async_flat = flat
         self._async_tensor = tensor
         out = self._ensure_async_output(flat.numel(), flat.device)
-        return self._handle.start_async(flat, out, flat.numel(), s)
+        started = self._handle.start_async(flat, out, flat.numel(), s)
+        if not started:
+            self._clear_async_state()
+        return started
 
     def wait_async(self, stream=None) -> None:
         """Wait for a previously started async allreduce and copy result back."""
         s = stream if stream is not None else getattr(self, "_async_stream", None)
-        self._handle.wait_async(s)
+        try:
+            duration = self._handle.wait_async(s)
+        except Exception:
+            self._clear_async_state()
+            raise
+        if duration is not None and duration < 0:
+            self._clear_async_state()
+            raise RuntimeError("AllreduceSdma wait_async failed")
         out = self._async_output_buf
-        if self._needs_cast and hasattr(self, "_async_buf"):
-            n = self._async_buf.numel()
-            self._async_tensor.copy_(out[:n].to(self._user_dtype).reshape(self._async_orig_shape))
-            del self._async_buf, self._async_tensor
-        elif hasattr(self, "_async_flat"):
-            n = self._async_flat.numel()
-            self._async_tensor.copy_(out[:n].reshape(self._async_orig_shape))
-            del self._async_flat, self._async_tensor
-        if hasattr(self, "_async_orig_shape"):
-            del self._async_orig_shape
-        if hasattr(self, "_async_stream"):
-            del self._async_stream
+        try:
+            if self._needs_cast and hasattr(self, "_async_buf"):
+                n = self._async_buf.numel()
+                self._async_tensor.copy_(out[:n].to(self._user_dtype).reshape(self._async_orig_shape))
+            elif hasattr(self, "_async_flat"):
+                n = self._async_flat.numel()
+                self._async_tensor.copy_(out[:n].reshape(self._async_orig_shape))
+            else:
+                raise RuntimeError("AllreduceSdma wait_async missing async tensor state")
+        finally:
+            self._clear_async_state()
+
+    def _clear_async_state(self) -> None:
+        for name in ("_async_buf", "_async_flat", "_async_tensor", "_async_orig_shape", "_async_stream"):
+            if hasattr(self, name):
+                delattr(self, name)
 
     def reset_flags(self) -> None:
         """Reset SDMA synchronization flags on the underlying handle."""
@@ -458,11 +475,18 @@ class SdmaTpComm:
         return gathered.reshape(self.npes * shape[0], *shape[1:])
 
     def allreduce_sum_async(self, tensor: torch.Tensor, stream=None) -> bool:
-        """Start async in-place all-reduce SUM. Call :meth:`wait_allreduce_sum` to complete."""
+        """Start async in-place all-reduce SUM.
+
+        Returns ``True`` on successful launch and raises ``RuntimeError`` if the
+        underlying async start fails.
+        """
         tensor = tensor.contiguous()
-        self._ar_async_dtype = tensor.dtype
         ar = self._get_ar(tensor.dtype)
-        return ar.start_async_inplace(tensor, stream)
+        started = ar.start_async_inplace(tensor, stream)
+        if not started:
+            raise RuntimeError(f"AllreduceSdma async start failed for dtype={tensor.dtype} shape={tuple(tensor.shape)}")
+        self._ar_async_dtype = tensor.dtype
+        return True
 
     def wait_allreduce_sum(self, stream=None) -> None:
         """Wait for async all-reduce to complete."""
@@ -470,8 +494,10 @@ class SdmaTpComm:
         if dtype is None:
             raise RuntimeError("wait_allreduce_sum called without prior allreduce_sum_async")
         ar = self._get_ar(dtype)
-        ar.wait_async(stream)
-        del self._ar_async_dtype
+        try:
+            ar.wait_async(stream)
+        finally:
+            del self._ar_async_dtype
 
     # -- Chunk-level primitives (for pipelined comm-GEMM overlap) --
 

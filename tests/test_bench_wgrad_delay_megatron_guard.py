@@ -2,6 +2,7 @@ import ast
 from pathlib import Path
 
 BENCH_PATH = Path(__file__).resolve().parents[1] / "benchmarks" / "bench_wgrad_delay.py"
+SDMA_COMM_PATH = Path(__file__).resolve().parents[1] / "lumen" / "modules" / "sdma_comm.py"
 
 
 def _megatron_layerwise_backward_loop_body() -> list[ast.stmt]:
@@ -42,6 +43,10 @@ def _is_backward_call(stmt: ast.stmt) -> bool:
 
 def _load_bench_tree() -> ast.Module:
     return ast.parse(BENCH_PATH.read_text())
+
+
+def _load_sdma_comm_tree() -> ast.Module:
+    return ast.parse(SDMA_COMM_PATH.read_text())
 
 
 def _load_function(name: str) -> ast.FunctionDef:
@@ -113,3 +118,34 @@ def test_megatron_style_stack_initializes_chained_module_parameters():
     assert len(fill_calls) == 1
     assert ast.unparse(fill_calls[0].args[0]) == "0.01"
     assert len(zero_calls) == 1
+
+
+def test_sdma_tp_comm_exposes_allgather_flag_reset():
+    tree = _load_sdma_comm_tree()
+
+    reset_method = None
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "SdmaTpComm":
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef) and child.name == "reset_allgather_flags":
+                    reset_method = child
+
+    assert reset_method is not None
+    assert "self._ag.reset_flags()" in ast.unparse(reset_method)
+    assert "self._ag_chunk.reset_flags()" in ast.unparse(reset_method)
+
+
+def test_megatron_style_sdma_test_resets_sdma_flags_between_runs():
+    tree = _load_bench_tree()
+    flag_resets = set()
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "TestMegatronStyleWgradDelay":
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef) and child.name == "test_megatron_style_pipeline_sdma":
+                    for call in ast.walk(child):
+                        if isinstance(call, ast.Call):
+                            flag_resets.add(ast.unparse(call.func))
+
+    assert "sdma_comm.reset_allgather_flags" in flag_resets
+    assert "sdma_comm.reset_allreduce_flags" in flag_resets
