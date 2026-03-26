@@ -1218,6 +1218,8 @@ class TestDeferredWgradSdmaComm:
         torch.cuda.synchronize()
         dist.barrier()
 
+        _ovl_put_done = torch.cuda.Event()
+
         def _overlapped():
             tp_group, _ = _get_or_create_rank_local_group()
             module, x_m, g_m = _build_real_api_single_layer(self.device, profile, tp_group)
@@ -1225,6 +1227,8 @@ class TestDeferredWgradSdmaComm:
             buf = ar_buf.clone()
             sdma_stream.wait_stream(torch.cuda.current_stream())
             comm.allreduce_sum_async(buf, stream=sdma_stream)
+            _ovl_put_done.record(sdma_stream)
+            torch.cuda.current_stream().wait_event(_ovl_put_done)
             module.backward_dw()
             comm.wait_allreduce_sum(stream=sdma_stream)
             torch.cuda.current_stream().wait_stream(sdma_stream)
@@ -1297,6 +1301,8 @@ class TestDeferredWgradSdmaComm:
         torch.cuda.synchronize()
         dist.barrier()
 
+        _ml_put_done = torch.cuda.Event()
+
         def _deferred():
             modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = False
@@ -1317,6 +1323,8 @@ class TestDeferredWgradSdmaComm:
                         modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
+                    _ml_put_done.record(sdma_stream)
+                    torch.cuda.current_stream().wait_event(_ml_put_done)
                     pending_ar = True
 
             if modules[n_layers - 1]._deferred_wgrad.has_pending:
@@ -1512,10 +1520,19 @@ class TestNCCLvsSdmaWgradDelay:
             dist_barrier=True,
         )
 
-        # Ensure synchronous SDMA ops complete before starting async path
+        # ── SDMA async overlap ─────────────────────────────────
+        # The ReduceScatter kernel uses max_blocks CUs (304) with blocks
+        # 1-N spinning on barrier->flag. Overlapping a large GEMM on
+        # the default stream causes CU contention that can deadlock the
+        # RS/AGPut kernels.  Record a CUDA event after start_async so the
+        # default stream waits for RS+AGPut to finish before launching the
+        # wgrad GEMM.  The SDMA DMA hardware transfers still overlap with
+        # the GEMM; only the CU-bound kernel dispatch is serialized.
         torch.cuda.synchronize()
         dist.barrier()
+
         sdma_comm.reset_allreduce_flags()  # noqa: F821
+        _sdma_put_done = torch.cuda.Event()
 
         def _sdma_ovl():
             tp_group, _ = _get_or_create_rank_local_group()
@@ -1524,6 +1541,8 @@ class TestNCCLvsSdmaWgradDelay:
             buf = ar_buf.clone()
             sdma_stream.wait_stream(torch.cuda.current_stream())
             sdma_comm.allreduce_sum_async(buf, stream=sdma_stream)  # noqa: F821
+            _sdma_put_done.record(sdma_stream)
+            torch.cuda.current_stream().wait_event(_sdma_put_done)
             module.backward_dw()
             sdma_comm.wait_allreduce_sum(stream=sdma_stream)  # noqa: F821
             torch.cuda.current_stream().wait_stream(sdma_stream)
@@ -1673,7 +1692,8 @@ class TestNCCLvsSdmaWgradDelay:
         dist.barrier()
         sdma_comm.reset_allreduce_flags()  # noqa: F821
 
-        # Deferred SDMA pipeline
+        _ds_put_done = torch.cuda.Event()
+
         def _deferred_sdma():
             modules, xs, g_outs, _ = _build_real_api_layer_stack(self.device, profile, n_layers)
             pending_ar = False
@@ -1691,6 +1711,8 @@ class TestNCCLvsSdmaWgradDelay:
                         modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
+                    _ds_put_done.record(sdma_stream)
+                    torch.cuda.current_stream().wait_event(_ds_put_done)
                     pending_ar = True
             if modules[n_layers - 1]._deferred_wgrad.has_pending:
                 modules[n_layers - 1].backward_dw()
@@ -1868,7 +1890,8 @@ class TestNCCLvsSdmaWgradDelay:
         dist.barrier()
         sdma_comm.reset_allreduce_flags()
 
-        # ── SDMA deferred pipeline ──
+        _ds2_put_done = torch.cuda.Event()
+
         def _deferred_sdma():
             modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
                 self.device,
@@ -1893,6 +1916,8 @@ class TestNCCLvsSdmaWgradDelay:
                         modules[i - 1].weight.main_grad,
                         stream=sdma_stream,
                     )
+                    _ds2_put_done.record(sdma_stream)
+                    torch.cuda.current_stream().wait_event(_ds2_put_done)
                     pending_ar = True
             if modules[n_layers - 1]._deferred_wgrad.has_pending:
                 modules[n_layers - 1].backward_dw()
@@ -2057,7 +2082,8 @@ class TestNCCLvsSdmaWgradDelay:
             dist.barrier()
             sdma_comm.reset_allreduce_flags()  # noqa: F821
 
-            # ── SDMA deferred pipeline ──
+            _ds3_put_done = torch.cuda.Event()
+
             def _deferred_sdma():
                 modules, xs_m, g_outs, _ = _build_real_api_layer_stack(
                     self.device,
@@ -2082,6 +2108,8 @@ class TestNCCLvsSdmaWgradDelay:
                             modules[i - 1].weight.main_grad,
                             stream=sdma_stream,
                         )
+                        _ds3_put_done.record(sdma_stream)
+                        torch.cuda.current_stream().wait_event(_ds3_put_done)
                         pending_ar = True
                 if modules[n_layers - 1]._deferred_wgrad.has_pending:
                     modules[n_layers - 1].backward_dw()
