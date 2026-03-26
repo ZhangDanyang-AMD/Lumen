@@ -11,6 +11,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 LLAMA31_LAUNCHER = REPO_ROOT / "examples" / "llama31" / "run_pretrain.sh"
+LLAMA31_CONFIG = REPO_ROOT / "examples" / "llama31" / "config_MI355X_1x8x1.sh"
+LLAMA31_MI300X_CONFIG = REPO_ROOT / "examples" / "llama31" / "config_MI300X_1x8x1.sh"
 LLAMA2_LAUNCHER = REPO_ROOT / "examples" / "llama2" / "run_finetune.sh"
 LLAMA2_CONFIG = REPO_ROOT / "examples" / "llama2" / "config_MI355X_1x8x1.sh"
 LLAMA2_MI300X_CONFIG = REPO_ROOT / "examples" / "llama2" / "config_MI300X_1x8x1.sh"
@@ -25,6 +27,12 @@ def _between(text: str, start_marker: str, end_marker: str) -> str:
 
 
 class TestLauncherParity:
+    def test_llama31_mi300x_config_exists_as_overlay(self):
+        assert LLAMA31_MI300X_CONFIG.exists()
+        source = _source(LLAMA31_MI300X_CONFIG)
+        assert 'source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"' in source
+        assert 'export MLPERF_SUBMISSION_PLATFORM="MI300X"' in source
+
     def test_llama2_launcher_builds_shared_checkpoint_suffix(self):
         source = _source(LLAMA2_LAUNCHER)
         assert "CMD_SUFFIX" in source

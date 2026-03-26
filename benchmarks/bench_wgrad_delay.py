@@ -61,7 +61,7 @@ Run multi-GPU — Tier 2 Megatron-style realism (``LumenColumnParallelLinear`` /
 
     torchrun --nproc_per_node=2 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k MegatronStyle
 
-Run explicit size experiments (2+ GPUs; 8 GPUs shown)::
+Run profiled experiments (2+ GPUs; run each profile in a separate invocation)::
 
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k backend_gap_experiment
     torchrun --nproc_per_node=8 -m pytest benchmarks/bench_wgrad_delay.py -v -s -k pipeline_gain_experiment
@@ -2136,6 +2136,27 @@ class TestWgradDelayProfileExperiments(TestNCCLvsSdmaWgradDelay):
     test_multi_layer_pipeline_comparison = None
     test_wgrad_overlap_scaling = None
     test_wgrad_overlap_scaling_summary = None
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        os.environ["MORI_ENABLE_SDMA"] = "1"
+        _init_dist()
+        self.rank = dist.get_rank()
+        self.world = dist.get_world_size()
+        self.device = torch.device(f"cuda:{self.rank}")
+
+        from lumen.modules.sdma_comm import SdmaTpComm
+
+        max_profile = get_e2e_fusion_profile("pipeline_gain")
+        _, _, _, ar_buf = _make_profiled_wgrad_single_layer_inputs(self.device, max_profile)
+        comm = SdmaTpComm.get(dist.group.WORLD)
+        comm.allreduce_sum(ar_buf)
+        torch.cuda.synchronize()
+        dist.barrier()
+
+        yield
+        torch.cuda.synchronize()
+        dist.barrier()
 
     def test_backend_gap_experiment_single_layer_overlap_comparison(self):
         self._run_single_layer_overlap_comparison(profile=get_e2e_fusion_profile("backend_gap"))
