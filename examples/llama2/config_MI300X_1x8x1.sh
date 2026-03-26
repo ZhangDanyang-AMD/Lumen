@@ -30,7 +30,7 @@ export TRAIN_STEPS=1024
 export MBS=1
 export GBS=8
 export LR=0.0004
-export EVAL_INTERVAL=384
+export EVAL_EVERY=384
 
 # ---- Parallelism (single node, no model parallelism) -------------------------
 export TP=1

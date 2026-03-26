@@ -230,25 +230,7 @@ def add_pretrain_args(parser):
 
     add_common_megatron_args(parser)
 
-    ckpt = parser.add_argument_group(title="checkpoint-management")
-    ckpt.add_argument("--use-ckpt", action="store_true", default=False, help="Resume from checkpoint.")
-    ckpt.add_argument("--save-ckpt", action="store_true", default=False, help="Save checkpoint at end of training.")
-    ckpt.add_argument(
-        "--resume-from-hf", action="store_true", default=False, help="Checkpoint is a weight-only HuggingFace format."
-    )
-    ckpt.add_argument(
-        "--continual-ckpt-path", type=str, default=None, help="Path for saving/loading continual checkpoints."
-    )
-    ckpt.add_argument("--ckpt-start-step", type=int, default=0, help="Steps already trained in the resumed checkpoint.")
-    ckpt.add_argument("--fp8-params", action="store_true", default=False, help="Load model parameters in FP8.")
-    ckpt.add_argument("--initial-ckpt-path", type=str, default=None, help="Path to initial checkpoint for resume.")
-
     mlperf = parser.add_argument_group(title="mlperf")
-    mlperf.add_argument("--tag", type=str, default="", help="Optional experiment tag.")
-    mlperf.add_argument("--target-log-ppl", type=float, default=3.3, help="Target log perplexity for convergence.")
-    mlperf.add_argument("--step-time-atol", type=int, default=18000, help="Maximum tolerable step time (ms).")
-    mlperf.add_argument("--eval-every", type=int, default=0, help="Evaluate every N training sequences.")
-    mlperf.add_argument("--start-eval-at", type=int, default=0, help="Start evaluation at N training sequences.")
     mlperf.add_argument("--size", type=str, default="8b", choices=["8b"], help="Model size (for Docker compatibility).")
     mlperf.add_argument("--nodes", type=int, default=None, help="Number of nodes (Docker compat, unused by Megatron).")
     mlperf.add_argument(

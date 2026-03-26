@@ -51,6 +51,33 @@ fi
 # ---- Performance tuning (model-agnostic, from common module) -----------------
 source "${REPO_ROOT}/lumen/models/perf_env.sh"
 
+# ---- Compute EVAL_INTERVAL from EVAL_EVERY if not explicitly set -------------
+if [ "${EVAL_EVERY}" -gt 0 ] && [ "${EVAL_INTERVAL}" -eq 0 ]; then
+    EVAL_INTERVAL=$(( (EVAL_EVERY + GBS - 1) / GBS ))
+fi
+
+# ---- Conditional command suffix (Docker run_and_time.sh compat) --------------
+CMD_SUFFIX=""
+
+if [ "${USE_CKPT}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --use-ckpt"
+    if [ "${FROM_HF}" -gt 0 ]; then
+        CMD_SUFFIX="${CMD_SUFFIX} --resume-from-hf"
+    fi
+fi
+
+if [ "${SAVE_CKPT}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --save-ckpt"
+fi
+
+if [ -n "${TAG}" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --tag ${TAG}"
+fi
+
+if [ "${FP8_PARAMS}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --fp8-params"
+fi
+
 
 ###############################################################################
 # MEGATRON BACKEND
@@ -142,6 +169,9 @@ run_megatron() {
     echo "  Lumen attn: ${LUMEN_ATTN_BACKEND}$(case "${LUMEN_ATTN_BACKEND}" in *fp8) echo " (fp8_quant=${LUMEN_FP8_QUANT})";; esac) rmsnorm=${LUMEN_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
     echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
+    echo "  Target:   log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
+    echo "  Ckpt:     use=${USE_CKPT} save=${SAVE_CKPT} fp8_params=${FP8_PARAMS} start_step=${CKPT_START_STEP}"
+    echo "  Eval:     every=${EVAL_EVERY}seqs (${EVAL_INTERVAL}steps) start_at=${START_EVAL_AT}"
     echo "================================================================"
 
     torchrun --nproc_per_node=${NGPU} --nnodes=${NNODES} \
@@ -172,7 +202,8 @@ run_megatron() {
         --global-batch-size ${GBS} \
         --train-iters ${TRAIN_STEPS} \
         --lr ${LR} --min-lr ${MIN_LR} \
-        --lr-decay-style cosine --lr-warmup-fraction 0.0 \
+        --lr-decay-style cosine \
+        --lr-warmup-iters ${LR_WARMUP_STEPS} \
         --weight-decay ${WEIGHT_DECAY} \
         --clip-grad ${GRADIENT_CLIP} \
         --adam-beta1 0.9 --adam-beta2 0.999 --adam-eps 1e-8 \
@@ -186,11 +217,19 @@ run_megatron() {
         --split 100,0,0 \
         --load ${CKPT_DIR} \
         --save ${SAVE_DIR} \
+        --seed ${SEED} \
         --finetune --no-load-optim --no-load-rng --auto-detect-ckpt-format \
-        --eval-iters 10 --eval-interval ${EVAL_INTERVAL} \
+        --eval-iters ${EVAL_ITERS} --eval-interval ${EVAL_INTERVAL} \
         --save-interval ${SAVE_INTERVAL} --log-interval ${LOG_INTERVAL} \
+        --continual-ckpt-path ${CONTINUAL_CKPT} \
+        --target-log-ppl ${TARGET_LOG_PPL} \
+        --step-time-atol ${STEP_TIME_ATOL} \
+        --ckpt-start-step ${CKPT_START_STEP} \
+        --eval-every ${EVAL_EVERY} \
+        --start-eval-at ${START_EVAL_AT} \
         ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
-        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS}
+        ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
+        ${CMD_SUFFIX}
 }
 
 
@@ -216,10 +255,12 @@ run_fsdp() {
     CMD+=" --max-steps ${TRAIN_STEPS}"
     CMD+=" --lr ${LR}"
     CMD+=" --min-lr ${MIN_LR}"
+    CMD+=" --lr-warmup-steps ${LR_WARMUP_STEPS}"
     CMD+=" --weight-decay ${WEIGHT_DECAY}"
     CMD+=" --max-grad-norm ${MAX_GRAD_NORM}"
     CMD+=" --log-interval ${LOG_INTERVAL}"
     CMD+=" --save-interval ${SAVE_INTERVAL}"
+    CMD+=" --eval-interval ${EVAL_INTERVAL}"
     CMD+=" --save-dir ${SAVE_DIR}"
     CMD+=" --num-workers ${NUM_WORKERS}"
     CMD+=" --train-data-path ${TRAIN_DATA}"
@@ -253,6 +294,16 @@ run_fsdp() {
 
     [ "${WARMUP_STEPS}" -gt 0 ] && CMD+=" --warmup-steps ${WARMUP_STEPS}"
     [ -n "${VAL_LOSS_TARGET}" ] && CMD+=" --val-loss-target ${VAL_LOSS_TARGET}"
+    CMD+=" --continual-ckpt-path ${CONTINUAL_CKPT}"
+    CMD+=" --target-log-ppl ${TARGET_LOG_PPL}"
+    CMD+=" --step-time-atol ${STEP_TIME_ATOL}"
+    CMD+=" --ckpt-start-step ${CKPT_START_STEP}"
+    CMD+=" --eval-every ${EVAL_EVERY}"
+    CMD+=" --start-eval-at ${START_EVAL_AT}"
+    CMD+=" --primus-turbo-fp8-attention ${PRIMUS_FP8_ATTN}"
+    CMD+=" --primus-turbo-mxfp8-attention ${PRIMUS_MXFP8_ATTN}"
+    CMD+=" --dbg-attn-output ${DBG_ATTN_OUTPUT}"
+    CMD+=" ${CMD_SUFFIX}"
 
     echo "================================================================"
     echo "LLaMA2 SFT — FSDP backend"
@@ -263,6 +314,10 @@ run_fsdp() {
     echo "  Sharding:   ${SHARDING}"
     echo "  LoRA:       rank=${LORA_RANK}"
     echo "  FP8:        training=${FP8_TRAINING} format=${FP8_FORMAT}"
+    echo "  Primus:     fp8_attn=${PRIMUS_FP8_ATTN} mxfp8_attn=${PRIMUS_MXFP8_ATTN} dbg=${DBG_ATTN_OUTPUT}"
+    echo "  Target:     log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
+    echo "  Ckpt:       use=${USE_CKPT} save=${SAVE_CKPT} fp8_params=${FP8_PARAMS} start_step=${CKPT_START_STEP}"
+    echo "  Eval:       every=${EVAL_EVERY}seqs (${EVAL_INTERVAL}steps) start_at=${START_EVAL_AT}"
     echo "================================================================"
 
     eval ${CMD}

@@ -45,12 +45,22 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.utils.data import DataLoader, DistributedSampler
 
+from lumen.models.experiment_ops import (
+    ExperimentTracker,
+    get_effective_stop_step,
+)
+
 # Re-export shared FSDP helpers so existing callers are not broken.
 from lumen.models.fsdp import (  # noqa: F401
     _rank0_print,
+    add_common_fsdp_args,
     apply_fp8_training,
     apply_lora,
+    build_cosine_warmup_scheduler,
     reset_fp8_state,
+    save_fsdp_checkpoint,
+    should_run_eval_step,
+    sync_scheduler_to_ckpt_step,
 )
 from lumen.models.llama2.dataset import LLaMA2SFTDataset
 
@@ -123,15 +133,27 @@ class FSDPTrainer:
             dist.init_process_group("nccl")
         torch.cuda.set_device(self.local_rank)
 
+        if args.use_ckpt:
+            resume_path = args.initial_ckpt_path or args.continual_ckpt_path
+            if resume_path:
+                args.model_name_or_path = resume_path
+                source_kind = "HF weights" if args.resume_from_hf else "checkpoint weights"
+                _rank0_print(f"> Resuming {source_kind} from {resume_path}")
+
         self.model = self._build_and_wrap_model()
         self.optimizer = self._build_optimizer()
         self.scheduler = self._build_scheduler()
+        sync_scheduler_to_ckpt_step(self.scheduler, args)
         self.train_loader = self._build_dataloader(args.train_data_path, args.train_samples)
         self.val_loader = self._build_dataloader(args.val_data_path, args.val_samples) if args.val_data_path else None
-
-        self._warmup_done = False
-        self._warmup_counter = 0
-        self._val_loss_ema: Optional[float] = None
+        self.tracker = ExperimentTracker(
+            args=args,
+            global_batch_size=args.micro_batch_size * args.gradient_accumulation_steps * self.world_size,
+            seq_length=args.seq_length,
+            backend="fsdp",
+            task_name="llama2-sft",
+            rank=self.global_rank,
+        )
 
     def _build_and_wrap_model(self) -> nn.Module:
         args = self.args
@@ -146,7 +168,7 @@ class FSDPTrainer:
         if args.lora_rank > 0:
             model = apply_lora(model, args)
 
-        if args.fp8_training:
+        if args.linear_fp8:
             apply_fp8_training(model, args)
 
         if getattr(args, "fsdp_version", 1) == 2:
@@ -164,7 +186,7 @@ class FSDPTrainer:
             )
             mixed_precision = MixedPrecision(
                 param_dtype=torch.bfloat16,
-                reduce_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32 if args.linear_fp8 else torch.bfloat16,
                 buffer_dtype=torch.bfloat16,
             )
             sharding = ShardingStrategy.FULL_SHARD
@@ -194,16 +216,12 @@ class FSDPTrainer:
             self.model.parameters(),
             lr=args.lr,
             betas=(0.9, 0.95),
+            eps=1e-5,
             weight_decay=args.weight_decay,
         )
 
     def _build_scheduler(self):
-        args = self.args
-        return torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer,
-            T_max=args.max_steps,
-            eta_min=args.min_lr,
-        )
+        return build_cosine_warmup_scheduler(self.optimizer, self.args)
 
     def _build_dataloader(self, data_path: Optional[str], num_samples: int) -> DataLoader:
         args = self.args
@@ -260,7 +278,7 @@ class FSDPTrainer:
         num_tokens = loss_mask.sum()
         loss = masked_loss / num_tokens.clamp(min=1)
 
-        loss.backward()
+        (loss / self.args.gradient_accumulation_steps).backward()
         return loss.detach()
 
     def _synthetic_warmup_step(self):
@@ -269,25 +287,55 @@ class FSDPTrainer:
         seq_len = args.seq_length + 1
         fake_ids = torch.ones(args.micro_batch_size, seq_len, dtype=torch.long, device=self.local_rank) * 3545
         fake_mask = torch.ones(args.micro_batch_size, seq_len, dtype=torch.long, device=self.local_rank)
-        batch = {"input_ids": fake_ids, "loss_mask": fake_mask}
+
         self.optimizer.zero_grad()
-        self._forward_backward(batch)
+        outputs = self.model(input_ids=fake_ids[:, :-1])
+        logits = outputs.logits
+        shift_logits = logits.view(-1, logits.size(-1))
+        shift_labels = fake_ids[:, 1:].reshape(-1)
+        per_token_loss = nn.functional.cross_entropy(
+            shift_logits,
+            shift_labels,
+            reduction="none",
+        )
+        loss_mask = fake_mask[:, 1:].reshape(-1).float()
+        masked_loss = (per_token_loss * loss_mask).sum()
+        loss = masked_loss / loss_mask.sum().clamp(min=1)
+        loss.backward()
         self.optimizer.step()
 
-    def _check_early_stop(self, loss_val: float) -> bool:
-        args = self.args
-        if args.val_loss_target is None:
-            return False
-        if self._val_loss_ema is None:
-            self._val_loss_ema = loss_val
-        else:
-            self._val_loss_ema = 0.9 * self._val_loss_ema + 0.1 * loss_val
-        if self._val_loss_ema < args.val_loss_target:
-            _rank0_print(
-                f"> [Early Stop] Loss EMA ({self._val_loss_ema:.4f}) < " f"target ({args.val_loss_target:.4f})"
-            )
-            return True
-        return False
+    def _validate(self) -> float:
+        self.model.eval()
+        total_loss, n_batches = 0.0, 0
+        with torch.no_grad():
+            for batch in self.val_loader:
+                input_ids = batch["input_ids"][:, :-1].to(self.local_rank)
+                labels = batch["input_ids"][:, 1:].to(self.local_rank)
+                loss_mask = batch["loss_mask"][:, 1:].to(self.local_rank).float()
+
+                outputs = self.model(input_ids=input_ids)
+                logits = outputs.logits
+                shift_logits = logits.view(-1, logits.size(-1))
+                shift_labels = labels.reshape(-1)
+                per_token_loss = nn.functional.cross_entropy(
+                    shift_logits,
+                    shift_labels,
+                    reduction="none",
+                )
+                masked_loss = (per_token_loss * loss_mask.reshape(-1)).sum()
+                num_tokens = loss_mask.sum()
+                total_loss += (masked_loss / num_tokens.clamp(min=1)).item()
+                n_batches += 1
+                if n_batches >= 10:
+                    break
+
+        self.model.train()
+        avg = total_loss / max(n_batches, 1)
+        if dist.is_initialized():
+            t = torch.tensor([avg], device="cuda")
+            dist.all_reduce(t, op=dist.ReduceOp.AVG)
+            avg = t.item()
+        return avg
 
     def train(self):
         """Run the full training loop."""
@@ -297,7 +345,7 @@ class FSDPTrainer:
             _rank0_print(f"> Running {args.warmup_steps} synthetic warmup steps ...")
             for _ in range(args.warmup_steps):
                 self._synthetic_warmup_step()
-            if args.fp8_training:
+            if args.linear_fp8:
                 reset_fp8_state(self.model)
             if dist.is_initialized():
                 dist.barrier()
@@ -305,57 +353,82 @@ class FSDPTrainer:
 
         self.model.train()
         grad_accum = args.gradient_accumulation_steps
-        global_step = 0
+        global_step = args.ckpt_start_step
+        effective_stop_step = get_effective_stop_step(args)
+        self.tracker.on_train_start(
+            configs={
+                "global_batch_size": self.tracker.global_batch_size,
+                "max_sequence_length": args.seq_length,
+                "max_steps": args.max_steps,
+                "effective_stop_step": effective_stop_step,
+            }
+        )
 
         data_iter = iter(self.train_loader)
-        while global_step < args.max_steps:
-            self.optimizer.zero_grad()
-            accum_loss = 0.0
+        try:
+            while global_step < effective_stop_step:
+                self.tracker.record_train_step_start(global_step)
+                self.optimizer.zero_grad()
+                accum_loss = 0.0
 
-            for micro_step in range(grad_accum):
-                try:
-                    batch = next(data_iter)
-                except StopIteration:
-                    data_iter = iter(self.train_loader)
-                    batch = next(data_iter)
+                for _micro_step in range(grad_accum):
+                    try:
+                        batch = next(data_iter)
+                    except StopIteration:
+                        data_iter = iter(self.train_loader)
+                        batch = next(data_iter)
 
-                loss = self._forward_backward(batch)
-                accum_loss += loss.item()
+                    loss = self._forward_backward(batch)
+                    accum_loss += loss.item()
 
-            if args.max_grad_norm > 0:
-                if getattr(args, "fsdp_version", 1) == 2:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
-                else:
-                    self.model.clip_grad_norm_(args.max_grad_norm)
+                if args.max_grad_norm > 0:
+                    if getattr(args, "fsdp_version", 1) == 2:
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
+                    else:
+                        self.model.clip_grad_norm_(args.max_grad_norm)
 
-            self.optimizer.step()
-            self.scheduler.step()
-            global_step += 1
+                self.optimizer.step()
+                self.scheduler.step()
+                global_step += 1
 
-            avg_loss = accum_loss / grad_accum
-            if global_step % args.log_interval == 0:
+                avg_loss = accum_loss / grad_accum
                 lr = self.scheduler.get_last_lr()[0]
-                _rank0_print(f"  step {global_step}/{args.max_steps} | " f"loss {avg_loss:.4f} | lr {lr:.2e}")
+                step_time_ms = self.tracker.record_train_step_end(
+                    global_step=global_step,
+                    train_loss=avg_loss,
+                    lr=lr,
+                )
 
-            if self._check_early_stop(avg_loss):
-                break
+                if global_step % args.log_interval == 0:
+                    _rank0_print(
+                        f"  step {global_step}/{effective_stop_step} | "
+                        f"loss {avg_loss:.4f} | lr {lr:.2e} | step_time_ms {step_time_ms:.1f}"
+                    )
 
-            if args.save_interval > 0 and global_step % args.save_interval == 0 and self.global_rank == 0:
-                save_path = os.path.join(args.save_dir, f"step_{global_step}")
-                self._save_checkpoint(save_path)
+                if self.tracker.should_preempt(global_step=global_step):
+                    _rank0_print(f"> Preemptive stop triggered at step {global_step}")
+                    break
+
+                if self.val_loader and should_run_eval_step(global_step, args):
+                    self.tracker.log_validation_start(global_step)
+                    val_loss = self._validate()
+                    _rank0_print(f"  step {global_step}/{effective_stop_step} | val_loss {val_loss:.4f}")
+                    if self.tracker.should_stop_on_validation(global_step=global_step, val_loss=val_loss):
+                        break
+
+                if args.save_interval > 0 and global_step % args.save_interval == 0 and self.global_rank == 0:
+                    save_path = os.path.join(args.save_dir, f"step_{global_step}")
+                    save_fsdp_checkpoint(self.model, save_path)
+                    _rank0_print(f"> Checkpoint saved to {save_path}")
+
+            if args.save_ckpt and self.global_rank == 0:
+                final_path = args.continual_ckpt_path or os.path.join(args.save_dir, "final")
+                save_fsdp_checkpoint(self.model, final_path)
+                _rank0_print(f"> Final checkpoint saved to {final_path}")
+        finally:
+            self.tracker.finish_run(global_step=global_step)
 
         _rank0_print(f"> Training complete after {global_step} steps.")
-
-    def _save_checkpoint(self, path: str) -> None:
-        os.makedirs(path, exist_ok=True)
-        unwrapped = self.model
-        while hasattr(unwrapped, "module"):
-            unwrapped = unwrapped.module
-        if hasattr(unwrapped, "save_pretrained"):
-            unwrapped.save_pretrained(path)
-        else:
-            torch.save(unwrapped.state_dict(), os.path.join(path, "model.pt"))
-        _rank0_print(f"> Checkpoint saved to {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -366,8 +439,6 @@ class FSDPTrainer:
 def get_args() -> argparse.Namespace:
     """Parse command-line arguments for FSDP-based LLaMA2 SFT."""
     parser = argparse.ArgumentParser(description="LLaMA2 SFT with FSDP + Lumen")
-
-    parser.add_argument("--backend", type=str, default="fsdp", choices=["megatron", "fsdp"], help="Training backend.")
 
     # -- Model --
     m = parser.add_argument_group("model")
@@ -385,88 +456,5 @@ def get_args() -> argparse.Namespace:
     m.add_argument("--vocab-size", type=int, default=32000)
     m.add_argument("--seq-length", type=int, default=4096)
     m.add_argument("--tokenizer-name-or-path", type=str, default="meta-llama/Llama-2-7b-hf")
-
-    # -- Training --
-    t = parser.add_argument_group("training")
-    t.add_argument("--micro-batch-size", type=int, default=1)
-    t.add_argument("--gradient-accumulation-steps", type=int, default=8)
-    t.add_argument("--max-steps", type=int, default=800)
-    t.add_argument("--lr", type=float, default=4e-4)
-    t.add_argument("--min-lr", type=float, default=0.0)
-    t.add_argument("--weight-decay", type=float, default=0.01)
-    t.add_argument("--max-grad-norm", type=float, default=1.0)
-    t.add_argument("--log-interval", type=int, default=10)
-    t.add_argument("--save-interval", type=int, default=0, help="Save checkpoint every N steps. 0 = disabled.")
-    t.add_argument("--save-dir", type=str, default="./checkpoints")
-    t.add_argument("--num-workers", type=int, default=4)
-    t.add_argument(
-        "--gradient-checkpointing",
-        action="store_true",
-        default=True,
-        help="Enable gradient/activation checkpointing (default: on).",
-    )
-    t.add_argument("--no-gradient-checkpointing", dest="gradient_checkpointing", action="store_false")
-
-    # -- Data --
-    d = parser.add_argument_group("data")
-    d.add_argument("--train-data-path", type=str, default=None)
-    d.add_argument("--val-data-path", type=str, default=None)
-    d.add_argument("--train-samples", type=int, default=10000)
-    d.add_argument("--val-samples", type=int, default=500)
-
-    # -- FSDP --
-    f = parser.add_argument_group("fsdp")
-    f.add_argument(
-        "--sharding-strategy", type=str, default="full_shard", choices=["full_shard", "shard_grad_op", "no_shard"]
-    )
-    f.add_argument(
-        "--fsdp-version",
-        type=int,
-        default=1,
-        choices=[1, 2],
-        help="FSDP version: 1=legacy FSDP, 2=fully_shard (PyTorch 2.4+)",
-    )
-    f.add_argument(
-        "--use-sdma",
-        action="store_true",
-        default=False,
-        help="Use mori SDMA instead of torch.distributed for supported collectives "
-        "(TP comm, amax all-reduce, CP all-to-all) when available.",
-    )
-
-    # -- LoRA --
-    lora = parser.add_argument_group("lora")
-    lora.add_argument("--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled (full fine-tuning).")
-    lora.add_argument("--lora-alpha", type=float, default=32.0)
-    lora.add_argument("--lora-dropout", type=float, default=0.1)
-
-    # -- FP8 training --
-    fp8 = parser.add_argument_group("fp8-training")
-    fp8.add_argument("--fp8-training", action="store_true", default=False)
-    fp8.add_argument("--fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"])
-    fp8.add_argument(
-        "--fp8-scaling", type=str, default="delayed", choices=["dynamic", "delayed", "blockwise", "blockwise2d"]
-    )
-    fp8.add_argument("--fp8-block-size", type=int, default=128)
-    fp8.add_argument("--fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
-    fp8.add_argument("--fp8-reduce-amax", action="store_true", default=False)
-    fp8.add_argument("--fp8-amax-history", type=int, default=16)
-    fp8.add_argument(
-        "--fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation (TE-compatible)."
-    )
-    fp8.add_argument("--fp8-activation", action="store_true", default=True)
-    fp8.add_argument("--no-fp8-activation", dest="fp8_activation", action="store_false")
-    fp8.add_argument(
-        "--grad-quant-type",
-        type=str,
-        default=None,
-        choices=["fp8", "mxfp8", "fp4"],
-        help="Gradient quantization type (None=disabled).",
-    )
-
-    # -- Warmup + Early stopping --
-    sft = parser.add_argument_group("sft")
-    sft.add_argument("--warmup-steps", type=int, default=0)
-    sft.add_argument("--val-loss-target", type=float, default=None)
-
+    add_common_fsdp_args(parser)
     return parser.parse_args()

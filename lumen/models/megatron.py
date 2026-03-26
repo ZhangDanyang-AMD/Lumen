@@ -65,6 +65,7 @@ from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
 from megatron.training import get_args, get_timers, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 
+from lumen.models.training_contract import add_shared_checkpoint_args, add_shared_experiment_args
 from lumen.models.utils import safe_add_argument
 from lumen.modules.attention_megatron import (
     LumenDotProductAttention,
@@ -893,6 +894,72 @@ def register_fp8_param_optimizer_hook(model, optimizer):
         print_rank_0("> FP8 param optimizer hook registered")
 
 
+def make_lumen_model_provider(
+    model_builder: Callable,
+    *,
+    lora_applier: Callable = apply_lora,
+    fp8_applier: Callable = apply_fp8_training,
+):
+    """Build the canonical Megatron model-provider assembly for Lumen.
+
+    The returned callable keeps task semantics in the supplied ``model_builder``
+    while applying the shared infrastructure assembly in a fixed order:
+    LoRA, pre-quant module flags, FP8 enablement, optional FP8 parallel-linear
+    enablement, then post-quant features.
+    """
+
+    def model_provider(pre_process=True, post_process=True, vp_stage=None):
+        import os
+
+        args = get_args()
+        model = model_builder(args, pre_process, post_process, vp_stage)
+
+        if getattr(args, "lora_rank", 0) > 0:
+            lora_applier(model, args)
+            if getattr(args, "lora_a2a", False):
+                os.environ["LORA_A2A"] = "1"
+                print_rank_0("> LoRA A2A communication optimisation enabled")
+
+        apply_lumen_pre_quant(model, args)
+
+        if getattr(args, "linear_fp8", False):
+            fp8_applier(model, args)
+            if getattr(args, "lumen_linear", False):
+                scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
+                enable_fp8_for_parallel_linear(
+                    model,
+                    scaling_type=scaling_type,
+                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
+                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
+                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
+                )
+
+        apply_lumen_post_quant(model, args)
+        return model
+
+    return model_provider
+
+
+def install_fp8_param_gather_hook() -> None:
+    """Install the canonical Megatron optimizer hook for FP8 param gather."""
+    import megatron.training.training as _mt_training
+
+    current_setup = _mt_training.setup_model_and_optimizer
+    if getattr(current_setup, "_lumen_fp8_param_gather_hook", False):
+        return
+
+    def _setup_with_fp8_hook(*args, **kwargs):
+        model, optimizer, scheduler = current_setup(*args, **kwargs)
+        train_args = get_args()
+        if getattr(train_args, "lumen_fp8_param_gather", False) and model:
+            target = model[0] if isinstance(model, list) else model
+            register_fp8_param_optimizer_hook(target, optimizer)
+        return model, optimizer, scheduler
+
+    _setup_with_fp8_hook._lumen_fp8_param_gather_hook = True
+    _mt_training.setup_model_and_optimizer = _setup_with_fp8_hook
+
+
 # ---------------------------------------------------------------------------
 # Synthetic warmup + FP8 state reset
 # ---------------------------------------------------------------------------
@@ -1292,6 +1359,12 @@ def add_common_megatron_args(parser):
     wes = parser.add_argument_group(title="warmup-early-stop")
     safe_add_argument(wes, "--warmup-steps", type=int, default=0)
     safe_add_argument(wes, "--val-loss-target", type=float, default=None)
+
+    ckpt = parser.add_argument_group(title="checkpoint")
+    add_shared_checkpoint_args(ckpt)
+
+    experiment = parser.add_argument_group(title="experiment")
+    add_shared_experiment_args(experiment)
 
     parser.set_defaults(**_TE_FORCE_OVERRIDES)
 

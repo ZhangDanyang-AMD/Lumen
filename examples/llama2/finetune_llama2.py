@@ -28,10 +28,8 @@ def _run_megatron():
     # Import TL megatron FIRST so _install_fused_layer_norm_patch() runs before
     # megatron.training loads TransformerBlock/FusedLayerNorm.  Otherwise the
     # patch is too late and final_layernorm still uses the original FusedLayerNorm.
-    import os
-
     from megatron.core.enums import ModelType
-    from megatron.training import get_args, pretrain, print_rank_0
+    from megatron.training import pretrain
 
     from lumen.models.llama2.megatron import (
         add_finetune_args,
@@ -41,25 +39,14 @@ def _run_megatron():
         lumen_gpt_builder,
         train_valid_test_datasets_provider,
     )
-    from lumen.models.megatron import enable_fp8_for_parallel_linear
+    from lumen.models.megatron import install_fp8_param_gather_hook, make_lumen_model_provider
 
-    def model_provider(pre_process=True, post_process=True, vp_stage=None):
-        args = get_args()
-        model = lumen_gpt_builder(args, pre_process, post_process, vp_stage)
-
-        if getattr(args, "lora_rank", 0) > 0:
-            apply_lora(model, args)
-            if getattr(args, "lora_a2a", False):
-                os.environ["LORA_A2A"] = "1"
-                print_rank_0("> LoRA A2A communication optimisation enabled")
-
-        if getattr(args, "linear_fp8", False):
-            apply_fp8_training(model, args)
-            if getattr(args, "lumen_linear", False):
-                scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
-                enable_fp8_for_parallel_linear(model, scaling_type=scaling_type)
-
-        return model
+    model_provider = make_lumen_model_provider(
+        lumen_gpt_builder,
+        lora_applier=apply_lora,
+        fp8_applier=apply_fp8_training,
+    )
+    install_fp8_param_gather_hook()
 
     train_valid_test_datasets_provider.is_distributed = True
 

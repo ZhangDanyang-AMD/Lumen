@@ -14,10 +14,19 @@ subpackages.
 """
 
 import logging
+import math
+import os
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+
+from lumen.models.training_contract import (
+    add_fsdp_fp8_contract_args,
+    add_fsdp_runtime_contract_args,
+    add_shared_checkpoint_args,
+    add_shared_experiment_args,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +71,7 @@ def add_common_fsdp_args(parser):
     t.add_argument("--save-interval", type=int, default=0, help="Save checkpoint every N steps. 0 = disabled.")
     t.add_argument("--save-dir", type=str, default="./checkpoints")
     t.add_argument("--num-workers", type=int, default=4)
+    add_fsdp_runtime_contract_args(t)
 
     # -- Data --
     d = parser.add_argument_group("data")
@@ -101,25 +111,7 @@ def add_common_fsdp_args(parser):
 
     # -- Linear FP8 training --
     lfp8 = parser.add_argument_group("linear-fp8")
-    lfp8.add_argument(
-        "--linear-fp8", action="store_true", default=False, help="Enable FP8 quantised training for Linear layers."
-    )
-    lfp8.add_argument(
-        "--linear-fp8-format", type=str, default="fp8_e4m3", choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"]
-    )
-    lfp8.add_argument(
-        "--linear-fp8-scaling",
-        type=str,
-        default="delayed",
-        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none"],
-    )
-    lfp8.add_argument("--linear-fp8-block-size", type=int, default=128)
-    lfp8.add_argument("--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
-    lfp8.add_argument("--linear-fp8-reduce-amax", action="store_true", default=False)
-    lfp8.add_argument("--linear-fp8-amax-history", type=int, default=16)
-    lfp8.add_argument("--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation.")
-    lfp8.add_argument("--linear-fp8-activation", action="store_true", default=True)
-    lfp8.add_argument("--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
+    add_fsdp_fp8_contract_args(lfp8)
     lfp8.add_argument("--linear-fp8-wgrad", action="store_true", default=True)
     lfp8.add_argument(
         "--no-linear-fp8-wgrad",
@@ -284,8 +276,8 @@ def add_common_fsdp_args(parser):
     )
 
     # -- FP8 checkpoint --
-    ckpt = parser.add_argument_group("fp8-checkpoint")
-    ckpt.add_argument(
+    fp8_ckpt = parser.add_argument_group("fp8-checkpoint")
+    fp8_ckpt.add_argument(
         "--lumen-fp8-checkpoint",
         action="store_true",
         default=False,
@@ -306,7 +298,98 @@ def add_common_fsdp_args(parser):
     wes.add_argument("--warmup-steps", type=int, default=0)
     wes.add_argument("--val-loss-target", type=float, default=None)
 
+    ckpt = parser.add_argument_group("checkpoint")
+    add_shared_checkpoint_args(ckpt)
+
+    experiment = parser.add_argument_group("experiment")
+    add_shared_experiment_args(experiment)
+
+    launcher = parser.add_argument_group("launcher-compat")
+    launcher.add_argument(
+        "--primus-turbo-fp8-attention",
+        type=str,
+        default=None,
+        help="Launcher compatibility flag (currently informational on FSDP path).",
+    )
+    launcher.add_argument(
+        "--primus-turbo-mxfp8-attention",
+        type=str,
+        default=None,
+        help="Launcher compatibility flag (currently informational on FSDP path).",
+    )
+    launcher.add_argument(
+        "--dbg-attn-output",
+        type=str,
+        default=None,
+        help="Launcher compatibility flag (currently informational on FSDP path).",
+    )
+
     return parser
+
+
+# ---------------------------------------------------------------------------
+# Scheduler helpers
+# ---------------------------------------------------------------------------
+
+
+def build_cosine_warmup_scheduler(optimizer, args):
+    """Build a cosine scheduler with optional linear warmup."""
+    warmup = getattr(args, "lr_warmup_steps", 0)
+    max_steps = getattr(args, "max_steps", 0)
+    max_lr = getattr(args, "lr", 0.0)
+    min_lr = getattr(args, "min_lr", 0.0)
+
+    def _lr_lambda(step):
+        if step < warmup:
+            return float(step) / max(warmup, 1)
+        progress = float(step - warmup) / max(max_steps - warmup, 1)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        min_ratio = min_lr / max_lr if max_lr > 0 else 0.0
+        return min_ratio + (1.0 - min_ratio) * cosine
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, _lr_lambda)
+
+
+# ---------------------------------------------------------------------------
+# Runtime helpers
+# ---------------------------------------------------------------------------
+
+
+def sync_scheduler_to_ckpt_step(scheduler, args) -> None:
+    """Advance a scheduler to the checkpoint start step, if any."""
+    ckpt_start_step = getattr(args, "ckpt_start_step", 0)
+    if ckpt_start_step > 0:
+        scheduler.step(ckpt_start_step)
+
+
+def should_run_eval_step(global_step: int, args) -> bool:
+    """Return whether validation should run at *global_step*."""
+    eval_interval = getattr(args, "eval_interval", 0)
+    eval_every = getattr(args, "eval_every", 0)
+    start_eval_at = getattr(args, "start_eval_at", 0)
+
+    interval = eval_interval if eval_interval > 0 else eval_every
+    if interval <= 0 or global_step < start_eval_at:
+        return False
+    return (global_step - start_eval_at) % interval == 0
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint helpers
+# ---------------------------------------------------------------------------
+
+
+def save_fsdp_checkpoint(model, path: str) -> None:
+    """Save an unwrapped FSDP/HF model to *path*."""
+    os.makedirs(path, exist_ok=True)
+    unwrapped = model
+    while hasattr(unwrapped, "module"):
+        unwrapped = unwrapped.module
+
+    if hasattr(unwrapped, "save_pretrained"):
+        unwrapped.save_pretrained(path)
+    else:
+        torch.save(unwrapped.state_dict(), os.path.join(path, "model.pt"))
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +438,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
 
     Args:
         dp_group: Data-parallel process group used for amax reduction.
-            If ``None`` and ``args.fp8_reduce_amax`` is true, falls back
+            If ``None`` and ``args.linear_fp8_reduce_amax`` is true, falls back
             to ``dist.group.WORLD``.
     """
     import lumen.quantize as quant
@@ -488,7 +571,7 @@ def apply_fsdp2(
     world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
     mesh = init_device_mesh("cuda", (world_size,))
 
-    if getattr(args, "linear_fp8", False) or getattr(args, "fp8_training", False):
+    if getattr(args, "linear_fp8", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,

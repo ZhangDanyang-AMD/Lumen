@@ -52,7 +52,6 @@ from lumen.models.megatron import (  # noqa: F401
     make_forward_step,
     reset_fp8_state,
 )
-from lumen.models.utils import safe_add_argument
 
 __all__ = [
     "LLaMA2SFTDataset",
@@ -180,9 +179,4 @@ forward_step = make_forward_step(get_batch, loss_func, zero_last_loss_mask=True)
 def add_finetune_args(parser):
     """Add finetune-specific arguments."""
     add_common_megatron_args(parser)
-
-    sft = parser.add_argument_group(title="sft-training")
-    safe_add_argument(sft, "--warmup-steps", type=int, default=0)
-    safe_add_argument(sft, "--val-loss-target", type=float, default=None)
-
     return parser

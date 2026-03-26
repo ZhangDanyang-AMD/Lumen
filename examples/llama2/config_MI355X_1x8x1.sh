@@ -21,9 +21,11 @@ export SEQ_LEN=8192
 export LR=4e-4
 export MIN_LR=0
 export TRAIN_STEPS=800
+export LR_WARMUP_STEPS=0
 export LOG_INTERVAL=1
 export SAVE_INTERVAL=200
 export SAVE_DIR="/results/checkpoints"
+export SEED=1234
 
 # ---- Data / tokenizer --------------------------------------------------------
 export TRAIN_DATA="/data/train.npy"
@@ -55,6 +57,29 @@ export BF16_LAYERS_END=1
 export WARMUP_STEPS=0
 export VAL_LOSS_TARGET=""
 
+# ---- Checkpoint management ---------------------------------------------------
+export USE_CKPT=0
+export FROM_HF=1
+export SAVE_CKPT=0
+export CONTINUAL_CKPT="/results/saved_ckpts"
+export CKPT_START_STEP=0
+export FP8_PARAMS=0
+
+# ---- Experiment management ---------------------------------------------------
+export TAG=""
+export TARGET_LOG_PPL="3.3"
+export STEP_TIME_ATOL=18000
+
+# ---- Evaluation (in training sequences, shared launcher contract) ------------
+export EVAL_EVERY=400
+export EVAL_INTERVAL=0
+export START_EVAL_AT=0
+
+# ---- Launcher compatibility --------------------------------------------------
+export PRIMUS_FP8_ATTN=0
+export PRIMUS_MXFP8_ATTN=0
+export DBG_ATTN_OUTPUT=0
+
 # ---- Megatron backend --------------------------------------------------------
 export MODEL_SIZE="llama2-70B"
 export TP=8
@@ -65,7 +90,7 @@ export SP=1
 export GBS=8
 export WEIGHT_DECAY=1e-4
 export GRADIENT_CLIP=0.3
-export EVAL_INTERVAL=50
+export EVAL_ITERS=10
 export PRECISION="bf16"
 export CKPT_DIR="/model"
 export LORA_A2A=0
