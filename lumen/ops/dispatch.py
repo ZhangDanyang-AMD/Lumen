@@ -36,6 +36,7 @@ class Backend(Enum):
     ASM = "asm"
     CK = "ck"
     TRITON = "triton"
+    HIPBLAS = "hipblas"
 
 
 FALLBACK_ORDER = [Backend.ASM, Backend.CK, Backend.TRITON]
@@ -153,6 +154,17 @@ def _probe_aiter_triton_quant():
     """Check if AITER Triton quant ops are available."""
     try:
         from aiter.ops.quant import per_tensor_quant_triton as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_hipblas():
+    """Check if AITER hipBLASLt GEMM ops are available."""
+    try:
+        from aiter.ops.gradlib import hipb_mm as _  # noqa: F401
 
         return True
     except (ImportError, OSError):

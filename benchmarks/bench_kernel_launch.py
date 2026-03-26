@@ -16,6 +16,8 @@ Exercises Lumen's fused-kernel features that reduce kernel-launch overhead:
     vs ``fp8_activation_store=False``.
   * **Attention backends**: ``aiter_csrc`` vs ``aiter_triton``.
   * **Fused RMSNorm + GEMM pipeline**: norm → quant → GEMM in one flow.
+  * **Fusion latency**: fused RoPE, fused RMSNorm+quant, fused GatedMLP,
+    fused MLP, and full norm+quant+GEMM pipeline vs decomposed equivalents.
 
 Run::
 
@@ -137,7 +139,7 @@ class TestQuantizedLinearScalingModes:
 @CUDA
 @AITER
 class TestFusedMoE:
-    """fused_moe_triton (end-to-end) vs individual fused_topk + GEMMs + fused_unpermute."""
+    """fused_moe_triton (end-to-end) vs individual fused_topk + per-expert GEMMs."""
 
     def _make_moe_inputs(self, num_tokens=B * S):
         hidden = torch.randn(num_tokens, HIDDEN, device="cuda", dtype=torch.bfloat16)
@@ -182,40 +184,49 @@ class TestFusedMoE:
         assert r.avg_ms > 0
 
     # Expected: Slower than fused_moe_triton. Each expert requires a separate
-    # GEMM kernel launch (8 experts = 8 launches), plus fused_topk, fused_permute,
-    # and fused_unpermute overhead. The Python loop and per-expert masking add
+    # GEMM kernel launch (8 experts = 8 launches), plus fused_topk and
+    # fused_permute overhead. The Python loop and per-expert masking add
     # host-side latency that the fused kernel avoids entirely.
     def test_individual_routing_latency(self):
-        """Individual routing: fused_topk + per-expert GEMMs + fused_unpermute."""
-        from lumen.ops.moe.fused_routing import fused_permute, fused_topk, fused_unpermute
+        """Individual routing: fused_topk + per-expert GEMMs (no fusion)."""
+        from lumen.ops.moe.fused_routing import fused_permute, fused_topk
         from lumen.ops.quantize.linear import gemm_bf16
 
         hidden, expert_w, logits = self._make_moe_inputs()
+        block_size = 32
+        max_token_id = hidden.shape[0] * TOP_K
 
         def _individual_moe():
             weights, indices = fused_topk(logits, TOP_K)
-            sorted_ids, sorted_w, sorted_expert_ids, num_valid, moe_buf = fused_permute(
+            sorted_ids, sorted_w, sorted_expert_ids, num_valid, _moe_buf = fused_permute(
                 hidden,
                 indices,
                 weights,
                 NUM_EXPERTS,
+                block_size=block_size,
             )
             expert_out = torch.zeros(
-                hidden.shape[0] * TOP_K,
+                max_token_id,
                 FFN_HIDDEN,
                 device="cuda",
                 dtype=torch.bfloat16,
             )
+            num_blocks = sorted_expert_ids.shape[0]
             for eid in range(NUM_EXPERTS):
-                mask = sorted_expert_ids == eid
-                if mask.any():
-                    token_ids = sorted_ids[mask]
-                    valid_ids = token_ids[token_ids < hidden.shape[0] * TOP_K]
-                    if valid_ids.numel() > 0:
-                        inp = moe_buf[valid_ids]
-                        expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
-            out = fused_unpermute(expert_out, sorted_ids, hidden.shape[0], TOP_K)
-            return out
+                token_ids_list = []
+                for b in range(num_blocks):
+                    if sorted_expert_ids[b].item() != eid:
+                        continue
+                    blk_start = b * block_size
+                    blk_ids = sorted_ids[blk_start : blk_start + block_size]
+                    valid = blk_ids[blk_ids < max_token_id]
+                    if valid.numel() > 0:
+                        token_ids_list.append(valid)
+                if token_ids_list:
+                    valid_ids = torch.cat(token_ids_list)
+                    inp = hidden[valid_ids // TOP_K]
+                    expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
+            return expert_out
 
         r = cuda_timer(_individual_moe, label="individual routing + per-expert GEMMs")
         print_report("MoE: Individual Routing", [r])
@@ -292,6 +303,8 @@ class TestFP8ActivationStore:
         r_bf16 = cuda_timer(lambda: mlp_bf16(x), label="GatedMLP fp8_store=False (fwd)")
         r_fp8 = cuda_timer(lambda: mlp_fp8(x), label="GatedMLP fp8_store=True (fwd)")
 
+        overhead = (r_fp8.avg_ms - r_bf16.avg_ms) / max(r_bf16.avg_ms, 1e-6) * 100
+        r_fp8.extra["vs_bf16"] = f"{overhead:+.1f}%"
         print_report("FP8 Activation Store: Forward", [r_bf16, r_fp8])
 
     # Expected: Backward pass with fp8_activation_store=True should be faster
@@ -314,6 +327,10 @@ class TestFP8ActivationStore:
         r_bf16 = cuda_timer(lambda: _fwd_bwd(mlp_bf16, x_bf16), label="GatedMLP fp8_store=False (fwd+bwd)")
         r_fp8 = cuda_timer(lambda: _fwd_bwd(mlp_fp8, x_fp8), label="GatedMLP fp8_store=True (fwd+bwd)")
 
+        speedup = r_bf16.avg_ms / max(r_fp8.avg_ms, 1e-6)
+        overhead = (r_fp8.avg_ms - r_bf16.avg_ms) / max(r_bf16.avg_ms, 1e-6) * 100
+        r_fp8.extra["vs_bf16"] = f"{overhead:+.1f}%"
+        r_fp8.extra["speedup"] = round(speedup, 2)
         print_report("FP8 Activation Store: Forward + Backward", [r_bf16, r_fp8])
 
     # Expected: ~1.5-2x memory reduction for activations saved during forward.
@@ -405,6 +422,8 @@ class TestAttentionBackends:
             lambda: attention(q, k, v, causal=True, backend_type="aiter_triton"),
             label="attention GQA (aiter_triton)",
         )
+        speedup = r_triton.avg_ms / max(r_csrc.avg_ms, 1e-6)
+        r_csrc.extra["speedup_vs_triton"] = round(speedup, 2)
         print_report("Attention: GQA (32Q/8KV)", [r_csrc, r_triton])
 
     # Expected: Sliding window (256 tokens) should be faster than full causal
@@ -507,7 +526,195 @@ class TestFusedNormGEMMPipeline:
 
 
 # ---------------------------------------------------------------------------
-# 6. Kernel-launch count: fused vs unfused (M1 acceptance criterion)
+# 6. Fusion latency: fused ops vs decomposed equivalents
+# ---------------------------------------------------------------------------
+
+
+@CUDA
+@AITER
+class TestFusionLatency:
+    """Latency comparison of Lumen fused ops vs decomposed equivalents.
+
+    Measures the wall-clock benefit of AITER-backed fused kernels over
+    manually sequenced PyTorch operations for several common pipelines.
+    """
+
+    # Expected: fused_rope dispatches two AITER Triton RoPE kernels (Q, K)
+    # which are individually faster than pure-PyTorch rope math (sin/cos
+    # broadcast multiply + interleave).  Speedup comes from fewer kernel
+    # launches and fused memory passes.
+    def test_fused_rope_vs_manual(self):
+        """Fused RoPE (AITER Triton) vs manual sin/cos rotation."""
+        from lumen.ops.rope import fused_rope
+
+        q = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(B, S, H_KV, D, device="cuda", dtype=torch.bfloat16)
+        cos = torch.randn(1, S, 1, D, device="cuda", dtype=torch.bfloat16)
+        sin = torch.randn(1, S, 1, D, device="cuda", dtype=torch.bfloat16)
+
+        def _manual():
+            x1_q, x2_q = q[..., : D // 2], q[..., D // 2 :]
+            rq = torch.cat((-x2_q, x1_q), dim=-1)
+            q_rot = q * cos + rq * sin
+            x1_k, x2_k = k[..., : D // 2], k[..., D // 2 :]
+            rk = torch.cat((-x2_k, x1_k), dim=-1)
+            k_rot = k * cos[:, :, :1, :] + rk * sin[:, :, :1, :]
+            return q_rot, k_rot
+
+        r_manual = cuda_timer(_manual, label="manual RoPE (sin/cos)")
+
+        r_fused = cuda_timer(
+            lambda: fused_rope(q, k, cos.squeeze(0).squeeze(-2), sin.squeeze(0).squeeze(-2)),
+            label="fused_rope (AITER Triton)",
+        )
+
+        speedup = r_manual.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused RoPE vs Manual", [r_manual, r_fused])
+
+    # Expected: rmsnorm_with_quant fuses norm + FP8 quantization into a
+    # single kernel pass (for dynamic/per_token/blockwise modes), avoiding
+    # the extra memory round-trip of writing BF16 normed output then
+    # re-reading it for quantization.
+    def test_fused_rmsnorm_quant_vs_separate(self):
+        """Fused RMSNorm+quant vs separate rmsnorm then manual FP8 cast."""
+        from lumen.ops.normalization.rmsnorm import rmsnorm, rmsnorm_with_quant
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w = torch.ones(HIDDEN, device="cuda", dtype=torch.bfloat16)
+
+        def _separate():
+            normed = rmsnorm(x, w)
+            return normed.to(fp8_dtype)
+
+        r_sep = cuda_timer(_separate, label="rmsnorm + manual cast to FP8")
+
+        results = [r_sep]
+        for mode in ["dynamic", "per_token", "blockwise"]:
+            r = cuda_timer(
+                lambda m=mode: rmsnorm_with_quant(x, w, eps=1e-6, scaling_type=m, fp8_dtype=fp8_dtype),
+                label=f"rmsnorm_with_quant({mode})",
+            )
+            speedup = r_sep.avg_ms / max(r.avg_ms, 1e-6)
+            r.extra["speedup"] = round(speedup, 2)
+            results.append(r)
+
+        print_report("Fused RMSNorm + Quant vs Separate", results)
+
+    # Expected: fused_gated_mlp uses AITER's ff_a16w16_fused_gated kernel
+    # which performs gate_proj, up_proj, SwiGLU activation, and down_proj
+    # in fewer kernel launches than the decomposed path. The fused kernel
+    # also benefits from register-level intermediate reuse.
+    def test_fused_gated_mlp_vs_decomposed(self):
+        """AITER fused_gated_mlp vs manual GEMMs + SwiGLU."""
+        from lumen.ops.mlp.fused_mlp import fused_gated_mlp
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w_gate = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_up = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_down = torch.randn(HIDDEN, FFN_HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+
+        def _decomposed():
+            gate = gemm_bf16(x, w_gate)
+            up = gemm_bf16(x, w_up)
+            act = torch.nn.functional.silu(gate) * up
+            return gemm_bf16(act, w_down)
+
+        r_decomposed = cuda_timer(_decomposed, label="manual gate+up+silu+down")
+
+        r_fused = cuda_timer(
+            lambda: fused_gated_mlp(x, w_up, w_gate, w_down, activation="swiglu"),
+            label="fused_gated_mlp (AITER)",
+        )
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused GatedMLP vs Decomposed", [r_decomposed, r_fused])
+
+    # Expected: fused_mlp uses AITER's ff_a16w16_fused_ungated kernel
+    # to combine up_proj + activation + down_proj.  The benefit is smaller
+    # than gated MLP because there are fewer intermediate tensors.
+    def test_fused_mlp_vs_decomposed(self):
+        """AITER fused_mlp vs manual GEMMs + GELU."""
+        from lumen.ops.mlp.fused_mlp import fused_mlp
+        from lumen.ops.quantize.linear import gemm_bf16
+
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        w_up = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+        w_down = torch.randn(HIDDEN, FFN_HIDDEN, device="cuda", dtype=torch.bfloat16) * 0.02
+
+        def _decomposed():
+            up = gemm_bf16(x, w_up)
+            act = torch.nn.functional.gelu(up)
+            return gemm_bf16(act, w_down)
+
+        r_decomposed = cuda_timer(_decomposed, label="manual up+gelu+down")
+
+        r_fused = cuda_timer(
+            lambda: fused_mlp(x, w_up, w_down, activation="gelu"),
+            label="fused_mlp (AITER)",
+        )
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Fused MLP vs Decomposed", [r_decomposed, r_fused])
+
+    # Expected: The full transformer-block pre-norm pipeline (RMSNorm →
+    # FP8 quant → GEMM) benefits from norm+quant fusion that eliminates
+    # one global memory round-trip.  Comparing the end-to-end latency
+    # of the fused pipeline against the decomposed version.
+    def test_norm_quant_gemm_pipeline(self):
+        """Full pipeline: RMSNorm → FP8 quant → GEMM (fused vs decomposed).
+
+        Both paths use the same pre-quantized FP8 weight so the comparison
+        isolates norm+quant fusion (one fewer global-memory round-trip) from
+        weight quantization overhead.
+        """
+        from lumen.ops.normalization.rmsnorm import rmsnorm, rmsnorm_with_quant
+        from lumen.ops.quantize.linear import (
+            dispatch_gemm,
+            quantize_input,
+        )
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
+        norm_w = torch.ones(HIDDEN, device="cuda", dtype=torch.bfloat16)
+        gemm_w = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
+
+        w_fp8, w_scale = quantize_input(gemm_w, "dynamic", fp8_dtype)
+
+        def _decomposed():
+            normed = rmsnorm(x, norm_w)
+            normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+            a_fp8, a_scale = quantize_input(normed_2d, "dynamic", fp8_dtype)
+            return dispatch_gemm(a_fp8, w_fp8, a_scale, w_scale, "dynamic")
+
+        r_decomposed = cuda_timer(_decomposed, label="rmsnorm + quant + GEMM (separate)")
+
+        def _fused():
+            normed_fp8, a_scale = rmsnorm_with_quant(
+                x,
+                norm_w,
+                eps=1e-6,
+                scaling_type="dynamic",
+                fp8_dtype=fp8_dtype,
+            )
+            normed_2d = normed_fp8.reshape(-1, normed_fp8.shape[-1]).contiguous()
+            return dispatch_gemm(normed_2d, w_fp8, a_scale, w_scale, "dynamic")
+
+        r_fused = cuda_timer(_fused, label="rmsnorm_with_quant + GEMM (fused)")
+
+        speedup = r_decomposed.avg_ms / max(r_fused.avg_ms, 1e-6)
+        r_fused.extra["speedup"] = round(speedup, 2)
+        print_report("Norm+Quant+GEMM Pipeline: Fused vs Decomposed", [r_decomposed, r_fused])
+
+
+# ---------------------------------------------------------------------------
+# 7. Kernel-launch count: fused vs unfused (M1 acceptance criterion)
 # ---------------------------------------------------------------------------
 
 
@@ -587,9 +794,16 @@ class TestKernelLaunchCount:
         n_unfused, _ = _count_kernels(_unfused)
 
         reduction = n_unfused - n_fused
-        print(f"\n  MoE fused kernels:   {n_fused}")
-        print(f"  MoE unfused kernels: {n_unfused}")
-        print(f"  Kernel reduction:    {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+        pct = reduction / max(n_unfused, 1) * 100
+        sep = "=" * 56
+        print(f"\n{sep}")
+        print("  MoE Kernel Launch Analysis")
+        print(sep)
+        print(f"  fused_moe_triton:     {n_fused:3d} kernels")
+        print(f"  per-expert GEMMs:     {n_unfused:3d} kernels")
+        print("  ─────────────────────────────────")
+        print(f"  Reduction:            {reduction:3d} kernels  ({pct:.0f}% fewer)")
+        print(sep)
         assert n_fused < n_unfused, f"Fused ({n_fused}) should use fewer kernels than unfused ({n_unfused})"
 
     # Expected: LumenGatedMLP fuses gate_proj + up_proj + activation + down_proj
@@ -624,9 +838,16 @@ class TestKernelLaunchCount:
         n_unfused, _ = _count_kernels(_unfused)
 
         reduction = n_unfused - n_fused
-        print(f"\n  GatedMLP fused kernels:   {n_fused}")
-        print(f"  GatedMLP unfused kernels: {n_unfused}")
-        print(f"  Kernel reduction:         {reduction} ({reduction / max(n_unfused, 1) * 100:.0f}%)")
+        pct = reduction / max(n_unfused, 1) * 100
+        sep = "=" * 56
+        print(f"\n{sep}")
+        print("  GatedMLP Kernel Launch Analysis")
+        print(sep)
+        print(f"  LumenGatedMLP (fused):    {n_fused:3d} kernels")
+        print(f"  Manual gate+up+down:      {n_unfused:3d} kernels")
+        print("  ─────────────────────────────────")
+        print(f"  Reduction:                {reduction:3d} kernels  ({pct:.0f}% fewer)")
+        print(sep)
 
 
 # ---------------------------------------------------------------------------
@@ -651,32 +872,48 @@ def main():
     # FP8 scaling modes
     x = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)
     w = torch.randn(FFN_HIDDEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
+    bf16_ms = None
     for mode in ["none", "delayed", "dynamic", "per_token", "blockwise", "mxfp8"]:
         r = cuda_timer(
             lambda m=mode: quantized_linear(x, w, scaling_type=m, fp8_dtype=fp8_dtype),
             label=f"quantized_linear({mode})",
         )
+        if mode == "none":
+            bf16_ms = r.avg_ms
+        elif bf16_ms is not None:
+            overhead = (r.avg_ms - bf16_ms) / max(bf16_ms, 1e-6) * 100
+            r.extra["vs_bf16"] = f"{overhead:+.1f}%"
         results.append(r)
 
     # Attention backends
     q = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
     k = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
     v = torch.randn(B, S, H, D, device="cuda", dtype=torch.bfloat16)
+    attn_results = []
     for be in ["aiter_csrc", "aiter_triton"]:
         r = cuda_timer(
             lambda b=be: attention(q, k, v, causal=True, backend_type=b),
             label=f"attention causal ({be})",
         )
-        results.append(r)
+        attn_results.append(r)
+    if len(attn_results) == 2:
+        speedup = attn_results[1].avg_ms / max(attn_results[0].avg_ms, 1e-6)
+        attn_results[0].extra["speedup_vs_triton"] = round(speedup, 2)
+    results.extend(attn_results)
 
     # GatedMLP fp8 activation store
+    mlp_results = []
     for fp8_store in [False, True]:
         mlp = LumenGatedMLP(HIDDEN, FFN_HIDDEN, activation="swiglu", bias=False, fp8_activation_store=fp8_store).to(
             device="cuda", dtype=torch.bfloat16
         )
         x_mlp = torch.randn(B, S, HIDDEN, device="cuda", dtype=torch.bfloat16)
         r = cuda_timer(lambda: mlp(x_mlp), label=f"GatedMLP fp8_store={fp8_store}")
-        results.append(r)
+        mlp_results.append(r)
+    if len(mlp_results) == 2:
+        overhead = (mlp_results[1].avg_ms - mlp_results[0].avg_ms) / max(mlp_results[0].avg_ms, 1e-6) * 100
+        mlp_results[1].extra["vs_bf16"] = f"{overhead:+.1f}%"
+    results.extend(mlp_results)
 
     # Fused MoE
     hidden = torch.randn(B * S, HIDDEN, device="cuda", dtype=torch.bfloat16)

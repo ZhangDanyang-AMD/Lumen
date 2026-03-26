@@ -4,199 +4,97 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Async CPU activation offload for Lumen.
+"""CPU offload for autograd saved tensors in Lumen.
 
-Provides hooks that offload forward activations to pinned CPU memory
-and prefetch them back to GPU before backward computation. Uses
-dedicated CUDA streams for async D2H/H2D transfers.
+Uses ``torch.autograd.graph.saved_tensors_hooks`` to move tensors saved for
+backward to pinned CPU memory, freeing GPU memory during forward. Dedicated
+CUDA streams overlap D2H work with compute; unpack restores tensors on GPU
+during backward.
 """
 
-import logging
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
-
-logger = logging.getLogger(__name__)
 
 
 class CPUOffloadManager:
-    """Manages async activation offload to CPU pinned memory.
+    """Offload autograd-saved tensors to pinned CPU memory."""
 
-    Registers forward hooks to copy activations to CPU after each layer,
-    and backward hooks to prefetch them back to GPU before they're needed.
-
-    Uses two dedicated CUDA streams:
-    - d2h_stream: Device-to-host transfers (forward)
-    - h2d_stream: Host-to-device transfers (backward)
-
-    Args:
-        enabled: Whether offload is active.
-        pin_memory: Use pinned (page-locked) CPU memory for transfers.
-    """
-
-    def __init__(self, enabled: bool = True, pin_memory: bool = True):
+    def __init__(self, enabled=True, pin_memory=True):
         self.enabled = enabled
         self.pin_memory = pin_memory
-        self._d2h_stream: Optional[torch.cuda.Stream] = None
-        self._h2d_stream: Optional[torch.cuda.Stream] = None
-        self._cpu_tensors: Dict[str, Tuple[torch.Tensor, torch.Size, torch.dtype]] = {}
-        self._hooks: List = []
-        self._layer_order: List[str] = []
+        self._d2h_streams = {}
+        self._h2d_streams = {}
+        self._offloaded_bytes = 0
 
     def _get_d2h_stream(self, device):
-        if self._d2h_stream is None:
-            self._d2h_stream = torch.cuda.Stream(device=device)
-        return self._d2h_stream
+        if device not in self._d2h_streams:
+            self._d2h_streams[device] = torch.cuda.Stream(device=device)
+        return self._d2h_streams[device]
 
     def _get_h2d_stream(self, device):
-        if self._h2d_stream is None:
-            self._h2d_stream = torch.cuda.Stream(device=device)
-        return self._h2d_stream
+        if device not in self._h2d_streams:
+            self._h2d_streams[device] = torch.cuda.Stream(device=device)
+        return self._h2d_streams[device]
 
-    def register_hooks(self, model: nn.Module, layer_types: Optional[tuple] = None) -> int:
-        """Register forward/backward hooks on model layers.
+    @property
+    def memory_saved_bytes(self):
+        return self._offloaded_bytes
 
-        Args:
-            model: Model to hook.
-            layer_types: Tuple of module types to hook. If None, hooks all
-                modules with parameters.
+    def _pack(self, tensor):
+        if not tensor.is_cuda or not self.enabled:
+            return tensor
+        if tensor.nelement() * tensor.element_size() < 1024:
+            return tensor
+        device = tensor.device
+        d2h = self._get_d2h_stream(device)
+        event = torch.cuda.current_stream(device).record_event()
+        with torch.cuda.stream(d2h):
+            d2h.wait_event(event)
+            cpu = torch.empty(
+                tensor.shape,
+                dtype=tensor.dtype,
+                pin_memory=self.pin_memory,
+            )
+            cpu.copy_(tensor, non_blocking=True)
+            cpu._d2h_event = d2h.record_event()
+            cpu._src_device = device
+        self._offloaded_bytes += tensor.nelement() * tensor.element_size()
+        return cpu
 
-        Returns:
-            Number of hooks registered.
-        """
-        if not self.enabled:
-            return 0
-
-        count = 0
-        for name, module in model.named_modules():
-            if layer_types is not None:
-                if not isinstance(module, layer_types):
-                    continue
-            elif not list(module.parameters(recurse=False)):
-                continue
-
-            fwd_hook = module.register_forward_hook(self._make_forward_hook(name))
-            bwd_hook = module.register_full_backward_pre_hook(self._make_backward_hook(name))
-            self._hooks.extend([fwd_hook, bwd_hook])
-            self._layer_order.append(name)
-            count += 1
-
-        logger.info("CPUOffloadManager: registered %d layer hooks", count)
-        return count
-
-    def _make_forward_hook(self, layer_name: str):
-        """Create forward hook that offloads output to CPU."""
-        manager = self
-
-        def hook(module, input, output):
-            if not manager.enabled:
-                return output
-            if not isinstance(output, torch.Tensor):
-                return output
-            if not output.is_cuda:
-                return output
-
-            device = output.device
-            d2h = manager._get_d2h_stream(device)
-
-            # Async copy to pinned CPU memory
-            with torch.cuda.stream(d2h):
-                if manager.pin_memory:
-                    cpu_tensor = torch.empty(
-                        output.shape,
-                        dtype=output.dtype,
-                        pin_memory=True,
-                    )
-                    cpu_tensor.copy_(output, non_blocking=True)
-                else:
-                    cpu_tensor = output.to("cpu", non_blocking=True)
-
-            manager._cpu_tensors[layer_name] = (cpu_tensor, output.shape, output.dtype)
-
-            # Return a placeholder that saves memory
-            # The actual tensor will be prefetched in backward
-            return output
-
-        return hook
-
-    def _make_backward_hook(self, layer_name: str):
-        """Create backward pre-hook that prefetches activations from CPU."""
-        manager = self
-
-        def hook(module, grad_output):
-            if not manager.enabled:
-                return
-            if layer_name not in manager._cpu_tensors:
-                return
-
-            cpu_tensor, shape, dtype = manager._cpu_tensors[layer_name]
-
-            # Determine device from grad_output
-            device = None
-            if isinstance(grad_output, tuple):
-                for g in grad_output:
-                    if isinstance(g, torch.Tensor) and g.is_cuda:
-                        device = g.device
-                        break
-            elif isinstance(grad_output, torch.Tensor) and grad_output.is_cuda:
-                device = grad_output.device
-
-            if device is not None:
-                h2d = manager._get_h2d_stream(device)
-                with torch.cuda.stream(h2d):
-                    _ = cpu_tensor.to(device, non_blocking=True)
-                # Sync to ensure data is available
-                h2d.synchronize()
-
-            # Clean up
-            del manager._cpu_tensors[layer_name]
-
-        return hook
-
-    def remove_hooks(self):
-        """Remove all registered hooks."""
-        for hook in self._hooks:
-            hook.remove()
-        self._hooks.clear()
-        self._layer_order.clear()
-        self._cpu_tensors.clear()
-
-    def memory_saved_bytes(self) -> int:
-        """Estimate bytes currently offloaded to CPU."""
-        total = 0
-        for name, (tensor, shape, dtype) in self._cpu_tensors.items():
-            total += tensor.nelement() * tensor.element_size()
-        return total
+    def _unpack(self, packed):
+        if not isinstance(packed, torch.Tensor) or packed.is_cuda:
+            return packed
+        if hasattr(packed, "_d2h_event"):
+            packed._d2h_event.synchronize()
+        device = getattr(packed, "_src_device", torch.device("cuda"))
+        h2d = self._get_h2d_stream(device)
+        event = torch.cuda.current_stream(device).record_event()
+        with torch.cuda.stream(h2d):
+            h2d.wait_event(event)
+            gpu = packed.to(device, non_blocking=True)
+        h2d.synchronize()
+        return gpu
 
 
 @contextmanager
-def lumen_cpu_offload_context(
-    model: nn.Module,
-    enabled: bool = True,
-    pin_memory: bool = True,
-    layer_types: Optional[tuple] = None,
-):
-    """Context manager for CPU activation offload.
+def lumen_cpu_offload_context(enabled=True, pin_memory=True):
+    """Context manager wrapping ``saved_tensors_hooks`` for CPU offload.
 
     Usage::
 
-        with lumen_cpu_offload_context(model, enabled=True):
+        with lumen_cpu_offload_context(enabled=True) as mgr:
             output = model(input)
             loss = criterion(output, target)
-            loss.backward()
+        loss.backward()
 
     Args:
-        model: Model to offload activations from.
-        enabled: Whether to enable offload.
-        pin_memory: Use pinned CPU memory.
-        layer_types: Module types to offload. None = all with params.
+        enabled: When False, no hooks are installed.
+        pin_memory: Allocate pinned CPU buffers for async copies.
     """
-    manager = CPUOffloadManager(enabled=enabled, pin_memory=pin_memory)
-    if enabled:
-        manager.register_hooks(model, layer_types)
-    try:
-        yield manager
-    finally:
-        manager.remove_hooks()
+    mgr = CPUOffloadManager(enabled=enabled, pin_memory=pin_memory)
+    if not enabled:
+        yield mgr
+        return
+    with torch.autograd.graph.saved_tensors_hooks(mgr._pack, mgr._unpack):
+        yield mgr

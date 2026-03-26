@@ -205,36 +205,49 @@ def trace_column_row_pipeline() -> List[str]:
 
 
 def trace_deferred_wgrad_overlap() -> List[str]:
-    """Trace sequential vs overlapped _DeferredWgrad execution."""
+    """Trace wgrad overlapped with simulated comm (sleep) vs sequential."""
     from lumen.modules.parallel_linear import _DeferredWgrad
 
     x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
     w = nn.Parameter(torch.randn(N, K, device="cuda", dtype=torch.bfloat16) * 0.02)
     w.main_grad = torch.zeros(N, K, device="cuda", dtype=torch.bfloat16)
-    w_next = torch.randn(K, N, device="cuda", dtype=torch.bfloat16) * 0.02
     grad_out = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
     dwg = _DeferredWgrad()
-    wgrad_stream = torch.cuda.Stream()
+    comm_stream = torch.cuda.Stream()
+
+    # Calibrate sleep cycles to roughly match wgrad GEMM latency
+    torch.cuda.synchronize()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    for _ in range(5):
+        _ = grad_out.T @ x
+    torch.cuda.synchronize()
+    start.record()
+    _ = grad_out.T @ x
+    end.record()
+    torch.cuda.synchronize()
+    dw_ns = int(start.elapsed_time(end) * 1e6)
+    sleep_cycles = max(dw_ns * 2, 100_000)
 
     def _sequential():
         w.main_grad.zero_()
         dwg.defer(w, lambda: grad_out.T @ x)
         dwg.execute()
         torch.cuda.synchronize()
-        _ = x @ w_next
+        torch.cuda._sleep(sleep_cycles)
         torch.cuda.synchronize()
 
     def _overlapped():
         w.main_grad.zero_()
         dwg.defer(w, lambda: grad_out.T @ x)
-        with torch.cuda.stream(wgrad_stream):
-            dwg.execute()
-        _ = x @ w_next
-        wgrad_stream.synchronize()
+        with torch.cuda.stream(comm_stream):
+            torch.cuda._sleep(sleep_cycles)
+        dwg.execute()
+        torch.cuda.current_stream().wait_stream(comm_stream)
 
     paths = [
-        trace_fn(_sequential, os.path.join(TRACE_DIR, "wgrad_sequential.json"), label="wgrad sequential"),
-        trace_fn(_overlapped, os.path.join(TRACE_DIR, "wgrad_overlapped.json"), label="wgrad overlapped"),
+        trace_fn(_sequential, os.path.join(TRACE_DIR, "wgrad_comm_sequential.json"), label="wgrad+comm sequential"),
+        trace_fn(_overlapped, os.path.join(TRACE_DIR, "wgrad_comm_overlapped.json"), label="wgrad||comm overlapped"),
     ]
     return paths
 

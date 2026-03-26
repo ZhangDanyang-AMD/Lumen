@@ -87,6 +87,11 @@ export STEP_TIME_ATOL=18000
 export EVAL_EVERY=12288
 export START_EVAL_AT=0
 
+# ---- Launcher compatibility --------------------------------------------------
+export PRIMUS_FP8_ATTN=0
+export PRIMUS_MXFP8_ATTN=0
+export DBG_ATTN_OUTPUT=0
+
 # ---- Lumen -------------------------------------------------------
 # Attention backend: "aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8"
 #   aiter_asm_fp8 uses ASM kernels with fallback: asm -> csrc -> triton

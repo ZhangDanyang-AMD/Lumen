@@ -38,6 +38,7 @@ import torch
 from lumen.ops.dispatch import (
     Backend,
     _probe_aiter_ck_gemm,
+    _probe_aiter_hipblas,
     _probe_aiter_quant,
     _probe_aiter_triton_gemm,
     _probe_aiter_triton_gemm_mxfp8,
@@ -186,27 +187,58 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
     return hipb_mm(a_fp8, w_fp8.t().contiguous(), -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
+def _expand_per_tensor_scale(scale, size):
+    """Broadcast a per-tensor scale to the per-row shape AITER expects."""
+    return scale.float().reshape(1).expand(size).contiguous()
+
+
+def _dequant_fp8_weight_local(weight_fp8, weight_scale, block_size):
+    """Dequantize FP8 weights locally to avoid circular imports with gemm_primitives."""
+    if weight_scale.numel() == 1:
+        return weight_fp8.float() * weight_scale.float()
+
+    k_dim = weight_fp8.shape[-1]
+    scale_cols = weight_scale.shape[-1] if weight_scale.dim() > 1 else 1
+
+    if scale_cols == 1 or scale_cols >= k_dim:
+        return weight_fp8.float() * weight_scale.float()
+
+    scales_expanded = weight_scale.float().repeat_interleave(block_size, dim=-1)[:, :k_dim]
+    return weight_fp8.float() * scales_expanded
+
+
 def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.gemm_op_a8w8 import gemm_a8w8_CK
 
-    return gemm_a8w8_CK(a_fp8, w_fp8, scale_a, scale_w)
+    m_dim, n_dim = a_fp8.shape[0], w_fp8.shape[0]
+    sa = _expand_per_tensor_scale(scale_a, m_dim).unsqueeze(1)
+    sw = _expand_per_tensor_scale(scale_w, n_dim).unsqueeze(1)
+    return gemm_a8w8_CK(a_fp8, w_fp8, sa, sw)
 
 
 def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_a8w8 import gemm_a8w8
 
-    return gemm_a8w8(a_fp8, w_fp8, scale_a, scale_w)
+    m_dim, n_dim = a_fp8.shape[0], w_fp8.shape[0]
+    sa = _expand_per_tensor_scale(scale_a, m_dim)
+    sw = _expand_per_tensor_scale(scale_w, n_dim)
+    return gemm_a8w8(a_fp8, w_fp8, sa, sw)
 
 
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w):
-    """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends."""
+    """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends.
+
+    hipBLASLt is tried last because ``hipb_create_extension`` / ``hipb_mm``
+    can SIGSEGV in ``mp.spawn`` child processes. CK and Triton are safer
+    choices for multi-process test coverage.
+    """
     backends = []
-    if _probe_aiter_quant():
-        backends.append((Backend.CK, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_ck_gemm():
         backends.append((Backend.CK, lambda: _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
+    if _probe_aiter_hipblas():
+        backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
     return try_backends(backends, op_name="gemm_per_tensor")
 
 
@@ -489,16 +521,17 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
 
         # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
-        # In hybrid mode (e.g. E4M3 fwd / E5M2 bwd), weight_fp8 was saved
-        # as the forward dtype.  AITER FP8 GEMM kernels do not support
-        # mixed-dtype operands (CK rejects, Triton misinterprets, hipBLASLt
-        # has no tuned config for E5M2).  Dequantize both to BF16 in that
-        # case.
+        # Fall back to BF16 dequant when:
+        #  1. Forward/backward FP8 dtypes differ.
+        #  2. Forward used per_token / blockwise quantization, which yields
+        #     multi-element weight scales incompatible with the per-tensor
+        #     dgrad GEMM path.
         _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
-        if _mixed_dtype:
+        _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
+        if _mixed_dtype or _needs_dequant:
             grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-            weight_t_bf16 = (weight_fp8.t().contiguous().float() * weight_scale).bfloat16()
-            grad_input = dispatch_gemm(grad_bf16, weight_t_bf16, None, None, "none")
+            weight_bf16 = _dequant_fp8_weight_local(weight_fp8, weight_scale, block_size).bfloat16()
+            grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
         else:
             grad_input = dispatch_gemm(
                 grad_fp8,

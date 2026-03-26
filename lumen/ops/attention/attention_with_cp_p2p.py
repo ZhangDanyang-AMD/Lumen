@@ -18,12 +18,33 @@ Ring CP is preferred when:
 """
 
 import logging
+import os
 from typing import Callable, Optional, Tuple
 
 import torch
 import torch.distributed as dist
 
+try:
+    from aiter.jit.core import AITER_ROOT_DIR
+except ImportError:
+    AITER_ROOT_DIR = None
+
 logger = logging.getLogger(__name__)
+
+
+def is_ck_bwd_compiled(dtype: torch.dtype = torch.bfloat16, causal: bool = True) -> bool:
+    """Check whether the CK attention backward kernel is already pre-built."""
+    if AITER_ROOT_DIR is None:
+        return False
+
+    jit_dir = os.path.join(AITER_ROOT_DIR, "aiter", "jit")
+    if os.path.isfile(os.path.join(jit_dir, "module_fmha_v3_bwd.so")):
+        return True
+
+    dtype_tag = "_fp16" if dtype == torch.float16 else "_bf16"
+    mask_tag = "_mask" if causal else "_nmask"
+    module_name = f"mha_bwd{dtype_tag}_nbias_ndbias{mask_tag}_ndropout_deterministic"
+    return os.path.isfile(os.path.join(jit_dir, module_name + ".so"))
 
 
 def _ring_send_recv_kv(
@@ -163,6 +184,13 @@ class AttentionCPP2PFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         q, k, v, lse = ctx.saved_tensors
+
+        assert is_ck_bwd_compiled(dtype=q.dtype, causal=ctx.causal), (
+            "CK attention backward kernel is not pre-compiled. "
+            "JIT compilation inside mp.spawn child processes can crash. "
+            "Pre-build AITER kernels before launching spawned tests."
+        )
+
         cp_group = ctx.cp_group
         cp_size = ctx.cp_size
         cp_rank = ctx.cp_rank

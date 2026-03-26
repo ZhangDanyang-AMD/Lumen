@@ -14,11 +14,18 @@ pytest-xdist
 torchao>=0.8
 
 # AITER — installed from third_party/aiter (editable) in Dockerfile
+# Megatron-LM — installed from git clone in Dockerfile (not on PyPI)
 
 # HuggingFace (model/dataset download helpers)
 huggingface_hub>=0.20
 datasets>=2.16
-regex
+transformers>=4.38
+
+# LoRA (via HuggingFace PEFT)
+peft>=0.9
+
+# Build tools (needed for mori submodule compilation)
+setuptools-scm
 
 # Utilities
 numpy>=1.26.0
