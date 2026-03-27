@@ -59,6 +59,45 @@ def _install_fused_layer_norm_patch():
 
 _install_fused_layer_norm_patch()
 
+
+def _install_language_module_checkpoint_patch():
+    """Guard LanguageModule.sharded_state_dict against missing output_layer.weight.
+
+    When LoRA (or another wrapper) replaces output_layer, the state-dict key
+    ``output_layer.weight`` no longer exists.  Megatron unconditionally indexes
+    it, producing a KeyError during checkpoint save.  This patch adds a safe
+    ``in`` check, consistent with how output_layer.bias is already handled.
+    """
+    from megatron.core.models.common.language_module import language_module as _lm_mod
+
+    def _patched_sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
+        assert not sharded_offsets, "Unexpected sharded offsets"
+        from megatron.core.transformer.module import MegatronModule
+
+        sharded_state_dict = MegatronModule.sharded_state_dict(self, prefix, sharded_offsets, metadata)
+
+        first_stage_word_emb_key = f"{prefix}embedding.word_embeddings.weight"
+        output_layer_weight_key = f"{prefix}output_layer.weight"
+        output_layer_bias_key = f"{prefix}output_layer.bias"
+
+        if self.share_embeddings_and_output_weights:
+            self.tie_embeddings_and_output_weights_state_dict(
+                sharded_state_dict, output_layer_weight_key, first_stage_word_emb_key
+            )
+        elif self.post_process:
+            if output_layer_weight_key in sharded_state_dict:
+                sharded_state_dict[output_layer_weight_key].allow_shape_mismatch = True
+
+        if self.post_process and output_layer_bias_key in sharded_state_dict:
+            sharded_state_dict[output_layer_bias_key].allow_shape_mismatch = True
+
+        return sharded_state_dict
+
+    _lm_mod.LanguageModule.sharded_state_dict = _patched_sharded_state_dict
+
+
+_install_language_module_checkpoint_patch()
+
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
 from megatron.core.utils import StragglerDetector, get_attr_wrapped_model
@@ -674,7 +713,17 @@ def apply_lora(model: GPTModel, args) -> None:
                 layer.mlp.linear_fc2 = LoraAdapter(layer.mlp.linear_fc2, **common)
 
     if hasattr(model, "output_layer") and model.output_layer is not None:
-        model.output_layer = LoraAdapter(model.output_layer, **common)
+        if not model.share_embeddings_and_output_weights:
+            # When embeddings and output weights are untied, wrapping the
+            # output_layer with LoRA changes its state-dict key from
+            # "output_layer.weight" to "output_layer.base_layer.weight".
+            # Megatron's LanguageModule.sharded_state_dict() hard-codes the
+            # original key, causing a KeyError during checkpoint save.
+            # Freeze the output layer instead -- standard practice for LoRA SFT.
+            for p in model.output_layer.parameters():
+                p.requires_grad = False
+        else:
+            model.output_layer = LoraAdapter(model.output_layer, **common)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
