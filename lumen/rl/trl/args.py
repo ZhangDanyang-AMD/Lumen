@@ -147,4 +147,10 @@ def build_grpo_config_kwargs(args: TrlLumenArgs) -> dict[str, Any]:
     }
     if args.save_interval <= 0:
         kwargs["save_strategy"] = "no"
+
+    # Pin rollout to Transformers' default model.generate() path.
+    # TRL also supports vLLM and paged-attention backends; disable them
+    # explicitly so a future TRL default cannot silently change rollout mode.
+    kwargs["use_vllm"] = False
+
     return kwargs

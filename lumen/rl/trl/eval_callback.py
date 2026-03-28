@@ -77,7 +77,7 @@ class GRPOEvalCallback(TrainerCallback):
             if key in logs:
                 record[key] = logs[key]
 
-        reward_mean = logs.get("reward") or logs.get("rewards/reward_fn/mean")
+        reward_mean = logs["reward"] if "reward" in logs else logs.get("rewards/reward_fn/mean")
         if reward_mean is not None:
             reward_mean = float(reward_mean)
             self._reward_history.append(reward_mean)
