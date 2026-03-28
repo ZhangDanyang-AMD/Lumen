@@ -13,6 +13,7 @@ from transformers import AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
 from lumen.rl.trl.args import build_grpo_config_kwargs
+from lumen.rl.trl.eval_callback import GRPOEvalCallback
 from lumen.rl.trl.modeling import build_actor_model
 from lumen.rl.trl.warmup import maybe_run_synthetic_warmup
 
@@ -52,7 +53,12 @@ def run_grpo(args, *, reward_fn):
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     device = f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu"
 
-    config = GRPOConfig(**build_grpo_config_kwargs(args))
+    config_kwargs = build_grpo_config_kwargs(args)
+    config = GRPOConfig(**config_kwargs)
+
+    eval_cb = GRPOEvalCallback(output_dir=config_kwargs["output_dir"])
+    callbacks = [eval_cb]
+
     trainer = GRPOTrainer(
         model=model,
         reward_funcs=reward_fn,
@@ -60,6 +66,7 @@ def run_grpo(args, *, reward_fn):
         train_dataset=args.train_dataset,
         eval_dataset=getattr(args, "eval_dataset", None),
         processing_class=tokenizer,
+        callbacks=callbacks,
     )
     maybe_run_synthetic_warmup(getattr(trainer, "model", model), args, device=device)
     trainer.train()

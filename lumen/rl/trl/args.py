@@ -123,7 +123,7 @@ def build_grpo_config_kwargs(args: TrlLumenArgs) -> dict[str, Any]:
     """Translate the stable Lumen contract into GRPOConfig keyword arguments."""
 
     save_steps = args.save_interval if args.save_interval > 0 else args.max_steps + 1
-    return {
+    kwargs: dict[str, Any] = {
         "output_dir": args.output_dir,
         "learning_rate": args.lr,
         "weight_decay": args.weight_decay,
@@ -136,7 +136,6 @@ def build_grpo_config_kwargs(args: TrlLumenArgs) -> dict[str, Any]:
         "save_steps": save_steps,
         "bf16": True,
         "gradient_checkpointing": args.gradient_checkpointing,
-        "max_prompt_length": args.max_prompt_length,
         "max_completion_length": args.max_completion_length,
         "num_generations": args.num_generations,
         "beta": args.beta,
@@ -146,3 +145,6 @@ def build_grpo_config_kwargs(args: TrlLumenArgs) -> dict[str, Any]:
         "remove_unused_columns": False,
         "seed": args.seed,
     }
+    if args.save_interval <= 0:
+        kwargs["save_strategy"] = "no"
+    return kwargs
