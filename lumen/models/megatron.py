@@ -246,17 +246,24 @@ def _patch_norms_in_spec(spec, norm_cls=None):
     - Block-level specs (``TransformerBlockSubmodules`` with
       ``layer_specs`` and ``final_layernorm``)
     - Layer-level specs (``ModuleSpec`` with ``submodules``)
+
+    IdentityOp placeholders (used for disabled modules like cross-attention
+    norms in decoder-only models) are preserved and never replaced.
     """
+    from megatron.core.transformer.identity_op import IdentityOp
+
     if norm_cls is None:
         norm_cls = _MegatronCompatibleTLNorm
 
     for attr in _NORM_ATTRS:
-        if getattr(spec, attr, None) is not None:
+        cur = getattr(spec, attr, None)
+        if cur is not None and cur is not IdentityOp:
             setattr(spec, attr, norm_cls)
 
     if hasattr(spec, "submodules") and spec.submodules is not None:
         for attr in _NORM_ATTRS:
-            if getattr(spec.submodules, attr, None) is not None:
+            cur = getattr(spec.submodules, attr, None)
+            if cur is not None and cur is not IdentityOp:
                 setattr(spec.submodules, attr, norm_cls)
 
     layer_specs = getattr(spec, "layer_specs", None)
@@ -691,7 +698,12 @@ def enable_fp8_for_parallel_linear(
 
 
 def apply_lora(model: GPTModel, args) -> None:
-    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning."""
+    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning.
+
+    By default, applies LoRA only to attention layers (QKV + output projection),
+    matching the MLPerf reference (NeMo target_modules=['attention']).
+    Set ``--lora-target-modules all`` to also include MLP layers.
+    """
     from megatron.core.transformer.lora_adapter import LoraAdapter
 
     common = {
@@ -701,34 +713,24 @@ def apply_lora(model: GPTModel, args) -> None:
         "dropout": args.lora_dropout,
     }
 
-    if hasattr(model, "embedding") and model.embedding is not None:
-        model.embedding.word_embeddings = LoraAdapter(model.embedding.word_embeddings, **common)
+    target = getattr(args, "lora_target_modules", "attention")
+
+    for p in model.parameters():
+        p.requires_grad = False
 
     if hasattr(model, "decoder") and model.decoder is not None:
         for layer in model.decoder.layers:
             layer.self_attention.linear_qkv = LoraAdapter(layer.self_attention.linear_qkv, **common)
             layer.self_attention.linear_proj = LoraAdapter(layer.self_attention.linear_proj, **common)
-            if hasattr(layer, "mlp") and layer.mlp is not None:
+            if target == "all" and hasattr(layer, "mlp") and layer.mlp is not None:
                 layer.mlp.linear_fc1 = LoraAdapter(layer.mlp.linear_fc1, **common)
                 layer.mlp.linear_fc2 = LoraAdapter(layer.mlp.linear_fc2, **common)
-
-    if hasattr(model, "output_layer") and model.output_layer is not None:
-        if not model.share_embeddings_and_output_weights:
-            # When embeddings and output weights are untied, wrapping the
-            # output_layer with LoRA changes its state-dict key from
-            # "output_layer.weight" to "output_layer.base_layer.weight".
-            # Megatron's LanguageModule.sharded_state_dict() hard-codes the
-            # original key, causing a KeyError during checkpoint save.
-            # Freeze the output layer instead -- standard practice for LoRA SFT.
-            for p in model.output_layer.parameters():
-                p.requires_grad = False
-        else:
-            model.output_layer = LoraAdapter(model.output_layer, **common)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print_rank_0(
-        f"> LoRA applied (rank={args.lora_rank}, alpha={args.lora_alpha}) — "
+        f"> LoRA applied (rank={args.lora_rank}, alpha={args.lora_alpha}, "
+        f"target={target}) — "
         f"trainable: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
     )
 
