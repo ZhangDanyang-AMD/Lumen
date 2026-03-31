@@ -75,7 +75,12 @@ class GRPOEvalCallback(TrainerCallback):
 
         for key in _TRACKED_KEYS:
             if key in logs:
-                record[key] = logs[key]
+                val = logs[key]
+                if key == "entropy" and isinstance(val, (int, float)) and val < -100:
+                    record["entropy_raw"] = val
+                    record[key] = None
+                else:
+                    record[key] = val
 
         reward_mean = logs["reward"] if "reward" in logs else logs.get("rewards/reward_fn/mean")
         if reward_mean is not None:

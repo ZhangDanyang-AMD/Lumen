@@ -19,9 +19,10 @@ import json
 import sys
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import matplotlib
 
-plt.switch_backend("Agg")
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 def load_log(log_path: Path) -> list[dict]:
@@ -34,12 +35,22 @@ def load_log(log_path: Path) -> list[dict]:
     return entries
 
 
-def _extract(entries: list[dict], key: str) -> tuple[list, list]:
+def _extract(entries: list[dict], key: str, *, filter_outliers: bool = False) -> tuple[list, list]:
     steps, vals = [], []
     for e in entries:
         if key in e and e[key] is not None:
             steps.append(e["step"])
             vals.append(float(e[key]))
+    if filter_outliers and len(vals) >= 3:
+        import numpy as _np
+        arr = _np.array(vals)
+        med = _np.median(arr)
+        mad = _np.median(_np.abs(arr - med))
+        if mad > 0:
+            threshold = 10 * mad
+            mask = _np.abs(arr - med) <= threshold
+            steps = [s for s, m in zip(steps, mask) if m]
+            vals = [v for v, m in zip(vals, mask) if m]
     return steps, vals
 
 
@@ -48,11 +59,12 @@ def plot(entries: list[dict], out_path: Path):
         ("reward", "Reward vs. Step", "Reward"),
         ("entropy", "Entropy vs. Step (KL proxy)", "Entropy"),
         ("completions/mean_length", "Response Length vs. Step", "Mean Length"),
-        ("win_rate_cumulative", "Win Rate vs. Step (over baseline)", "Win Rate"),
         ("win_rate", "Win Rate vs. Step (over baseline)", "Win Rate"),
         ("loss", "Loss vs. Step", "Loss"),
         ("grad_norm", "Gradient Norm vs. Step", "Grad Norm"),
     ]
+
+    _OUTLIER_KEYS = {"entropy", "grad_norm"}
 
     active = [(key, title, ylabel) for key, title, ylabel in panels if _extract(entries, key)[0]]
     if not active:
@@ -64,7 +76,7 @@ def plot(entries: list[dict], out_path: Path):
 
     for idx, (key, title, ylabel) in enumerate(active):
         ax = axes[idx, 0]
-        steps, vals = _extract(entries, key)
+        steps, vals = _extract(entries, key, filter_outliers=(key in _OUTLIER_KEYS))
         ax.plot(steps, vals, marker="o", markersize=4, linewidth=1.5)
         ax.set_title(title, fontsize=13, fontweight="bold")
         ax.set_xlabel("Step")

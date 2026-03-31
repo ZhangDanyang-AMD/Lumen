@@ -67,6 +67,7 @@ def _load_runner_module(events):
 
     transformers_mod = types.ModuleType("transformers")
     transformers_mod.AutoTokenizer = _FakeAutoTokenizer
+    transformers_mod.TrainerCallback = type("TrainerCallback", (), {})
     sys.modules["transformers"] = transformers_mod
 
     def _grpo_config(**kwargs):
@@ -175,6 +176,50 @@ def test_grpo_fsdp1_example_smoke(tmp_path):
         "--gradient-accumulation-steps",
         "1",
         "--num-generations",
+        "2",
+    ]
+
+    completed = subprocess.run(
+        cmd,
+        cwd=repo_root,
+        env=env,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+
+
+@pytest.mark.skipif(
+    os.environ.get("LUMEN_RUN_SLOW_RL_TESTS") != "1",
+    reason="set LUMEN_RUN_SLOW_RL_TESTS=1 to run distributed RL smoke tests",
+)
+def test_grpo_fsdp2_example_smoke(tmp_path):
+    repo_root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "accelerate.commands.launch",
+        "--config_file",
+        str(repo_root / "examples/rl/trl/accelerate/fsdp2.yaml"),
+        str(repo_root / "examples/rl/trl/run_grpo_fsdp.py"),
+        "--model-name-or-path",
+        "hf-internal-testing/tiny-random-LlamaForCausalLM",
+        "--dataset-name",
+        "trl-lib/Capybara",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--max-steps",
+        "2",
+        "--micro-batch-size",
+        "1",
+        "--gradient-accumulation-steps",
+        "1",
+        "--num-generations",
+        "2",
+        "--fsdp-version",
         "2",
     ]
 

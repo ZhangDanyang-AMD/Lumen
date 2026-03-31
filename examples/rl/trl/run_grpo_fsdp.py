@@ -15,7 +15,25 @@ from lumen.rl.trl.runner import run_grpo
 
 
 def reward_fn(prompts, completions, **kwargs):
-    return [1.0 for _ in completions]
+    """Reward concise, substantive completions to create a real training signal.
+
+    GRPO requires reward variance across the group of completions for each
+    prompt.  A constant reward yields zero advantages and therefore zero
+    policy gradient.  This reward function penalises both trivially short
+    and excessively long responses, creating a smooth gradient that drives
+    the policy toward a preferred response length.
+    """
+    rewards = []
+    for completion in completions:
+        n_words = len(completion.split())
+        if n_words < 5:
+            r = 0.1
+        elif n_words <= 60:
+            r = min(1.0, 0.3 + 0.7 * n_words / 60)
+        else:
+            r = max(0.0, 1.0 - (n_words - 60) / 120)
+        rewards.append(round(r, 4))
+    return rewards
 
 
 def parse_args():
@@ -60,14 +78,37 @@ def parse_args():
     return parser.parse_args()
 
 
+def _ensure_prompt_column(dataset):
+    """Ensure the dataset has a ``prompt`` column required by GRPOTrainer.
+
+    Datasets in chat-messages format (e.g. ``trl-lib/Capybara``) store
+    conversations under a ``messages`` column.  Extract the first user
+    message content as the prompt so GRPO can generate completions from it.
+    """
+    if "prompt" in dataset.column_names:
+        return dataset
+    if "messages" not in dataset.column_names:
+        raise ValueError("Dataset must have either a 'prompt' or 'messages' column.")
+
+    def _extract(example):
+        for msg in example["messages"]:
+            if msg["role"] == "user":
+                return {"prompt": msg["content"]}
+        return {"prompt": ""}
+
+    return dataset.map(_extract)
+
+
 def _load_train_dataset(raw):
     if raw.train_data_path:
-        return load_dataset("json", data_files=raw.train_data_path, split="train")
-    return load_dataset(
-        raw.dataset_name,
-        raw.dataset_config_name,
-        split=raw.dataset_split,
-    )
+        ds = load_dataset("json", data_files=raw.train_data_path, split="train")
+    else:
+        ds = load_dataset(
+            raw.dataset_name,
+            raw.dataset_config_name,
+            split=raw.dataset_split,
+        )
+    return _ensure_prompt_column(ds)
 
 
 def main():
