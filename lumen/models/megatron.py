@@ -750,7 +750,7 @@ def apply_fp8_training(model: GPTModel, args) -> None:
         ScalingType,
     )
 
-    fmt = getattr(args, "lumen_fp8_format", "fp8_e4m3")
+    fmt = getattr(args, "lumen_fp8_format", None) or getattr(args, "linear_fp8_format", "fp8_e4m3")
     scaling = getattr(args, "linear_fp8_scaling", "delayed")
     block_size = getattr(args, "linear_fp8_block_size", 128)
     amax_algo = getattr(args, "linear_fp8_amax_algo", "max")
@@ -986,9 +986,54 @@ def make_lumen_model_provider(
                 )
 
         apply_lumen_post_quant(model, args)
+
+        if getattr(args, "fp8_param_storage", False):
+            _shrink_frozen_weights_to_fp8(model)
+
         return model
 
     return model_provider
+
+
+def _shrink_frozen_weights_to_fp8(model) -> None:
+    """Tag frozen 2-D weights for FP8 storage.
+
+    At this point the model might still be on meta device or already on CUDA.
+    We tag the weights with metadata and install load/forward hooks.  If the
+    weight is already materialized on CUDA, we also shrink it to a 1-element
+    FP8 placeholder.  If on meta device, we just tag it — the patched
+    materializer will create FP8-sized tensors later.
+    """
+    import torch
+
+    fp8_dtype = torch.float8_e4m3fnuz
+    count = 0
+    for _name, module in model.named_modules():
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, torch.nn.Parameter):
+            continue
+        if w.requires_grad:
+            continue
+        if w.ndim < 2:
+            continue
+
+        orig_shape = w.shape
+        orig_dtype = w.dtype
+        w._fp8_orig_shape = orig_shape
+        w._fp8_original_dtype = orig_dtype
+        w._fp8_dtype = fp8_dtype
+        w._fp8_storage_enabled = True
+
+        if str(w.device) != "meta":
+            device = w.device
+            tiny = torch.zeros(1, dtype=fp8_dtype, device=device)
+            w.data = tiny
+
+        _wrap_load_from_state_dict(module, fp8_dtype)
+        _install_fp8_forward_hooks(module, fp8_dtype)
+        count += 1
+
+    print_rank_0(f"> FP8 param storage: tagged {count} frozen weights for FP8 storage")
 
 
 def install_fp8_param_gather_hook() -> None:
@@ -1009,6 +1054,366 @@ def install_fp8_param_gather_hook() -> None:
 
     _setup_with_fp8_hook._lumen_fp8_param_gather_hook = True
     _mt_training.setup_model_and_optimizer = _setup_with_fp8_hook
+
+
+def install_fp8_param_storage_hook() -> None:
+    """Hook the training setup to enable FP8 parameter storage.
+
+    When ``--fp8-param-storage`` is active, this:
+
+    1. Forces ``--init-model-with-meta-device`` so the model skeleton is
+       created without allocating GPU memory.
+    2. Patches ``to_empty_if_meta_device`` so tagged frozen weights are
+       materialized as tiny FP8 placeholders (~0 MB) instead of full-size
+       BF16 tensors (~140 GB for 70B).
+    3. Patches ``Float16Module.__init__`` so ``.bfloat16()`` skips params
+       that are already in FP8.
+    4. Patches ``load_checkpoint`` to log FP8 statistics after loading.
+    """
+    import megatron.training.training as _mt_training
+
+    current_setup = _mt_training.setup_model_and_optimizer
+    if getattr(current_setup, "_lumen_fp8_param_storage_hook", False):
+        return
+
+    def _setup_with_fp8_storage(*a, **kw):
+        train_args = get_args()
+        if not getattr(train_args, "fp8_param_storage", False):
+            return current_setup(*a, **kw)
+
+        train_args.init_model_with_meta_device = True
+        print_rank_0("> FP8 param storage: forcing init_model_with_meta_device=True")
+        _patch_meta_materializer()
+        _patch_float16_module()
+        _patch_load_checkpoint_for_fp8()
+        model, optimizer, scheduler = current_setup(*a, **kw)
+
+        targets = model if isinstance(model, list) else [model]
+        for m in targets:
+            unwrapped = m
+            while hasattr(unwrapped, "module"):
+                unwrapped = unwrapped.module
+            _install_embedding_output_fp8_hooks(unwrapped)
+
+        print_rank_0(
+            "> FP8 param storage: linear layers handled inline by "
+            "FP8StoredLinearFunction (no per-layer forward hooks needed)"
+        )
+
+        return model, optimizer, scheduler
+
+    _setup_with_fp8_storage._lumen_fp8_param_storage_hook = True
+    _mt_training.setup_model_and_optimizer = _setup_with_fp8_storage
+
+
+def _patch_meta_materializer() -> None:
+    """Replace to_empty_if_meta_device with a version that materializes
+    FP8-tagged parameters as tiny 1-element FP8 tensors (saving ~70GB).
+
+    The trick: ``Module._apply`` iterates parameters in order.  We build
+    a lookup of which Parameter objects are FP8-tagged, then inside the
+    per-tensor callback we look up the enclosing Parameter via the module
+    tree to decide whether to shrink it.
+
+    We also directly patch the local name binding in the already-imported
+    ``megatron.training.training`` module via ``sys.modules``.
+    """
+    import sys
+
+    import megatron.training.utils as _mu
+    import torch
+
+    _orig_to_empty = _mu.to_empty_if_meta_device
+    if getattr(_orig_to_empty, "_fp8_patched", False):
+        return
+
+    def _fp8_aware_to_empty(module, *, device, recurse=True):
+        fp8_data_map = {}
+        for _n, p in module.named_parameters(recurse=recurse):
+            if getattr(p, "_fp8_storage_enabled", False):
+                fp8_data_map[id(p)] = p
+
+        orig_apply = torch.nn.Module._apply
+
+        def _custom_apply(mod, fn, recurse_inner=True):
+            for key, param in mod._parameters.items():
+                if param is None:
+                    continue
+                if id(param) in fp8_data_map:
+                    if param.data.device == torch.device("meta"):
+                        fp8_dtype = torch.float8_e4m3fnuz
+                        new_data = torch.zeros(1, dtype=fp8_dtype, device=device)
+                    else:
+                        new_data = param.data.to(device)
+                    param_out = torch.nn.Parameter(new_data, requires_grad=param.requires_grad)
+                    for attr in ("_fp8_storage_enabled", "_fp8_orig_shape", "_fp8_original_dtype", "_fp8_dtype"):
+                        if hasattr(param, attr):
+                            setattr(param_out, attr, getattr(param, attr))
+                    mod._parameters[key] = param_out
+                    fp8_data_map[id(param_out)] = param_out
+                else:
+                    with torch.no_grad():
+                        new_data = fn(param.data)
+                    if new_data is not param.data:
+                        param_out = torch.nn.Parameter(new_data, requires_grad=param.requires_grad)
+                        mod._parameters[key] = param_out
+            for key, buf in mod._buffers.items():
+                if buf is not None:
+                    mod._buffers[key] = fn(buf)
+            if recurse_inner:
+                for child in mod.children():
+                    _custom_apply(child, fn, recurse_inner)
+            return mod
+
+        def _empty_fn(tensor):
+            if tensor.device == torch.device("meta"):
+                return torch.empty_like(tensor, device=device)
+            return tensor.to(device)
+
+        _custom_apply(module, _empty_fn, recurse)
+        torch.nn.Module._apply = orig_apply
+        return module
+
+    _fp8_aware_to_empty._fp8_patched = True
+    _mu.to_empty_if_meta_device = _fp8_aware_to_empty
+    training_mod = sys.modules.get("megatron.training.training")
+    if training_mod is not None:
+        training_mod.to_empty_if_meta_device = _fp8_aware_to_empty
+
+
+def _patch_float16_module() -> None:
+    """Patch Float16Module.__init__ so .bfloat16() skips FP8-tagged params.
+
+    Float16Module wraps the model via ``module.bfloat16()``, which casts
+    every parameter to BF16.  For FP8-tagged weights (tiny placeholders),
+    we collect them, let .bfloat16() run, then restore FP8 data and
+    re-attach the custom attributes.
+    """
+    from megatron.core.transformer.module import Float16Module
+
+    _orig_init = Float16Module.__init__
+    if getattr(_orig_init, "_fp8_patched", False):
+        return
+
+    def _fp8_safe_init(self, config, module):
+        fp8_info = {}
+        for name, mod in module.named_modules():
+            for pname, p in mod._parameters.items():
+                if p is not None and getattr(p, "_fp8_storage_enabled", False):
+                    fp8_info[(name, pname)] = {
+                        "data": p.data.clone(),
+                        "_fp8_storage_enabled": True,
+                        "_fp8_orig_shape": getattr(p, "_fp8_orig_shape", None),
+                        "_fp8_original_dtype": getattr(p, "_fp8_original_dtype", None),
+                        "_fp8_dtype": getattr(p, "_fp8_dtype", None),
+                    }
+
+        _orig_init(self, config, module)
+
+        inner = self.module if hasattr(self, "module") else module
+        for (mod_name, pname), info in fp8_info.items():
+            parts = mod_name.split(".") if mod_name else []
+            target = inner
+            for part in parts:
+                target = getattr(target, part, target)
+            p = target._parameters.get(pname)
+            if p is not None:
+                p.data = info["data"].to(p.device)
+                for attr in ("_fp8_storage_enabled", "_fp8_orig_shape", "_fp8_original_dtype", "_fp8_dtype"):
+                    if info.get(attr) is not None:
+                        setattr(p, attr, info[attr])
+
+    _fp8_safe_init._fp8_patched = True
+    Float16Module.__init__ = _fp8_safe_init
+
+
+def _patch_load_checkpoint_for_fp8() -> None:
+    """Monkey-patch Megatron's load_checkpoint to convert weights to FP8 after loading."""
+    import sys
+
+    import megatron.training.checkpointing as _ckpt
+
+    _original_load = _ckpt.load_checkpoint
+    if getattr(_original_load, "_fp8_patched", False):
+        return
+
+    def _load_with_fp8(ddp_model, optimizer, opt_param_scheduler, **kwargs):
+        import gc
+
+        import torch
+
+        result = _original_load(ddp_model, optimizer, opt_param_scheduler, **kwargs)
+
+        if torch.cuda.is_available():
+            alloc = torch.cuda.memory_allocated() / (1024**3)
+            print_rank_0(f"> GPU memory right after ckpt load: {alloc:.2f}GB")
+
+        targets = ddp_model if isinstance(ddp_model, list) else [ddp_model]
+        fp8_dtype = torch.float8_e4m3fnuz
+        converted = 0
+        freed_bytes = 0
+        already_fp8 = 0
+
+        for m in targets:
+            unwrapped = m
+            while hasattr(unwrapped, "module"):
+                unwrapped = unwrapped.module
+            for _name, mod in unwrapped.named_modules():
+                w = getattr(mod, "weight", None)
+                if w is None or w.requires_grad or w.dim() != 2:
+                    continue
+                if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz):
+                    already_fp8 += 1
+                    if not hasattr(w, "_fp8_scale"):
+                        amax = w.data.float().abs().amax().clamp(min=1e-12)
+                        w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
+                        w._fp8_orig_shape = w.shape
+                        w._fp8_original_dtype = torch.bfloat16
+                        w._fp8_storage_enabled = True
+                        _install_fp8_forward_hooks(mod, fp8_dtype)
+                    continue
+                if w.dtype == torch.bfloat16:
+                    old_bytes = w.numel() * w.element_size()
+                    amax = w.data.abs().amax().clamp(min=1e-12)
+                    scale = torch.finfo(fp8_dtype).max / amax
+                    fp8_data = (w.data.float() * scale).to(fp8_dtype)
+                    w.data = fp8_data
+                    w._fp8_scale = scale.to(w.device)
+                    w._fp8_orig_shape = fp8_data.shape
+                    w._fp8_original_dtype = torch.bfloat16
+                    w._fp8_storage_enabled = True
+                    freed_bytes += old_bytes - fp8_data.numel() * fp8_data.element_size()
+                    converted += 1
+                    if not getattr(mod, "_fp8_hooks_installed", False):
+                        _install_fp8_forward_hooks(mod, fp8_dtype)
+                        mod._fp8_hooks_installed = True
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        if torch.cuda.is_available():
+            alloc = torch.cuda.memory_allocated() / (1024**3)
+            print_rank_0(f"> GPU memory after FP8 conversion: {alloc:.2f}GB")
+
+        print_rank_0(
+            f"> FP8 param storage: {converted} BF16 weights converted to FP8, "
+            f"{already_fp8} already FP8, freed {freed_bytes/(1024**3):.1f}GB"
+        )
+        return result
+
+    _load_with_fp8._fp8_patched = True
+    _ckpt.load_checkpoint = _load_with_fp8
+    training_mod = sys.modules.get("megatron.training.training")
+    if training_mod is not None:
+        training_mod.load_checkpoint = _load_with_fp8
+
+
+def _wrap_load_from_state_dict(module, fp8_dtype):
+    """Override _load_from_state_dict to quantize 'weight' on the fly."""
+    import torch
+
+    original_load = module._load_from_state_dict
+
+    _fp8_hook_call_count = [0]
+
+    def _fp8_load_from_state_dict(
+        state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        weight_key = prefix + "weight"
+        _fp8_hook_call_count[0] += 1
+        if _fp8_hook_call_count[0] <= 3:
+            import torch.distributed as _dist
+
+            rank = _dist.get_rank() if _dist.is_initialized() else 0
+            if rank == 0:
+                has_key = weight_key in state_dict
+                has_attr = hasattr(module.weight, "_fp8_orig_shape") if hasattr(module, "weight") else False
+                print(
+                    f"[FP8 HOOK] prefix={prefix!r} key={weight_key!r} "
+                    f"found={has_key} has_fp8_shape={has_attr} "
+                    f"w.dtype={module.weight.dtype if hasattr(module, 'weight') else 'N/A'} "
+                    f"w.shape={tuple(module.weight.shape) if hasattr(module, 'weight') else 'N/A'}",
+                    flush=True,
+                )
+
+        if weight_key in state_dict:
+            w = module.weight
+            if hasattr(w, "_fp8_orig_shape"):
+                incoming = state_dict[weight_key]
+                if isinstance(incoming, torch.Tensor):
+                    device = w.device if str(w.device) != "meta" else torch.device("cuda")
+                    amax = incoming.abs().amax().clamp(min=1e-12)
+                    fp8_max = torch.finfo(fp8_dtype).max
+                    scale = fp8_max / amax
+                    fp8_w = (incoming.float() * scale).to(fp8_dtype).to(device)
+                    w.data = fp8_w
+                    w._fp8_scale = scale.to(device)
+                    del state_dict[weight_key]
+
+                    remaining = {k: v for k, v in state_dict.items() if k.startswith(prefix) and k != weight_key}
+                    if remaining:
+                        original_load(
+                            state_dict, prefix, local_metadata, False, missing_keys, unexpected_keys, error_msgs
+                        )
+                    return
+
+        original_load(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+
+    module._load_from_state_dict = _fp8_load_from_state_dict
+
+
+def _install_fp8_forward_hooks(module, fp8_dtype):
+    """No-op per-linear hooks — layer-level hooks are installed by
+    _install_layer_level_fp8_hooks instead, to handle FP8 wrappers
+    that bypass individual module forward()."""
+    pass
+
+
+def _install_embedding_output_fp8_hooks(model):
+    """Install dequant hooks on embedding and output_layer only.
+
+    Transformer layer linears are handled by ``FP8StoredLinearFunction``
+    inside ``_do_gemm`` — no hooks needed there.  But embedding (index
+    lookup) and Megatron's output_layer (``ColumnParallelLinear``) don't
+    go through ``_do_gemm``, so they still need pre/post hooks.  These
+    are only two weights (~500 MB BF16 each), so the temporary is small.
+    """
+    import torch
+
+    embed_mod = None
+    output_mod = None
+    for name, mod in model.named_modules():
+        if "word_embeddings" in name and hasattr(mod, "weight"):
+            w = mod.weight
+            if hasattr(w, "_fp8_scale"):
+                embed_mod = mod
+        if name.endswith("output_layer") and hasattr(mod, "weight"):
+            w = mod.weight
+            if hasattr(w, "_fp8_scale"):
+                output_mod = mod
+
+    count = 0
+    for mod in [embed_mod, output_mod]:
+        if mod is None:
+            continue
+
+        def _pre(m, inputs, _mod=mod):
+            w = _mod.weight
+            if hasattr(w, "_fp8_scale"):
+                orig_dtype = getattr(w, "_fp8_original_dtype", torch.bfloat16)
+                _mod._fp8_emb_saved = w.data
+                w.data = (w.data.to(torch.float32) / w._fp8_scale).to(orig_dtype)
+
+        def _post(m, inputs, output, _mod=mod):
+            if hasattr(_mod, "_fp8_emb_saved"):
+                _mod.weight.data = _mod._fp8_emb_saved
+                del _mod._fp8_emb_saved
+
+        mod.register_forward_pre_hook(_pre)
+        mod.register_forward_hook(_post)
+        count += 1
+
+    print_rank_0(f"> FP8 param storage: installed embedding/output dequant hooks " f"on {count} modules")
 
 
 # ---------------------------------------------------------------------------
@@ -1032,9 +1437,7 @@ def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
     tokens[:, -1] = 2
     labels = tokens.clone()
-    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
-    if zero_last_loss_mask:
-        loss_mask[:, -1] = 0
+    loss_mask = torch.zeros(mbs, seq_length, dtype=torch.float, device="cuda")
     attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
     position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
 
@@ -1278,6 +1681,15 @@ def add_common_megatron_args(parser):
         action="store_true",
         default=False,
         help="Store and all-gather parameters in FP8 for reduced communication volume.",
+    )
+    safe_add_argument(
+        lumen,
+        "--fp8-param-storage",
+        action="store_true",
+        default=False,
+        help="Store frozen base-model weights in FP8 after checkpoint loading. "
+        "Halves model weight memory (~140GB→~70GB for 70B) enabling TP=1 on "
+        "192GB GPUs. Weights are dequantized on-the-fly during forward pass.",
     )
     safe_add_argument(
         lumen,

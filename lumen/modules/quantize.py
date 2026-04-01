@@ -89,6 +89,14 @@ class LumenLinear(nn.Module):
             nn.init.zeros_(self.bias)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        pqw = None
+        w = self.weight
+        if hasattr(w, "_fp8_scale") and w.dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+        ):
+            pqw = (w.data, 1.0 / w._fp8_scale)
         return quantized_linear(
             input,
             self.weight,
@@ -97,6 +105,8 @@ class LumenLinear(nn.Module):
             backend=self.backend_type,
             fp8_dtype=self.fp8_dtype,
             block_size=self.block_size,
+            pre_quantized_weight=pqw,
+            activation_tensor_id=getattr(self, "_activation_tensor_id", None),
         )
 
     def extra_repr(self) -> str:

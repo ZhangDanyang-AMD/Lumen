@@ -79,6 +79,10 @@ if [ "${FP8_PARAMS}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --fp8-params"
 fi
 
+if [ "${FP8_PARAM_STORAGE:-0}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --fp8-param-storage"
+fi
+
 if [ "${USE_SDMA}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"
 fi
@@ -170,6 +174,10 @@ run_megatron() {
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
     MEMORY_ARGS=""; [ "${LOG_MEMORY:-0}" -eq 1 ] && MEMORY_ARGS="--log-memory-to-tensorboard"
+    LR_DECAY_ARGS=""; [ -n "${LR_DECAY_ITERS:-}" ] && LR_DECAY_ARGS="--lr-decay-iters ${LR_DECAY_ITERS}"
+
+    DIST_OPT_ARGS=""
+    [ "${USE_DIST_OPTIMIZER:-0}" = "1" ] && DIST_OPT_ARGS="--use-distributed-optimizer"
 
     RESET_ARGS="--reset-position-ids --reset-attention-mask --eod-mask-loss"
     if [ "${DISABLE_RESET_FLAGS:-0}" = "1" ]; then
@@ -225,9 +233,10 @@ run_megatron() {
         --lr ${LR} --min-lr ${MIN_LR} \
         --lr-decay-style cosine \
         --lr-warmup-iters ${LR_WARMUP_STEPS} \
+        ${LR_DECAY_ARGS} \
         --weight-decay ${WEIGHT_DECAY} \
         --clip-grad ${GRADIENT_CLIP} \
-        --adam-beta1 0.9 --adam-beta2 0.999 --adam-eps 1e-8 \
+        --adam-beta1 ${ADAM_BETA1:-0.9} --adam-beta2 ${ADAM_BETA2:-0.999} --adam-eps ${ADAM_EPS:-1e-8} \
         --${PRECISION} \
         --no-gradient-accumulation-fusion \
         ${RESET_ARGS} \
@@ -251,6 +260,7 @@ run_megatron() {
         ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
         ${RECOMPUTE_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
+        ${DIST_OPT_ARGS} \
         ${MEMORY_ARGS} ${CMD_SUFFIX}
 }
 

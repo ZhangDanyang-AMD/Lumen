@@ -384,6 +384,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
         delay_wgrad: bool = False,
         deferred_wgrad=None,
         fp8_activation_store: bool = False,
+        activation_tensor_id: Optional[str] = None,
     ) -> torch.Tensor:
         # weight is [N, K] — standard PyTorch Linear convention
         if scaling_type == "none":
@@ -437,11 +438,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         input_2d = input.reshape(-1, input.shape[-1]).contiguous()
 
+        _act_mgr = scaling_manager if activation_tensor_id else None
+        _act_tid = activation_tensor_id or "activation"
         input_fp8, input_scale = quantize_input(
             input_2d,
             scaling_type,
             fp8_dtype,
             block_size,
+            _act_mgr,
+            _act_tid,
         )
         weight_fp8, weight_scale = quantize_input(
             weight,
@@ -548,6 +553,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None,
                 None,
                 None,
+                None,
             )
 
         if not ctx.quantize_activation:
@@ -613,6 +619,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 grad_input,
                 grad_weight,
                 grad_bias,
+                None,
                 None,
                 None,
                 None,
@@ -766,10 +773,140 @@ class QuantizedLinearFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
+
+
+class FP8StoredLinearFunction(torch.autograd.Function):
+    """Linear for weights already stored in FP8 (FP8 param storage).
+
+    Unlike :class:`QuantizedLinearFunction`, the weight is never passed as a
+    BF16 tensor — only the compact FP8 data + scale enter the autograd graph.
+    This prevents PyTorch from pinning a full BF16 copy per layer for the
+    entire forward pass, which is critical for fitting 70B models in 192 GB.
+
+    Forward:  quantize input → FP8 GEMM with pre-quantized weight
+    Backward: re-dequantize weight from saved FP8 for dgrad; no wgrad
+              (frozen base weights).
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        input: torch.Tensor,
+        weight_fp8: torch.Tensor,
+        weight_scale: torch.Tensor,
+        bias: Optional[torch.Tensor],
+        scaling_manager,
+        scaling_type: str,
+        fp8_dtype: torch.dtype,
+        block_size: int,
+        tensor_id: str,
+        gradient_accumulation_fusion: bool,
+        delay_wgrad: bool,
+        deferred_wgrad,
+        activation_tensor_id: Optional[str] = None,
+    ) -> torch.Tensor:
+        input_2d = input.reshape(-1, input.shape[-1]).contiguous()
+
+        _act_mgr = scaling_manager if activation_tensor_id else None
+        _act_tid = activation_tensor_id or "activation"
+        input_fp8, input_scale = quantize_input(
+            input_2d,
+            scaling_type,
+            fp8_dtype,
+            block_size,
+            _act_mgr,
+            _act_tid,
+        )
+
+        N = weight_fp8.shape[0]
+        output = dispatch_gemm(
+            input_fp8,
+            weight_fp8,
+            input_scale,
+            weight_scale,
+            scaling_type,
+        )
+        output = output.view(*input.shape[:-1], N)
+
+        if bias is not None:
+            output = output + bias
+
+        ctx.save_for_backward(input_fp8, weight_fp8, input_scale, weight_scale)
+        ctx.scaling_manager = scaling_manager
+        ctx.scaling_type = scaling_type
+        ctx.fp8_dtype = fp8_dtype
+        ctx.block_size = block_size
+        ctx.has_bias = bias is not None
+        ctx.input_shape = input.shape
+        ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+        ctx.delay_wgrad = delay_wgrad
+        ctx.deferred_wgrad = deferred_wgrad
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
+        fp8_dtype = ctx.fp8_dtype
+        block_size = ctx.block_size
+        scaling_type = ctx.scaling_type
+
+        mgr = ctx.scaling_manager
+        bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
+
+        grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        bwd_scaling = "dynamic" if scaling_type in ("per_token", "blockwise", "blockwise2d") else scaling_type
+        grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
+
+        _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
+        _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
+        if _mixed_dtype or _needs_dequant:
+            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
+            grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+            weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
+            grad_input = dispatch_gemm(
+                grad_bf16,
+                weight_bf16.t().contiguous(),
+                None,
+                None,
+                "none",
+            )
+        else:
+            grad_input = dispatch_gemm(
+                grad_fp8,
+                weight_fp8.t().contiguous(),
+                grad_scale,
+                weight_scale,
+                bwd_scaling,
+            )
+        grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
+
+        grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
+
+        return (
+            grad_input,
+            None,  # weight_fp8 (no grad — frozen)
+            None,  # weight_scale
+            grad_bias,
+            None,  # scaling_manager
+            None,  # scaling_type
+            None,  # fp8_dtype
+            None,  # block_size
+            None,  # tensor_id
+            None,  # gradient_accumulation_fusion
+            None,  # delay_wgrad
+            None,  # deferred_wgrad
+            None,  # activation_tensor_id
+        )
+
+
+_mark_allow_in_graph(FP8StoredLinearFunction)
 
 
 # ---------------------------------------------------------------------------
@@ -794,6 +931,8 @@ def quantized_linear(
     delay_wgrad: bool = False,
     deferred_wgrad=None,
     fp8_activation_store: bool = False,
+    pre_quantized_weight: Optional[tuple] = None,
+    activation_tensor_id: Optional[str] = None,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -815,6 +954,10 @@ def quantized_linear(
         delay_wgrad: If ``True``, defer weight gradient computation.
         deferred_wgrad: A :class:`~lumen.modules.parallel_linear._DeferredWgrad`
             instance that collects deferred wgrad closures.
+        pre_quantized_weight: Optional ``(fp8_tensor, scale)`` tuple when the
+            weight is already stored in FP8.  Bypasses weight quantization
+            and avoids materializing a full BF16 weight tensor in the
+            autograd graph.
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -827,6 +970,23 @@ def quantized_linear(
         from lumen.quantize import ScalingManager
 
         scaling_manager = ScalingManager(fp8_dtype=fp8_dtype)
+
+    if pre_quantized_weight is not None:
+        return FP8StoredLinearFunction.apply(
+            input,
+            pre_quantized_weight[0],
+            pre_quantized_weight[1],
+            bias,
+            scaling_manager,
+            scaling_type,
+            fp8_dtype,
+            block_size,
+            tensor_id,
+            gradient_accumulation_fusion,
+            delay_wgrad,
+            deferred_wgrad,
+            activation_tensor_id,
+        )
 
     return QuantizedLinearFunction.apply(
         input,
@@ -843,4 +1003,5 @@ def quantized_linear(
         delay_wgrad,
         deferred_wgrad,
         fp8_activation_store,
+        activation_tensor_id,
     )

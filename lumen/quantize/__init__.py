@@ -363,6 +363,21 @@ def _replace_forward(
     _gaf = getattr(module, "gradient_accumulation_fusion", False)
     _fp8_act_store = getattr(module, "fp8_activation_store", False)
 
+    def _get_pre_quant_weight():
+        """Return (fp8_data, gemm_scale) if weight is stored in FP8, else None."""
+        import torch as _torch
+
+        w = module.weight
+        if hasattr(w, "_fp8_scale") and w.dtype in (
+            _torch.float8_e4m3fn,
+            _torch.float8_e4m3fnuz,
+            _torch.float8_e5m2,
+        ):
+            return (w.data, 1.0 / w._fp8_scale)
+        return None
+
+    _act_tensor_id = tensor_id.replace(".weight", ".activation")
+
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
@@ -382,6 +397,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
+                pre_quantized_weight=_get_pre_quant_weight(),
+                activation_tensor_id=_act_tensor_id,
             )
 
     else:
@@ -422,6 +439,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
+                pre_quantized_weight=_get_pre_quant_weight(),
+                activation_tensor_id=_act_tensor_id,
             )
 
             if is_row_parallel and seq_parallel:

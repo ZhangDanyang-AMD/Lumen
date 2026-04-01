@@ -180,14 +180,62 @@ def _do_gemm(
     gradient_accumulation_fusion=False,
     delay_wgrad=False,
     deferred_wgrad=None,
+    activation_tensor_id=None,
 ):
     """Route to Lumen FP8 GEMM or standard F.linear.
 
     When ``delay_wgrad=True``, always routes through
     :func:`~lumen.ops.quantize.linear.quantized_linear` (even for BF16)
     so that the autograd backward can defer the wgrad computation.
+
+    When the weight carries ``_fp8_scale`` (FP8 param storage), the weight
+    is already in FP8 format.  For FP8 GEMMs we pass the pre-quantized
+    weight and its scale directly via ``pre_quantized_weight``, avoiding
+    any BF16 materialization.  For BF16 GEMMs we dequantize into a
+    short-lived temporary.
     """
     from lumen.ops.quantize.linear import quantized_linear
+
+    _fp8_stored = hasattr(weight, "_fp8_scale") and weight.dtype in (
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+    )
+
+    if _fp8_stored and scaling_type != "none":
+        gemm_scale = 1.0 / weight._fp8_scale
+        return quantized_linear(
+            input_,
+            weight,
+            bias,
+            scaling_manager=scaling_manager,
+            scaling_type=scaling_type,
+            fp8_dtype=fp8_dtype,
+            block_size=block_size,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            delay_wgrad=delay_wgrad,
+            deferred_wgrad=deferred_wgrad,
+            pre_quantized_weight=(weight.data, gemm_scale),
+            activation_tensor_id=activation_tensor_id,
+        )
+
+    if _fp8_stored:
+        orig_dtype = getattr(weight, "_fp8_original_dtype", torch.bfloat16)
+        weight_bf16 = (weight.data.to(torch.float32) / weight._fp8_scale).to(orig_dtype)
+        if delay_wgrad:
+            return quantized_linear(
+                input_,
+                weight_bf16,
+                bias,
+                scaling_manager=scaling_manager,
+                scaling_type="none",
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+                delay_wgrad=delay_wgrad,
+                deferred_wgrad=deferred_wgrad,
+            )
+        return F.linear(input_, weight_bf16, bias)
 
     if scaling_type != "none" or delay_wgrad:
         return quantized_linear(
@@ -201,6 +249,7 @@ def _do_gemm(
             gradient_accumulation_fusion=gradient_accumulation_fusion,
             delay_wgrad=delay_wgrad,
             deferred_wgrad=deferred_wgrad,
+            activation_tensor_id=activation_tensor_id,
         )
     return F.linear(input_, weight, bias)
 
@@ -415,6 +464,7 @@ class LumenColumnParallelLinear(nn.Module):
                 gradient_accumulation_fusion=self.gradient_accumulation_fusion,
                 delay_wgrad=self.delay_wgrad,
                 deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+                activation_tensor_id=getattr(self, "_activation_tensor_id", None),
             )
 
         gather = self.gather_output
@@ -469,6 +519,7 @@ class LumenColumnParallelLinear(nn.Module):
         comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
 
         gemm_bias = self.bias if not self.skip_bias_add else None
+        _act_tid = getattr(self, "_activation_tensor_id", None)
         out_local = _do_gemm(
             input_parallel,
             weight,
@@ -480,6 +531,7 @@ class LumenColumnParallelLinear(nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             delay_wgrad=self.delay_wgrad,
             deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+            activation_tensor_id=_act_tid,
         )
 
         input_gathered = comm.wait_allgather_dim0(stream=sdma_stream)
@@ -496,6 +548,7 @@ class LumenColumnParallelLinear(nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             delay_wgrad=self.delay_wgrad,
             deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+            activation_tensor_id=_act_tid,
         )
         output_parallel = torch.cat([out_local, out_remaining], dim=0)
         return output_parallel, self.bias if self.skip_bias_add else None
@@ -761,6 +814,7 @@ class LumenRowParallelLinear(nn.Module):
                 gradient_accumulation_fusion=self.gradient_accumulation_fusion,
                 delay_wgrad=self.delay_wgrad,
                 deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+                activation_tensor_id=getattr(self, "_activation_tensor_id", None),
             )
 
             if self.explicit_expert_comm:
