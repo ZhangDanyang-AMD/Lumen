@@ -16,6 +16,7 @@ from lumen.rl.trl.args import (
 
 __all__ = [
     "GRPOEvalCallback",
+    "GRPOPerfCallback",
     "TrlLumenArgs",
     "build_accelerate_config_path",
     "build_actor_model",
@@ -39,5 +40,8 @@ def __getattr__(name: str):
         return getattr(module, name)
     if name == "GRPOEvalCallback":
         module = importlib.import_module("lumen.rl.trl.eval_callback")
+        return getattr(module, name)
+    if name == "GRPOPerfCallback":
+        module = importlib.import_module("lumen.rl.trl.perf_callback")
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
