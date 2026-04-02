@@ -30,18 +30,20 @@ def mock_gemm():
     from unittest import mock
 
     from lumen.ops.quantize import linear as linear_mod
+    from lumen.quantize.descriptor import FP8Descriptor
 
-    def _mock_dispatch(a, w, scale_a, scale_w, scaling_type, bias=None):
+    def _mock_dispatch(a, w, scale_a=None, scale_w=None, scaling_type="none", bias=None):
+        if isinstance(a, FP8Descriptor):
+            scale_a = a.scale
+            a = a.data
+        if isinstance(w, FP8Descriptor):
+            scale_w = w.scale
+            w = w.data
         if scaling_type == "none":
             return _simple_gemm(a, w, bias=bias)
-        # For FP8 paths, dequant then matmul (simplified)
         if scale_a is not None and isinstance(scale_a, torch.Tensor):
             a = a.to(torch.bfloat16) * scale_a
-        elif scale_a is not None:
-            a = a.to(torch.bfloat16) * scale_a
         if scale_w is not None and isinstance(scale_w, torch.Tensor):
-            w = w.to(torch.bfloat16) * scale_w
-        elif scale_w is not None:
             w = w.to(torch.bfloat16) * scale_w
         return _simple_gemm(a, w, bias=bias)
 
@@ -166,11 +168,11 @@ class TestGradAccumFusion:
         from unittest import mock
 
         from lumen.ops.quantize import linear as linear_mod
+        from lumen.quantize.descriptor import FP8Descriptor
 
         def _mock_quantize(x, scaling_type, fp8_dtype, block_size=128, manager=None, tensor_id=None, backward=False):
-            # Pass-through: return input as "quantized" with unit scale
             scale = torch.ones(1, device=x.device, dtype=torch.float32)
-            return x, scale
+            return FP8Descriptor(data=x, scale=scale, fp8_dtype=fp8_dtype)
 
         M, K, N = 4, 128, 128
         device = "cuda"

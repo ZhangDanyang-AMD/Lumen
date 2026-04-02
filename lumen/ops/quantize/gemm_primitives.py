@@ -16,7 +16,7 @@ from typing import Callable, Optional
 
 import torch
 
-from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
+from lumen.ops.quantize.linear import FP8Descriptor, dispatch_gemm, quantize_input
 
 
 def compute_dgrad_bf16(
@@ -122,16 +122,16 @@ def _dequant_fp8_weight(
       - blockwise: ``(N, ceil(K / block_size))``
     """
     if weight_scale.numel() == 1:
-        return weight_fp8.float() * weight_scale.float()
+        return weight_fp8.bfloat16() * weight_scale.bfloat16()
 
     K = weight_fp8.shape[-1]
     scale_cols = weight_scale.shape[-1] if weight_scale.dim() > 1 else 1
 
     if scale_cols == 1 or scale_cols >= K:
-        return weight_fp8.float() * weight_scale.float()
+        return weight_fp8.bfloat16() * weight_scale.bfloat16()
 
-    scales_expanded = weight_scale.float().repeat_interleave(block_size, dim=-1)[:, :K]
-    return weight_fp8.float() * scales_expanded
+    scales_expanded = weight_scale.bfloat16().repeat_interleave(block_size, dim=-1)[:, :K]
+    return weight_fp8.bfloat16() * scales_expanded
 
 
 def compute_dgrad_fp8(
@@ -164,25 +164,35 @@ def compute_dgrad_fp8(
     bwd_dtype = getattr(scaling_manager, "fp8_dtype_bwd", fp8_dtype) if scaling_manager else fp8_dtype
 
     grad_flat = grad_chunk.reshape(-1, grad_chunk.shape[-1]).contiguous()
-    grad_fp8, grad_scale = quantize_input(
+    grad_desc = quantize_input(
         grad_flat,
         bwd_scaling,
         bwd_dtype,
         block_size,
     )
+    grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
 
     mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
     _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
-    if mixed_dtype or _needs_dequant:
-        grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
+    if _needs_dequant:
+        grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
         weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
         result = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
+    elif mixed_dtype:
+        grad_recast = quantize_input(grad_flat, bwd_scaling, fp8_dtype, block_size)
+        weight_desc = FP8Descriptor.from_tensors(weight_fp8, weight_scale, fp8_dtype)
+        result = dispatch_gemm(
+            grad_recast.data,
+            weight_desc.transpose_cached,
+            grad_recast.scale,
+            weight_desc.scale,
+            bwd_scaling,
+        )
     else:
         result = dispatch_gemm(
-            grad_fp8,
+            grad_desc,
             weight_fp8.t().contiguous(),
-            grad_scale,
-            weight_scale,
-            bwd_scaling,
+            scale_w=weight_scale,
+            scaling_type=bwd_scaling,
         )
     return result.view(*grad_chunk.shape[:-1], weight_fp8.shape[-1])

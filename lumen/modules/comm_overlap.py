@@ -626,7 +626,7 @@ class _FusedColumnParallelForward(torch.autograd.Function):
     ):
         if scaling_type != "none":
             weight_2d = weight.reshape(-1, weight.shape[-1])
-            weight_fp8, weight_scale = quantize_input(
+            weight_desc = quantize_input(
                 weight_2d,
                 scaling_type,
                 fp8_dtype,
@@ -637,7 +637,7 @@ class _FusedColumnParallelForward(torch.autograd.Function):
 
             def gemm_fn(inp, w, b):
                 inp_2d = inp.reshape(-1, inp.shape[-1])
-                inp_fp8, inp_scale = quantize_input(
+                inp_desc = quantize_input(
                     inp_2d,
                     scaling_type,
                     fp8_dtype,
@@ -646,16 +646,14 @@ class _FusedColumnParallelForward(torch.autograd.Function):
                     tensor_id="col_act",
                 )
                 return dispatch_gemm(
-                    inp_fp8,
-                    weight_fp8,
-                    inp_scale,
-                    weight_scale,
-                    scaling_type,
+                    inp_desc,
+                    weight_desc,
+                    scaling_type=scaling_type,
                     bias=b,
                 )
 
         else:
-            weight_fp8, weight_scale = None, None
+            weight_desc = None
 
             def gemm_fn(inp, w, b):
                 return dispatch_gemm(inp, w, None, None, "none", bias=b)
@@ -673,8 +671,8 @@ class _FusedColumnParallelForward(torch.autograd.Function):
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
         ctx.block_size = block_size
-        ctx.weight_fp8 = weight_fp8
-        ctx.weight_scale = weight_scale
+        ctx.weight_fp8 = weight_desc.data if weight_desc is not None else None
+        ctx.weight_scale = weight_desc.scale if weight_desc is not None else None
         return output
 
     @staticmethod
@@ -792,7 +790,7 @@ class _FusedRowParallelForward(torch.autograd.Function):
     ):
         if scaling_type != "none":
             weight_2d = weight.reshape(-1, weight.shape[-1])
-            weight_fp8, weight_scale = quantize_input(
+            weight_desc = quantize_input(
                 weight_2d,
                 scaling_type,
                 fp8_dtype,
@@ -803,7 +801,7 @@ class _FusedRowParallelForward(torch.autograd.Function):
 
             def gemm_fn(inp, w, b):
                 inp_2d = inp.reshape(-1, inp.shape[-1])
-                inp_fp8, inp_scale = quantize_input(
+                inp_desc = quantize_input(
                     inp_2d,
                     scaling_type,
                     fp8_dtype,
@@ -812,16 +810,14 @@ class _FusedRowParallelForward(torch.autograd.Function):
                     tensor_id="row_act",
                 )
                 return dispatch_gemm(
-                    inp_fp8,
-                    weight_fp8,
-                    inp_scale,
-                    weight_scale,
-                    scaling_type,
+                    inp_desc,
+                    weight_desc,
+                    scaling_type=scaling_type,
                     bias=b,
                 )
 
         else:
-            weight_fp8, weight_scale = None, None
+            weight_desc = None
 
             def gemm_fn(inp, w, b):
                 return dispatch_gemm(inp, w, None, None, "none", bias=b)
@@ -838,8 +834,8 @@ class _FusedRowParallelForward(torch.autograd.Function):
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
         ctx.block_size = block_size
-        ctx.weight_fp8 = weight_fp8
-        ctx.weight_scale = weight_scale
+        ctx.weight_fp8 = weight_desc.data if weight_desc is not None else None
+        ctx.weight_scale = weight_desc.scale if weight_desc is not None else None
         return output
 
     @staticmethod

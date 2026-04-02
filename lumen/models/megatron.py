@@ -19,6 +19,8 @@ from typing import Callable, Optional
 
 import torch
 
+from lumen.quantize.descriptor import FP8Descriptor
+
 # ---------------------------------------------------------------------------
 # FusedLayerNorm patch (must run before any Megatron module imports)
 # ---------------------------------------------------------------------------
@@ -504,6 +506,8 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
+        if getattr(args, "lumen_fp8_activation_store", False):
+            config.activation_func_fp8_input_store = True
 
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
@@ -700,9 +704,11 @@ def enable_fp8_for_parallel_linear(
 def apply_lora(model: GPTModel, args) -> None:
     """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning.
 
-    By default, applies LoRA only to attention layers (QKV + output projection),
-    matching the MLPerf reference (NeMo target_modules=['attention']).
-    Set ``--lora-target-modules all`` to also include MLP layers.
+    Target modules controlled by ``--lora-target-modules``:
+
+    * ``"attention"`` — QKV + output projection only (NeMo reference).
+    * ``"attention_mlp"`` — attention + MLP (gate/up + down).
+    * ``"all"`` (default) — attention + MLP + embedding + output layer.
     """
     from megatron.core.transformer.lora_adapter import LoraAdapter
 
@@ -713,7 +719,7 @@ def apply_lora(model: GPTModel, args) -> None:
         "dropout": args.lora_dropout,
     }
 
-    target = getattr(args, "lora_target_modules", "attention")
+    target = getattr(args, "lora_target_modules", "all")
 
     for p in model.parameters():
         p.requires_grad = False
@@ -722,9 +728,16 @@ def apply_lora(model: GPTModel, args) -> None:
         for layer in model.decoder.layers:
             layer.self_attention.linear_qkv = LoraAdapter(layer.self_attention.linear_qkv, **common)
             layer.self_attention.linear_proj = LoraAdapter(layer.self_attention.linear_proj, **common)
-            if target == "all" and hasattr(layer, "mlp") and layer.mlp is not None:
+            if target in ("all", "attention_mlp") and hasattr(layer, "mlp") and layer.mlp is not None:
                 layer.mlp.linear_fc1 = LoraAdapter(layer.mlp.linear_fc1, **common)
                 layer.mlp.linear_fc2 = LoraAdapter(layer.mlp.linear_fc2, **common)
+
+    if target == "all":
+        if hasattr(model, "embedding") and model.embedding is not None:
+            if hasattr(model.embedding, "word_embeddings"):
+                model.embedding.word_embeddings = LoraAdapter(model.embedding.word_embeddings, **common)
+        if hasattr(model, "output_layer") and model.output_layer is not None:
+            model.output_layer = LoraAdapter(model.output_layer, **common)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -1146,9 +1159,28 @@ def _patch_meta_materializer() -> None:
                     else:
                         new_data = param.data.to(device)
                     param_out = torch.nn.Parameter(new_data, requires_grad=param.requires_grad)
-                    for attr in ("_fp8_storage_enabled", "_fp8_orig_shape", "_fp8_original_dtype", "_fp8_dtype"):
+                    for attr in (
+                        "_fp8_storage_enabled",
+                        "_fp8_orig_shape",
+                        "_fp8_original_dtype",
+                        "_fp8_dtype",
+                        "_fp8_scale",
+                    ):
                         if hasattr(param, attr):
                             setattr(param_out, attr, getattr(param, attr))
+                    if (
+                        getattr(param_out, "_fp8_scale", None) is not None
+                        and getattr(param_out, "_fp8_dtype", None) is not None
+                    ):
+                        sc = param_out._fp8_scale
+                        if torch.is_tensor(sc):
+                            sc = sc.to(param_out.device)
+                            param_out._fp8_scale = sc
+                        param_out._fp8_desc = FP8Descriptor(
+                            data=param_out.data,
+                            scale=sc,
+                            fp8_dtype=param_out._fp8_dtype,
+                        )
                     mod._parameters[key] = param_out
                     fp8_data_map[id(param_out)] = param_out
                 else:
@@ -1189,6 +1221,7 @@ def _patch_float16_module() -> None:
     we collect them, let .bfloat16() run, then restore FP8 data and
     re-attach the custom attributes.
     """
+    import torch
     from megatron.core.transformer.module import Float16Module
 
     _orig_init = Float16Module.__init__
@@ -1206,6 +1239,7 @@ def _patch_float16_module() -> None:
                         "_fp8_orig_shape": getattr(p, "_fp8_orig_shape", None),
                         "_fp8_original_dtype": getattr(p, "_fp8_original_dtype", None),
                         "_fp8_dtype": getattr(p, "_fp8_dtype", None),
+                        "_fp8_scale": getattr(p, "_fp8_scale", None),
                     }
 
         _orig_init(self, config, module)
@@ -1219,9 +1253,21 @@ def _patch_float16_module() -> None:
             p = target._parameters.get(pname)
             if p is not None:
                 p.data = info["data"].to(p.device)
-                for attr in ("_fp8_storage_enabled", "_fp8_orig_shape", "_fp8_original_dtype", "_fp8_dtype"):
+                for attr in (
+                    "_fp8_storage_enabled",
+                    "_fp8_orig_shape",
+                    "_fp8_original_dtype",
+                    "_fp8_dtype",
+                    "_fp8_scale",
+                ):
                     if info.get(attr) is not None:
                         setattr(p, attr, info[attr])
+                if info.get("_fp8_scale") is not None and info.get("_fp8_dtype") is not None:
+                    sc = p._fp8_scale
+                    if torch.is_tensor(sc):
+                        sc = sc.to(p.device)
+                        p._fp8_scale = sc
+                    p._fp8_desc = FP8Descriptor(data=p.data, scale=sc, fp8_dtype=info["_fp8_dtype"])
 
     _fp8_safe_init._fp8_patched = True
     Float16Module.__init__ = _fp8_safe_init
@@ -1264,9 +1310,10 @@ def _patch_load_checkpoint_for_fp8() -> None:
                     continue
                 if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz):
                     already_fp8 += 1
-                    if not hasattr(w, "_fp8_scale"):
+                    if not hasattr(w, "_fp8_desc"):
                         amax = w.data.float().abs().amax().clamp(min=1e-12)
                         w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
+                        w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
                         w._fp8_orig_shape = w.shape
                         w._fp8_original_dtype = torch.bfloat16
                         w._fp8_storage_enabled = True
@@ -1279,6 +1326,7 @@ def _patch_load_checkpoint_for_fp8() -> None:
                     fp8_data = (w.data.float() * scale).to(fp8_dtype)
                     w.data = fp8_data
                     w._fp8_scale = scale.to(w.device)
+                    w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
                     w._fp8_orig_shape = fp8_data.shape
                     w._fp8_original_dtype = torch.bfloat16
                     w._fp8_storage_enabled = True
@@ -1348,6 +1396,7 @@ def _wrap_load_from_state_dict(module, fp8_dtype):
                     fp8_w = (incoming.float() * scale).to(fp8_dtype).to(device)
                     w.data = fp8_w
                     w._fp8_scale = scale.to(device)
+                    w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
                     del state_dict[weight_key]
 
                     remaining = {k: v for k, v in state_dict.items() if k.startswith(prefix) and k != weight_key}
@@ -1385,11 +1434,11 @@ def _install_embedding_output_fp8_hooks(model):
     for name, mod in model.named_modules():
         if "word_embeddings" in name and hasattr(mod, "weight"):
             w = mod.weight
-            if hasattr(w, "_fp8_scale"):
+            if hasattr(w, "_fp8_desc"):
                 embed_mod = mod
         if name.endswith("output_layer") and hasattr(mod, "weight"):
             w = mod.weight
-            if hasattr(w, "_fp8_scale"):
+            if hasattr(w, "_fp8_desc"):
                 output_mod = mod
 
     count = 0
@@ -1399,10 +1448,10 @@ def _install_embedding_output_fp8_hooks(model):
 
         def _pre(m, inputs, _mod=mod):
             w = _mod.weight
-            if hasattr(w, "_fp8_scale"):
+            if hasattr(w, "_fp8_desc"):
                 orig_dtype = getattr(w, "_fp8_original_dtype", torch.bfloat16)
                 _mod._fp8_emb_saved = w.data
-                w.data = (w.data.to(torch.float32) / w._fp8_scale).to(orig_dtype)
+                w.data = (w.data.to(torch.float32) / w._fp8_desc.scale).to(orig_dtype)
 
         def _post(m, inputs, output, _mod=mod):
             if hasattr(_mod, "_fp8_emb_saved"):
@@ -1437,7 +1486,9 @@ def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
     tokens[:, -1] = 2
     labels = tokens.clone()
-    loss_mask = torch.zeros(mbs, seq_length, dtype=torch.float, device="cuda")
+    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
+    if zero_last_loss_mask:
+        loss_mask[:, -1] = 0
     attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
     position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
 
@@ -1770,6 +1821,15 @@ def add_common_megatron_args(parser):
     safe_add_argument(lora, "--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled.")
     safe_add_argument(lora, "--lora-alpha", type=float, default=32.0)
     safe_add_argument(lora, "--lora-dropout", type=float, default=0.1)
+    safe_add_argument(
+        lora,
+        "--lora-target-modules",
+        type=str,
+        default="all",
+        choices=["attention", "attention_mlp", "all"],
+        help="LoRA target scope: 'attention' (QKV+proj, NeMo reference), "
+        "'attention_mlp' (attention+MLP), 'all' (attention+MLP+emb+output).",
+    )
     safe_add_argument(
         lora,
         "--lora-a2a",

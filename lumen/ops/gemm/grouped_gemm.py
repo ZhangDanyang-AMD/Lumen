@@ -363,9 +363,11 @@ def _grouped_gemm_fp8_sequential(
         b_g = bias[g] if bias is not None else None
 
         if xs is None and scaling_type != "none":
-            x_g, xs = quantize_input(x_g, scaling_type, fp8_dtype, block_size)
+            desc = quantize_input(x_g, scaling_type, fp8_dtype, block_size)
+            x_g, xs = desc.data, desc.scale
         if ws is None and scaling_type != "none":
-            w_g, ws = quantize_input(w_g, scaling_type, fp8_dtype, block_size)
+            desc = quantize_input(w_g, scaling_type, fp8_dtype, block_size)
+            w_g, ws = desc.data, desc.scale
 
         out_g = dispatch_gemm(x_g, w_g, xs, ws, scaling_type, b_g)
         outputs.append(out_g)

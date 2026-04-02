@@ -334,7 +334,10 @@ class TestAttentionBiasForward:
     @pytest.mark.parametrize("config", BIAS_CONFIGS[:1], ids=BIAS_IDS[:1])
     def test_zero_bias_matches_no_bias(self, config):
         q, k, v, sm_scale = _make_tensors(config)
-        bias = torch.zeros(1, config.num_head_q, config.seqlen_q, config.seqlen_kv, device="cuda", dtype=torch.float32)
+        # Use (1,1,sq,sk) so both paths hit the same CK backend (per-head
+        # bias would route to Triton while no-bias stays on CK, making a
+        # strict tolerance impossible due to BF16 kernel differences).
+        bias = torch.zeros(1, 1, config.seqlen_q, config.seqlen_kv, device="cuda", dtype=torch.float32)
         out_bias = attn_ops.attention(q, k, v, softmax_scale=sm_scale, bias=bias)
         out_no_bias = attn_ops.attention(q, k, v, softmax_scale=sm_scale)
         torch.testing.assert_close(out_bias, out_no_bias, atol=1e-5, rtol=1e-4)

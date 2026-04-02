@@ -22,6 +22,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from lumen.quantize.descriptor import FP8Descriptor
+
 logger = logging.getLogger(__name__)
 
 
@@ -263,6 +265,7 @@ class FP8ParamManager:
         self._original_dtypes: dict = {}
         self._hooks: list = []
         self._wrapped_modules: list = []
+        self._state_dict_handles: list = []
 
     def quantize_params(self, model: nn.Module) -> int:
         """Quantize all linear weights in the model to FP8.
@@ -284,9 +287,8 @@ class FP8ParamManager:
                 self._param_scales[name] = scale
 
                 weight.data = fp8_weight.to(weight.device)
-                weight._fp8_scale = scale
-                weight._fp8_dtype = self.fp8_dtype
-                weight._original_dtype = self._original_dtypes[name]
+                weight._fp8_desc = FP8Descriptor(data=weight.data, scale=scale, fp8_dtype=self.fp8_dtype)
+                weight._fp8_original_dtype = self._original_dtypes[name]
                 count += 1
 
         logger.info("Quantized %d parameters to FP8 (%s)", count, self.fp8_dtype)
@@ -295,9 +297,12 @@ class FP8ParamManager:
     def register_dequant_hooks(self, model: nn.Module) -> int:
         """Register forward pre-hooks to dequantize FP8 params before compute.
 
+        Also registers state_dict hooks so checkpoints save BF16 weights.
+
         Returns:
             Number of hooks registered.
         """
+        self.register_state_dict_hooks(model)
         count = 0
         for name, module in model.named_modules():
             if name in self._param_scales:
@@ -308,14 +313,45 @@ class FP8ParamManager:
                 count += 1
         return count
 
+    def register_state_dict_hooks(self, model: nn.Module) -> int:
+        """Register hooks so ``state_dict`` serializes dequantized weights.
+
+        FP8 parameters are temporarily cast to their original dtype (default
+        bfloat16) before tensors are collected, then restored so runtime
+        storage stays in FP8.
+        """
+
+        def _pre_save(module, prefix, keep_vars):
+            for _name, param in module._parameters.items():
+                if param is None or not hasattr(param, "_fp8_desc"):
+                    continue
+                orig_dtype = getattr(param, "_fp8_original_dtype", torch.bfloat16)
+                param._state_dict_data_backup = param.data
+                param.data = (param.data.to(torch.float32) / param._fp8_desc.scale).to(orig_dtype)
+
+        def _post_save(module, state_dict, prefix, local_metadata):
+            for _name, param in module._parameters.items():
+                if param is None or not hasattr(param, "_state_dict_data_backup"):
+                    continue
+                param.data = param._state_dict_data_backup
+                del param._state_dict_data_backup
+
+        count = 0
+        for mod in model.modules():
+            if not any(p is not None and hasattr(p, "_fp8_desc") for p in mod._parameters.values()):
+                continue
+            self._state_dict_handles.append(mod.register_state_dict_pre_hook(_pre_save))
+            self._state_dict_handles.append(mod.register_state_dict_post_hook(_post_save))
+            count += 1
+        return count
+
     def _make_dequant_hook(self, param_name: str):
         original_dtype = self._original_dtypes[param_name]
 
         def hook(module, inputs):
             weight = module.weight
-            if hasattr(weight, "_fp8_scale"):
-                fp8_data = weight.data
-                dequant = dequantize_param_from_fp8(fp8_data, weight._fp8_scale, original_dtype)
+            if hasattr(weight, "_fp8_desc"):
+                dequant = dequantize_param_from_fp8(weight._fp8_desc.data, weight._fp8_desc.scale, original_dtype)
                 module._dequantized_weight = dequant
 
         return hook
@@ -341,6 +377,9 @@ class FP8ParamManager:
         for hook in self._hooks:
             hook.remove()
         self._hooks.clear()
+        for handle in self._state_dict_handles:
+            handle.remove()
+        self._state_dict_handles.clear()
         for module in self._wrapped_modules:
             if hasattr(module, "_fp8_original_forward"):
                 module.forward = module._fp8_original_forward

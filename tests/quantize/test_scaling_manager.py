@@ -11,7 +11,7 @@ Covers:
   - get_scale returns None for blockwise/mxfp8/per_token recipes
   - get_scale returns a tensor for delayed/dynamic recipes
   - update_amax records history
-  - quantize round-trip: delayed, dynamic, blockwise — numerical correctness vs golden
+  - quantize round-trip: delayed, dynamic, blockwise — returns FP8Descriptor; numerical correctness vs golden
   - FP8 param lifecycle: register, mark stale, re-quantize
   - Gradient quantization: quantize_grad_tensor static method — SNR check
   - quantize_bwd_delayed: cross-iteration delayed scaling for blockwise2d backward
@@ -40,6 +40,7 @@ from lumen.quantize.config import (  # noqa: E402
     QuantFormat,
     ScalingType,
 )
+from lumen.quantize.descriptor import FP8Descriptor  # noqa: E402
 from lumen.quantize.scaling_manager import ScalingManager  # noqa: E402
 
 # ===================================================================
@@ -154,16 +155,18 @@ class TestQuantize:
     def test_delayed_quantize(self):
         mgr = ScalingManager(recipe="delayed")
         t = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
-        fp8_t, scale = mgr.quantize("w", t)
-        assert fp8_t is not None
-        assert scale is not None
+        desc = mgr.quantize("w", t)
+        assert isinstance(desc, FP8Descriptor)
+        assert desc.data is not None
+        assert desc.scale is not None
 
     def test_delayed_quantize_round_trip_snr(self):
         """Delayed quant→dequant round-trip should have high SNR vs original."""
         mgr = ScalingManager(recipe="delayed")
         torch.manual_seed(42)
         t = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
-        fp8_t, scale = mgr.quantize("w", t)
+        desc = mgr.quantize("w", t)
+        fp8_t, scale = desc.data, desc.scale
         reconstructed = fp8_t.to(torch.bfloat16) * scale
         snr = compute_snr(t, reconstructed)
         assert snr > 10, f"Delayed quant round-trip SNR too low: {snr:.1f} dB"
@@ -171,16 +174,18 @@ class TestQuantize:
     def test_dynamic_quantize(self):
         mgr = ScalingManager(recipe="dynamic")
         t = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
-        fp8_t, scale = mgr.quantize("w", t)
-        assert fp8_t is not None
-        assert scale is not None
+        desc = mgr.quantize("w", t)
+        assert isinstance(desc, FP8Descriptor)
+        assert desc.data is not None
+        assert desc.scale is not None
 
     def test_dynamic_quantize_matches_golden(self):
         """Dynamic quant output should closely match pure-PyTorch golden."""
         mgr = ScalingManager(recipe="dynamic")
         torch.manual_seed(42)
         t = torch.randn(32, 64, device="cuda", dtype=torch.bfloat16)
-        fp8_t, scale = mgr.quantize("w", t)
+        desc = mgr.quantize("w", t)
+        fp8_t, scale = desc.data, desc.scale
         reconstructed = fp8_t.to(torch.bfloat16) * scale
 
         golden, _ = fp8_quant_dequant_ref(t, fp8_dtype=mgr.fp8_dtype)
@@ -207,7 +212,8 @@ class TestQuantize:
         mgr = ScalingManager(recipe="blockwise")
         torch.manual_seed(42)
         t = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
-        fp8_t, fp8_scales = mgr.quantize("w", t)
+        desc = mgr.quantize("w", t)
+        fp8_t, fp8_scales = desc.data, desc.scale
 
         reconstructed = fp8_t.to(torch.bfloat16)
         if fp8_scales is not None:
@@ -226,9 +232,16 @@ class TestQuantize:
         cfg = QuantConfig(scaling=ScalingType.NONE)
         mgr = ScalingManager(cfg)
         t = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
-        result, scale = mgr.quantize("w", t)
-        assert result is t
-        assert scale is None
+        result = mgr.quantize("w", t)
+        assert result is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
+def test_quantize_returns_descriptor():
+    mgr = ScalingManager(QuantConfig(scaling=ScalingType.DELAYED))
+    x = torch.randn(4, 64, device="cuda", dtype=torch.bfloat16)
+    result = mgr.quantize("test_weight", x)
+    assert isinstance(result, FP8Descriptor)
 
 
 # ===================================================================
@@ -443,10 +456,11 @@ class TestBlockwise2DRecipe:
         mgr_bw2d = ScalingManager(recipe="blockwise2d")
         t = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16)
 
-        fp8_bw, scale_bw = mgr_bw.quantize("w", t)
-        fp8_bw2d, scale_bw2d = mgr_bw2d.quantize("w", t)
+        desc_bw = mgr_bw.quantize("w", t)
+        desc_bw2d = mgr_bw2d.quantize("w", t)
 
-        assert torch.equal(fp8_bw, fp8_bw2d)
+        assert torch.equal(desc_bw.data, desc_bw2d.data)
+        scale_bw, scale_bw2d = desc_bw.scale, desc_bw2d.scale
         if scale_bw is not None and scale_bw2d is not None:
             assert torch.allclose(scale_bw, scale_bw2d)
 

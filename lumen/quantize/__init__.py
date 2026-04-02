@@ -46,6 +46,7 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
     quantized_linear,
 )
+from lumen.quantize.comm_tensor import FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -54,6 +55,7 @@ from lumen.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
+from lumen.quantize.descriptor import FP8Descriptor
 from lumen.quantize.optimizer_manager import (
     FP32MasterWeightOptimizer,
     get_scaling_manager,
@@ -368,6 +370,11 @@ def _replace_forward(
         import torch as _torch
 
         w = module.weight
+        if hasattr(w, "_fp8_desc"):
+            if w._fp8_desc.data.data_ptr() != w.data.data_ptr():
+                w._fp8_desc.invalidate_transpose()
+                return None
+            return (w._fp8_desc.data, 1.0 / w._fp8_desc.scale)
         if hasattr(w, "_fp8_scale") and w.dtype in (
             _torch.float8_e4m3fn,
             _torch.float8_e4m3fnuz,

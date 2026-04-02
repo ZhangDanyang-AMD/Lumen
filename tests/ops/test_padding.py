@@ -263,7 +263,7 @@ class TestQuantizeInputMxfp8Padding:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(64, 50, dtype=torch.bfloat16)
-            x_q, x_s = quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
+            quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
 
             call_args = mock_fn.call_args
             input_tensor = call_args[0][0]
@@ -279,7 +279,7 @@ class TestQuantizeInputMxfp8Padding:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(50, 64, dtype=torch.bfloat16)
-            x_q, x_s = quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
+            quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
 
             call_args = mock_fn.call_args
             input_tensor = call_args[0][0]
@@ -300,7 +300,7 @@ class TestQuantizeInputMxfp8Padding:
             from lumen.ops.quantize.linear import quantize_input
 
             x = torch.randn(50, 50, dtype=torch.bfloat16)
-            x_q, x_s = quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
+            quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
 
             call_args = mock_fn.call_args
             input_tensor = call_args[0][0]
@@ -323,8 +323,8 @@ class TestQuantizeInputMxfp8Padding:
         for M, K in [(64, 50), (50, 64), (50, 50)]:
             x = torch.randn(M, K, dtype=torch.bfloat16, device="cuda")
             try:
-                x_q, x_s = quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
+                desc = quantize_input(x, "mxfp8", torch.float8_e4m3fn, block_size=128)
             except (ImportError, RuntimeError) as e:
                 pytest.skip(f"AITER/mxfp8 ops not available: {e}")
-            assert x_q.size(0) % 32 == 0
-            assert x_q.size(-1) % 32 == 0
+            assert desc.data.size(0) % 32 == 0
+            assert desc.data.size(-1) % 32 == 0
