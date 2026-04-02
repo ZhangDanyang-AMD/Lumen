@@ -19,6 +19,8 @@ from typing import Callable, Optional
 
 import torch
 
+from lumen.quantize.descriptor import FP8Descriptor
+
 # ---------------------------------------------------------------------------
 # Megatron compatibility patches (must run before any Megatron model imports)
 # ---------------------------------------------------------------------------
@@ -427,6 +429,8 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
+        if getattr(args, "lumen_fp8_activation_store", False):
+            config.activation_func_fp8_input_store = True
 
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
@@ -621,7 +625,14 @@ def enable_fp8_for_parallel_linear(
 
 
 def apply_lora(model: GPTModel, args) -> None:
-    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning."""
+    """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning.
+
+    Target modules controlled by ``--lora-target-modules``:
+
+    * ``"attention"`` — QKV + output projection only (NeMo reference).
+    * ``"attention_mlp"`` — attention + MLP (gate/up + down).
+    * ``"all"`` (default) — attention + MLP + embedding + output layer.
+    """
     from megatron.core.transformer.lora_adapter import LoraAdapter
 
     common = {
@@ -631,28 +642,24 @@ def apply_lora(model: GPTModel, args) -> None:
         "dropout": args.lora_dropout,
     }
 
-    if hasattr(model, "embedding") and model.embedding is not None:
-        model.embedding.word_embeddings = LoraAdapter(model.embedding.word_embeddings, **common)
+    target = getattr(args, "lora_target_modules", "all")
+
+    for p in model.parameters():
+        p.requires_grad = False
 
     if hasattr(model, "decoder") and model.decoder is not None:
         for layer in model.decoder.layers:
             layer.self_attention.linear_qkv = LoraAdapter(layer.self_attention.linear_qkv, **common)
             layer.self_attention.linear_proj = LoraAdapter(layer.self_attention.linear_proj, **common)
-            if hasattr(layer, "mlp") and layer.mlp is not None:
+            if target in ("all", "attention_mlp") and hasattr(layer, "mlp") and layer.mlp is not None:
                 layer.mlp.linear_fc1 = LoraAdapter(layer.mlp.linear_fc1, **common)
                 layer.mlp.linear_fc2 = LoraAdapter(layer.mlp.linear_fc2, **common)
 
-    if hasattr(model, "output_layer") and model.output_layer is not None:
-        if not model.share_embeddings_and_output_weights:
-            # When embeddings and output weights are untied, wrapping the
-            # output_layer with LoRA changes its state-dict key from
-            # "output_layer.weight" to "output_layer.base_layer.weight".
-            # Megatron's LanguageModule.sharded_state_dict() hard-codes the
-            # original key, causing a KeyError during checkpoint save.
-            # Freeze the output layer instead -- standard practice for LoRA SFT.
-            for p in model.output_layer.parameters():
-                p.requires_grad = False
-        else:
+    if target == "all":
+        if hasattr(model, "embedding") and model.embedding is not None:
+            if hasattr(model.embedding, "word_embeddings"):
+                model.embedding.word_embeddings = LoraAdapter(model.embedding.word_embeddings, **common)
+        if hasattr(model, "output_layer") and model.output_layer is not None:
             model.output_layer = LoraAdapter(model.output_layer, **common)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1124,12 +1131,6 @@ def _patch_load_checkpoint_for_fp8() -> None:
                 if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz):
                     already_fp8 += 1
                     if not hasattr(w, "_fp8_desc"):
-                        already_fp8_no_desc += 1
-                        if already_fp8_no_desc <= 5:
-                            print_rank_0(
-                                f"  [FP8 BUG] {_name}.weight: FP8 but NO _fp8_desc! "
-                                f"shape={tuple(w.shape)} fp8_amax={w.data.float().abs().amax():.4f}"
-                            )
                         amax = w.data.float().abs().amax().clamp(min=1e-12)
                         w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
                         w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
@@ -1316,7 +1317,9 @@ def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
     tokens[:, -1] = 2
     labels = tokens.clone()
-    loss_mask = torch.zeros(mbs, seq_length, dtype=torch.float, device="cuda")
+    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
+    if zero_last_loss_mask:
+        loss_mask[:, -1] = 0
     attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
     position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
 
@@ -1640,6 +1643,15 @@ def add_common_megatron_args(parser):
     safe_add_argument(lora, "--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled.")
     safe_add_argument(lora, "--lora-alpha", type=float, default=32.0)
     safe_add_argument(lora, "--lora-dropout", type=float, default=0.1)
+    safe_add_argument(
+        lora,
+        "--lora-target-modules",
+        type=str,
+        default="all",
+        choices=["attention", "attention_mlp", "all"],
+        help="LoRA target scope: 'attention' (QKV+proj, NeMo reference), "
+        "'attention_mlp' (attention+MLP), 'all' (attention+MLP+emb+output).",
+    )
     safe_add_argument(
         lora,
         "--lora-a2a",

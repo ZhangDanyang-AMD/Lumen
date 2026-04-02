@@ -186,8 +186,78 @@ def _do_gemm(
     When ``delay_wgrad=True``, always routes through
     :func:`~lumen.ops.quantize.linear.quantized_linear` (even for BF16)
     so that the autograd backward can defer the wgrad computation.
+
+    When the weight carries ``_fp8_desc`` (FP8 param storage), the weight
+    is already in FP8 format.  For FP8 GEMMs we pass the pre-quantized
+    weight and its scale directly via ``pre_quantized_weight``, avoiding
+    any BF16 materialization.  For BF16 GEMMs we dequantize into a
+    short-lived temporary.
     """
     from lumen.ops.quantize.linear import quantized_linear
+
+    _fp8_stored = hasattr(weight, "_fp8_desc") and weight.dtype in (
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+    )
+    if (
+        not _fp8_stored
+        and hasattr(weight, "_fp8_scale")
+        and weight.dtype
+        in (
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+        )
+    ):
+        from lumen.quantize.descriptor import FP8Descriptor
+
+        weight._fp8_desc = FP8Descriptor(
+            data=weight.data,
+            scale=weight._fp8_scale,
+            fp8_dtype=weight.dtype,
+        )
+        _fp8_stored = True
+
+    if _fp8_stored:
+        if weight._fp8_desc.data.data_ptr() != weight.data.data_ptr():
+            weight._fp8_desc.invalidate_transpose()
+            del weight._fp8_desc
+            _fp8_stored = False
+
+    if _fp8_stored and scaling_type != "none":
+        gemm_scale = 1.0 / weight._fp8_desc.scale
+        return quantized_linear(
+            input_,
+            weight,
+            bias,
+            scaling_manager=scaling_manager,
+            scaling_type=scaling_type,
+            fp8_dtype=fp8_dtype,
+            block_size=block_size,
+            gradient_accumulation_fusion=gradient_accumulation_fusion,
+            delay_wgrad=delay_wgrad,
+            deferred_wgrad=deferred_wgrad,
+            pre_quantized_weight=(weight.data, gemm_scale),
+        )
+
+    if _fp8_stored:
+        orig_dtype = getattr(weight, "_fp8_original_dtype", torch.bfloat16)
+        weight_bf16 = (weight.data.to(torch.float32) / weight._fp8_desc.scale).to(orig_dtype)
+        if delay_wgrad:
+            return quantized_linear(
+                input_,
+                weight_bf16,
+                bias,
+                scaling_manager=scaling_manager,
+                scaling_type="none",
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                gradient_accumulation_fusion=gradient_accumulation_fusion,
+                delay_wgrad=delay_wgrad,
+                deferred_wgrad=deferred_wgrad,
+            )
+        return F.linear(input_, weight_bf16, bias)
 
     if scaling_type != "none" or delay_wgrad:
         return quantized_linear(

@@ -46,6 +46,7 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
     quantized_linear,
 )
+from lumen.quantize.comm_tensor import FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -54,6 +55,7 @@ from lumen.quantize.config import (
     get_fp8_max,
     get_fp8_max_bwd,
 )
+from lumen.quantize.descriptor import FP8Descriptor
 from lumen.quantize.optimizer_manager import (
     FP32MasterWeightOptimizer,
     get_scaling_manager,
@@ -362,6 +364,26 @@ def _replace_forward(
     _deferred_wgrad = getattr(module, "_deferred_wgrad", None) if _delay_wgrad else None
     _gaf = getattr(module, "gradient_accumulation_fusion", False)
     _fp8_act_store = getattr(module, "fp8_activation_store", False)
+
+    def _get_pre_quant_weight():
+        """Return (fp8_data, gemm_scale) if weight is stored in FP8, else None."""
+        import torch as _torch
+
+        w = module.weight
+        if hasattr(w, "_fp8_desc"):
+            if w._fp8_desc.data.data_ptr() != w.data.data_ptr():
+                w._fp8_desc.invalidate_transpose()
+                return None
+            return (w._fp8_desc.data, 1.0 / w._fp8_desc.scale)
+        if hasattr(w, "_fp8_scale") and w.dtype in (
+            _torch.float8_e4m3fn,
+            _torch.float8_e4m3fnuz,
+            _torch.float8_e5m2,
+        ):
+            return (w.data, 1.0 / w._fp8_scale)
+        return None
+
+    _act_tensor_id = tensor_id.replace(".weight", ".activation")
 
     if not is_megatron:
 

@@ -79,6 +79,14 @@ if [ "${FP8_PARAMS}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --fp8-params"
 fi
 
+if [ "${FP8_PARAM_STORAGE:-0}" -gt 0 ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --fp8-param-storage"
+fi
+
+if [ "${FP8_ACT_STORE:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-fp8-activation-store"
+fi
+
 if [ "${USE_SDMA}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"
 fi
@@ -124,6 +132,7 @@ run_megatron() {
     LORA_ARGS=""
     if [ "${LORA_RANK}" -gt 0 ]; then
         LORA_ARGS="--lora-rank ${LORA_RANK} --lora-alpha ${LORA_ALPHA} --lora-dropout ${LORA_DROPOUT}"
+        LORA_ARGS="${LORA_ARGS} --lora-target-modules ${LORA_TARGET_MODULES:-all}"
         [ "${LORA_A2A}" -eq 1 ] && LORA_ARGS="${LORA_ARGS} --lora-a2a"
     fi
 
@@ -140,6 +149,7 @@ run_megatron() {
             FP8_ARGS+=" --num-layers-at-start-in-bf16 ${BF16_LAYERS_START:-1}"
             FP8_ARGS+=" --num-layers-at-end-in-bf16 ${BF16_LAYERS_END:-1}"
         fi
+        [ "${FP8_CHECKPOINT:-0}" = "1" ] && FP8_ARGS+=" --lumen-fp8-checkpoint"
     fi
 
     LUMEN_ATTN_ARGS="--lumen-attn-backend ${LUMEN_ATTN_BACKEND}"
@@ -235,7 +245,9 @@ run_megatron() {
         --start-eval-at ${START_EVAL_AT} \
         ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
-        ${CMD_SUFFIX}
+        ${DIST_OPT_ARGS} \
+        --distributed-timeout-minutes ${DIST_TIMEOUT_MINUTES:-120} \
+        ${MEMORY_ARGS} ${CMD_SUFFIX}
 }
 
 

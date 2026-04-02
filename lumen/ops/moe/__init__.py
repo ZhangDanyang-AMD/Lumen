@@ -10,12 +10,18 @@ from lumen.ops.moe.fused_router import (
     fused_moe_aux_loss,
     fused_topk_with_score_function,
 )
-from lumen.ops.moe.fused_routing import fused_permute, fused_topk, fused_unpermute
+from lumen.ops.moe.fused_routing import (
+    decode_aiter_sorted_ids,
+    fused_permute,
+    fused_topk,
+    fused_unpermute,
+)
 
 __all__ = [
     "fused_topk",
     "fused_permute",
     "fused_unpermute",
+    "decode_aiter_sorted_ids",
     "fused_moe_triton",
     "fused_topk_with_score_function",
     "fused_compute_score_for_moe_aux_loss",

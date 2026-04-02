@@ -143,7 +143,7 @@ class TestLauncherParity:
         source = _source(LLAMA2_MI300X_CONFIG)
         assert 'source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"' in source
         assert "export EVAL_EVERY=" in source
-        assert 'export LUMEN_ATTN_BACKEND="aiter_csrc"' in source
+        assert 'export LUMEN_ATTN_BACKEND="csrc"' in source
         assert 'export MLPERF_SUBMISSION_PLATFORM="MI300X"' in source
 
     def test_llama31_config_defines_use_sdma_default(self):

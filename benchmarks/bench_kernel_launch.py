@@ -194,7 +194,6 @@ class TestFusedMoE:
 
         hidden, expert_w, logits = self._make_moe_inputs()
         block_size = 32
-        max_token_id = hidden.shape[0] * TOP_K
 
         def _individual_moe():
             weights, indices = fused_topk(logits, TOP_K)
@@ -205,27 +204,23 @@ class TestFusedMoE:
                 NUM_EXPERTS,
                 block_size=block_size,
             )
+            # sorted_ids is now decoded: flat_idx = token_id * k + slot_id
+            # so sorted_ids // k == token_id, range [0, num_tokens * k)
+            n_slots = sorted_ids.shape[0]
             expert_out = torch.zeros(
-                max_token_id,
+                n_slots,
                 FFN_HIDDEN,
                 device="cuda",
                 dtype=torch.bfloat16,
             )
-            num_blocks = sorted_expert_ids.shape[0]
+            # Group slots by expert assignment (via original indices)
+            token_ids = (sorted_ids.long() // TOP_K).clamp(max=hidden.shape[0] - 1)
+            slot_expert = indices[token_ids, sorted_ids.long() % TOP_K]
             for eid in range(NUM_EXPERTS):
-                token_ids_list = []
-                for b in range(num_blocks):
-                    if sorted_expert_ids[b].item() != eid:
-                        continue
-                    blk_start = b * block_size
-                    blk_ids = sorted_ids[blk_start : blk_start + block_size]
-                    valid = blk_ids[blk_ids < max_token_id]
-                    if valid.numel() > 0:
-                        token_ids_list.append(valid)
-                if token_ids_list:
-                    valid_ids = torch.cat(token_ids_list)
-                    inp = hidden[valid_ids // TOP_K]
-                    expert_out[valid_ids] = gemm_bf16(inp, expert_w[eid])
+                mask = slot_expert == eid
+                if mask.any():
+                    inp = hidden[token_ids[mask]]
+                    expert_out[mask] = gemm_bf16(inp, expert_w[eid])
             return expert_out
 
         r = cuda_timer(_individual_moe, label="individual routing + per-expert GEMMs")

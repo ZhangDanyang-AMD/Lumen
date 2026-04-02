@@ -18,6 +18,7 @@ from lumen.quantize.config import (
     ScalingType,
     _get_float8_e4m3,
 )
+from lumen.quantize.descriptor import FP8Descriptor
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class ScalingManager:
         # FP8 param lifecycle state
         self._fp8_param_ids: Set[str] = set()
         self._fp8_params: Dict[str, nn.Parameter] = {}
-        self._fp8_param_cache: Dict[str, tuple] = {}
+        self._fp8_param_cache: Dict[str, Optional[FP8Descriptor]] = {}
         self._fp8_param_stale: Set[str] = set()
         self._fp8_step_counter: int = -1
         self._sdma_allgather = None
@@ -210,7 +211,7 @@ class ScalingManager:
         self.amax_history[tensor_id].append(tensor.detach().abs().amax())
 
     def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
-        """Quantize tensor. Returns (quantized_tensor, scale).
+        """Quantize tensor. Returns :class:`~lumen.quantize.descriptor.FP8Descriptor` or ``None``.
 
         When FP8 param mode is active for *tensor_id*, this method
         returns the cached (and possibly lazily re-quantized) FP8 weight
@@ -273,11 +274,11 @@ class ScalingManager:
         with torch.no_grad():
             for tid, param in self._fp8_params.items():
                 self._fp8_param_stale.discard(tid)
-                fp8_data, scale = self._quantize_core(tid, param.data)
-                self._fp8_param_cache[tid] = (
-                    fp8_data.detach() if isinstance(fp8_data, torch.Tensor) else fp8_data,
-                    scale.detach() if isinstance(scale, torch.Tensor) else scale,
-                )
+                desc = self._quantize_core(tid, param.data)
+                if desc is not None:
+                    desc.data = desc.data.detach()
+                    desc.scale = desc.scale.detach()
+                self._fp8_param_cache[tid] = desc
 
         if self._dp_group is not None:
             if self._use_sdma:
@@ -299,13 +300,12 @@ class ScalingManager:
             return cached
 
         self._fp8_param_stale.discard(tensor_id)
-        fp8_data, scale = self._quantize_core(tensor_id, tensor)
-        entry = (
-            fp8_data.detach() if isinstance(fp8_data, torch.Tensor) else fp8_data,
-            scale.detach() if isinstance(scale, torch.Tensor) else scale,
-        )
-        self._fp8_param_cache[tensor_id] = entry
-        return entry
+        desc = self._quantize_core(tensor_id, tensor)
+        if desc is not None:
+            desc.data = desc.data.detach()
+            desc.scale = desc.scale.detach()
+        self._fp8_param_cache[tensor_id] = desc
+        return desc
 
     def _collect_amaxes(self):
         """Gather the latest amax values from all registered FP8 params."""
@@ -490,7 +490,7 @@ class ScalingManager:
     def _quantize_core(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Core quantization logic (delegates to format-specific paths)."""
         if self.config.scaling == ScalingType.NONE:
-            return tensor, None
+            return None
 
         scale = self.get_scale(tensor_id, tensor, backward=backward)
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
@@ -498,12 +498,13 @@ class ScalingManager:
 
         if scale is None and self.config.format == QuantFormat.MXFP8:
             convert_to_mxfp8, _, _ = _get_quant_ops()
-            return convert_to_mxfp8(
+            fp8_tensor, mx_scale = convert_to_mxfp8(
                 tensor,
                 block_size=self.config.block_size,
                 axis=-1,
                 float8_dtype_pt=dtype,
             )
+            return FP8Descriptor(data=fp8_tensor, scale=mx_scale, fp8_dtype=dtype)
 
         if scale is None and self.config.scaling in (ScalingType.BLOCKWISE, ScalingType.BLOCKWISE2D):
             _, _, quant_fp8_blockwise_impl = _get_quant_ops()
@@ -515,7 +516,7 @@ class ScalingManager:
                 axis=1,
                 block_size=self.config.block_size,
             )
-            return fp8_tensor.view(orig_shape), fp8_scales
+            return FP8Descriptor(data=fp8_tensor.view(orig_shape), scale=fp8_scales, fp8_dtype=dtype)
 
         if scale is None and self.config.scaling == ScalingType.PER_TOKEN:
             orig_shape = tensor.shape
@@ -523,11 +524,11 @@ class ScalingManager:
             row_max = flat.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
             row_scale = row_max / fp8_max
             fp8_tensor = (flat / row_scale).clamp(-fp8_max, fp8_max).to(dtype)
-            return fp8_tensor.view(orig_shape), row_scale
+            return FP8Descriptor(data=fp8_tensor.view(orig_shape), scale=row_scale, fp8_dtype=dtype)
 
         fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
         self.update_amax(tensor_id, tensor)
-        return fp8_tensor, scale
+        return FP8Descriptor(data=fp8_tensor, scale=scale, fp8_dtype=dtype)
 
     # ------------------------------------------------------------------
     # Reset

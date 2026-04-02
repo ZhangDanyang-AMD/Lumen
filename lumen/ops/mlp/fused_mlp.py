@@ -132,8 +132,8 @@ def _quant_activation(t: torch.Tensor, fp8_dtype: torch.dtype):
     (``dequant = fp8.to(float32) * scale``).
     """
     t_2d = t.reshape(-1, t.shape[-1]).contiguous()
-    t_fp8, scale = quantize_input(t_2d, "dynamic", fp8_dtype)
-    return t_fp8.view(torch.uint8), scale
+    desc = quantize_input(t_2d, "dynamic", fp8_dtype)
+    return desc.data.view(torch.uint8), desc.scale
 
 
 def _dequant_activation(t_u8: torch.Tensor, scale: torch.Tensor, fp8_dtype: torch.dtype, out_dtype: torch.dtype):
