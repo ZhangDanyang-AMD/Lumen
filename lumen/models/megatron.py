@@ -19,86 +19,14 @@ from typing import Callable, Optional
 
 import torch
 
+# ---------------------------------------------------------------------------
+# Megatron compatibility patches (must run before any Megatron model imports)
+# ---------------------------------------------------------------------------
+from lumen.models.megatron_patches import install_all as _install_megatron_patches
 from lumen.quantize.descriptor import FP8Descriptor
 
-# ---------------------------------------------------------------------------
-# FusedLayerNorm patch (must run before any Megatron module imports)
-# ---------------------------------------------------------------------------
+_install_megatron_patches()
 
-
-def _install_fused_layer_norm_patch():
-    """Patch FusedLayerNorm to support both RMSNorm and LayerNorm before
-    any Megatron module imports it.  Must run before GPTModel/TransformerBlock import."""
-    from megatron.core.fusions import fused_layer_norm as _fln_mod
-
-    from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
-
-    class _FusedLayerNormCompat(torch.nn.Module):
-        """Dispatches to Lumen's RMSNorm or LayerNorm based on config."""
-
-        def __new__(cls, config, hidden_size, eps=1e-6, **kwargs):
-            norm_type = getattr(config, "normalization", "LayerNorm")
-            if norm_type == "RMSNorm":
-                return object.__new__(cls)
-            # Use Lumen LayerNorm for standard LayerNorm too
-            return object.__new__(cls)
-
-        def __init__(self, config, hidden_size, eps=1e-6, **kwargs):
-            super().__init__()
-            norm_type = getattr(config, "normalization", "LayerNorm")
-            if norm_type == "RMSNorm":
-                self._norm = LumenRMSNorm(hidden_size, eps=eps)
-            else:
-                self._norm = LumenLayerNorm(hidden_size, eps=eps)
-            self.weight = self._norm.weight
-
-        def forward(self, x):
-            return self._norm(x)
-
-    _FusedLayerNormCompat.__name__ = "FusedLayerNorm"
-    _fln_mod.FusedLayerNorm = _FusedLayerNormCompat
-
-
-_install_fused_layer_norm_patch()
-
-
-def _install_language_module_checkpoint_patch():
-    """Guard LanguageModule.sharded_state_dict against missing output_layer.weight.
-
-    When LoRA (or another wrapper) replaces output_layer, the state-dict key
-    ``output_layer.weight`` no longer exists.  Megatron unconditionally indexes
-    it, producing a KeyError during checkpoint save.  This patch adds a safe
-    ``in`` check, consistent with how output_layer.bias is already handled.
-    """
-    from megatron.core.models.common.language_module import language_module as _lm_mod
-
-    def _patched_sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
-        assert not sharded_offsets, "Unexpected sharded offsets"
-        from megatron.core.transformer.module import MegatronModule
-
-        sharded_state_dict = MegatronModule.sharded_state_dict(self, prefix, sharded_offsets, metadata)
-
-        first_stage_word_emb_key = f"{prefix}embedding.word_embeddings.weight"
-        output_layer_weight_key = f"{prefix}output_layer.weight"
-        output_layer_bias_key = f"{prefix}output_layer.bias"
-
-        if self.share_embeddings_and_output_weights:
-            self.tie_embeddings_and_output_weights_state_dict(
-                sharded_state_dict, output_layer_weight_key, first_stage_word_emb_key
-            )
-        elif self.post_process:
-            if output_layer_weight_key in sharded_state_dict:
-                sharded_state_dict[output_layer_weight_key].allow_shape_mismatch = True
-
-        if self.post_process and output_layer_bias_key in sharded_state_dict:
-            sharded_state_dict[output_layer_bias_key].allow_shape_mismatch = True
-
-        return sharded_state_dict
-
-    _lm_mod.LanguageModule.sharded_state_dict = _patched_sharded_state_dict
-
-
-_install_language_module_checkpoint_patch()
 
 from megatron.core.models.gpt import GPTModel
 from megatron.core.models.gpt.gpt_layer_specs import get_gpt_layer_local_spec
@@ -754,83 +682,31 @@ def apply_lora(model: GPTModel, args) -> None:
 
 
 def apply_fp8_training(model: GPTModel, args) -> None:
-    """Enable FP8 quantised training via Lumen's non-invasive patching."""
-    import lumen.quantize as quant
-    from lumen.quantize import (
-        AmaxAlgo,
-        QuantConfig,
-        QuantFormat,
-        ScalingType,
-    )
+    """Enable FP8 quantised training via Lumen's non-invasive patching.
 
-    fmt = getattr(args, "lumen_fp8_format", None) or getattr(args, "linear_fp8_format", "fp8_e4m3")
-    scaling = getattr(args, "linear_fp8_scaling", "delayed")
-    block_size = getattr(args, "linear_fp8_block_size", 128)
-    amax_algo = getattr(args, "linear_fp8_amax_algo", "max")
-    reduce_amax = getattr(args, "linear_fp8_reduce_amax", False)
-    history_len = getattr(args, "linear_fp8_amax_history", 16)
-    margin = getattr(args, "linear_fp8_margin", 0)
-    quant_act = getattr(args, "linear_fp8_activation", True)
-    fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
-    grad_quant_type = getattr(args, "grad_quant_type", None)
-    first_last_bf16 = getattr(args, "first_last_layers_bf16", False)
-    bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
-    bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
-    num_layers = getattr(args, "num_layers", 0)
-    use_sdma = getattr(args, "use_sdma", False)
-    fp8_attn = getattr(args, "lumen_fp8_attn", "none")
-    fp8_dpa = fp8_attn in ("dpa", "mha")
-    fp8_mha = fp8_attn == "mha"
+    .. deprecated:: Prefer :meth:`LumenConfig.enable` directly.
+    """
+    from lumen.config import LumenConfig
 
-    print_rank_0(
-        f"> transformer_impl='Aiter Backend', fp8_format='{fmt}', \
-        fp8_scaling='{scaling}', \
-        fp8_block_size='{block_size}', \
-        fp8_amax_algo='{amax_algo}', \
-        fp8_reduce_amax='{reduce_amax}', \
-        fp8_amax_history='{history_len}', \
-        fp8_activation='{quant_act}', \
-        fp8_wgrad='{fp8_wgrad}', \
-        grad_quant='{grad_quant_type}', \
-        first_last_bf16='{first_last_bf16}' (start={bf16_start}, end={bf16_end}), \
-        use_sdma='{use_sdma}', \
-        fp8_attn='{fp8_attn}'"
-    )
-
-    config = QuantConfig(
-        format=QuantFormat(fmt),
-        scaling=ScalingType(scaling),
-        block_size=block_size,
-        amax_algo=AmaxAlgo(amax_algo),
-        margin=margin,
-        reduce_amax=reduce_amax,
-        history_len=history_len,
-        quantize_activation=quant_act,
-        fp8_wgrad=fp8_wgrad,
-        quantize_grad=grad_quant_type,
-        first_last_layers_bf16=first_last_bf16,
-        num_layers_at_start_in_bf16=bf16_start,
-        num_layers_at_end_in_bf16=bf16_end,
-        num_layers=num_layers,
-        use_sdma=use_sdma,
-        fp8_dpa=fp8_dpa,
-        fp8_mha=fp8_mha,
-    )
+    cfg = LumenConfig.from_args(args)
 
     dp_group = None
-    if reduce_amax:
+    if cfg.reduce_amax:
         import torch.distributed as dist
         from megatron.core import parallel_state
 
         if dist.is_initialized():
             dp_group = parallel_state.get_data_parallel_group()
 
-    quant.enable(model, config=config, dp_group=dp_group)
+    import lumen.quantize as quant
+
+    qcfg = cfg.quant_config
+    quant.enable(model, config=qcfg, dp_group=dp_group)
     print_rank_0(
-        f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
-        f"block_size={block_size}, amax_algo={amax_algo}, "
-        f"reduce_amax={reduce_amax}, history={history_len}, "
-        f"activation={quant_act}, grad_quant={grad_quant_type})"
+        f"> FP8 training enabled (format={cfg.format}, scaling={cfg.scaling}, "
+        f"block_size={cfg.block_size}, amax_algo={cfg.amax_algo}, "
+        f"reduce_amax={cfg.reduce_amax}, history={cfg.history_len}, "
+        f"activation={cfg.quantize_activation}, grad_quant={cfg.quantize_grad})"
     )
 
 
@@ -874,69 +750,28 @@ def _enable_lumen_fp8_checkpoint(scaling_manager):
 
 
 def apply_lumen_pre_quant(model: GPTModel, args) -> None:
-    """Phase 1: Set module attributes BEFORE quant.enable() captures them."""
-    from lumen.modules.grouped_linear import LumenGroupedLinear
-    from lumen.modules.layernorm_linear import LumenLayerNormLinear
-    from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+    """Phase 1: Set module attributes BEFORE quant.enable() captures them.
 
-    delay_wgrad = getattr(args, "lumen_delay_wgrad", False)
-    gaf = getattr(args, "lumen_gradient_accumulation_fusion", False)
-    fp8_act_store = getattr(args, "lumen_fp8_activation_store", False)
+    .. deprecated:: Prefer :meth:`LumenConfig.enable` which handles this automatically.
+    """
+    from lumen.config import LumenConfig
 
-    if not delay_wgrad and not gaf and not fp8_act_store:
-        return
-
-    lumen_linear_types = (
-        LumenColumnParallelLinear,
-        LumenRowParallelLinear,
-        LumenLayerNormLinear,
-        LumenGroupedLinear,
-    )
-
-    count = 0
-    for module in model.modules():
-        if isinstance(module, lumen_linear_types):
-            if delay_wgrad and hasattr(module, "delay_wgrad"):
-                module.delay_wgrad = delay_wgrad
-            if gaf and hasattr(module, "gradient_accumulation_fusion"):
-                module.gradient_accumulation_fusion = gaf
-            if fp8_act_store:
-                module.fp8_activation_store = True
-            count += 1
-
-    if count > 0:
-        opts = []
-        if delay_wgrad:
-            opts.append("delay_wgrad")
-        if gaf:
-            opts.append("gradient_accumulation_fusion")
-        if fp8_act_store:
-            opts.append("fp8_activation_store")
-        print_rank_0(f"> Lumen pre-quant optimizations ({', '.join(opts)}) applied to {count} modules")
+    LumenConfig.from_args(args)._apply_pre_quant(model)
 
 
 apply_lumen_optimizations = apply_lumen_pre_quant
 
 
 def apply_lumen_post_quant(model: GPTModel, args) -> None:
-    """Phase 2: Features requiring ScalingManager (created by quant.enable)."""
-    fp8_ckpt = getattr(args, "lumen_fp8_checkpoint", False)
-    fp8_param = getattr(args, "lumen_fp8_param_gather", False)
+    """Phase 2: Features requiring ScalingManager (created by quant.enable).
 
-    sm = _find_scaling_manager(model) if (fp8_ckpt or fp8_param) else None
+    .. deprecated:: Prefer :meth:`LumenConfig.enable` which handles this automatically.
+    """
+    from lumen.config import LumenConfig
 
-    if fp8_ckpt:
-        if sm is not None:
-            _enable_lumen_fp8_checkpoint(sm)
-        else:
-            print_rank_0("> WARNING: --lumen-fp8-checkpoint requires FP8 quantization (--linear-fp8)")
-
-    if fp8_param:
-        if sm is not None:
-            sm.enable_fp8_params(model)
-            print_rank_0(f"> FP8 param gather enabled ({sm.num_fp8_params} params registered)")
-        else:
-            print_rank_0("> WARNING: --lumen-fp8-param-gather requires FP8 quantization (--linear-fp8)")
+    cfg = LumenConfig.from_args(args)
+    sm = _find_scaling_manager(model) if (cfg.fp8_checkpoint or cfg.fp8_param_gather) else None
+    cfg._apply_post_quant(model, sm)
 
 
 def get_cpu_offload_context(args):
@@ -1093,6 +928,20 @@ def install_fp8_param_storage_hook() -> None:
         train_args = get_args()
         if not getattr(train_args, "fp8_param_storage", False):
             return current_setup(*a, **kw)
+
+        _fmt = (
+            getattr(train_args, "lumen_fp8_format", "")
+            or getattr(train_args, "fp8", "")
+            or getattr(train_args, "linear_fp8_format", "")
+        )
+        if _fmt == "hybrid":
+            try:
+                from lumen.ops.quantize.linear import ensure_hipblaslt_ready
+
+                ensure_hipblaslt_ready()
+                print_rank_0("> hipBLASLt workspace pre-allocated for hybrid FP8 backward")
+            except Exception as e:
+                print_rank_0(f"> WARNING: hipBLASLt pre-init failed: {e}")
 
         train_args.init_model_with_meta_device = True
         print_rank_0("> FP8 param storage: forcing init_model_with_meta_device=True")
@@ -1274,7 +1123,11 @@ def _patch_float16_module() -> None:
 
 
 def _patch_load_checkpoint_for_fp8() -> None:
-    """Monkey-patch Megatron's load_checkpoint to convert weights to FP8 after loading."""
+    """Monkey-patch Megatron's load_checkpoint to convert weights to FP8 after loading.
+
+    Also integrates LoRA base_layer key remapping and mmap loading, so
+    external ``patch_checkpointing.py`` is no longer needed.
+    """
     import sys
 
     import megatron.training.checkpointing as _ckpt
@@ -1283,12 +1136,29 @@ def _patch_load_checkpoint_for_fp8() -> None:
     if getattr(_original_load, "_fp8_patched", False):
         return
 
+    from lumen.models.megatron_patches import remap_lora_state_dict as _remap_lora_state_dict
+
     def _load_with_fp8(ddp_model, optimizer, opt_param_scheduler, **kwargs):
         import gc
 
         import torch
 
-        result = _original_load(ddp_model, optimizer, opt_param_scheduler, **kwargs)
+        _orig_module_load_sd = torch.nn.Module.load_state_dict
+
+        def _remap_load_state_dict(self_mod, state_dict, strict=True, **kw):
+            state_dict = _remap_lora_state_dict(self_mod, state_dict)
+            try:
+                return _orig_module_load_sd(self_mod, state_dict, strict=strict, **kw)
+            except Exception:
+                if strict:
+                    return _orig_module_load_sd(self_mod, state_dict, strict=False, **kw)
+                raise
+
+        torch.nn.Module.load_state_dict = _remap_load_state_dict
+        try:
+            result = _original_load(ddp_model, optimizer, opt_param_scheduler, **kwargs)
+        finally:
+            torch.nn.Module.load_state_dict = _orig_module_load_sd
 
         if torch.cuda.is_available():
             alloc = torch.cuda.memory_allocated() / (1024**3)
@@ -1299,6 +1169,7 @@ def _patch_load_checkpoint_for_fp8() -> None:
         converted = 0
         freed_bytes = 0
         already_fp8 = 0
+        already_fp8_no_desc = 0
 
         for m in targets:
             unwrapped = m
@@ -1311,6 +1182,12 @@ def _patch_load_checkpoint_for_fp8() -> None:
                 if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz):
                     already_fp8 += 1
                     if not hasattr(w, "_fp8_desc"):
+                        already_fp8_no_desc += 1
+                        if already_fp8_no_desc <= 5:
+                            print_rank_0(
+                                f"  [FP8 BUG] {_name}.weight: FP8 but NO _fp8_desc! "
+                                f"shape={tuple(w.shape)} fp8_amax={w.data.float().abs().amax():.4f}"
+                            )
                         amax = w.data.float().abs().amax().clamp(min=1e-12)
                         w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
                         w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
@@ -1345,8 +1222,14 @@ def _patch_load_checkpoint_for_fp8() -> None:
 
         print_rank_0(
             f"> FP8 param storage: {converted} BF16 weights converted to FP8, "
-            f"{already_fp8} already FP8, freed {freed_bytes/(1024**3):.1f}GB"
+            f"{already_fp8} already FP8 ({already_fp8_no_desc} had NO _fp8_desc!), "
+            f"freed {freed_bytes/(1024**3):.1f}GB"
         )
+        if already_fp8_no_desc > 0:
+            print_rank_0(
+                f"  *** WARNING: {already_fp8_no_desc} FP8 weights lost _fp8_desc "
+                f"and got WRONG scale (fp8_max/fp8_amax ≈ 1.0 instead of correct value)! ***"
+            )
         return result
 
     _load_with_fp8._fp8_patched = True
@@ -1476,9 +1359,14 @@ _warmup_completed = False
 def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     """Generate a synthetic batch for GPU kernel warmup.
 
+    The loss_mask is zeroed out entirely so that the optimizer step
+    receives zero gradients and trainable weights (e.g. LoRA) are not
+    corrupted by synthetic data.  Forward + backward still execute
+    (warming up GPU kernels and calibrating FP8 amax history).
+
     Args:
-        zero_last_loss_mask: If ``True``, set ``loss_mask[:, -1] = 0``
-            (used by SFT to match real-data masking behaviour).
+        zero_last_loss_mask: Legacy flag (kept for API compat); the
+            entire loss_mask is now always zeroed.
     """
     seq_length = args.seq_length
     mbs = args.micro_batch_size
@@ -1486,9 +1374,7 @@ def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
     tokens[:, -1] = 2
     labels = tokens.clone()
-    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
-    if zero_last_loss_mask:
-        loss_mask[:, -1] = 0
+    loss_mask = torch.zeros(mbs, seq_length, dtype=torch.float, device="cuda")
     attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
     position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
 

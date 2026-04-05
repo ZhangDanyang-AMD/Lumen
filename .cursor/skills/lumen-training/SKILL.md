@@ -7,7 +7,7 @@ description: Use when bringing up, comparing, debugging, or reviewing Lumen trai
 
 ## Core Principle
 
-When a Lumen training run disagrees with a trusted reference, stop spending GPU on the bad run and reduce the problem to the smallest reproducible mismatch. If no trusted reference exists yet, define one before tuning. Do not solve correctness problems by retuning parameters that already match the reference.
+When a Lumen training run disagrees with a trusted reference, start each new debug session by reading the repo-local bug note file, then compare against the current reference and reduce the problem to the smallest reproducible mismatch. Use the bug note file as working memory, not as proof. If no trusted reference exists yet, define one before tuning. Do not solve correctness problems by retuning parameters that already match the reference.
 
 ## Use When
 
@@ -17,17 +17,28 @@ When a Lumen training run disagrees with a trusted reference, stop spending GPU 
 - AITER is suspected in a training mismatch
 - Someone proposes "just tweak LR, clip, warmup, or scaling" even though those values already match the reference
 
+Treat any fresh return to the same debugging problem as a new debug session:
+
+- a new chat or agent session
+- a new day or work block
+- returning after unrelated work
+- starting a new round of debug after prior tests finished
+
+Treat a meaningful test or experiment as a step that changes confidence in a hypothesis, such as a new repro, written diff, backend toggle, layerwise compare, kernel test, or targeted integration check. Do not log every identical rerun.
+
 ## Default Workflow
 
-1. Stop the run once behavior is clearly wrong. Save logs, checkpoints, and the first failing signal. Do not keep training "for more evidence" when the run is already untrustworthy.
-2. Before training or debugging, compare the current run against the reference across effective parameters, config, environment, and dataset. If no trusted reference exists yet, define one first. Use [reference.md](reference.md).
-3. If a value is already aligned with the reference, do not change it to chase the symptom.
-4. If the relevant parameters, config, and dataset are aligned and the mismatch remains, compare forward and backward layer by layer on the same inputs unless AITER evidence already isolates the failing path earlier.
-5. If AITER is implicated by op or backend evidence, validate the kernel path first, then run a targeted integration check, then do end-to-end confirmation. Never reverse this order.
+1. At the start of every new debug session, read the whole `.cursor/tmp-training-bugs.md` file relative to the `Lumen` repo root before proposing new hypotheses or next steps.
+2. Stop the run once behavior is clearly wrong. Save logs, checkpoints, and the first failing signal. Do not keep training "for more evidence" when the run is already untrustworthy.
+3. Before training or debugging, compare the current run against the reference across effective parameters, config, environment, and dataset. If no trusted reference exists yet, define one first. Use [reference.md](reference.md).
+4. If a value is already aligned with the reference, do not change it to chase the symptom.
+5. If the relevant parameters, config, and dataset are aligned and the mismatch remains, compare forward and backward layer by layer on the same inputs unless AITER evidence already isolates the failing path earlier.
+6. If AITER is implicated by op or backend evidence, validate the kernel path first, then run a targeted integration check, then do end-to-end confirmation. Never reverse this order.
 
 ## Required Order
 
 1. Freeze one trusted reference:
+   - read `.cursor/tmp-training-bugs.md` relative to the `Lumen` repo root first and note any still-open suspicions
    - choose the reference branch, checkpoint, and recipe
    - if no trusted reference exists, define one before tuning
    - record the exact first failing signal
@@ -54,6 +65,8 @@ When a Lumen training run disagrees with a trusted reference, stop spending GPU 
 ## Hard Rules
 
 - Stop training when the run is clearly wrong. Debug first, resume only after the cause is understood or isolated.
+- Start every new debug session by reading the whole `.cursor/tmp-training-bugs.md` file relative to the `Lumen` repo root.
+- After each meaningful test or experiment, append or update any new possible bug, evidence, and status in `.cursor/tmp-training-bugs.md` relative to the `Lumen` repo root, including negative results that rule a suspicion out.
 - When in doubt, stop and diff against the reference instead of continuing to burn GPU.
 - Compare parameters, config, data pipeline, and dataset before starting training and before debugging.
 - Do not change any already-aligned hyperparameter or training knob to make a bad run look better.
@@ -81,6 +94,7 @@ Treat AITER as implicated only when at least one of these is true:
 
 ## Red Flags
 
+- Starting a fresh debug session without reading `.cursor/tmp-training-bugs.md` relative to the `Lumen` repo root
 - Continuing a clearly bad run for "more signal"
 - Changing aligned LR, warmup, clip, scaling, batch semantics, or precision settings
 - Comparing config files but not effective runtime values
@@ -91,6 +105,7 @@ Treat AITER as implicated only when at least one of these is true:
 
 ## References
 
+- `.cursor/tmp-training-bugs.md` relative to the `Lumen` repo root - repo-local temporary file for open bug candidates, evidence, and outcomes
 - [reference.md](reference.md) - pre-training diff checklist, debug entry checklist, layerwise compare checklist, and AITER validation ladder
 
 ## Pairing

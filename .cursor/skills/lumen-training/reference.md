@@ -1,5 +1,43 @@
 # Lumen Training Reference
 
+## Temporary Bug Note File
+
+Use the repo-local file `.cursor/tmp-training-bugs.md` relative to the `Lumen` repo root to track possible bugs found during testing.
+
+Rules:
+
+- read the whole file at the start of every new debug session
+- use it to avoid repeating dead ends and to reuse prior evidence
+- do not treat it as proof that overrides fresh reference diffs
+- append or update findings after each meaningful test, repro, or validation step
+
+Treat any fresh return to the same debugging problem as a new debug session:
+
+- a new chat or agent session
+- a new day or work block
+- returning after unrelated work
+- starting a new round of debug after prior tests finished
+
+Meaningful test or experiment means a step that changes confidence in a hypothesis, for example:
+
+- a new minimal repro
+- a new written reference diff
+- a backend toggle check
+- a layerwise forward or backward comparison
+- a kernel unit test
+- a targeted integration validation
+
+Do not log every identical rerun. Do log negative results that rule a suspicion out.
+
+Each entry should record:
+
+- date or session marker
+- symptom
+- possible bug or suspicion
+- evidence collected so far
+- next check
+- status: open, ruled out, or resolved
+
 ## If No Trusted Reference Exists
 
 Do not tune first. Freeze a comparison target before bring-up or debugging:

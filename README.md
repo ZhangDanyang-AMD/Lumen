@@ -5,7 +5,7 @@ A lightweight, AMD-native quantized training framework for large language models
 Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication.
 
 - **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and FP4 (Not supported yet) with a unified `QuantConfig` interface
-- **[Aiter Kernels](https://github.com/ROCm/aiter)** — high-performance quantized MHA, Linear, MLA, MoE kernels
+- **[AITER Kernels](https://github.com/ROCm/aiter)** — high-performance GPU kernels for attention, GEMM, normalization, RoPE, MoE, fused MLP, cross-entropy, and quantization
 - **[MORI](https://github.com/ROCm/mori)** — high-performance RDMA + GPU communication library for distributed training (MORI-CCL: all-gather, reduce-scatter, all-reduce; MORI-EP: MoE expert dispatch)
 
 ## Architecture
@@ -15,7 +15,7 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
 <div align="center">
 <table>
   <tr>
-    <th colspan="2" align="center">SFT / PRETRAIN / RL </th>
+    <th colspan="2" align="center">SFT / PRETRAIN / RL</th>
   </tr>
   <tr>
     <td colspan="2" align="center">
@@ -51,21 +51,68 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
     </td>
   </tr>
   <tr>
-    <th align="center">ATTENTION KERNELS</th>
+    <th align="center">ATTENTION</th>
     <th align="center">QUANTIZED LINEAR</th>
   </tr>
   <tr>
     <td align="center" valign="top">
-      <code>aiter_csrc</code> <br>
-      <code>aiter_triton</code> <br>
-      <code>aiter_triton_fp8</code> <br>
-      <code>aiter_csrc_fp8</code> <br>
-      Context Parallelism
+      MHA / MLA / GQA<br>
+      <code>aiter_csrc</code> / <code>aiter_triton</code><br>
+      FP8 &amp; MXFP8 attention<br>
+      Context Parallelism (A2A &amp; P2P)
     </td>
     <td align="center" valign="top">
-      Fused: quant &rarr; GEMM &rarr; dequant (one op)<br>
-      AITER C++, ASM or Triton backend<br>
+      Fused: quant &rarr; GEMM &rarr; dequant<br>
+      FP8 per-tensor / per-token / block-scale / MXFP8<br>
+      Grouped &amp; MoE GEMM (GMM, fused MoE)<br>
+      hipBLASLt, DeepGEMM, Tuned GEMM
+    </td>
+  </tr>
+  <tr>
+    <th align="center">NORMALIZATION</th>
+    <th align="center">FUSED MLP</th>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      LayerNorm / RMSNorm (ASM, CK, Triton)<br>
+      Fused RMSNorm + FP8 quantization<br>
+      Fused LayerNorm + linear
+    </td>
+    <td align="center" valign="top">
+      Gated &amp; ungated feed-forward fusion<br>
+      FP8 activation store<br>
       <code>torch.compile</code> compatible
+    </td>
+  </tr>
+  <tr>
+    <th align="center">RoPE</th>
+    <th align="center">MoE ROUTING</th>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      Fused RoPE fwd / bwd<br>
+      SBHD, THD, 2D (vision), 3D (video)
+    </td>
+    <td align="center" valign="top">
+      Fused top-k + softmax<br>
+      MoE sorting, alignment, unpermute<br>
+      Fused aux loss (fwd + bwd)
+    </td>
+  </tr>
+  <tr>
+    <th align="center">CROSS-ENTROPY</th>
+    <th align="center">QUANTIZATION OPS</th>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      Vocab-parallel cross-entropy<br>
+      Online softmax + Triton CE kernel<br>
+      Optional SDMA all-gather
+    </td>
+    <td align="center" valign="top">
+      Per-tensor / per-token / block-wise FP8 quant<br>
+      MXFP8 quantization<br>
+      HIP, CK, and Triton backends
     </td>
   </tr>
   <tr>
@@ -74,10 +121,10 @@ Lumen owns the quantized training lifecycle and delegates everything else (optim
   </tr>
   <tr>
     <td align="center" valign="top">
-      Asm kernels<br>
-      hipBLASLt, Triton<br>
+      ASM &rarr; CK &rarr; Triton fallback chain<br>
+      hipBLASLt, DeepGEMM<br>
       <br>
-      &uarr; serves: <b>QUANTIZED LINEAR + ATTENTION</b>
+      &uarr; serves: <b>ALL OPERATORS ABOVE</b>
     </td>
     <td align="center" valign="top">
       MORI-CCL (AG, RS, AR)<br>
@@ -153,7 +200,7 @@ pip install -e ".[dev]"
 
 | Library | PyPI Package | Purpose |
 |---------|-------------|---------|
-| [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised kernels: high-performance quantized MHA, Linear, MLA, MoE kernels |
+| [AITER](https://github.com/ROCm/aiter) | `amd-aiter` | AMD-optimised GPU kernels: attention, GEMM, normalization, RoPE, MoE, fused MLP, cross-entropy, quantization (ASM / CK / Triton backends) |
 | [MORI](https://github.com/ROCm/mori) | `mori` | Native RDMA + GPU communication: MORI-CCL (collective ops), MORI-EP (MoE dispatch) |
 
 
@@ -174,9 +221,24 @@ See [`tests/`](tests/) for test instructions.
 Lumen/
 ├── lumen/                     # Main Python package
 │   ├── core/                  #   FP8 dtype helpers, gradient quantization, device detection
-│   ├── kernels/               #   Triton GPU kernels (FP8/MXFP8 flash attention)
-│   ├── ops/                   #   Stateless ops API (attention, quantize, normalization)
-│   ├── modules/               #   nn.Module wrappers (LumenAttention, LumenLinear, Megatron drop-in)
+│   ├── kernels/               #   AITER kernel wrappers (FP8/MXFP8 flash attention impl)
+│   ├── ops/                   #   Stateless ops API — all backed by AITER
+│   │   ├── attention/         #     MHA/MLA/GQA + Context Parallelism (A2A, P2P)
+│   │   ├── quantize/          #     Quantized linear, GEMM primitives, quant/dequant ops
+│   │   ├── gemm/              #     Grouped GEMM, MoE GEMM dispatch
+│   │   ├── normalization/     #     LayerNorm, RMSNorm (ASM, CK, Triton + fused FP8)
+│   │   ├── mlp/               #     Fused gated & ungated feed-forward
+│   │   ├── moe/               #     Fused routing, sorting, aux loss, fused MoE
+│   │   ├── rope.py            #     Fused RoPE (SBHD, THD, 2D, 3D)
+│   │   ├── cross_entropy.py   #     Vocab-parallel cross-entropy
+│   │   └── dispatch.py        #     ASM → CK → Triton fallback dispatcher
+│   ├── modules/               #   nn.Module wrappers (drop-in for Megatron / FSDP)
+│   │   ├── attention*.py      #     LumenAttention, LumenDotProductAttention, MLA
+│   │   ├── parallel_linear.py #     TP column/row parallel linear + FP8
+│   │   ├── grouped_linear.py  #     MoE grouped linear + TP variants
+│   │   ├── fused_mlp.py       #     LumenFusedMLP, LumenGatedMLP
+│   │   ├── cross_entropy.py   #     Vocab-parallel cross-entropy module
+│   │   └── comm_overlap.py    #     AG/GEMM and GEMM/RS overlap
 │   ├── quantize/              #   Quantization lifecycle (enable/disable, config, scaling manager)
 │   └── models/                #   Training utilities & model definitions
 │       ├── megatron.py        #     Shared Megatron stack (spec patching, FP8, LoRA)
@@ -184,7 +246,8 @@ Lumen/
 │       ├── llama2/            #     LLaMA2 SFT (dataset, megatron/, fsdp/)
 │       └── llama31/           #     LLaMA 3.1 Pretrain (dataset, megatron/, fsdp/)
 ├── third_party/               # Git submodules
-│   └── aiter/                 #   AMD AITER — High-performance quantized MHA, Linear, MLA, MoE kernels
+│   ├── aiter/                 #   AMD AITER — GPU kernel provider (ASM, CK, Triton)
+│   └── mori/                  #   MORI — RDMA + GPU communication
 ├── examples/                  # End-to-end training examples (Dockerfile, launcher, scripts)
 │   ├── llama2/                #   LLaMA2 SFT
 │   └── llama31/               #   LLaMA 3.1 Pretrain
