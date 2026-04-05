@@ -401,36 +401,15 @@ def patch_norms(model: nn.Module, args) -> None:
     """Replace norm modules in the model with Lumen implementations.
 
     Works for both HuggingFace and other FSDP-compatible models.
+
+    .. deprecated:: Prefer :meth:`LumenConfig.enable` which handles norm
+       patching automatically.
     """
-    if not getattr(args, "lumen_norm", False):
-        return
+    from lumen.config import LumenConfig
 
-    from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
-
-    grad_quant_type = getattr(args, "grad_quant_type", None)
-    count = 0
-    for name, module in model.named_modules():
-        for attr_name, child in list(module.named_children()):
-            cls_name = type(child).__name__
-            if cls_name in ("RMSNorm", "LlamaRMSNorm", "MistralRMSNorm", "Qwen2RMSNorm"):
-                hidden_size = child.weight.shape[0]
-                eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
-                replacement = LumenRMSNorm(hidden_size, eps=eps, grad_quant_type=grad_quant_type)
-                replacement.weight.data.copy_(child.weight.data)
-                setattr(module, attr_name, replacement)
-                count += 1
-            elif cls_name in ("LayerNorm",):
-                hidden_size = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
-                eps = getattr(child, "eps", 1e-5)
-                replacement = LumenLayerNorm(hidden_size, eps=eps, grad_quant_type=grad_quant_type)
-                if child.weight is not None:
-                    replacement.weight.data.copy_(child.weight.data)
-                if hasattr(child, "bias") and child.bias is not None and replacement.bias is not None:
-                    replacement.bias.data.copy_(child.bias.data)
-                setattr(module, attr_name, replacement)
-                count += 1
-
-    _rank0_print(f"> Replaced {count} norm modules with Lumen implementations")
+    cfg = LumenConfig.from_args(args)
+    if cfg.lumen_norm:
+        cfg._patch_norms(model)
 
 
 def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
@@ -440,69 +419,13 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
         dp_group: Data-parallel process group used for amax reduction.
             If ``None`` and ``args.linear_fp8_reduce_amax`` is true, falls back
             to ``dist.group.WORLD``.
+
+    .. deprecated:: Prefer :meth:`LumenConfig.enable` directly.
     """
-    import lumen.quantize as quant
-    from lumen.quantize import (
-        AmaxAlgo,
-        QuantConfig,
-        QuantFormat,
-        ScalingType,
-    )
+    from lumen.config import LumenConfig
 
-    fmt = getattr(args, "linear_fp8_format", "fp8_e4m3")
-    scaling = getattr(args, "linear_fp8_scaling", "delayed")
-    block_size = getattr(args, "linear_fp8_block_size", 128)
-    amax_algo = getattr(args, "linear_fp8_amax_algo", "max")
-    reduce_amax = getattr(args, "linear_fp8_reduce_amax", False)
-    history_len = getattr(args, "linear_fp8_amax_history", 16)
-    margin = getattr(args, "linear_fp8_margin", 0)
-    quant_act = getattr(args, "linear_fp8_activation", True)
-    fp8_wgrad = getattr(args, "linear_fp8_wgrad", True)
-    grad_quant_type = getattr(args, "grad_quant_type", None)
-    first_last_bf16 = getattr(args, "first_last_layers_bf16", False)
-    bf16_start = getattr(args, "num_layers_at_start_in_bf16", 1)
-    bf16_end = getattr(args, "num_layers_at_end_in_bf16", 1)
-    use_sdma = getattr(args, "use_sdma", False)
-    fp8_attn = getattr(args, "lumen_fp8_attn", "none")
-    fp8_dpa = fp8_attn in ("dpa", "mha")
-    fp8_mha = fp8_attn == "mha"
-
-    config = QuantConfig(
-        format=QuantFormat(fmt),
-        scaling=ScalingType(scaling),
-        block_size=block_size,
-        amax_algo=AmaxAlgo(amax_algo),
-        margin=margin,
-        reduce_amax=reduce_amax,
-        history_len=history_len,
-        quantize_activation=quant_act,
-        fp8_wgrad=fp8_wgrad,
-        quantize_grad=grad_quant_type,
-        first_last_layers_bf16=first_last_bf16,
-        num_layers_at_start_in_bf16=bf16_start,
-        num_layers_at_end_in_bf16=bf16_end,
-        use_sdma=use_sdma,
-        fp8_dpa=fp8_dpa,
-        fp8_mha=fp8_mha,
-    )
-
-    if dp_group is None and config.reduce_amax and dist.is_initialized():
-        dp_group = dist.group.WORLD
-
-    # Patch norms before enabling quant
-    patch_norms(model, args)
-
-    quant.enable(
-        model,
-        config=config,
-        dp_group=dp_group if config.reduce_amax else None,
-    )
-    bf16_str = f", first_last_bf16=start:{bf16_start}/end:{bf16_end}" if first_last_bf16 else ""
-    _rank0_print(
-        f"> FP8 training enabled (format={fmt}, scaling={scaling}, "
-        f"amax_algo={amax_algo}, activation={quant_act}, "
-        f"fp8_wgrad={fp8_wgrad}, grad_quant={grad_quant_type}{bf16_str})"
-    )
+    cfg = LumenConfig.from_args(args)
+    cfg.enable(model, dp_group=dp_group)
 
 
 def reset_fp8_state(model: nn.Module) -> None:
