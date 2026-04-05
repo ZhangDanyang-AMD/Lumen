@@ -19,8 +19,6 @@ from typing import Callable, Optional
 
 import torch
 
-from lumen.quantize.descriptor import FP8Descriptor
-
 # ---------------------------------------------------------------------------
 # Megatron compatibility patches (must run before any Megatron model imports)
 # ---------------------------------------------------------------------------
@@ -1131,6 +1129,12 @@ def _patch_load_checkpoint_for_fp8() -> None:
                 if w.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz):
                     already_fp8 += 1
                     if not hasattr(w, "_fp8_desc"):
+                        already_fp8_no_desc += 1
+                        if already_fp8_no_desc <= 5:
+                            print_rank_0(
+                                f"  [FP8 BUG] {_name}.weight: FP8 but NO _fp8_desc! "
+                                f"shape={tuple(w.shape)} fp8_amax={w.data.float().abs().amax():.4f}"
+                            )
                         amax = w.data.float().abs().amax().clamp(min=1e-12)
                         w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
                         w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
@@ -1317,9 +1321,7 @@ def _get_synthetic_batch(args, *, zero_last_loss_mask=False):
     tokens = torch.ones(mbs, seq_length, dtype=torch.long, device="cuda") * 3545
     tokens[:, -1] = 2
     labels = tokens.clone()
-    loss_mask = torch.ones(mbs, seq_length, dtype=torch.float, device="cuda")
-    if zero_last_loss_mask:
-        loss_mask[:, -1] = 0
+    loss_mask = torch.zeros(mbs, seq_length, dtype=torch.float, device="cuda")
     attention_mask = torch.ones(mbs, 1, seq_length, seq_length, dtype=torch.bool, device="cuda")
     position_ids = torch.arange(seq_length, dtype=torch.long, device="cuda").unsqueeze(0).expand(mbs, -1)
 
