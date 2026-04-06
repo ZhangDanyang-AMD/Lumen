@@ -652,11 +652,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
         #  2. Forward used per_token / blockwise quantization — weight_scale
         #     is multi-element and incompatible with the per-tensor dgrad GEMM.
         # Dequant weight BEFORE transposing so scale dimensions align.
+        from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
         _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
         _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
         if _mixed_dtype or _needs_dequant:
-            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
-
             grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
             weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
             grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
@@ -691,6 +691,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
             _mgr = mgr
             _w_ref = ctx.weight_ref
             _gaf = ctx.gradient_accumulation_fusion
+            _block_size = block_size
 
             def _wgrad_fn():
                 if _use_fp8:
@@ -702,8 +703,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
                         _bwd_scaling,
                     )
                 else:
-                    g_bf16 = (_grad_fp8.float() * _grad_scale).bfloat16()
-                    i_bf16 = (_input_fp8.float() * _input_scale).bfloat16()
+                    g_bf16 = _dequant_fp8_weight(_grad_fp8, _grad_scale, _block_size).bfloat16()
+                    i_bf16 = _dequant_fp8_weight(_input_fp8, _input_scale, _block_size).bfloat16()
                     gw = dispatch_gemm(
                         g_bf16.t().contiguous(),
                         i_bf16.t().contiguous(),
@@ -732,8 +733,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     bwd_scaling,
                 )
             else:
-                grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-                input_bf16 = (input_fp8.float() * input_scale).bfloat16()
+                grad_bf16 = _dequant_fp8_weight(grad_fp8, grad_scale, block_size).bfloat16()
+                input_bf16 = _dequant_fp8_weight(input_fp8, input_scale, block_size).bfloat16()
                 grad_weight = dispatch_gemm(
                     grad_bf16.t().contiguous(),
                     input_bf16.t().contiguous(),
