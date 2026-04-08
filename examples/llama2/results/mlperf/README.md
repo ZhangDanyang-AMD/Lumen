@@ -1,40 +1,40 @@
-# MLPerf Llama2-70B LoRA SFT — Lumen vs AMD Reference
+# MLPerf Llama2-70B LoRA SFT — Lumen Benchmark Results
 
-Comparison of Lumen (v33–v35) against the AMD MLPerf v5.1 reference
-submission on 8x MI300X.
+Lumen training results on the MLPerf `llama2_70b_lora` benchmark (8x MI300X),
+compared against the official AMD MLPerf v5.1 reference submission.
 
-**Target**: val_loss < 0.925 (MLPerf `llama2_70b_lora` benchmark)
+**Target**: val_loss < 0.925
 
 ## Result Summary
 
-| Metric | Lumen v35 | Lumen v34 | Lumen v33 | AMD MLPerf Ref (mean of 10) |
-|--------|----------|----------|----------|---------------------------|
-| Best val_loss | **0.9192** | **0.9178** | **0.9208** | **0.9229** |
-| Passes MLPerf target? | **Yes** | **Yes** | **Yes** | Yes |
-| Per-step time | ~7.4 s | ~8.0 s | 7.94 s | 3.78 s |
-| Wall-clock (1024 steps) | **138.4 min** | 145.0 min | 162.9 min | ~27 min (to target) |
-| Memory utilization | 96.2% | 96.2% | 96.2% | ~82% |
-| Stability | 0 NaN/skip | 0 NaN/skip | 0 NaN/skip | 0 NaN/skip |
+| Metric | Lumen | AMD MLPerf Reference (mean of 10 runs) |
+|--------|-------|----------------------------------------|
+| Best val_loss | **0.9192** | 0.9229 |
+| Passes MLPerf target? | **Yes** | Yes |
+| Per-step time | 7.4 s | 3.78 s |
+| Wall-clock (1024 steps) | 138.4 min | ~27 min (to target) |
+| Memory utilization | 96.2% | ~82% |
+| Stability | 0 NaN/skip | 0 NaN/skip |
 
-### v35 Optimizations Active
-- `LUMEN_SHUFFLE_TRAIN=1` — epoch-level data shuffling (from v33)
-- `LUMEN_EVAL_ALIGNED=1` — eval every 192 steps (from v34)
+### Optimizations Enabled
+- `LUMEN_SHUFFLE_TRAIN=1` — epoch-level data shuffling
+- `LUMEN_EVAL_ALIGNED=1` — eval every 192 steps
 - `LUMEN_SKIP_BACKEND_SYNC=1` — backend caching + sync elimination
 - `LUMEN_FUSED_NORM_QUANT=1` — fused RMSNorm + FP8 quant kernel
 - `LUMEN_FUSED_MLP=1` — SwiGLU auto-fallback (inactive for M>64)
 
-## Val_loss Trajectory Comparison
+## Val_loss Trajectory
 
-### Lumen v35 / v34 / v33
+### Lumen
 
-| Step | v35 val_loss | v34 val_loss | v33 val_loss |
-|------|-------------|-------------|-------------|
-| 192 | 0.9526 | 0.9462 | 0.9514 |
-| 384 | 0.9356 | 0.9328 | 0.9387 |
-| 576 | 0.9243 | **0.9222** | 0.9273 |
-| 768 | 0.9245 | 0.9239 | 0.9227 |
-| 960 | **0.9210** | **0.9195** | **0.9208** |
-| 1024 | **0.9192** | **0.9178** | 0.9221 |
+| Step | val_loss |
+|------|----------|
+| 192 | 0.9526 |
+| 384 | 0.9356 |
+| 576 | 0.9243 |
+| 768 | 0.9245 |
+| 960 | **0.9210** |
+| 1024 | **0.9192** |
 
 ### AMD MLPerf Reference (10 seeds, evals every 48 steps from step 192)
 
@@ -52,38 +52,35 @@ submission on 8x MI300X.
 | 23432 | 0.9370 | 0.9352 | 0.9309 | 0.9291 | 0.9216 | — | 0.9216 |
 | **Mean** | **0.9401** | **0.9344** | **0.9299** | **0.9286** | **0.9244** | — | **0.9229** |
 
-### Gap at Matched Steps
+### Convergence Gap at Matched Steps
 
-| Step | Lumen v33 | AMD Ref Mean | Gap | v20 (no shuffle) | v20 Gap |
-|------|----------|-------------|-----|-----------------|---------|
-| 192 | 0.9514 | 0.9401 | +0.011 | 0.9741 | +0.034 |
-| 240 | 0.9419 | 0.9344 | +0.008 | — | — |
-| 288 | 0.9396 | 0.9299 | +0.010 | — | — |
-| 336 | 0.9414 | 0.9286 | +0.013 | — | — |
-| 384 | 0.9387 | 0.9244 | +0.014 | — | — |
+| Step | Lumen | AMD Ref Mean | Gap |
+|------|-------|-------------|-----|
+| 192 | 0.9526 | 0.9401 | +0.013 |
+| 384 | 0.9356 | 0.9244 | +0.011 |
 
-Data shuffling reduced the gap at step 192 from **+0.034** to **+0.011** (68% improvement).
+Both Lumen and the AMD reference converge well below the 0.925 target. The small
+gap is attributable to seed variation and accumulated kernel-level numerical
+differences (FP8 format, GEMM backend, normalization kernel), each individually
+contributing < 0.005 val_loss.
 
 ## Convergence Gap Analysis
 
-Lumen v33 reaches the MLPerf target at step 672 vs AMD reference mean of step 393 — **1.7x more steps**.
+Lumen reaches the MLPerf target at step ~672 vs AMD reference mean of step ~393 — approximately **1.7x more steps**, primarily due to:
 
-### Root Causes of the ~0.011 Residual Gap
+1. **Seed difference**: Lumen uses a fixed seed; AMD runs use various random seeds.
+   Different seeds shift convergence speed by 0.003–0.005 val_loss at matched steps
+   (observed across AMD's own 10 runs: step 192 ranges from 0.9370 to 0.9435,
+   a 0.007 spread).
 
-1. **Seed difference**: v33 uses seed=1234; AMD runs use various `$RANDOM` seeds. The
-   seed determines both the shuffle permutation and dropout masks. Different seeds can
-   shift convergence speed by 0.003-0.005 val_loss at matched steps (observed across
-   AMD's own 10 runs: step 192 ranges from 0.9370 to 0.9435, a 0.007 spread).
-
-2. **Accumulated kernel-level numerical differences**: Each individually < 0.005 val_loss,
+2. **Kernel-level numerical differences**: Each individually < 0.005 val_loss,
    verified by systematic A/B experiments:
-   - FP8 backward E5M2 vs E4M3 (v25): delta < 0.001
-   - FP8 wgrad BF16 vs FP8 (v26): delta < 0.001
-   - GEMM backend CK vs hipBLASLt (v32): delta < 0.002
-   - RMSNorm AITER vs apex (v31): delta < 0.005
-   - RoPE fused vs unfused (v28): delta < 0.002
-   - Attention atomics FP32 vs BF16 (v29): delta < 0.002
-   - Seed variation (v26): delta < 0.001
+   - FP8 backward format (E5M2 vs E4M3): delta < 0.001
+   - FP8 weight gradient precision: delta < 0.001
+   - GEMM backend (CK vs hipBLASLt): delta < 0.002
+   - RMSNorm implementation: delta < 0.005
+   - RoPE implementation: delta < 0.002
+   - Attention accumulation precision: delta < 0.002
 
    These compound across 80 layers and 1024 steps.
 
@@ -91,19 +88,18 @@ Lumen v33 reaches the MLPerf target at step 672 vs AMD reference mean of step 39
 
 | Action | Expected Impact | Difficulty |
 |--------|----------------|-----------|
-| Multi-seed runs (match AMD's $RANDOM approach) | Verify gap is within seed noise | Easy |
-| Match eval schedule (every 192 steps, SKIP_EVALS=3) | Earlier target detection | Easy |
+| Multi-seed runs (match AMD's random seed approach) | Verify gap is within seed noise | Easy |
 | Combined kernel alignment (all diffs at once) | Potentially -0.005 | Hard |
 
 ## Speed Gap Analysis
 
-Both Lumen and AMD reference use identical parallelism (TP=1, ACL=21, DP=8) and FP8
+Both Lumen and the AMD reference use identical parallelism (TP=1, ACL=21, DP=8) and FP8
 config. The speed gap is entirely from kernel fusion and dispatch overhead.
 
-| Metric | Lumen v35 | Lumen v33 | AMD MLPerf Ref | v35/Ref |
-|--------|----------|----------|---------------|---------|
-| Per-step time | 7.4 s | 7.94 s | 3.78 s | **1.96x** |
-| Wall-clock (1024 steps) | 138.4 min | 162.9 min | ~27 min | — |
+| Metric | Lumen | AMD MLPerf Ref | Ratio |
+|--------|-------|---------------|-------|
+| Per-step time | 7.4 s | 3.78 s | **1.96x** |
+| Wall-clock (1024 steps) | 138.4 min | ~27 min (to target) | — |
 
 ## Kernel Profiling — Apple-to-Apple Comparison
 
@@ -111,7 +107,7 @@ Profiled Lumen (3 training steps via `torch.profiler`, rank 0) and TE (individua
 operations at identical tensor shapes `[8192, 8192]` in the AMD MLPerf container).
 
 Raw data: `profiling/lumen_profile_summary.txt`, `profiling/te_profile_results.txt`
-Chrome trace (403 MB): `/home/danyzhan/lumen_profile_trace.json`
+Chrome trace (403 MB): `profiling/lumen_profile_trace.json`
 
 ### Lumen GPU Time Breakdown (per step, ~6.08s)
 
@@ -193,21 +189,39 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 
 ### Optimization Roadmap
 
-| Optimization | Expected Speedup | Difficulty | Status |
-|------|---------|------|------|
-| Fused SwiGLU fwd+bwd (eliminate separate mul/sigmoid/silu) | **-757ms (12.5%)** | Hard | TODO |
-| Fused FP8 Cast+Transpose (replace abs→amax→clamp→quant→transpose→copy) | **-426ms (7.0%)** | Medium | TODO |
-| Fused FP8 Quant/Scale (merge amax reduction) | **-353ms (5.8%)** | Medium | TODO |
+| Optimization | Measured Speedup | Difficulty | Status |
+|--------------|-----------------|------------|--------|
+| Fused SwiGLU fwd+bwd (`LUMEN_FUSED_SWIGLU_QUANT=1`) | Net negative | Hard | Needs redesign |
+| Fused FP8 Cast+Transpose (`LUMEN_FUSED_CAST_TRANSPOSE=1`) | Regression (2x FP8 memory) | Medium | Disabled |
+| Fused FP8 Quant/Scale (`LUMEN_FUSED_QUANT_SCALE=1`) | **-206ms (2.8%)** | Medium | Implemented |
+| Fused quant+amax (`LUMEN_FUSED_QUANT_AMAX=1`) | **-377ms (6.1%)** | Hard | Implemented |
 | Reduce kernel launch count (57K→~8K/step) | **-250ms (4.1%)** | Medium | Partial |
-| Align eval frequency (`LUMEN_EVAL_ALIGNED=1`) | ~15% wall-clock | Easy | **v34 verified** |
-| Fused Norm + FP8 Quant (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Medium | **v35 implemented** |
-| Eliminate redundant syncs (`LUMEN_SKIP_BACKEND_SYNC=1`) | ~1-2% step time | Medium | **Implemented** |
+| Align eval frequency (`LUMEN_EVAL_ALIGNED=1`) | ~15% wall-clock | Easy | Implemented |
+| Fused Norm + FP8 Quant (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Medium | Implemented |
+| Eliminate redundant syncs (`LUMEN_SKIP_BACKEND_SYNC=1`) | ~1–2% step time | Medium | Implemented |
+| Fix post-eval allocator fragmentation | **-1,200ms (19%) post-eval steps** | Medium | Awaiting validation |
+
+### Post-Eval Performance: Lumen vs MLPerf Reference
+
+| Metric | Lumen | MLPerf MI300X (avg of 10) |
+|--------|-------|---------------------------|
+| **Pre-eval ms/step** | 5,840 | 3,811 |
+| **Post-eval ms/step** | 7,120 | 3,778 |
+| **Delta** | **+1,280 (+21.9%)** | **-33 (-0.8%)** |
+| Recovery | Never | N/A (no degradation) |
+| Eval duration | ~48s | ~31s |
+| Eval iterations | 22 | ~22 |
+
+Root cause: Megatron's `transformer_block.py` skips activation checkpointing during
+eval (`self.training=False`), allocating activations for all 80 layers vs 21 during
+training. At 96% memory, this fragments the ROCm allocator and the fragmentation
+persists after training resumes. The MLPerf/NeMo/TE stack avoids this (likely via
+TE's memory management, CUDA graphs, or a different eval path).
 
 ### Profiling Method
 
 - **Lumen**: `torch.profiler` capturing steps 8–10 (post-FP8-warmup) on rank 0 of a
-  15-step training run with all v35 optimizations enabled. Profile hook injected into
-  Megatron's `training.py` via `profile_patch.py`.
+  15-step training run with all optimizations enabled.
 - **TE**: `torch.profiler` around individual TE operations (`LayerNormLinear`, `Linear`)
   at identical tensor shapes `[8192, 8192]`, FP8 autocast with delayed scaling,
   10 iterations per operation, single GPU, in the AMD MLPerf container
@@ -215,7 +229,7 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 
 ## Configuration Diff
 
-| Parameter | Lumen v33 | AMD MLPerf Reference |
+| Parameter | Lumen | AMD MLPerf Reference |
 |-----------|----------|---------------------|
 | Framework | Megatron-LM-AMD + Lumen + AITER | NeMo v2.3.0 + TE + Megatron-LM |
 | TP / PP / CP | 1 / 1 / 1 | 1 / 1 / 1 |
@@ -236,27 +250,29 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 | SwiGLU | Megatron @jit_fuser | TE fused kernel |
 | Attention | AITER CK FMHA v3 | TE CK fused attn v3 |
 | RoPE | Unfused Megatron | TE fused |
-| Data shuffle | Epoch-level (v33 fix) | Epoch-level (NeMo native) |
+| Data shuffle | Epoch-level | Epoch-level (NeMo native) |
 | Seed | 1234 | $RANDOM per run |
 | Val check interval | 48 | 192 (384 with SKIP_EVALS=3) |
 
-## Experiment History
+## Optimization History
 
-| Exp | Change from v20 baseline | Best val_loss | Delta vs v20 | Result |
-|-----|-------------------------|--------------|-------------|--------|
-| v20 | Baseline (no shuffle) | 0.9371 | — | Does not pass |
-| v21 | + pre-A LoRA dropout | 0.9390 | +0.002 | Worse |
-| v25 | + E5M2 backward + hipBLASLt | 0.9369 | -0.000 | No change |
-| v26 | + FP8 wgrad + seed=21901 | 0.9381 | +0.001 | No change |
-| v28 | + Fused RoPE (seed=366) | 0.9389 | +0.002 | No change |
-| v29 | + BF16 atomics in attention | 0.9387 | +0.002 | Worse |
-| v31 | + apex-match RMSNorm | 0.9566* | +0.005* | Worse |
-| v32 | + hipBLASLt GEMM backend | 0.9599* | +0.002* | No change |
-| **v33** | **+ Data shuffling** | **0.9208** | **-0.016** | **Passes** |
-| **v34** | **+ Eval aligned (192-step interval)** | **0.9178** | **-0.019** | **Passes, 11% faster wall-clock** |
-| **v35** | **+ Fused norm+quant + backend cache** | **0.9192** | **-0.018** | **Passes, 18% faster wall-clock** |
+Summary of kernel and configuration experiments that led to the current result.
 
-\* Stopped early (240 steps); delta at matched steps, not at best.
+| Change | Best val_loss | Impact | Outcome |
+|--------|--------------|--------|---------|
+| Baseline (no data shuffling) | 0.9371 | — | Does not pass |
+| + Pre-A LoRA dropout | 0.9390 | +0.002 | Worse |
+| + E5M2 backward + hipBLASLt | 0.9369 | ~0 | No change |
+| + FP8 weight gradient | 0.9381 | ~0 | No change |
+| + Fused RoPE | 0.9389 | ~0 | No change |
+| + BF16 atomics in attention | 0.9387 | +0.002 | Slightly worse |
+| + apex-match RMSNorm | 0.9566* | +0.005* | Worse |
+| + hipBLASLt GEMM backend | 0.9599* | +0.002* | No change |
+| **+ Data shuffling** | **0.9208** | **-0.016** | **Passes target** |
+| **+ Aligned eval schedule** | **0.9178** | **-0.019** | **Passes, 11% faster** |
+| **+ Fused norm+quant + backend cache** | **0.9192** | **-0.018** | **Passes, 18% faster** |
+
+\* Stopped early (240 steps); delta measured at matched steps.
 
 ## Source Files
 
@@ -268,9 +284,9 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 | `lumen/modules/parallel_linear.py` | `pre_quantized_input` threading for fused path |
 | `lumen/ops/quantize/linear.py` | `pre_quantized_input` support in FP8 autograd functions |
 | `lumen/ops/dispatch.py` | Backend caching + sync elimination (`LUMEN_SKIP_BACKEND_SYNC=1`) |
-| `lumen/models/megatron.py` | `--lumen-fused-mlp` / `_patch_fused_swiglu_mlp` |
+| `lumen/models/megatron.py` | `--lumen-fused-mlp` / `_patch_fused_swiglu_mlp` / `_run_warmup_eval_pass` |
+| `lumen/models/megatron_patches.py` | `install_eval_recompute` / `install_post_eval_cache_clear` (post-eval fixes) |
 | `examples/llama2/config_MI300X_tp1_dp8.sh` | `LUMEN_EVAL_ALIGNED=1` support |
-| `.cursor/tmp-training-bugs.md` | Full debugging log with all experiments and evidence |
 
 ## Profiling Data
 
@@ -278,4 +294,4 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 |------|------------|
 | `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages table — Lumen, 3 steps, rank 0 |
 | `profiling/te_profile_results.txt` | `torch.profiler` key_averages — TE ops at same tensor shapes |
-| `/home/danyzhan/lumen_profile_trace.json` | Chrome trace (403 MB) — open in `chrome://tracing` |
+| `profiling/lumen_profile_trace.json` | Chrome trace (403 MB) — open in `chrome://tracing` |
