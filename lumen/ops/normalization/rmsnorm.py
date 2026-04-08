@@ -26,6 +26,7 @@ Provides:
 """
 
 import logging
+import os
 from typing import Optional, Tuple, Union
 
 import torch
@@ -173,6 +174,16 @@ class _RMSNormGradQuant(torch.autograd.Function):
 # ---------------------------------------------------------------------------
 
 
+_USE_APEX_RMSNORM = os.environ.get("LUMEN_USE_APEX_RMSNORM", "0") == "1"
+
+
+def _rmsnorm_apex(x_2d, weight, eps):
+    """Apex fused RMSNorm — matches AMD MLPerf TE reference."""
+    from apex.normalization.fused_layer_norm import fused_rms_norm_affine
+
+    return fused_rms_norm_affine(x_2d, weight, weight.shape, eps, False)
+
+
 def rmsnorm(
     x: torch.Tensor,
     weight: torch.Tensor,
@@ -184,6 +195,9 @@ def rmsnorm(
     When any input requires grad, the Triton backend is preferred because
     its ``_RMSNorm`` autograd.Function provides forward+backward support,
     whereas CK kernels do not participate in the autograd graph.
+
+    Set ``LUMEN_USE_APEX_RMSNORM=1`` to use apex's ``fused_rms_norm_affine``
+    instead of AITER, matching the AMD MLPerf reference (TE + apex).
 
     Args:
         x: Input tensor ``(*, hidden_size)``.
@@ -200,8 +214,9 @@ def rmsnorm(
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1])
 
-    needs_grad = torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad)
-    if needs_grad and _probe_aiter_triton_rmsnorm():
+    if _USE_APEX_RMSNORM:
+        y = _rmsnorm_apex(x_2d, weight, eps)
+    elif torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad) and _probe_aiter_triton_rmsnorm():
         y = _rmsnorm_triton(x_2d, weight, eps)
     else:
         y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")

@@ -14,6 +14,7 @@ arguments) remains in the per-model subpackages.
 """
 
 import logging
+import os
 from functools import partial
 from typing import Callable, Optional
 
@@ -430,7 +431,7 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     _override_te_args_for_lumen(args)
 
     if config is None:
-        args.apply_rope_fusion = False
+        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -496,7 +497,7 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
     _override_te_args_for_lumen(args)
 
     if config is None:
-        args.apply_rope_fusion = False
+        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -543,7 +544,88 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         vp_stage=vp_stage,
     )
 
+    if getattr(args, "lumen_fused_mlp", False):
+        _patch_fused_swiglu_mlp(model)
+
     return model
+
+
+def _patch_fused_swiglu_mlp(model):
+    """Patch Megatron MLP forward to use AITER fused SwiGLU when available.
+
+    Replaces the fc1 → SwiGLU → fc2 pipeline with a single AITER Triton
+    kernel call (``ff_a16w16_fused_gated``) that fuses gate+up GEMM,
+    SiLU activation, element-wise multiply, and down GEMM.
+
+    Only activates when: gated_linear_unit=True, no MLP bias, the AITER
+    fused gated kernel is available, AND batch size M <= 64 (the fused
+    kernel is slower than decomposed GEMMs for large M).  For training
+    with large sequence lengths (M=8192), this will fall back to the
+    original path.  Main benefit is for inference or small-batch scenarios.
+    """
+    from lumen.ops.dispatch import _probe_aiter_fused_gated
+
+    if not _probe_aiter_fused_gated():
+        print_rank_0("WARNING: --lumen-fused-mlp requested but AITER fused gated kernel unavailable")
+        return
+
+    from megatron.core.transformer.mlp import MLP
+
+    patched = 0
+    for module in model.modules():
+        if not isinstance(module, MLP):
+            continue
+        if not getattr(module.config, "gated_linear_unit", False):
+            continue
+        if getattr(module.config, "add_bias_linear", False):
+            continue
+
+        _orig_forward = module.forward
+
+        def _make_fused_forward(mlp_module, orig_fwd):
+            _w_down_cache = [None]
+
+            def _fused_forward(hidden_states, per_token_scale=None):
+                try:
+                    from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_gated
+
+                    w_fc1 = mlp_module.linear_fc1.weight
+                    w_fc2 = mlp_module.linear_fc2.weight
+
+                    orig_shape = hidden_states.shape
+                    x_2d = hidden_states.reshape(-1, orig_shape[-1]).contiguous()
+
+                    M = x_2d.shape[0]
+                    if M > 64:
+                        return orig_fwd(hidden_states, per_token_scale=per_token_scale)
+
+                    x_bf16 = x_2d.bfloat16() if x_2d.dtype != torch.bfloat16 else x_2d
+                    w1_bf16 = w_fc1.bfloat16() if w_fc1.dtype != torch.bfloat16 else w_fc1
+
+                    w2_data = w_fc2.data if not hasattr(w_fc2, "data") else w_fc2
+                    w2_bf16 = w2_data.bfloat16() if w2_data.dtype != torch.bfloat16 else w2_data
+                    if _w_down_cache[0] is None or _w_down_cache[0].data_ptr() != w2_bf16.data_ptr():
+                        _w_down_cache[0] = w2_bf16.t().contiguous()
+                    w_down = _w_down_cache[0]
+
+                    out = ff_a16w16_fused_gated(
+                        x_bf16,
+                        w1_bf16,
+                        w_down,
+                        dtype=torch.bfloat16,
+                        activation="silu",
+                    )
+                    out = out.reshape(orig_shape[:-1] + (out.shape[-1],))
+                    return out, None
+                except Exception:
+                    return orig_fwd(hidden_states, per_token_scale=per_token_scale)
+
+            return _fused_forward
+
+        module.forward = _make_fused_forward(module, _orig_forward)
+        patched += 1
+
+    print_rank_0(f"Patched {patched} MLP modules with AITER fused SwiGLU forward")
 
 
 def _patch_mla_attention(spec):
@@ -934,12 +1016,18 @@ def install_fp8_param_storage_hook() -> None:
             or getattr(train_args, "fp8", "")
             or getattr(train_args, "linear_fp8_format", "")
         )
-        if _fmt == "hybrid":
+        _want_hipblaslt = _fmt == "hybrid" or os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
+        if _want_hipblaslt:
             try:
                 from lumen.ops.quantize.linear import ensure_hipblaslt_ready
 
                 ensure_hipblaslt_ready()
-                print_rank_0("> hipBLASLt workspace pre-allocated for hybrid FP8 backward")
+                _reason = (
+                    "LUMEN_PREFER_HIPBLASLT"
+                    if os.environ.get("LUMEN_PREFER_HIPBLASLT") == "1"
+                    else "hybrid FP8 backward"
+                )
+                print_rank_0(f"> hipBLASLt workspace pre-allocated for {_reason}")
             except Exception as e:
                 print_rank_0(f"> WARNING: hipBLASLt pre-init failed: {e}")
 

@@ -31,6 +31,8 @@ Example::
     )
 """
 
+import os
+
 import torch
 from megatron.core import tensor_parallel
 from megatron.training import get_args, get_tokenizer, print_rank_0
@@ -86,12 +88,15 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     print_rank_0("> building train, validation, and test SFT datasets ...")
 
+    shuffle_train = bool(int(os.environ.get("LUMEN_SHUFFLE_TRAIN", "0")))
     train_ds = LLaMA2SFTDataset(
         train_val_test_num_samples[0],
         train_path,
         args.seq_length,
         raw_tokenizer,
         is_hf,
+        shuffle=shuffle_train,
+        seed=args.seed,
     )
     valid_ds = LLaMA2SFTDataset(
         train_val_test_num_samples[1],

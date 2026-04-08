@@ -78,12 +78,19 @@ export LUMEN_FP8_QUANT="blockwise"
 export LUMEN_RMSNORM=0
 export LUMEN_NORM=0
 
-# ---- Evaluation (matching MLPerf: VAL_CHECK_INTERVAL=384, SKIP_EVALS=3) -----
-# MLPerf: first eval at step (3+1)*384/8 = 192; then every 384/8 = 48 steps
-export EVAL_EVERY=384
-export EVAL_INTERVAL=0
+# ---- Evaluation --------------------------------------------------------------
+# LUMEN_EVAL_ALIGNED=1: eval every 192 steps (1536 samples), matching MLPerf
+#   wall-clock budget (5 evals instead of 21, saves ~15 min).
+# Default (0): eval every 48 steps (384 samples) for detailed convergence tracking.
 export EVAL_ITERS=22            # Full validation set: 173 samples / GBS=8 ~ 22
 export START_EVAL_AT=0
+if [ "${LUMEN_EVAL_ALIGNED:-0}" = "1" ]; then
+    export EVAL_EVERY=1536      # 1536/GBS=8 = every 192 steps
+    export EVAL_INTERVAL=0
+else
+    export EVAL_EVERY=384       # 384/GBS=8 = every 48 steps
+    export EVAL_INTERVAL=0
+fi
 
 # ---- Warmup / early stopping ------------------------------------------------
 export VAL_LOSS_TARGET=""

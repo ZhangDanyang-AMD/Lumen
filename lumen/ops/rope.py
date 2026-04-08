@@ -17,6 +17,7 @@ AITER kernel mapping:
 """
 
 import functools
+import os
 from typing import Tuple
 
 import torch
@@ -26,6 +27,8 @@ from lumen.ops.dispatch import (
     _probe_aiter_triton_rope_3d,
     _probe_aiter_triton_rope_cached,
 )
+
+_SKIP_SYNC = os.environ.get("LUMEN_SKIP_BACKEND_SYNC", "0") == "1"
 
 NEOX_STYLE = 0
 GPTJ_STYLE = 1
@@ -132,7 +135,8 @@ def apply_rotary_pos_emb(
         True,  # reuse_freqs_front_part
         False,  # nope_first
     )
-    torch.cuda.synchronize()
+    if not _SKIP_SYNC:
+        torch.cuda.synchronize()
     return _sbhd_to_bhsd(out_sbhd)
 
 
@@ -201,7 +205,8 @@ def apply_rotary_pos_emb_2d(
         True,  # reuse_freqs_front_part
         False,  # nope_first
     )
-    torch.cuda.synchronize()
+    if not _SKIP_SYNC:
+        torch.cuda.synchronize()
     return out
 
 
@@ -228,5 +233,6 @@ def apply_rotary_pos_emb_3d(
 
     rope_fwd_3d = _get_aiter_rope_fwd_3d()
     out = rope_fwd_3d(x, grid_sizes, freqs, sp_size, sp_rank)
-    torch.cuda.synchronize()
+    if not _SKIP_SYNC:
+        torch.cuda.synchronize()
     return out

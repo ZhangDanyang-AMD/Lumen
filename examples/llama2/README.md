@@ -17,10 +17,12 @@ BACKEND=fsdp bash examples/llama2/run_finetune.sh
 
 The training script (`finetune_llama2.py`) selects the backend via `--backend megatron|fsdp`.
 
-## TP=1 DP=8 MLPerf-Aligned Training (8x MI300X)
+## MLPerf-Aligned Training: Llama2-70B LoRA SFT (8x MI300X)
 
 Llama2-70B LoRA SFT with FP8 quantization, TP=1 DP=8 parallelism, aligned with the
-MLPerf `MI300X_EPYC_9575F_pytorch_llama2_70b` reference submission.
+AMD MLPerf v5.1 `MI300X_EPYC_9575F_pytorch_llama2_70b` reference submission.
+
+**Lumen v33 passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9208.
 
 ### Prerequisites
 
@@ -54,8 +56,13 @@ python examples/llama2/scripts/convert_dataset.py \
 ### Step 2 — Launch training
 
 ```bash
-bash examples/llama2/run_tp1_dp8.sh
+# MLPerf-aligned training with data shuffling (recommended)
+LUMEN_SHUFFLE_TRAIN=1 bash examples/llama2/run_tp1_dp8.sh
 ```
+
+The `LUMEN_SHUFFLE_TRAIN=1` environment variable enables epoch-level data shuffling,
+matching the AMD MLPerf reference behavior. This is **critical for convergence** —
+without it, val_loss stalls at ~0.937 and never reaches the 0.925 target.
 
 ### Step 3 — Monitor training
 
@@ -66,15 +73,13 @@ Logs stream to stdout and are tee'd to `~/tp1_dp8_v3.log`:
 tail -f ~/tp1_dp8_v3.log | grep -E "iteration|lm loss|grad_norm"
 
 # Watch validation eval
-tail -f ~/tp1_dp8_v3.log | grep "eval"
+tail -f ~/tp1_dp8_v3.log | grep "validation loss"
 
 # Quick GPU memory check
 rocm-smi --showmeminfo vram
 ```
 
 ### Script chain
-
-`run_tp1_dp8.sh` orchestrates the full pipeline inside a Docker container:
 
 ```
 [Host]  bash run_tp1_dp8.sh
@@ -102,13 +107,13 @@ and skip themselves if already applied.
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Tensor Parallel | 1 | Matches MLPerf reference |
+| Tensor Parallel | 1 | Single-GPU model, same as MLPerf reference |
 | Data Parallel | 8 | One rank per GPU |
 | Global Batch Size | 8 | MBS=1 x DP=8 |
 | Sequence Length | 8192 | |
-| Learning Rate | 2e-4 | Stable for Lumen FP8 (MLPerf uses 4e-4 with TE) |
+| Learning Rate | 4e-4 | Matches MLPerf reference |
 | LR Schedule | Cosine decay | Over full 1024 steps, min\_lr=0 |
-| LR Warmup Steps | 100 | Ramp from 0 to peak LR |
+| LR Warmup Steps | 0 | Matches MLPerf reference |
 | Synthetic Warmup | 5 steps | Zero loss\_mask — calibrates FP8 scales without updating LoRA weights |
 | Weight Decay | 1e-4 | Matches MLPerf |
 | Gradient Clip | 0.3 | Matches MLPerf |
@@ -118,48 +123,65 @@ and skip themselves if already applied.
 | FP8 Param Storage | Enabled | Weights stored in FP8 to save memory |
 | Activation Recompute | 80 layers (full) | Required for TP=1 memory budget |
 | Distributed Optimizer | Enabled | Shards optimizer states across DP ranks |
+| Data Shuffling | Enabled (`LUMEN_SHUFFLE_TRAIN=1`) | Epoch-level shuffle matching NeMo reference |
 | Seed | 1234 | Fixed for reproducibility |
 
-### MLPerf alignment notes
+### Data shuffling
 
-The configuration matches the MLPerf MI300X submission for all parameters except:
+Data shuffling is the single most important factor for reaching the MLPerf target.
 
-| Parameter | Lumen | MLPerf | Reason |
-|-----------|-------|--------|--------|
-| Learning Rate | 2e-4 | 4e-4 | Lumen FP8 (AITER backend) is more sensitive to high LR than TransformerEngine |
-| LR Warmup | 100 steps | 0 | Compensates for the FP8 precision gap at training start |
-| Activation Recompute Layers | 80 (full) | 21 | TP=1 puts all parameters on one GPU; full recompute needed to fit in 192 GB |
+The training dataset (`train.npy`) contains 3901 pre-packed samples of 8192 tokens each.
+The AMD MLPerf reference (NeMo) shuffles all sample indices into a random permutation at
+epoch start (seeded by the training seed). Without shuffling, consecutive mini-batches
+contain adjacent packed sequences that are highly correlated, degrading early convergence.
 
-Root cause of the LR sensitivity: Lumen's AITER GEMM kernels do not guarantee FP32
-accumulation for partial sums, and delayed scaling uses stale amax from the previous
-iteration. These compound across 80 layers at high learning rates.
+| Setting | Best val_loss | Passes MLPerf? | Steps to target |
+|---------|--------------|----------------|-----------------|
+| `LUMEN_SHUFFLE_TRAIN=0` (v20) | 0.9371 | No | Never |
+| `LUMEN_SHUFFLE_TRAIN=1` (v33) | **0.9208** | **Yes** | 672 |
 
-### Configuration
-
-All training parameters live in `config_MI300X_tp1_dp8.sh`. Key variables to customize:
-
-```bash
-export LR=2e-4           # Learning rate (lower = more stable, higher = faster convergence)
-export TRAIN_STEPS=1024   # Total training iterations
-export CKPT_DIR="/data1/lumen/megatron_ckpt_nous_tp1"  # Megatron-format checkpoint
-export TRAIN_DATA="/data1/lumen/data/train.npy"         # Training data
-export VALID_DATA="/data1/lumen/data/validation.npy"    # Validation data
-export WARMUP_STEPS=5     # Synthetic warmup steps (FP8 scale calibration)
-export LR_WARMUP_STEPS=100  # LR linear ramp-up steps
-```
+Implementation: `lumen/models/llama2/dataset.py` — `LLaMA2SFTDataset._build_samples_mapping()`
+creates a permuted index array and remaps `__getitem__` through it. Controlled by `LUMEN_SHUFFLE_TRAIN`
+env var, passed via `shuffle=True` in `lumen/models/llama2/megatron/sft.py`.
 
 ### Expected results
 
-With the default configuration (lr=2e-4, 1024 steps, seed=1234):
+With the recommended configuration (lr=4e-4, 1024 steps, seed=1234, `LUMEN_SHUFFLE_TRAIN=1`):
 
 | Metric | Value |
 |--------|-------|
-| Initial loss (step 6, after warmup) | ~4.0 |
+| Initial loss (step 6, after warmup) | ~4.1 |
 | Loss at step 100 | ~1.3 |
-| Loss at step 500 | ~1.0 |
-| Best validation loss | ~0.96 |
+| Loss at step 500 | ~1.3 |
+| Best validation loss | **0.9208** (step 960) |
+| Final validation loss (step 1024) | **0.9221** |
 | MLPerf target | 0.925 |
-| Peak GPU memory per device | ~170 GB / 192 GB |
+| First step under target | 672 |
+| Peak GPU memory per device | ~185 GB / 192 GB (96.2%) |
+| Step time | ~7.9 s |
+
+See [`results/mlperf_llama2_70b_lora/`](results/mlperf_llama2_70b_lora/) for the full
+comparison against the AMD MLPerf reference.
+
+### MLPerf alignment status
+
+All training parameters now match the AMD MLPerf v5.1 reference:
+
+| Parameter | Lumen (v33) | MLPerf Reference | Status |
+|-----------|-------------|-----------------|--------|
+| Learning Rate | 4e-4 | 4e-4 | Matched |
+| LR Warmup | 0 | 0 | Matched |
+| LR Schedule | Cosine, 1024 steps | Cosine, 1024 steps | Matched |
+| LoRA rank/alpha | 16/32 | 16/32 | Matched |
+| FP8 Format | E4M3 hybrid | E4M3 hybrid | Matched |
+| Data Shuffling | Epoch-level | Epoch-level | **Matched (v33 fix)** |
+| Activation Recompute | 80 layers (full) | 21 layers | Different (TP=1 memory) |
+| FP8 Engine | AITER (CK + Triton) | TransformerEngine | Different (kernel impl) |
+| Attention | AITER CK FMHA | TE fused CK v3 | Different (same CK kernel) |
+| RMSNorm | AITER Triton | TE Triton / apex | Different (higher precision) |
+
+Remaining implementation differences (FP8 engine, attention, RMSNorm) each contribute
+< 0.005 val_loss delta individually, as verified by systematic A/B experiments (v25-v32).
 
 ### Troubleshooting
 
@@ -169,9 +191,9 @@ With the default configuration (lr=2e-4, 1024 steps, seed=1234):
 | `HIP out of memory` in forward pass | Activation memory overflow | Increase `RECOMPUTE_NUM_LAYERS` (default 80 = full recompute) |
 | `grad_norm: 0.000` every step | Broken autograd chain with LoRA + recompute | Ensure `patch_requires_grad.py` ran |
 | NCCL timeout on step 1 | AITER kernel tuning takes > default timeout | Set `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=7200` (already in `run_tp1_dp8.sh`) |
-| Loss spikes / divergence | LR too high for Lumen FP8 | Lower `LR` (2e-4 is known stable) and/or increase `LR_WARMUP_STEPS` |
+| Loss spikes / divergence | LoRA scaling bug or LR too high | Ensure `patch_lora_scaling.py` ran; use lr=4e-4 |
 | `numpy.product` error on save | Deprecated numpy API in Megatron | Already patched in `run_tp1_dp8.sh`; ensure the `sed` line runs |
-| `IndexError` in validation | Validation dataset too short | Not critical — training results are unaffected |
+| val_loss stuck at ~0.937 | Data not shuffled | Set `LUMEN_SHUFFLE_TRAIN=1` |
 
 ## CLI Flags
 
@@ -203,4 +225,4 @@ Debug/diagnostic patches are available in `scripts/debug/`.
 
 ## Reference Logs
 
-See [`results/`](results/) for full training logs from LLaMA2-70B SFT runs on 8x MI355X GPUs across different quantization configurations (BF16, FP8 blockwise, MXFP8, FSDP).
+See [`results/`](results/) for full training logs from LLaMA2-70B SFT runs on MI300X/MI355X GPUs across different quantization configurations and MLPerf comparisons.

@@ -310,6 +310,36 @@ def remap_lora_state_dict(module, state_dict):
     return new_sd
 
 
+# ── Fused RoPE (apex → Megatron rope_utils) ────────────────────────────────
+
+_FUSED_ROPE_INSTALLED = False
+
+
+def install_fused_rope():
+    """Register apex fused RoPE into Megatron's rope_utils.
+
+    Enables ``apply_rope_fusion=True`` without TransformerEngine.  The apex
+    kernel delegates to AITER on ROCm (MI300X), matching TE's fused path.
+
+    Megatron passes ``interleaved=`` kwarg that apex doesn't accept, so we
+    wrap to strip unsupported keywords.
+    """
+    global _FUSED_ROPE_INSTALLED
+    if _FUSED_ROPE_INSTALLED:
+        return
+    try:
+        import megatron.core.models.common.embeddings.rope_utils as rope_utils
+        from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
+
+        def _compat_fused_rope(t, freqs, **kwargs):
+            return _apex_rope(t, freqs)
+
+        rope_utils.fused_apply_rotary_pos_emb = _compat_fused_rope
+        _FUSED_ROPE_INSTALLED = True
+    except ImportError:
+        pass
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
@@ -325,3 +355,4 @@ def install_all():
     install_requires_grad_fix()
     install_swiglu_fp8()
     install_mlp_recompute()
+    install_fused_rope()

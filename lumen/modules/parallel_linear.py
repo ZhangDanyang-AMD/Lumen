@@ -181,6 +181,7 @@ def _do_gemm(
     delay_wgrad=False,
     deferred_wgrad=None,
     activation_tensor_id=None,
+    pre_quantized_input=None,
 ):
     """Route to Lumen FP8 GEMM or standard F.linear.
 
@@ -241,6 +242,7 @@ def _do_gemm(
             deferred_wgrad=deferred_wgrad,
             pre_quantized_weight=(weight.data, gemm_scale),
             activation_tensor_id=activation_tensor_id,
+            pre_quantized_input=pre_quantized_input,
         )
 
     if _fp8_stored:
@@ -274,6 +276,7 @@ def _do_gemm(
             delay_wgrad=delay_wgrad,
             deferred_wgrad=deferred_wgrad,
             activation_tensor_id=activation_tensor_id,
+            pre_quantized_input=pre_quantized_input,
         )
     return F.linear(input_, weight, bias)
 

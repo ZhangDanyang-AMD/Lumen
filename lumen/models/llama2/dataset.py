@@ -58,6 +58,8 @@ class LLaMA2SFTDataset(Dataset):
         seq_length: int,
         tokenizer,
         is_hf_tokenizer: bool = False,
+        shuffle: bool = False,
+        seed: int = 1234,
     ):
         self.num_samples = num_samples
         self.seq_length = seq_length
@@ -65,6 +67,9 @@ class LLaMA2SFTDataset(Dataset):
         self.is_hf_tokenizer = is_hf_tokenizer
         self.indexed_dataset: List[Dict[str, list]] = []
         self._raw_idx = 0
+        self._shuffle = shuffle
+        self._seed = seed
+        self._samples_mapping: Optional[np.ndarray] = None
 
         if data_path is None:
             self._raw_samples: list = []
@@ -87,9 +92,13 @@ class LLaMA2SFTDataset(Dataset):
             if arr.ndim == 1 and arr.dtype == object:
                 # Object array of dicts: {"input_ids": [...], "loss_mask": [...], ...}
                 # Produced by convert_dataset.py (MLPerf NeMo style).
-                self._raw_samples = [
-                    {"input_ids": list(item["input_ids"]), "loss_mask": list(item["loss_mask"])} for item in arr
-                ]
+                self._raw_samples = []
+                for item in arr:
+                    d = {"input_ids": list(item["input_ids"]), "loss_mask": list(item["loss_mask"])}
+                    if "seq_start_id" in item:
+                        sid = item["seq_start_id"]
+                        d["seq_start_id"] = sid.tolist() if hasattr(sid, "tolist") else list(sid)
+                    self._raw_samples.append(d)
             elif arr.ndim == 2:
                 # Pre-split integer array: (N, seq_len)
                 arr = arr.astype(np.int64)
@@ -117,17 +126,63 @@ class LLaMA2SFTDataset(Dataset):
 
         logger.info("Loaded %d samples from %s", len(self._raw_samples), data_path)
 
+        if self._shuffle and len(self._raw_samples) > 0:
+            self._build_samples_mapping()
+
+    def _build_samples_mapping(self):
+        """Build epoch-level shuffled index mapping matching NeMo GPTSFTPackedDataset."""
+        rng = np.random.RandomState(self._seed)
+        dataset_len = len(self._raw_samples)
+        max_num_epochs = int(np.ceil(self.num_samples / dataset_len))
+        indices = np.arange(dataset_len)[None, :].repeat(max_num_epochs, axis=0)
+        for epoch_indices in indices:
+            rng.shuffle(epoch_indices)
+        self._samples_mapping = indices.reshape(-1)[: self.num_samples]
+        logger.info(
+            "Built shuffled mapping: %d samples from %d raw × %d epochs (seed=%d)",
+            len(self._samples_mapping),
+            dataset_len,
+            max_num_epochs,
+            self._seed,
+        )
+
     def __len__(self) -> int:
         return self.num_samples
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        if self._samples_mapping is not None:
+            raw_idx = int(self._samples_mapping[idx % len(self._samples_mapping)])
+            sample = self._raw_samples[raw_idx]
+            processed = self._process_sample(sample)
+            if processed is None:
+                processed = {"input_ids": [0] * self.seq_length, "loss_mask": [0] * self.seq_length}
+            ids = processed["input_ids"]
+            mask = processed["loss_mask"]
+            seq_start_id = sample.get("seq_start_id", [0])
+            if isinstance(seq_start_id, np.ndarray):
+                seq_start_id = seq_start_id.tolist()
+            result = {
+                "input_ids": ids + [ids[-1]] if len(ids) == self.seq_length else ids[: self.seq_length + 1],
+                "loss_mask": mask + [0] if len(mask) == self.seq_length else mask[: self.seq_length + 1],
+                "seq_start_id": seq_start_id,
+            }
+            return {k: torch.LongTensor(v) for k, v in result.items()}
+
         while idx >= len(self.indexed_dataset):
             packed = self._pack_next()
             if packed is None:
                 break
             self.indexed_dataset.append(packed)
 
-        idx = idx % max(len(self.indexed_dataset), 1)
+        if len(self.indexed_dataset) == 0:
+            dummy = {
+                "input_ids": [0] * (self.seq_length + 1),
+                "loss_mask": [0] * (self.seq_length + 1),
+                "seq_start_id": [0, self.seq_length + 1],
+            }
+            return {k: torch.LongTensor(v) for k, v in dummy.items()}
+
+        idx = idx % len(self.indexed_dataset)
         sample = self.indexed_dataset[idx]
         return {k: torch.LongTensor(v) for k, v in sample.items()}
 

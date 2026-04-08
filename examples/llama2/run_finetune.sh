@@ -91,6 +91,14 @@ if [ "${USE_SDMA}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"
 fi
 
+if [ "${LUMEN_FUSED_ROPE:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-fused-rope"
+fi
+
+if [ "${LUMEN_FUSED_MLP:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-fused-mlp"
+fi
+
 
 ###############################################################################
 # MEGATRON BACKEND
