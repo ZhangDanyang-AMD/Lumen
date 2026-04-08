@@ -1,14 +1,12 @@
-"""FP8 optimized training for Llama-2-70B-chat (FSDP sharded).
+"""FP8 Linear optimized training for Llama-2-70B-chat (FSDP sharded).
 
-Same approach as train_grpo_fp8.py (which completed step 1 at ~30s but
-OOMed at step 2 on BF16) — but now with aggressive memory management:
+Same approach as train_grpo_fp8.py with aggressive memory management:
 - gc.collect() + empty_cache() between generation and training
 - Explicit memory tracking at each phase
-- FP8 dynamic scaling applied post-FSDP
+- FP8 Linear (dynamic scaling) via LumenConfig applied post-FSDP
 
-The hypothesis: even though quant.enable only quantizes the GEMM compute
-path (weights stay BF16), the reduced intermediate tensor sizes during
-matmul forward/backward may free enough GPU memory to survive step 2.
+Note: LumenConfig FP8 Linear only quantizes the GEMM compute path —
+weights stay BF16. True memory savings require FP8ParamManager.
 
 Launch:
   accelerate launch --config_file fsdp_8gpu.yaml \
@@ -29,7 +27,7 @@ from transformers import AutoTokenizer, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = os.environ.get(
     "OUTPUT_DIR",
@@ -138,9 +136,10 @@ def main():
         callbacks=[_PerfLogCallback(OUTPUT_DIR)],
     )
 
-    print(f"[fp8_70b] Rank={rank} Applying Lumen FP8 dynamic scaling...", flush=True)
-    manager = quant.enable(trainer.model, format="fp8_e4m3", scaling="dynamic")
-    print(f"[fp8_70b] Rank={rank} FP8 quantization applied!", flush=True)
+    print(f"[fp8_70b] Rank={rank} Applying LumenConfig FP8 Linear (dynamic scaling)...", flush=True)
+    cfg = LumenConfig(format="fp8_e4m3", scaling="dynamic")
+    _, trainer.model = cfg.enable(trainer.model)
+    print(f"[fp8_70b] Rank={rank} LumenConfig FP8 Linear applied!", flush=True)
 
     gc.collect()
     torch.cuda.empty_cache()

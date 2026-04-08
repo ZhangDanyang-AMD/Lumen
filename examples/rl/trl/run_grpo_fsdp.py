@@ -105,6 +105,10 @@ def parse_args():
     parser.add_argument("--lumen-fused-rope", action="store_true", default=False)
     parser.add_argument("--lumen-hip-graphs", action="store_true", default=False)
     parser.add_argument("--lumen-fp8-checkpoint", action="store_true", default=False)
+    parser.add_argument("--fp8-param-manager", action="store_true", default=False,
+                        help="Replace nn.Linear weights with FP8 via FP8ParamManager (true memory savings).")
+    parser.add_argument("--use-8bit-adam", action="store_true", default=False,
+                        help="Use bitsandbytes Adam8bit optimizer for smaller optimizer states.")
 
     return parser.parse_args()
 
@@ -186,6 +190,8 @@ def main():
         lumen_fused_rope=raw.lumen_fused_rope,
         lumen_hip_graphs=raw.lumen_hip_graphs,
         lumen_fp8_checkpoint=raw.lumen_fp8_checkpoint,
+        fp8_param_manager=raw.fp8_param_manager,
+        use_8bit_adam=raw.use_8bit_adam,
         train_dataset=_load_train_dataset(raw),
     )
 
@@ -209,6 +215,8 @@ def main():
         summary = {
             "model": raw.model_name_or_path,
             "linear_fp8": raw.linear_fp8,
+            "fp8_param_manager": raw.fp8_param_manager,
+            "use_8bit_adam": raw.use_8bit_adam,
             "lora_rank": raw.lora_rank,
             "max_steps": raw.max_steps,
             "elapsed_seconds": round(elapsed, 2),

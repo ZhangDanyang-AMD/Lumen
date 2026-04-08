@@ -1,7 +1,7 @@
 """Apple-to-apple FP8 run (delayed scaling, pre-loaded BF16 model).
 
-Identical to train_grpo_bf16_preloaded.py except for one line:
-  quant.enable(model, format="fp8_e4m3", scaling="delayed")
+Identical to train_grpo_bf16_preloaded.py except FP8 enablement via
+  LumenConfig(format="fp8_e4m3", scaling="delayed").enable(model)
 
 Delayed scaling uses a rolling amax history (default length 16) to compute
 scale factors, TE-style.  Compare with dynamic scaling (exact per-tensor
@@ -25,7 +25,7 @@ from transformers import AutoModelForCausalLM, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = os.environ.get(
     "OUTPUT_DIR",
@@ -70,7 +70,8 @@ def _build_fp8_model():
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
-    quant.enable(model, format="fp8_e4m3", scaling="delayed")
+    cfg = LumenConfig(format="fp8_e4m3", scaling="delayed")
+    _, model = cfg.enable(model)
     return model
 
 

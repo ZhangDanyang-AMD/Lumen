@@ -63,6 +63,9 @@ class VerlLumenArgs:
     lumen_fp8_param_gather: bool = False
     lumen_fp8_weight_cache: bool = False
 
+    fp8_param_manager: bool = False
+    use_8bit_adam: bool = False
+
     def __post_init__(self) -> None:
         if self.train_backend not in _VALID_TRAIN_BACKENDS:
             raise ValueError(
@@ -120,6 +123,7 @@ def from_verl_config(cfg: Any) -> VerlLumenArgs:
         "linear_fp8", "linear_fp8_format", "linear_fp8_scaling",
         "lumen_norm", "lumen_fp8_attn", "lumen_fp8_activation_store",
         "lumen_fp8_param_gather", "lumen_fp8_weight_cache",
+        "fp8_param_manager", "use_8bit_adam",
     ):
         if key in lumen_cfg:
             kwargs[key] = lumen_cfg[key]

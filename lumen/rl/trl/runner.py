@@ -6,6 +6,7 @@
 
 """High-level GRPO runner for the TRL + Lumen integration."""
 
+import logging
 import os
 
 import torch
@@ -17,7 +18,31 @@ from lumen.rl.trl.eval_callback import GRPOEvalCallback
 from lumen.rl.trl.modeling import build_actor_model
 from lumen.rl.trl.warmup import maybe_run_synthetic_warmup
 
+logger = logging.getLogger(__name__)
+
 __all__ = ["run_grpo"]
+
+
+class _LumenGRPOTrainer(GRPOTrainer):
+    """GRPOTrainer subclass that supports 8-bit Adam from bitsandbytes."""
+
+    _lumen_use_8bit_adam: bool = False
+
+    def create_optimizer(self):
+        if not self._lumen_use_8bit_adam:
+            return super().create_optimizer()
+
+        import bitsandbytes as bnb
+
+        opt_cls = bnb.optim.Adam8bit
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        self.optimizer = opt_cls(
+            params,
+            lr=self.args.learning_rate,
+            weight_decay=self.args.weight_decay,
+        )
+        logger.info("Using bitsandbytes Adam8bit optimizer (%d param groups)", len(params))
+        return self.optimizer
 
 
 def _build_tokenizer(args):
@@ -59,7 +84,8 @@ def run_grpo(args, *, reward_fn):
     eval_cb = GRPOEvalCallback(output_dir=config_kwargs["output_dir"])
     callbacks = [eval_cb]
 
-    trainer = GRPOTrainer(
+    trainer_cls = _LumenGRPOTrainer if getattr(args, "use_8bit_adam", False) else GRPOTrainer
+    trainer = trainer_cls(
         model=model,
         reward_funcs=reward_fn,
         args=config,
@@ -68,6 +94,8 @@ def run_grpo(args, *, reward_fn):
         processing_class=tokenizer,
         callbacks=callbacks,
     )
+    if getattr(args, "use_8bit_adam", False):
+        trainer._lumen_use_8bit_adam = True
     maybe_run_synthetic_warmup(getattr(trainer, "model", model), args, device=device)
     trainer.train()
     return trainer

@@ -455,23 +455,6 @@ def reset_fp8_state(model: nn.Module) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _wrap_params_as_fp8_comm(model: nn.Module, fp8_dtype: torch.dtype) -> int:
-    """Wrap BF16 parameters with FP8CommTensor for FSDP2 FP8 all-gather."""
-    from lumen.quantize.comm_tensor import FP8CommTensor
-
-    count = 0
-    for module in model.modules():
-        for name, param in list(module._parameters.items()):
-            if param is not None and param.dtype == torch.bfloat16 and param.requires_grad:
-                wrapped = torch.nn.Parameter(
-                    FP8CommTensor(param.data, fp8_dtype=fp8_dtype),
-                    requires_grad=True,
-                )
-                module._parameters[name] = wrapped
-                count += 1
-    return count
-
-
 def apply_fsdp2(
     model: nn.Module,
     args,
@@ -521,13 +504,6 @@ def apply_fsdp2(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.bfloat16,
         )
-
-    if getattr(args, "lumen_fp8_param_gather", False):
-        from lumen.quantize.config import _get_float8_e4m3
-
-        fp8_dtype = _get_float8_e4m3()
-        n_wrapped = _wrap_params_as_fp8_comm(model, fp8_dtype)
-        _rank0_print(f"> FP8CommTensor wrapping: {n_wrapped} params")
 
     sharded_layers = False
     for module in model.modules():

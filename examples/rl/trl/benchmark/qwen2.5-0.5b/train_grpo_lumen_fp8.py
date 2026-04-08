@@ -1,7 +1,7 @@
 """Apple-to-apple FP8 run (dynamic scaling, pre-loaded BF16 model).
 
-Identical to train_grpo_bf16_preloaded.py except for one line:
-  quant.enable(model, format="fp8_e4m3", scaling="dynamic")
+Identical to train_grpo_bf16_preloaded.py except FP8 enablement via
+  LumenConfig(format="fp8_e4m3", scaling="dynamic").enable(model)
 
 Dynamic scaling computes the exact per-tensor amax on every forward pass,
 making it the most numerically accurate FP8 quantization method (no stale
@@ -25,7 +25,7 @@ from transformers import AutoModelForCausalLM, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = os.environ.get(
     "OUTPUT_DIR",
@@ -70,7 +70,8 @@ def _build_fp8_model():
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
-    quant.enable(model, format="fp8_e4m3", scaling="dynamic")
+    cfg = LumenConfig(format="fp8_e4m3", scaling="dynamic")
+    _, model = cfg.enable(model)
     return model
 
 

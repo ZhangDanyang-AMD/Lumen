@@ -174,7 +174,7 @@ def main():
         cpu_offload=False,
         fp8_param_gather=True,
     )
-    manager = cfg.enable(trainer.model)
+    _, trainer.model = cfg.enable(trainer.model)
     print(f"[max_memsave] Rank={rank} LumenConfig enabled!", flush=True)
 
     gc.collect()

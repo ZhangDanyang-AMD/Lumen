@@ -1,11 +1,8 @@
-"""FP8 dynamic scaling for Llama-2-70B-chat (FSDP sharded).
+"""FP8 Linear (dynamic scaling) for Llama-2-70B-chat (FSDP sharded).
 
-Identical to train_grpo_bf16.py except applies Lumen FP8 quantization
-to the actor model after GRPOTrainer init (post-FSDP wrapping).
-
-Uses dynamic scaling which computes per-tensor amax on every forward
-pass — avoids the FSDP mixed-precision Float dtype crash that affects
-delayed scaling (see tmp-training-bugs.md [demo-a-fsdp-delayed-fp8-crash]).
+Applies Lumen FP8 quantization via LumenConfig to the actor model after
+GRPOTrainer init (post-FSDP wrapping). Uses dynamic scaling which computes
+per-tensor amax on every forward pass.
 
 Launch:
   accelerate launch --config_file fsdp_8gpu.yaml \
@@ -25,7 +22,7 @@ from transformers import AutoTokenizer, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = os.environ.get(
     "OUTPUT_DIR",
@@ -115,16 +112,17 @@ def main():
         callbacks=[_PerfLogCallback(OUTPUT_DIR)],
     )
 
-    print("[fp8_70b] Applying Lumen FP8 quantization (dynamic scaling) to actor model...")
-    quant.enable(trainer.model, format="fp8_e4m3", scaling="dynamic")
-    print("[fp8_70b] FP8 quantization applied!")
+    print("[fp8_70b] Applying Lumen FP8 Linear (dynamic scaling) to actor model...")
+    cfg = LumenConfig(format="fp8_e4m3", scaling="dynamic")
+    _, trainer.model = cfg.enable(trainer.model)
+    print("[fp8_70b] LumenConfig FP8 Linear applied!")
 
     trainer.train()
 
     if torch.cuda.is_available():
         peak_gb = torch.cuda.max_memory_allocated() / 1e9
         print(f"[fp8_70b] Peak GPU memory: {peak_gb:.2f} GB")
-    print("[fp8_70b] FP8 dynamic-scaling training done!")
+    print("[fp8_70b] FP8 Linear training done!")
 
 
 if __name__ == "__main__":

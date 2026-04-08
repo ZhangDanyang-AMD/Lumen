@@ -795,37 +795,55 @@ def make_lumen_model_provider(
 
     The returned callable keeps task semantics in the supplied ``model_builder``
     while applying the shared infrastructure assembly in a fixed order:
-    LoRA, pre-quant module flags, FP8 enablement, optional FP8 parallel-linear
-    enablement, then post-quant features.
+
+    1. Megatron LoRA (uses ``megatron.core.transformer.lora_adapter``,
+       separate from PEFT — handled by *lora_applier*)
+    2. ``LumenConfig.enable()`` — FP8ParamManager, norm patching, pre-quant,
+       ``quant.enable``, post-quant (PEFT LoRA skipped via ``lora_rank=0``)
+    3. Megatron-specific ``enable_fp8_for_parallel_linear`` (optional)
     """
 
     def model_provider(pre_process=True, post_process=True, vp_stage=None):
         import os
 
+        from dataclasses import replace as _replace
+
+        from lumen.config import LumenConfig
+
         args = get_args()
         model = model_builder(args, pre_process, post_process, vp_stage)
 
+        # 1. Megatron LoRA (not PEFT — stays separate)
         if getattr(args, "lora_rank", 0) > 0:
             lora_applier(model, args)
             if getattr(args, "lora_a2a", False):
                 os.environ["LORA_A2A"] = "1"
                 print_rank_0("> LoRA A2A communication optimisation enabled")
 
-        apply_lumen_pre_quant(model, args)
+        # 2. Unified LumenConfig.enable() — skip PEFT LoRA (handled above)
+        cfg = LumenConfig.from_args(args)
+        cfg = _replace(cfg, lora_rank=0)
 
-        if getattr(args, "linear_fp8", False):
-            fp8_applier(model, args)
-            if getattr(args, "lumen_linear", False):
-                scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
-                enable_fp8_for_parallel_linear(
-                    model,
-                    scaling_type=scaling_type,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                )
+        dp_group = None
+        if cfg.reduce_amax:
+            import torch.distributed as dist
+            from megatron.core import parallel_state
+            if dist.is_initialized():
+                dp_group = parallel_state.get_data_parallel_group()
 
-        apply_lumen_post_quant(model, args)
+        cfg.enable(model, dp_group=dp_group)
+
+        # 3. Megatron-specific parallel linear FP8 (not covered by LumenConfig)
+        if getattr(args, "linear_fp8", False) and getattr(args, "lumen_linear", False):
+            scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
+            enable_fp8_for_parallel_linear(
+                model,
+                scaling_type=scaling_type,
+                fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
+                gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
+                delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
+            )
+
         return model
 
     return model_provider

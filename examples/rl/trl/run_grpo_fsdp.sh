@@ -23,7 +23,7 @@ FSDP_VERSION="${1:?Usage: $0 <1|2>}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
-ACCEL_CONFIG="${REPO_ROOT}/examples/rl/trl/accelerate/fsdp${FSDP_VERSION}.yaml"
+ACCEL_CONFIG="${ACCEL_CONFIG:-${REPO_ROOT}/examples/rl/trl/accelerate/fsdp${FSDP_VERSION}.yaml}"
 
 if [[ ! -f "${ACCEL_CONFIG}" ]]; then
     echo "ERROR: accelerate config not found: ${ACCEL_CONFIG}" >&2
@@ -62,6 +62,8 @@ LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
 LUMEN_FUSED_MLP="${LUMEN_FUSED_MLP:-0}"
 LUMEN_CPU_OFFLOAD="${LUMEN_CPU_OFFLOAD:-0}"
 LUMEN_FP8_CHECKPOINT="${LUMEN_FP8_CHECKPOINT:-0}"
+FP8_PARAM_MANAGER="${FP8_PARAM_MANAGER:-0}"
+USE_8BIT_ADAM="${USE_8BIT_ADAM:-0}"
 
 CMD=(
     python -m accelerate.commands.launch
@@ -131,6 +133,14 @@ fi
 
 if [[ "${LUMEN_FP8_CHECKPOINT}" == "1" ]]; then
     CMD+=(--lumen-fp8-checkpoint)
+fi
+
+if [[ "${FP8_PARAM_MANAGER}" == "1" ]]; then
+    CMD+=(--fp8-param-manager)
+fi
+
+if [[ "${USE_8BIT_ADAM}" == "1" ]]; then
+    CMD+=(--use-8bit-adam)
 fi
 
 echo "=== TRL + Lumen GRPO — FSDP${FSDP_VERSION} ==="

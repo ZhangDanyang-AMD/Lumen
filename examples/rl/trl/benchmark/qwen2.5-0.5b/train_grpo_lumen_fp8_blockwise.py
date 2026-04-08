@@ -1,7 +1,7 @@
 """Apple-to-apple FP8 run (blockwise scaling, pre-loaded BF16 model).
 
-Identical to train_grpo_bf16_preloaded.py except for one line:
-  quant.enable(model, format="fp8_e4m3", scaling="blockwise")
+Identical to train_grpo_bf16_preloaded.py except FP8 enablement via
+  LumenConfig(format="fp8_e4m3", scaling="blockwise").enable(model)
 
 Blockwise scaling computes a separate scale per block of 128 elements,
 giving finer granularity than per-tensor methods (dynamic/delayed).
@@ -26,7 +26,7 @@ from transformers import AutoModelForCausalLM, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = os.environ.get(
     "OUTPUT_DIR",
@@ -71,7 +71,8 @@ def _build_fp8_model():
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
-    quant.enable(model, format="fp8_e4m3", scaling="blockwise")
+    cfg = LumenConfig(format="fp8_e4m3", scaling="blockwise")
+    _, model = cfg.enable(model)
     return model
 
 

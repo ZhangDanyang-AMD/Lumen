@@ -29,9 +29,9 @@ Apple-to-apple comparison of BF16, FP8 dynamic scaling, and FP8 cached weights o
 | Script | Quantization |
 |---|---|
 | `train_grpo_bf16_preloaded.py` | None (BF16 control) |
-| `train_grpo_lumen_fp8.py` | `quant.enable(model, ..., scaling="dynamic")` |
-| `train_grpo_lumen_fp8_stored.py` | `quant.enable` + `quant.store_weights_fp8` (FP8 weight cache) |
-| `train_grpo_lumen_fp8_blockwise.py` | `quant.enable(model, ..., scaling="blockwise")` |
+| `train_grpo_lumen_fp8.py` | `LumenConfig(format="fp8_e4m3", scaling="dynamic").enable(model)` |
+| `train_grpo_lumen_fp8_stored.py` | `LumenConfig(format="fp8_e4m3", scaling="dynamic").enable(model)` + FP8 weight cache |
+| `train_grpo_lumen_fp8_blockwise.py` | `LumenConfig(format="fp8_e4m3", scaling="blockwise").enable(model)` |
 
 ## Results (1000 steps each, 8x MI300X DDP)
 
@@ -49,7 +49,7 @@ Apple-to-apple comparison of BF16, FP8 dynamic scaling, and FP8 cached weights o
 
 ### FP8 Weight Cache (`store_weights_fp8`)
 
-The FP8 cached approach pre-quantizes all `nn.Linear` weights to FP8 and stores them as non-parameter buffers. During forward, the cached FP8 data is fed directly to the GEMM kernel, **skipping the per-forward weight quantization** that `quant.enable()` normally performs.
+The FP8 cached approach pre-quantizes all `nn.Linear` weights to FP8 and stores them as non-parameter buffers. During forward, the cached FP8 data is fed directly to the GEMM kernel, **skipping the per-forward weight quantization** that FP8 Linear normally performs.
 
 - **35% faster than FP8 dynamic** (12.78s vs 19.79s) — eliminates per-forward `quantize_input` on the weight tensor (amax + scale computation + quantization kernel)
 - **33% lower KL than FP8 dynamic** (0.0077 vs 0.0115) — the cached weight is quantized once at initialization quality, rather than re-quantized on every forward with different numerical states
@@ -79,24 +79,55 @@ FP8 dynamic introduces a **3.87x overhead** due to per-layer amax/scale computat
 - FP8 cached KL (0.0077) is 11x higher than BF16 but 33% lower than FP8 dynamic, suggesting quantization noise is reduced when weights are quantized fewer times.
 - Reward curves are comparable across all three methods.
 
+## FP8 Memory Savings (Single GPU, True FP8 Weight Storage)
+
+Measured with `test_fp8_memory.py` on a single MI300X GPU. Each config ran in an isolated
+Python process to avoid cross-config GPU memory leaks.
+
+| Config | Peak Alloc (MB) | Steady-State (MB) | vs BF16 Peak | vs BF16 Steady |
+|---|---|---|---|---|
+| BF16 Baseline (AdamW) | 76,861 | 46,228 | baseline | baseline |
+| FP8ParamManager | 28,909 | 24,757 | **-62.4%** | **-46.5%** |
+| FP8ParamManager + 8-bit Adam | 27,923 | 23,769 | **-63.7%** | **-48.6%** |
+| FP8 Attention (dpa) | 76,860 | 46,227 | -0.0% | -0.0% |
+
+### Memory breakdown
+
+| Component | BF16 Baseline | FP8ParamManager | FP8+8bit Adam | FP8 Attention |
+|---|---|---|---|---|
+| Parameter storage | 15,317 MB | 8,160 MB | 8,160 MB | 15,317 MB |
+| Optimizer states | 30,633 MB (bf16) | 2,005 MB (bf16) | 1,018 MB (uint8) | 30,633 MB (bf16) |
+
+`FP8ParamManager` replaces all `nn.Linear` weights with `float8_e4m3fn` (1 byte/element vs 2),
+which also causes PyTorch AdamW to allocate proportionally smaller optimizer state buffers.
+
+See `outputs/benchmark/FP8_MEMORY_BENCHMARK.md` for the full report and
+`outputs/benchmark/llama-3.1-8b/fp8_memory_test_all.json` for raw data.
+
 ## Logs
 
-- `../../outputs/benchmark/llama-3.1-8b/bf16_preloaded_1000steps.jsonl`
-- `../../outputs/benchmark/llama-3.1-8b/fp8_dynamic_1000steps.jsonl`
-- `../../outputs/benchmark/llama-3.1-8b/lumen_fp8_stored/grpo_perf_log.jsonl`
+- `outputs/benchmark/llama-3.1-8b/bf16_preloaded_1000steps.jsonl`
+- `outputs/benchmark/llama-3.1-8b/fp8_dynamic_1000steps.jsonl`
+- `outputs/benchmark/llama-3.1-8b/fp8_memory_test_all.json`
 
 ## Launch Commands
 
 ```bash
-# BF16 baseline
+# BF16 baseline (8-GPU DDP)
 accelerate launch --config_file ddp_8gpu.yaml --num_processes 8 --main_process_port 29500 \
   train_grpo_bf16_preloaded.py --max-steps 1000
 
-# FP8 dynamic scaling
+# FP8 dynamic scaling (8-GPU DDP)
 accelerate launch --config_file ddp_8gpu.yaml --num_processes 8 --main_process_port 29500 \
   train_grpo_lumen_fp8.py --max-steps 1000
 
-# FP8 cached weights (recommended)
+# FP8 cached weights (8-GPU DDP, recommended)
 accelerate launch --config_file ddp_8gpu.yaml --num_processes 8 --main_process_port 29502 \
   train_grpo_lumen_fp8_stored.py --max-steps 1000
+
+# FP8 memory benchmark (single GPU, process-isolated)
+python test_fp8_memory.py --model /dev/shm/model/llama-3.1-8b --configs bf16 --output bf16.json
+python test_fp8_memory.py --model /dev/shm/model/llama-3.1-8b --configs fp8params --output fp8params.json
+python test_fp8_memory.py --model /dev/shm/model/llama-3.1-8b --configs fp8_8bit --output fp8_8bit.json
+python test_fp8_memory.py --model /dev/shm/model/llama-3.1-8b --configs fp8attn --output fp8attn.json
 ```

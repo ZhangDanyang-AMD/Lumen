@@ -159,7 +159,7 @@ def main():
         scaling="dynamic",
         fp8_param_gather=True,
     )
-    manager = cfg.enable(trainer.model)
+    _, trainer.model = cfg.enable(trainer.model)
     print(f"[fp8_32b] Rank={rank} LumenConfig enabled!", flush=True)
 
     gc.collect()

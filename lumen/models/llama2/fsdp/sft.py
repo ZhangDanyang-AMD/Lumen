@@ -165,11 +165,9 @@ class FSDPTrainer:
             )
             _rank0_print("> Gradient checkpointing enabled")
 
-        if args.lora_rank > 0:
-            model = apply_lora(model, args)
-
-        if args.linear_fp8:
-            apply_fp8_training(model, args)
+        from lumen.config import LumenConfig
+        cfg = LumenConfig.from_args(args)
+        _manager, model = cfg.enable(model)
 
         if getattr(args, "fsdp_version", 1) == 2:
             from lumen.models.fsdp import apply_fsdp2

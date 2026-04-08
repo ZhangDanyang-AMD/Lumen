@@ -1,0 +1,108 @@
+[
+  {
+    "config": "bf16_baseline",
+    "steps": [
+      {
+        "step": 1,
+        "allocated_mb": 76860.5517578125,
+        "reserved_mb": 77726.0,
+        "current_allocated_mb": 46227.5361328125,
+        "loss": 12.631868362426758
+      },
+      {
+        "step": 2,
+        "allocated_mb": 76860.5517578125,
+        "reserved_mb": 78728.0,
+        "current_allocated_mb": 46226.7861328125,
+        "loss": 12.502522468566895
+      },
+      {
+        "step": 3,
+        "allocated_mb": 76860.5517578125,
+        "reserved_mb": 78728.0,
+        "current_allocated_mb": 46227.5361328125,
+        "loss": 12.378435134887695
+      }
+    ]
+  },
+  {
+    "config": "fp8_param_manager",
+    "n_quantized": 225,
+    "steps": [
+      {
+        "step": 1,
+        "allocated_mb": 26760.91162109375,
+        "reserved_mb": 27390.0,
+        "current_allocated_mb": 24755.89599609375,
+        "loss": 12.769634246826172
+      },
+      {
+        "step": 2,
+        "allocated_mb": 28908.02490234375,
+        "reserved_mb": 31400.0,
+        "current_allocated_mb": 24755.89599609375,
+        "loss": 12.748164176940918
+      },
+      {
+        "step": 3,
+        "allocated_mb": 28909.02490234375,
+        "reserved_mb": 31400.0,
+        "current_allocated_mb": 24755.89599609375,
+        "loss": 12.725386619567871
+      }
+    ]
+  },
+  {
+    "config": "fp8_param_8bit_adam",
+    "n_quantized": 225,
+    "steps": [
+      {
+        "step": 1,
+        "allocated_mb": 25775.7587890625,
+        "reserved_mb": 26388.0,
+        "current_allocated_mb": 23769.45361328125,
+        "loss": 12.743414878845215
+      },
+      {
+        "step": 2,
+        "allocated_mb": 27921.58251953125,
+        "reserved_mb": 30396.0,
+        "current_allocated_mb": 23769.45361328125,
+        "loss": 12.71055793762207
+      },
+      {
+        "step": 3,
+        "allocated_mb": 27922.58251953125,
+        "reserved_mb": 30396.0,
+        "current_allocated_mb": 23769.45361328125,
+        "loss": 12.743430137634277
+      }
+    ]
+  },
+  {
+    "config": "fp8_attention_dpa",
+    "steps": [
+      {
+        "step": 1,
+        "allocated_mb": 76860.02099609375,
+        "reserved_mb": 77436.0,
+        "current_allocated_mb": 46227.00537109375,
+        "loss": 12.72603988647461
+      },
+      {
+        "step": 2,
+        "allocated_mb": 76860.240234375,
+        "reserved_mb": 77438.0,
+        "current_allocated_mb": 46227.224609375,
+        "loss": 12.45846939086914
+      },
+      {
+        "step": 3,
+        "allocated_mb": 76860.45947265625,
+        "reserved_mb": 77438.0,
+        "current_allocated_mb": 46227.44384765625,
+        "loss": 12.342527389526367
+      }
+    ]
+  }
+]

@@ -91,6 +91,8 @@ class TrlLumenArgs:
     lumen_fused_rope: bool = False
     lumen_hip_graphs: bool = False
     lumen_fp8_checkpoint: bool = False
+    fp8_param_manager: bool = False
+    use_8bit_adam: bool = False
 
     def __post_init__(self) -> None:
         if self.algorithm != "grpo":

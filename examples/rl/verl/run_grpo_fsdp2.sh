@@ -55,6 +55,8 @@ export LUMEN_NORM="${LUMEN_NORM:-0}"
 export LUMEN_FP8_WEIGHT_CACHE="${LUMEN_FP8_WEIGHT_CACHE:-0}"
 export LUMEN_FP8_ACTIVATION_STORE="${LUMEN_FP8_ACTIVATION_STORE:-0}"
 export LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
+export FP8_PARAM_MANAGER="${FP8_PARAM_MANAGER:-0}"
+export USE_8BIT_ADAM="${USE_8BIT_ADAM:-0}"
 
 echo "=== VERL + Lumen GRPO — FSDP2 + sglang rollout ==="
 echo "Model:        ${MODEL_NAME}"
@@ -79,7 +81,7 @@ echo ""
 VERL_ENTRY="verl.trainer.main_ppo"
 if [ "${LUMEN_FP8}" = "1" ] || [ "${LUMEN_FP8_ATTN}" != "none" ] || [ "${LUMEN_NORM}" = "1" ] \
    || [ "${LUMEN_FP8_WEIGHT_CACHE}" = "1" ] || [ "${LUMEN_FP8_ACTIVATION_STORE}" = "1" ] \
-   || [ "${LUMEN_FP8_PARAM_GATHER}" = "1" ]; then
+   || [ "${LUMEN_FP8_PARAM_GATHER}" = "1" ] || [ "${FP8_PARAM_MANAGER}" = "1" ]; then
     VERL_ENTRY="lumen.rl.verl.verl_entry"
 fi
 

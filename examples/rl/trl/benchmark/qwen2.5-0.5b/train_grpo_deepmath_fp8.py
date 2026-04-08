@@ -11,7 +11,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
-import lumen.quantize as quant
+from lumen.config import LumenConfig
 
 OUTPUT_DIR = "/workspace/Lumen/outputs/benchmark/qwen2-0.5b-exact/fp8_run"
 MODEL_PATH = "/dev/shm/model/qwen2-0.5b-instruct"
@@ -49,7 +49,8 @@ model = AutoModelForCausalLM.from_pretrained(
     attn_implementation="flash_attention_2",
 )
 
-quant.enable(model, format="fp8_e4m3", scaling="dynamic")
+cfg = LumenConfig(format="fp8_e4m3", scaling="dynamic")
+_, model = cfg.enable(model)
 print("Lumen FP8 enabled on model")
 
 training_args = GRPOConfig(

@@ -28,6 +28,7 @@ from transformers import AutoModelForCausalLM, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 from trl.rewards import accuracy_reward
 
+from lumen.config import LumenConfig
 import lumen.quantize as quant
 
 OUTPUT_DIR = os.environ.get(
@@ -88,7 +89,8 @@ def _build_fp8_stored_model():
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False},
     )
-    quant.enable(model, format="fp8_e4m3", scaling="dynamic")
+    cfg = LumenConfig(format="fp8_e4m3", scaling="dynamic")
+    _, model = cfg.enable(model)
     n = quant.store_weights_fp8(model, fp8_dtype=torch.float8_e4m3fn)
     print(f"[fp8_stored] Cached {n} linear weights in FP8")
 

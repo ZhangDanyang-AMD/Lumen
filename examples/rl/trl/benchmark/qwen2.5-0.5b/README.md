@@ -29,11 +29,11 @@ Apple-to-apple comparison of BF16 and FP8 scaling methods on Qwen2-0.5B-Instruct
 | Script | Quantization |
 |---|---|
 | `train_grpo_bf16_preloaded.py` | None (BF16 control) |
-| `train_grpo_lumen_fp8.py` | `quant.enable(model, fp8_e4m3, scaling="dynamic")` |
-| `train_grpo_lumen_fp8_delayed.py` | `quant.enable(model, fp8_e4m3, scaling="delayed")` |
-| `train_grpo_lumen_fp8_blockwise.py` | `quant.enable(model, fp8_e4m3, scaling="blockwise")` -- Fixed (backward shape mismatch resolved) |
+| `train_grpo_lumen_fp8.py` | `LumenConfig(format="fp8_e4m3", scaling="dynamic").enable(model)` |
+| `train_grpo_lumen_fp8_delayed.py` | `LumenConfig(format="fp8_e4m3", scaling="delayed").enable(model)` |
+| `train_grpo_lumen_fp8_blockwise.py` | `LumenConfig(format="fp8_e4m3", scaling="blockwise").enable(model)` -- Fixed (backward shape mismatch resolved) |
 
-The only code difference between working scripts is the `quant.enable(...)` call.
+The only code difference between working scripts is the `LumenConfig(...)` constructor arguments.
 
 ## Results
 
@@ -79,7 +79,7 @@ The only code difference between working scripts is the `quant.enable(...)` call
 
 On a 0.5B model, the parameter memory (~1GB in BF16) is a small fraction of the 7.11GB total (dominated by activations, optimizer states, generation buffers, and the reference model). Even storing weights in FP8 would only save ~0.5GB (7%).
 
-**Update**: Testing on Llama-3.1-8B (see `../llama-3.1-8b/`) confirmed that even on 8B models, peak memory is identical (112.58 GB) because `quant.enable()` only quantizes GEMMs on-the-fly — weights remain BF16. True memory reduction requires FP8 weight storage, FP8 optimizer states, or FP8 reference model.
+**Update**: Testing on Llama-3.1-8B (see `../llama-3.1-8b/`) confirmed that even on 8B models, peak memory is identical (112.58 GB) because FP8 Linear only quantizes GEMMs on-the-fly — weights remain BF16. True memory reduction requires FP8ParamManager (FP8 weight storage), 8-bit optimizer states, or FP8 reference model.
 
 ## Logs
 
