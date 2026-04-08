@@ -294,4 +294,3 @@ Summary of kernel and configuration experiments that led to the current result.
 |------|------------|
 | `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages table — Lumen, 3 steps, rank 0 |
 | `profiling/te_profile_results.txt` | `torch.profiler` key_averages — TE ops at same tensor shapes |
-| `profiling/lumen_profile_trace.json` | Chrome trace (403 MB) — open in `chrome://tracing` |
