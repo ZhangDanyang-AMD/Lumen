@@ -40,8 +40,28 @@ def _maybe_enable_gradient_checkpointing(model, args):
     return model
 
 
-def _maybe_apply_fp8(model, args):
+def _has_lumen_optimizations(args) -> bool:
     if getattr(args, "linear_fp8", False):
+        return True
+    if getattr(args, "lumen_norm", False):
+        return True
+    if getattr(args, "lumen_fp8_attn", "none") != "none":
+        return True
+    if getattr(args, "lumen_fp8_activation_store", False):
+        return True
+    if getattr(args, "lumen_fused_mlp", False):
+        return True
+    if getattr(args, "lumen_fp8_param_gather", False):
+        return True
+    if getattr(args, "lumen_cpu_offload", False):
+        return True
+    if getattr(args, "lumen_fp8_checkpoint", False):
+        return True
+    return False
+
+
+def _maybe_apply_lumen(model, args):
+    if _has_lumen_optimizations(args):
         apply_fp8_training(model, args)
     return model
 
@@ -53,7 +73,7 @@ def build_actor_model(args):
     model = _maybe_enable_gradient_checkpointing(model, args)
     if getattr(args, "lora_rank", 0) > 0:
         model = apply_lora(model, args)
-    model = _maybe_apply_fp8(model, args)
+    model = _maybe_apply_lumen(model, args)
     return model
 
 
@@ -61,8 +81,7 @@ def build_reference_model(args):
     """Build the frozen causal LM reference model."""
 
     model = _load_causal_lm(args.model_name_or_path)
-    # v1 keeps LoRA exclusive to the actor so KL/reference math stays simple.
-    model = _maybe_apply_fp8(model, args)
+    model = _maybe_apply_lumen(model, args)
     model.eval()
     return model
 
@@ -77,7 +96,6 @@ def build_reward_model(args):
         torch_dtype=torch.bfloat16,
         attn_implementation="sdpa",
     )
-    # v1 keeps LoRA exclusive to the actor so reward evaluation stays stable.
-    model = _maybe_apply_fp8(model, args)
+    model = _maybe_apply_lumen(model, args)
     model.eval()
     return model

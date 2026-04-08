@@ -31,7 +31,7 @@ Apple-to-apple comparison of BF16 and FP8 scaling methods on Qwen2-0.5B-Instruct
 | `train_grpo_bf16_preloaded.py` | None (BF16 control) |
 | `train_grpo_lumen_fp8.py` | `quant.enable(model, fp8_e4m3, scaling="dynamic")` |
 | `train_grpo_lumen_fp8_delayed.py` | `quant.enable(model, fp8_e4m3, scaling="delayed")` |
-| `train_grpo_lumen_fp8_blockwise.py` | `quant.enable(model, fp8_e4m3, scaling="blockwise")` -- **CRASHES** |
+| `train_grpo_lumen_fp8_blockwise.py` | `quant.enable(model, fp8_e4m3, scaling="blockwise")` -- Fixed (backward shape mismatch resolved) |
 
 The only code difference between working scripts is the `quant.enable(...)` call.
 
@@ -64,7 +64,7 @@ The only code difference between working scripts is the `quant.enable(...)` call
 |---|---|---|---|---|
 | Dynamic | Working | 11.95s (3.18x) | 0.0209 | Fastest FP8 option, exact amax per forward pass |
 | Delayed | Working | 16.32s (4.34x) | 0.0182 | TE-style amax history (len=16), 37% slower than dynamic |
-| Blockwise | **CRASH** | N/A | N/A | Backward shape mismatch (896 vs 28) at `linear.py:736` |
+| Blockwise | **Fixed** | N/A | N/A | Backward shape mismatch fixed (was at `linear.py:736`, used `_dequant_fp8_weight` for blockwise scales) |
 
 ## Recommendation: Dynamic Scaling
 
@@ -77,7 +77,9 @@ The only code difference between working scripts is the `quant.enable(...)` call
 
 ## Why No Memory Savings on 0.5B
 
-On a 0.5B model, the parameter memory (~1GB in BF16) is a small fraction of the 7.11GB total (dominated by activations, optimizer states, generation buffers, and the reference model). Even storing weights in FP8 would only save ~0.5GB (7%). FP8 memory savings materialize at 7B+ where parameters dominate peak memory.
+On a 0.5B model, the parameter memory (~1GB in BF16) is a small fraction of the 7.11GB total (dominated by activations, optimizer states, generation buffers, and the reference model). Even storing weights in FP8 would only save ~0.5GB (7%).
+
+**Update**: Testing on Llama-3.1-8B (see `../llama-3.1-8b/`) confirmed that even on 8B models, peak memory is identical (112.58 GB) because `quant.enable()` only quantizes GEMMs on-the-fly — weights remain BF16. True memory reduction requires FP8 weight storage, FP8 optimizer states, or FP8 reference model.
 
 ## Logs
 

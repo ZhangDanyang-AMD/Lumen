@@ -204,7 +204,9 @@ Generates `compare_curves.png` (side-by-side 6-panel plot) and
 `COMPARISON.md` (statistical summary with Pearson correlations) in the
 baseline output directory.
 
-## Validated Results (LLaMA-2-70B, 30 steps)
+## Validated Results
+
+### LLaMA-2-70B Lumen vs Baseline (30 steps)
 
 Both runs used identical configuration (seed=1234, 8 GPUs, FSDP1).
 
@@ -218,8 +220,139 @@ Both runs used identical configuration (seed=1234, 8 GPUs, FSDP1).
 
 Strong correlations across all metrics (r > 0.7 except loss) confirm that
 Lumen's integration layer produces equivalent training dynamics to pure TRL.
-Full analysis: `outputs/trl-grpo-70b/ANALYSIS.md`. Full comparison:
-`outputs/trl-grpo-70b-baseline/COMPARISON.md`.
+
+### Llama-3.1-8B Memory Matrix (8x MI300X, 10 steps)
+
+4-config comparison on `trl-lib/DeepMath-103K`, seed=1234, num_generations=4:
+
+| Config | Distributed | Peak Mem/GPU | vs A | Avg Step | Reward |
+|---|---|---|---|---|---|
+| A) BF16 full | FSDP1 | 34.57 GB | baseline | 11.07s | 0.42→0.79 |
+| B) BF16 LoRA r=16 | DDP | 17.83 GB | **-48%** | 9.56s | 0.41→0.43 |
+| C) FP8 full | FSDP1 | 38.85 GB | +12% | 126.67s | 0.51→0.74 |
+| D) FP8 LoRA r=16 | DDP | 20.64 GB | -40% | 185.28s | 0.48→0.47 |
+
+**Key findings**: LoRA provides 48% memory savings. FP8 via `quant.enable()`
+increases memory (+12%) and latency (11.5x) due to AITER Triton fallback when
+FSDP1 upcasts params to FP32.
+
+### Llama-3.1-8B Extended Lumen Optimizations (8x MI300X, 10 steps)
+
+Additional Lumen FP8 features tested on FSDP1:
+
+| Config | Peak Mem/GPU | vs BF16 | Speed |
+|---|---|---|---|
+| BF16 full (baseline) | 34.57 GB | — | 1x |
+| FP8 Linear only | 38.85 GB | +12% | 0.10x |
+| FP8 Linear + FP8 Attn (dpa) | **30.92 GB** | **-11%** | 0.08x |
+| FP8 Linear + FP8 Attn + Act Store | 30.89 GB | -11% | 0.08x |
+| FP8 Linear + FP8 Attn + Param Gather | CRASH | — | — |
+| FP8 Linear + FP8 Attn + Lumen Norm | CRASH | — | — |
+
+**Key findings**: FP8 Attention (dpa) is the only add-on that reduces memory
+below BF16 baseline (-11%). Activation Store has no effect on HF models. Param
+Gather and Lumen Norm crash on FSDP1 (need FSDP2 or AITER fixes).
+
+### VERL Integration Status
+
+VERL 0.7.1 integration scaffolding is in `lumen/rl/verl/` but cannot run on
+this ROCm container because VERL removed co-located HF rollout in favor of
+async server-based rollout (vllm/sglang). ROCm-compatible vllm or sglang is
+required.
+
+See [outputs/benchmark/BENCHMARK_RESULTS.md](../../outputs/benchmark/BENCHMARK_RESULTS.md)
+for full analysis including Demo A, B, C, and D-1.
+
+## Running the Benchmarks
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MODEL_NAME` | `hf-internal-testing/tiny-random-LlamaForCausalLM` | Model path or HF ID |
+| `LINEAR_FP8` | `0` | `1` to enable FP8 linear quantization |
+| `LORA_RANK` | `0` | LoRA rank (`0` = full fine-tune) |
+| `NUM_PROCESSES` | `2` | Number of GPUs |
+| `MAX_STEPS` | `30` | Training steps |
+| `TRAIN_DATA_PATH` | `trl-lib/Capybara` | Dataset name or local path |
+| `OUTPUT_DIR` | auto-generated | Output directory |
+| `FSDP_VERSION` | `1` | `1` for FSDP1, `2` for FSDP2 |
+| `LUMEN_FP8_ATTN` | `none` | FP8 attention mode (`none`, `dpa`, `mha`) |
+| `LUMEN_NORM` | `0` | `1` to enable Lumen norm replacement |
+| `LUMEN_FP8_ACTIVATION_STORE` | `0` | `1` to enable FP8 activation storage |
+| `LUMEN_FP8_PARAM_GATHER` | `0` | `1` to enable FP8 param all-gather |
+
+### BF16 Full Fine-Tune (FSDP1)
+
+```bash
+LINEAR_FP8=0 LORA_RANK=0 NUM_PROCESSES=8 MAX_STEPS=10 \
+  MODEL_NAME=/dev/shm/model/llama-3.1-8b \
+  TRAIN_DATA_PATH=trl-lib/DeepMath-103K \
+  OUTPUT_DIR=./outputs/demo-b/bf16-full \
+  bash examples/rl/trl/run_grpo_fsdp.sh 1
+```
+
+### BF16 + LoRA (DDP)
+
+LoRA configs require DDP due to FSDP1+PEFT mixed-precision incompatibility:
+
+```bash
+accelerate launch \
+  --config_file examples/rl/trl/accelerate/ddp.yaml \
+  --num_processes 8 \
+  examples/rl/trl/run_grpo_fsdp.py \
+  --model-name-or-path /dev/shm/model/llama-3.1-8b \
+  --dataset-name trl-lib/DeepMath-103K \
+  --output-dir ./outputs/demo-b/bf16-lora \
+  --max-steps 10 --micro-batch-size 1 --gradient-accumulation-steps 4 \
+  --num-generations 4 --max-completion-length 256 --lr 5e-6 \
+  --log-interval 1 --seed 1234 --lora-rank 16
+```
+
+### FP8 Full Fine-Tune (FSDP1)
+
+```bash
+LINEAR_FP8=1 LORA_RANK=0 NUM_PROCESSES=8 MAX_STEPS=10 \
+  MODEL_NAME=/dev/shm/model/llama-3.1-8b \
+  TRAIN_DATA_PATH=trl-lib/DeepMath-103K \
+  OUTPUT_DIR=./outputs/demo-b/fp8-full \
+  bash examples/rl/trl/run_grpo_fsdp.sh 1
+```
+
+### FP8 + LoRA (DDP)
+
+```bash
+LINEAR_FP8=1 accelerate launch \
+  --config_file examples/rl/trl/accelerate/ddp.yaml \
+  --num_processes 8 \
+  examples/rl/trl/run_grpo_fsdp.py \
+  --model-name-or-path /dev/shm/model/llama-3.1-8b \
+  --dataset-name trl-lib/DeepMath-103K \
+  --output-dir ./outputs/demo-b/fp8-lora \
+  --max-steps 10 --micro-batch-size 1 --gradient-accumulation-steps 4 \
+  --num-generations 4 --max-completion-length 256 --lr 5e-6 \
+  --log-interval 1 --seed 1234 --lora-rank 16 --linear-fp8
+```
+
+### Advanced Benchmark (R1-R5 Configs)
+
+The `benchmark/` folder contains a more comprehensive benchmark runner
+supporting 5 configurations:
+
+```bash
+# Individual runs
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh R1  # BF16 baseline
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh R2  # Lumen BF16
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh R3  # FP8 Linear only
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh R4  # FP8 Full suite
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh R5  # FP8 Full + LoRA
+
+# All core runs
+bash examples/rl/trl/benchmark/llama-3.1-8b/run.sh ALL
+
+# Analyze results
+python examples/rl/trl/benchmark/analyze_benchmark.py outputs/benchmark/llama-3.1-8b
+```
 
 ## Reward Function
 
@@ -269,6 +402,15 @@ docker run --rm lumen-trl-test
 | `lumen/rl/trl/warmup.py` | Synthetic warmup for FSDP |
 | `lumen/rl/trl/eval_callback.py` | `GRPOEvalCallback` for per-step JSONL logging |
 | `lumen/rl/trl/plot_curves.py` | Matplotlib plotting for eval logs |
+
+### VERL Integration (Scaffolding Only)
+
+| File | Description |
+|---|---|
+| `lumen/rl/verl/config.py` | `VerlLumenArgs` — VERL-Lumen configuration contract |
+| `lumen/rl/verl/fsdp_backend.py` | Lumen-aware FSDP model builders for VERL roles |
+| `lumen/rl/verl/verl_entry.py` | Monkey-patching entrypoint for Lumen+VERL |
+| `examples/rl/verl/run_grpo_fsdp2.sh` | VERL GRPO launcher with Hydra CLI overrides |
 
 ## Notes
 

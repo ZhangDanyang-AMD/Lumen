@@ -7,7 +7,12 @@
 """Accelerate entrypoint for TRL + Lumen GRPO runs."""
 
 import argparse
+import json
+import os
+import time
+from pathlib import Path
 
+import torch
 from datasets import load_dataset
 
 from lumen.rl.trl.args import TrlLumenArgs
@@ -22,10 +27,17 @@ def reward_fn(prompts, completions, **kwargs):
     policy gradient.  This reward function penalises both trivially short
     and excessively long responses, creating a smooth gradient that drives
     the policy toward a preferred response length.
+
+    TRL passes completions in chat-message format (list of dicts) when the
+    dataset uses chat templates.  Extract the text content transparently.
     """
     rewards = []
     for completion in completions:
-        n_words = len(completion.split())
+        if isinstance(completion, list):
+            text = " ".join(m.get("content", "") for m in completion if isinstance(m, dict))
+        else:
+            text = completion
+        n_words = len(text.split())
         if n_words < 5:
             r = 0.1
         elif n_words <= 60:
@@ -75,6 +87,25 @@ def parse_args():
         help="Disable gradient checkpointing for the actor build path.",
     )
     parser.set_defaults(gradient_checkpointing=True)
+
+    parser.add_argument("--lumen-norm", action="store_true", default=False)
+    parser.add_argument("--lumen-fp8-attn", type=str, default="none",
+                        choices=["none", "dpa", "mha"])
+    parser.add_argument("--lumen-fp8-quant-type", type=str, default="blockwise",
+                        choices=["dynamic", "delayed", "blockwise", "blockwise2d",
+                                 "per_token", "none", "mxfp8"])
+    parser.add_argument("--lumen-attn-backend", type=str, default="auto",
+                        choices=["auto", "triton", "csrc", "asm"])
+    parser.add_argument("--lumen-fp8-activation-store", action="store_true", default=False)
+    parser.add_argument("--lumen-fp8-param-gather", action="store_true", default=False)
+    parser.add_argument("--lumen-fused-mlp", action="store_true", default=False)
+    parser.add_argument("--lumen-cpu-offload", action="store_true", default=False)
+    parser.add_argument("--lumen-delay-wgrad", action="store_true", default=False)
+    parser.add_argument("--lumen-gradient-accumulation-fusion", action="store_true", default=False)
+    parser.add_argument("--lumen-fused-rope", action="store_true", default=False)
+    parser.add_argument("--lumen-hip-graphs", action="store_true", default=False)
+    parser.add_argument("--lumen-fp8-checkpoint", action="store_true", default=False)
+
     return parser.parse_args()
 
 
@@ -142,9 +173,66 @@ def main():
         lora_alpha=raw.lora_alpha,
         lora_dropout=raw.lora_dropout,
         gradient_checkpointing=raw.gradient_checkpointing,
+        lumen_norm=raw.lumen_norm,
+        lumen_fp8_attn=raw.lumen_fp8_attn,
+        lumen_fp8_quant_type=raw.lumen_fp8_quant_type,
+        lumen_attn_backend=raw.lumen_attn_backend,
+        lumen_fp8_activation_store=raw.lumen_fp8_activation_store,
+        lumen_fp8_param_gather=raw.lumen_fp8_param_gather,
+        lumen_fused_mlp=raw.lumen_fused_mlp,
+        lumen_cpu_offload=raw.lumen_cpu_offload,
+        lumen_delay_wgrad=raw.lumen_delay_wgrad,
+        lumen_gradient_accumulation_fusion=raw.lumen_gradient_accumulation_fusion,
+        lumen_fused_rope=raw.lumen_fused_rope,
+        lumen_hip_graphs=raw.lumen_hip_graphs,
+        lumen_fp8_checkpoint=raw.lumen_fp8_checkpoint,
         train_dataset=_load_train_dataset(raw),
     )
-    run_grpo(args, reward_fn=reward_fn)
+
+    rank = int(os.environ.get("RANK", 0))
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+    t0 = time.time()
+    trainer = run_grpo(args, reward_fn=reward_fn)
+    elapsed = time.time() - t0
+
+    if rank == 0:
+        lumen_opts = {k: v for k, v in {
+            "lumen_norm": raw.lumen_norm,
+            "lumen_fp8_attn": raw.lumen_fp8_attn,
+            "lumen_fp8_activation_store": raw.lumen_fp8_activation_store,
+            "lumen_fp8_param_gather": raw.lumen_fp8_param_gather,
+            "lumen_fused_mlp": raw.lumen_fused_mlp,
+        }.items() if v and v != "none"}
+        summary = {
+            "model": raw.model_name_or_path,
+            "linear_fp8": raw.linear_fp8,
+            "lora_rank": raw.lora_rank,
+            "max_steps": raw.max_steps,
+            "elapsed_seconds": round(elapsed, 2),
+            **lumen_opts,
+        }
+        if torch.cuda.is_available():
+            peak_gb = torch.cuda.max_memory_allocated() / 1e9
+            free, total = torch.cuda.mem_get_info()
+            summary["peak_memory_gb"] = round(peak_gb, 2)
+            summary["free_gpu_gb"] = round(free / 1e9, 2)
+            summary["total_gpu_gb"] = round(total / 1e9, 2)
+
+        print(f"\n{'='*60}", flush=True)
+        print(f"BENCHMARK SUMMARY", flush=True)
+        print(f"{'='*60}", flush=True)
+        for k, v in summary.items():
+            print(f"  {k}: {v}", flush=True)
+        print(f"{'='*60}", flush=True)
+
+        summary_path = Path(raw.output_dir) / "benchmark_summary.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"Summary written to {summary_path}", flush=True)
 
 
 if __name__ == "__main__":

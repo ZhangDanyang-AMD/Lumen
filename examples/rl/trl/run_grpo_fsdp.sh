@@ -22,6 +22,7 @@ set -euo pipefail
 FSDP_VERSION="${1:?Usage: $0 <1|2>}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+
 ACCEL_CONFIG="${REPO_ROOT}/examples/rl/trl/accelerate/fsdp${FSDP_VERSION}.yaml"
 
 if [[ ! -f "${ACCEL_CONFIG}" ]]; then
@@ -53,6 +54,14 @@ LINEAR_FP8="${LINEAR_FP8:-0}"
 LORA_RANK="${LORA_RANK:-0}"
 LORA_ALPHA="${LORA_ALPHA:-32}"
 LORA_DROPOUT="${LORA_DROPOUT:-0.1}"
+
+LUMEN_NORM="${LUMEN_NORM:-0}"
+LUMEN_FP8_ATTN="${LUMEN_FP8_ATTN:-none}"
+LUMEN_FP8_ACTIVATION_STORE="${LUMEN_FP8_ACTIVATION_STORE:-0}"
+LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
+LUMEN_FUSED_MLP="${LUMEN_FUSED_MLP:-0}"
+LUMEN_CPU_OFFLOAD="${LUMEN_CPU_OFFLOAD:-0}"
+LUMEN_FP8_CHECKPOINT="${LUMEN_FP8_CHECKPOINT:-0}"
 
 CMD=(
     python -m accelerate.commands.launch
@@ -94,6 +103,34 @@ fi
 
 if [[ "${LINEAR_FP8}" == "1" ]]; then
     CMD+=(--linear-fp8)
+fi
+
+if [[ "${LUMEN_NORM}" == "1" ]]; then
+    CMD+=(--lumen-norm)
+fi
+
+if [[ "${LUMEN_FP8_ATTN}" != "none" ]]; then
+    CMD+=(--lumen-fp8-attn "${LUMEN_FP8_ATTN}")
+fi
+
+if [[ "${LUMEN_FP8_ACTIVATION_STORE}" == "1" ]]; then
+    CMD+=(--lumen-fp8-activation-store)
+fi
+
+if [[ "${LUMEN_FP8_PARAM_GATHER}" == "1" ]]; then
+    CMD+=(--lumen-fp8-param-gather)
+fi
+
+if [[ "${LUMEN_FUSED_MLP}" == "1" ]]; then
+    CMD+=(--lumen-fused-mlp)
+fi
+
+if [[ "${LUMEN_CPU_OFFLOAD}" == "1" ]]; then
+    CMD+=(--lumen-cpu-offload)
+fi
+
+if [[ "${LUMEN_FP8_CHECKPOINT}" == "1" ]]; then
+    CMD+=(--lumen-fp8-checkpoint)
 fi
 
 echo "=== TRL + Lumen GRPO — FSDP${FSDP_VERSION} ==="

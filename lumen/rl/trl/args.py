@@ -79,6 +79,18 @@ class TrlLumenArgs:
     num_layers_at_end_in_bf16: int = 1
     use_sdma: bool = False
     lumen_norm: bool = False
+    lumen_fp8_attn: str = "none"
+    lumen_fp8_quant_type: str = "blockwise"
+    lumen_attn_backend: str = "auto"
+    lumen_fp8_activation_store: bool = False
+    lumen_fp8_param_gather: bool = False
+    lumen_fused_mlp: bool = False
+    lumen_cpu_offload: bool = False
+    lumen_delay_wgrad: bool = False
+    lumen_gradient_accumulation_fusion: bool = False
+    lumen_fused_rope: bool = False
+    lumen_hip_graphs: bool = False
+    lumen_fp8_checkpoint: bool = False
 
     def __post_init__(self) -> None:
         if self.algorithm != "grpo":

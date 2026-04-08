@@ -71,6 +71,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "delay_wgrad": ("lumen_delay_wgrad",),
     "gradient_accumulation_fusion": ("lumen_gradient_accumulation_fusion",),
     "fp8_param_gather": ("lumen_fp8_param_gather",),
+    "fp8_weight_cache": ("lumen_fp8_weight_cache",),
     "fused_rope": ("lumen_fused_rope",),
     "hip_graphs": ("lumen_hip_graphs",),
     "fp8_checkpoint": ("lumen_fp8_checkpoint",),
@@ -123,6 +124,7 @@ class LumenConfig:
     delay_wgrad: bool = False
     gradient_accumulation_fusion: bool = False
     fp8_param_gather: bool = False
+    fp8_weight_cache: bool = False
     fused_rope: bool = False
     hip_graphs: bool = False
     fp8_checkpoint: bool = False
@@ -212,6 +214,7 @@ class LumenConfig:
     # -----------------------------------------------------------------------
 
     def _patch_norms(self, model) -> None:
+        import torch
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
         count = 0
@@ -226,18 +229,28 @@ class LumenConfig:
                 ):
                     hidden = child.weight.shape[0]
                     eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
+                    target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
                     repl = LumenRMSNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
-                    repl.weight.data.copy_(child.weight.data)
+                    if not child.weight.is_meta:
+                        repl.weight.data.copy_(child.weight.data)
+                    repl.to(target_dtype)
+                    if child.weight.is_meta:
+                        repl.to(device="meta")
                     setattr(module, attr_name, repl)
                     count += 1
                 elif cls_name in ("LayerNorm",):
                     hidden = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
                     eps = getattr(child, "eps", 1e-5)
                     repl = LumenLayerNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
-                    if child.weight is not None:
+                    is_meta = child.weight is not None and child.weight.is_meta
+                    target_dtype = child.weight.dtype if (child.weight is not None and not is_meta) else torch.bfloat16
+                    if child.weight is not None and not is_meta:
                         repl.weight.data.copy_(child.weight.data)
-                    if hasattr(child, "bias") and child.bias is not None and repl.bias is not None:
+                    if hasattr(child, "bias") and child.bias is not None and repl.bias is not None and not is_meta:
                         repl.bias.data.copy_(child.bias.data)
+                    repl.to(target_dtype)
+                    if is_meta:
+                        repl.to(device="meta")
                     setattr(module, attr_name, repl)
                     count += 1
 
@@ -245,47 +258,72 @@ class LumenConfig:
             _rank0_print(f"> Replaced {count} norm modules with Lumen implementations")
 
     def _apply_pre_quant(self, model) -> None:
-        """Set module attributes that must exist before ``quant.enable()``."""
-        if not (self.delay_wgrad or self.gradient_accumulation_fusion or self.fp8_activation_store):
+        """Set module attributes that must exist before ``quant.enable()``.
+
+        ``delay_wgrad`` and ``gradient_accumulation_fusion`` are only
+        meaningful on Lumen-native parallel linear types.
+
+        ``fp8_activation_store`` is set on both Lumen-native types **and**
+        standard ``nn.Linear`` so that ``_replace_forward`` captures the
+        flag and passes it into ``QuantizedLinearFunction``.
+        """
+        import torch.nn as nn
+
+        has_lumen_only = self.delay_wgrad or self.gradient_accumulation_fusion
+        has_act_store = self.fp8_activation_store
+
+        if not (has_lumen_only or has_act_store):
             return
 
-        try:
-            from lumen.modules.grouped_linear import LumenGroupedLinear
-            from lumen.modules.layernorm_linear import LumenLayerNormLinear
-            from lumen.modules.parallel_linear import (
-                LumenColumnParallelLinear,
-                LumenRowParallelLinear,
-            )
+        lumen_count = 0
+        if has_lumen_only:
+            try:
+                from lumen.modules.grouped_linear import LumenGroupedLinear
+                from lumen.modules.layernorm_linear import LumenLayerNormLinear
+                from lumen.modules.parallel_linear import (
+                    LumenColumnParallelLinear,
+                    LumenRowParallelLinear,
+                )
 
-            lumen_types = (
-                LumenColumnParallelLinear,
-                LumenRowParallelLinear,
-                LumenLayerNormLinear,
-                LumenGroupedLinear,
-            )
-        except ImportError:
-            return
+                lumen_types = (
+                    LumenColumnParallelLinear,
+                    LumenRowParallelLinear,
+                    LumenLayerNormLinear,
+                    LumenGroupedLinear,
+                )
+            except ImportError:
+                lumen_types = ()
 
-        count = 0
-        for module in model.modules():
-            if isinstance(module, lumen_types):
-                if self.delay_wgrad and hasattr(module, "delay_wgrad"):
-                    module.delay_wgrad = True
-                if self.gradient_accumulation_fusion and hasattr(module, "gradient_accumulation_fusion"):
-                    module.gradient_accumulation_fusion = True
-                if self.fp8_activation_store:
+            for module in model.modules():
+                if lumen_types and isinstance(module, lumen_types):
+                    if self.delay_wgrad and hasattr(module, "delay_wgrad"):
+                        module.delay_wgrad = True
+                    if self.gradient_accumulation_fusion and hasattr(module, "gradient_accumulation_fusion"):
+                        module.gradient_accumulation_fusion = True
+                    if has_act_store:
+                        module.fp8_activation_store = True
+                    lumen_count += 1
+
+        linear_count = 0
+        if has_act_store:
+            for module in model.modules():
+                if isinstance(module, nn.Linear):
                     module.fp8_activation_store = True
-                count += 1
+                    linear_count += 1
 
-        if count:
-            opts = []
-            if self.delay_wgrad:
-                opts.append("delay_wgrad")
-            if self.gradient_accumulation_fusion:
-                opts.append("gradient_accumulation_fusion")
-            if self.fp8_activation_store:
-                opts.append("fp8_activation_store")
-            _rank0_print(f"> Pre-quant optimizations ({', '.join(opts)}) applied to {count} modules")
+        opts = []
+        if self.delay_wgrad:
+            opts.append("delay_wgrad")
+        if self.gradient_accumulation_fusion:
+            opts.append("gradient_accumulation_fusion")
+        if has_act_store:
+            opts.append("fp8_activation_store")
+        total = lumen_count + linear_count
+        if total:
+            _rank0_print(
+                f"> Pre-quant optimizations ({', '.join(opts)}) applied to "
+                f"{total} modules ({lumen_count} Lumen, {linear_count} nn.Linear)"
+            )
 
     def _apply_post_quant(self, model, manager) -> None:
         """Apply features that require the ScalingManager from ``quant.enable()``."""
@@ -301,6 +339,15 @@ class LumenConfig:
                 _rank0_print(f"> FP8 param gather enabled ({manager.num_fp8_params} params)")
             else:
                 _rank0_print("> WARNING: fp8_param_gather requires FP8 quantization")
+
+        if self.fp8_weight_cache:
+            if manager is not None:
+                import lumen.quantize as quant
+
+                count = quant.store_weights_fp8(model)
+                _rank0_print(f"> FP8 weight cache enabled ({count} layers cached)")
+            else:
+                _rank0_print("> WARNING: fp8_weight_cache requires FP8 quantization")
 
     @staticmethod
     def _enable_fp8_checkpoint(manager) -> None:
@@ -352,6 +399,7 @@ class LumenConfig:
                 "delay_wgrad",
                 "gradient_accumulation_fusion",
                 "fp8_param_gather",
+                "fp8_weight_cache",
                 "fused_rope",
                 "hip_graphs",
                 "fp8_checkpoint",

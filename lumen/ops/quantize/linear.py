@@ -384,6 +384,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         delay_wgrad: bool = False,
         deferred_wgrad=None,
         fp8_activation_store: bool = False,
+        fp8_weight_cache: Optional[torch.Tensor] = None,
+        fp8_weight_scale: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # weight is [N, K] — standard PyTorch Linear convention
         if scaling_type == "none":
@@ -405,14 +407,20 @@ class QuantizedLinearFunction(torch.autograd.Function):
             return output
 
         if not quantize_activation:
-            weight_fp8, weight_scale = quantize_input(
-                weight,
-                scaling_type,
-                fp8_dtype,
-                block_size,
-                scaling_manager,
-                tensor_id,
-            )
+            if fp8_weight_cache is not None and fp8_weight_scale is not None:
+                weight_fp8 = fp8_weight_cache.contiguous()
+                weight_scale = fp8_weight_scale
+                if weight_scale.device != weight_fp8.device:
+                    weight_scale = weight_scale.to(weight_fp8.device)
+            else:
+                weight_fp8, weight_scale = quantize_input(
+                    weight.contiguous(),
+                    scaling_type,
+                    fp8_dtype,
+                    block_size,
+                    scaling_manager,
+                    tensor_id,
+                )
             weight_dequant = (weight_fp8.to(input.dtype) * weight_scale).to(input.dtype)
             output = gemm_bf16(input, weight_dequant, bias)
             if fp8_activation_store:
@@ -443,14 +451,20 @@ class QuantizedLinearFunction(torch.autograd.Function):
             fp8_dtype,
             block_size,
         )
-        weight_fp8, weight_scale = quantize_input(
-            weight,
-            scaling_type,
-            fp8_dtype,
-            block_size,
-            scaling_manager,
-            tensor_id,
-        )
+        if fp8_weight_cache is not None and fp8_weight_scale is not None:
+            weight_fp8 = fp8_weight_cache.contiguous()
+            weight_scale = fp8_weight_scale
+            if weight_scale.device != weight_fp8.device:
+                weight_scale = weight_scale.to(weight_fp8.device)
+        else:
+            weight_fp8, weight_scale = quantize_input(
+                weight.contiguous(),
+                scaling_type,
+                fp8_dtype,
+                block_size,
+                scaling_manager,
+                tensor_id,
+            )
 
         # Forward: Y = input @ weight^T  (TN layout, weight is [N, K])
         output = dispatch_gemm(input_fp8, weight_fp8, input_scale, weight_scale, scaling_type)
@@ -534,20 +548,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return (
-                grad_input,
-                grad_weight,
-                grad_bias,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                grad_input, grad_weight, grad_bias,
+                None, None, None, None, None, None, None, None, None, None, None, None, None,
             )
 
         if not ctx.quantize_activation:
@@ -610,20 +612,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return (
-                grad_input,
-                grad_weight,
-                grad_bias,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                grad_input, grad_weight, grad_bias,
+                None, None, None, None, None, None, None, None, None, None, None, None, None,
             )
 
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
@@ -753,20 +743,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
         return (
-            grad_input,
-            grad_weight,
-            grad_bias,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            grad_input, grad_weight, grad_bias,
+            None, None, None, None, None, None, None, None, None, None, None, None, None,
         )
 
 
@@ -795,6 +773,8 @@ def quantized_linear(
     delay_wgrad: bool = False,
     deferred_wgrad=None,
     fp8_activation_store: bool = False,
+    fp8_weight_cache: Optional[torch.Tensor] = None,
+    fp8_weight_scale: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -816,6 +796,10 @@ def quantized_linear(
         delay_wgrad: If ``True``, defer weight gradient computation.
         deferred_wgrad: A :class:`~lumen.modules.parallel_linear._DeferredWgrad`
             instance that collects deferred wgrad closures.
+        fp8_weight_cache: Pre-quantized FP8 weight tensor (from
+            :func:`~lumen.quantize.store_weights_fp8`).  When provided,
+            ``quantize_input`` is skipped for the weight.
+        fp8_weight_scale: Scale for *fp8_weight_cache*.
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -844,4 +828,6 @@ def quantized_linear(
         delay_wgrad,
         deferred_wgrad,
         fp8_activation_store,
+        fp8_weight_cache,
+        fp8_weight_scale,
     )
