@@ -2,7 +2,7 @@ name: Deploy Documentation
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev/RL]
     paths:
       - 'lumen-docs/**'
       - '.github/workflows/docs.yml'
@@ -47,13 +47,13 @@ jobs:
           cp -r lumen-docs/docs/build/html _site/docs
 
       - name: Upload artifact
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev/RL'
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev/RL'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
