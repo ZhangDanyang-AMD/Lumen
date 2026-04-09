@@ -176,7 +176,7 @@ bash examples/rl/verl/run_grpo_megatron_vllm.sh
 | PPO | TRL / VERL | SGLang / vLLM | Supported |
 | DAPO | TRL | Built-in | Supported |
 
-**Note:** LoRA with Megatron remains unsupported — PEFT expects HuggingFace model structure, not Megatron parallel layers.
+**Note:** LoRA with Megatron is supported via Lumen's custom `MegatronLoraAdapter` — set `LORA_RANK=32` as an environment variable.
 
 ---
 

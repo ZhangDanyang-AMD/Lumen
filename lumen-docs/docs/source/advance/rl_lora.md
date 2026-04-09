@@ -75,9 +75,31 @@ This guide explains how to enable LoRA in RL training and configure related para
    bash examples/rl/verl/run_grpo_fsdp2_vllm.sh
    ```
 
-### VERL Backend (Megatron) — LoRA Not Supported
+### VERL Backend (Megatron) — LoRA via Custom TP-Aware Adapter
 
-**LoRA with Megatron is not supported.** PEFT expects HuggingFace model structure, not Megatron's `ColumnParallelLinear`/`RowParallelLinear` layers. Use full fine-tuning with Megatron FP8PM (on-the-fly quantization) instead, or use the FSDP2 backend for LoRA + FP8.
+LoRA is supported for the Megatron backend through Lumen's custom `MegatronLoraAdapter`, which wraps `ColumnParallelLinear` and `RowParallelLinear` layers with TP-aware low-rank adapters. The adapters are injected **before** DDP wrapping via `post_model_creation_callbacks` to ensure correct gradient reduction.
+
+1. Set `LORA_RANK` (and optionally `LORA_ALPHA`, `LORA_DROPOUT`) as environment variables.
+
+2. Use `lumen.rl.verl.verl_entry` as the entry point (automatic when any Lumen feature or `LORA_RANK` is set).
+
+3. Target layers: `linear_qkv`, `linear_proj`, `linear_fc1`, `linear_fc2` (attention + MLP).
+
+4. Combinable with FP8PM (`FP8_PARAM_MANAGER=1`) — FP8PM hooks the base parallel linear modules inside the LoRA wrappers.
+
+5. Example (SGLang rollout):
+
+   ```bash
+   LORA_RANK=32 LORA_ALPHA=32 FP8_PARAM_MANAGER=1 \
+   bash examples/rl/verl/run_grpo_megatron_sglang.sh
+   ```
+
+6. Example (vLLM rollout):
+
+   ```bash
+   LORA_RANK=32 LORA_ALPHA=32 FP8_PARAM_MANAGER=1 \
+   bash examples/rl/verl/run_grpo_megatron_vllm.sh
+   ```
 
 ## Best Practices and Notes
 
@@ -147,9 +169,14 @@ LUMEN_FP8=1 FP8_PARAM_MANAGER=1 \
 bash examples/rl/verl/run_grpo_fsdp2_vllm.sh
 ```
 
-### VERL + Megatron + SGLang (full fine-tuning only, no LoRA)
+### VERL + GRPO + LoRA (Megatron + SGLang, 8× MI300X)
 
 ```bash
+# Full fine-tuning (no LoRA)
+bash examples/rl/verl/run_grpo_megatron_sglang.sh
+
+# With LoRA + FP8PM
+LORA_RANK=32 LORA_ALPHA=32 FP8_PARAM_MANAGER=1 \
 bash examples/rl/verl/run_grpo_megatron_sglang.sh
 ```
 
@@ -160,6 +187,6 @@ bash examples/rl/verl/run_grpo_megatron_sglang.sh
 | GRPO | TRL | Built-in | Validated |
 | GRPO | VERL (FSDP2) | SGLang | Validated |
 | GRPO | VERL (FSDP2) | vLLM | Validated |
-| GRPO | VERL (Megatron) | SGLang / vLLM | **Not supported** (LoRA incompatible with Megatron layers) |
+| GRPO | VERL (Megatron) | SGLang / vLLM | Supported (custom TP-aware adapter) |
 | PPO | TRL / VERL (FSDP2) | SGLang / vLLM | Supported |
 | DAPO | TRL | Built-in | Supported |
