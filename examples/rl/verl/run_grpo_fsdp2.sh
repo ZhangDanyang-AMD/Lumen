@@ -23,6 +23,8 @@
 #   LOG_PROB_MICRO_BSZ - Log prob micro batch size per GPU (default: 4)
 #   NUM_GENERATIONS - Number of rollout generations (default: 4)
 #   EXPERIMENT_NAME - Experiment name (default: auto from model)
+#   PARAM_OFFLOAD  - Enable param offloading (default: false; MUST be false with FP8PM)
+#   OPTIMIZER_OFFLOAD - Enable optimizer offloading (default: false; MUST be false with FP8PM)
 #   LUMEN_FP8      - Enable FP8 linear (default: 0)
 #   LUMEN_FP8_ATTN - FP8 attention mode (default: none)
 #   LUMEN_NORM     - Enable Lumen norm replacement (default: 0)
@@ -57,6 +59,8 @@ export LUMEN_FP8_ACTIVATION_STORE="${LUMEN_FP8_ACTIVATION_STORE:-0}"
 export LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
 export FP8_PARAM_MANAGER="${FP8_PARAM_MANAGER:-0}"
 export USE_8BIT_ADAM="${USE_8BIT_ADAM:-0}"
+PARAM_OFFLOAD="${PARAM_OFFLOAD:-false}"
+OPTIMIZER_OFFLOAD="${OPTIMIZER_OFFLOAD:-false}"
 
 echo "=== VERL + Lumen GRPO — FSDP2 + sglang rollout ==="
 echo "Model:        ${MODEL_NAME}"
@@ -76,6 +80,10 @@ echo "Lumen Norm:   ${LUMEN_NORM}"
 echo "FP8 Wt Cache: ${LUMEN_FP8_WEIGHT_CACHE}"
 echo "FP8 Act Store:${LUMEN_FP8_ACTIVATION_STORE}"
 echo "FP8 Param Gth:${LUMEN_FP8_PARAM_GATHER}"
+echo "FP8 ParamMgr: ${FP8_PARAM_MANAGER}"
+echo "8bit Adam:    ${USE_8BIT_ADAM}"
+echo "Param Offload:${PARAM_OFFLOAD}"
+echo "Optim Offload:${OPTIMIZER_OFFLOAD}"
 echo ""
 
 VERL_ENTRY="verl.trainer.main_ppo"
@@ -104,8 +112,8 @@ python3 -m "${VERL_ENTRY}" \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
     actor_rollout_ref.actor.fsdp_config.model_dtype=bf16 \
     actor_rollout_ref.actor.fsdp_config.strategy=fsdp2 \
-    actor_rollout_ref.actor.fsdp_config.param_offload=false \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=false \
+    actor_rollout_ref.actor.fsdp_config.param_offload="${PARAM_OFFLOAD}" \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload="${OPTIMIZER_OFFLOAD}" \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.temperature=1.0 \

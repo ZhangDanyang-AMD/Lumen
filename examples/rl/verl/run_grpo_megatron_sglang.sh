@@ -59,22 +59,27 @@ if [ "${LUMEN_FP8}" = "1" ] || [ "${LUMEN_FP8_ATTN}" != "none" ] || [ "${LUMEN_N
 fi
 
 python3 -m "${VERL_ENTRY}" \
+    --config-name=ppo_megatron_trainer \
     algorithm.adv_estimator=grpo \
     actor_rollout_ref.model.path="${MODEL_NAME}" \
     actor_rollout_ref.model.trust_remote_code=false \
     actor_rollout_ref.model.enable_gradient_checkpointing=true \
     actor_rollout_ref.model.use_remove_padding=false \
-    actor_rollout_ref.actor.strategy=megatron \
     actor_rollout_ref.actor.ppo_mini_batch_size="${TRAIN_BSZ}" \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${MICRO_BSZ}" \
     actor_rollout_ref.actor.ppo_epochs=1 \
     actor_rollout_ref.actor.use_kl_loss=false \
-    actor_rollout_ref.actor.grad_clip=1.0 \
-    actor_rollout_ref.actor.entropy_coeff=0.0 \
+    actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.actor.use_torch_compile=false \
     actor_rollout_ref.actor.optim.lr=5e-7 \
     actor_rollout_ref.actor.optim.lr_warmup_steps=0 \
+    actor_rollout_ref.actor.optim.clip_grad=1.0 \
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size="${ACTOR_TP}" \
+    actor_rollout_ref.actor.megatron.sequence_parallel=false \
+    actor_rollout_ref.actor.megatron.param_offload="${PARAM_OFFLOAD:-false}" \
+    actor_rollout_ref.actor.megatron.optimizer_offload="${OPTIMIZER_OFFLOAD:-false}" \
+    +actor_rollout_ref.actor.megatron.override_transformer_config.transformer_impl=local \
+    +actor_rollout_ref.actor.megatron.override_transformer_config.sequence_parallel=false \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.temperature=1.0 \

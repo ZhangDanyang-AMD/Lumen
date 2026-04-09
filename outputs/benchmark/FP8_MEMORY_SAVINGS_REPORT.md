@@ -9,10 +9,18 @@
 
 ## Executive Summary
 
-FP8ParamManager delivers **61-62% peak memory reduction** on multi-GPU training
-by replacing `nn.Linear` weights with FP8 (1 byte/element vs 2 bytes BF16),
-which also dramatically shrinks optimizer states. This enables **70B model
-training on a single MI300X GPU** (210 GB) where BF16 DDP cannot fit.
+FP8ParamManager + LoRA delivers **up to 82% peak memory reduction** on multi-GPU
+training by combining FP8 weight storage (1 byte vs 2 bytes BF16), LoRA
+(parameter-efficient training), and 8-bit Adam (halved optimizer precision).
+
+**Headline results** (Llama-3.1-8B, 8x MI300X):
+- **VERL actor (DDP)**: 90.08 GB → **16.46 GB** per GPU (**-81.7%**)
+- **VERL actor (FSDP2)**: 12.67 GB → **9.17 GB** per GPU (**-27.6%** with LoRA)
+- **TRL 70B (DDP)**: 142.73 GB → **73.48 GB** per GPU (**-49%**)
+
+A custom autograd function (`_FP8LinearFunc`) ensures that only the compact FP8
+weight + scalar scale are saved for backward, not full BF16 copies — critical
+for keeping peak memory proportional to FP8 storage rather than BF16.
 
 The alternative approach (FP8 Linear via `LumenConfig(format="fp8_e4m3", ...)`)
 **increases** memory by +3% to +34% and slows training by 10-30%, because it
@@ -113,6 +121,13 @@ any single-GPU technique. FP8ParamManager + DDP is best compared against BF16 DD
 
 ## Demo B: Memory Optimization Matrix — 8B + 70B
 
+### Llama-3.1-8B (single GPU, 3 training steps)
+
+| Config | Peak Mem | vs BF16+LoRA |
+|--------|---------|-------------|
+| BF16 + LoRA r=16 (AdamW) | 17.07 GB | baseline |
+| FP8PM + LoRA r=16 + 8-bit Adam | **13.31 GB** | **-22%** |
+
 ### Llama-3.1-8B (8-GPU DDP, 20 steps)
 
 | Config | Peak Mem/GPU | vs BF16 full |
@@ -120,18 +135,21 @@ any single-GPU technique. FP8ParamManager + DDP is best compared against BF16 DD
 | BF16 full | 80.5 GB | baseline |
 | FP8ParamManager | 31.4 GB | **-61%** |
 | BF16 + LoRA r=16 | 18.2 GB | **-77%** |
-| FP8PM + LoRA | -- INCOMPATIBLE | dtype mismatch |
 
-### Llama-2-70B (8-GPU DDP, 5 steps)
+### Llama-2-70B (8-GPU DDP, 3 steps)
 
-| Config | Peak Mem/GPU | Status |
-|--------|-------------|--------|
-| BF16 DDP | -- OOM (~420 GB needed) | Cannot fit |
-| BF16 + LoRA r=16 DDP | **142.9 GB** | Fits (256 GB GPU) |
-| FP8PM + 8-bit Adam DDP | **210.8 GB** | Fits (256 GB GPU) |
+| Config | Peak Mem/GPU | vs BF16+LoRA | Step Time |
+|--------|-------------|-------------|-----------|
+| BF16 DDP (no LoRA) | OOM (~420 GB) | — | — |
+| BF16 + LoRA r=16 DDP | **142.73 GB** | baseline | ~80s |
+| FP8PM + 8-bit Adam DDP | **73.31 GB** | **-49%** | ~314s |
+| FP8PM + 8-bit Adam + LoRA r=16 DDP | **73.48 GB** | **-49%** | ~324s |
 
-**Key result**: FP8ParamManager enables 70B full-model inference-mode training
-on MI300X where BF16 DDP cannot fit.
+**Key results**:
+- FP8PM cuts 70B per-GPU memory **in half** vs BF16+LoRA (73 GB vs 143 GB)
+- Both FP8PM configs fit comfortably on MI300X (256 GB) with 190 GB free
+- LoRA does not significantly change FP8PM peak memory (73.31 vs 73.48 GB)
+- Step time ~4x slower than BF16+LoRA due to serial dequantization overhead
 
 ---
 
@@ -151,21 +169,48 @@ The full stack doesn't add memory savings beyond FP8PM alone because:
 
 ---
 
-## Demo D-1: VERL + FSDP2 + SGLang (8-GPU, 10 steps)
+## Demo D: VERL Actor Training — Memory Savings (8-GPU, 3 steps, Llama-3.1-8B)
 
-VERL uses FSDP2, which is incompatible with FP8ParamManager. Results with
-FP8 Linear (`LumenConfig(format="fp8_e4m3", scaling="dynamic")`):
+Benchmarks of VERL's actor training component with different optimization configs.
+Environment: `rocm/sgl-dev:v0.5.9-rocm700` container, PyTorch 2.9.0+rocm7.0,
+8x MI300X (270 GB HBM each).
 
-| Config | Peak Mem/GPU | Step Time | Throughput |
-|--------|-------------|-----------|------------|
-| BF16 baseline | **11.8 GB** | 14.6s | 770 tok/s |
-| FP8 Linear | **12.2 GB** | 19.1s | 590 tok/s |
+### FSDP2 Results (model sharded across 8 GPUs)
 
-FP8 Linear on VERL+FSDP2: **+4% memory, -23% throughput**.
+| Config | Peak Mem/GPU | vs BF16 FSDP2 | Trainable Params |
+|--------|-------------|---------------|-----------------|
+| BF16 full finetune (FSDP2) | **12.67 GB** | baseline | 8.03B (100%) |
+| BF16 + LoRA r=16 (FSDP2) | **9.17 GB** | **-27.6%** | 41.9M (0.52%) |
 
-**Note**: With 8-way FSDP2 sharding, per-GPU memory is already very low (11.8 GB
-for 8B model). FP8ParamManager would require `FP8CommTensor` integration for
-FSDP2 compatibility, which is future work.
+### DDP Results (model replicated on each GPU)
+
+| Config | Peak Mem/GPU | vs BF16 DDP | Trainable Params |
+|--------|-------------|-------------|-----------------|
+| BF16 full finetune (DDP) | **90.08 GB** | baseline | 8.03B (100%) |
+| BF16 + LoRA r=16 (DDP) | **21.89 GB** | **-75.7%** | 41.9M (0.52%) |
+| FP8PM + LoRA r=16 + 8-bit Adam (DDP) | **16.46 GB** | **-81.7%** | 41.9M (0.52%) |
+
+### Analysis
+
+- **LoRA on FSDP2** saves 27.6% — reduces optimizer states (only LoRA adapter
+  params tracked) while FSDP2 shards the frozen base model.
+- **FP8PM + LoRA on DDP** saves 81.7% vs BF16 DDP (90.08 → 16.46 GB) by
+  combining FP8 weight storage (halved), LoRA (minimal optimizer states),
+  and 8-bit Adam (halved optimizer precision).
+- **FP8PM + LoRA saves 25% more** than LoRA alone on DDP (16.46 vs 21.89 GB)
+  because FP8ParamManager reduces the base model footprint from 16 GB (BF16)
+  to ~8 GB (FP8).
+
+### Previous VERL + SGLang Full Pipeline Results
+
+VERL with SGLang rollout in async hybrid mode (actor + rollout share GPU):
+
+| Config | Peak Alloc/GPU | Peak Res/GPU | Step Time | Throughput |
+|--------|---------------|-------------|-----------|------------|
+| BF16 baseline | **11.77 GB** | 18.91 GB | 14.2s | 790 tok/s |
+| FP8 Linear | **12.22 GB** | 18.91 GB | 19.0s | 592 tok/s |
+
+FP8 Linear on VERL+FSDP2: +4% allocated memory, -25% throughput (no savings).
 
 ---
 
@@ -176,26 +221,42 @@ FSDP2 compatibility, which is future work.
 | FP8ParamManager | yes | no (mixed dtype) | no (NCCL FP8) |
 | FP8 Linear | yes | yes | yes |
 | LoRA | yes | caution (dtype) | caution (DTensor) |
-| FP8PM + LoRA | no | no | no |
+| FP8PM + LoRA | yes (fixed) | no | no |
 | 8-bit Adam | yes | yes | yes |
 
 ---
 
 ## VERL Backend Combinations
 
-Lumen supports four VERL backend combinations via `lumen.rl.verl.verl_entry`:
+Lumen supports VERL training via `lumen.rl.verl.verl_entry` (monkey-patching FSDP/Megatron
+workers) and via `benchmark_verl_actor_memory.py` (direct torchrun benchmark):
 
-| Training Backend | Rollout Backend | Launch Script | Lumen Patching |
-|-----------------|----------------|---------------|----------------|
-| FSDP2 | SGLang | `run_grpo_fsdp2.sh` | `patch_verl_fsdp_workers` |
-| FSDP2 | vLLM | `run_grpo_fsdp2_vllm.sh` | `patch_verl_fsdp_workers` |
-| Megatron | SGLang | `run_grpo_megatron_sglang.sh` | `patch_verl_megatron_workers` |
-| Megatron | vLLM | `run_grpo_megatron_vllm.sh` | `patch_verl_megatron_workers` |
+| Training Backend | Rollout Backend | Launch Script | Status |
+|-----------------|----------------|---------------|--------|
+| FSDP2 | SGLang | `run_grpo_fsdp2.sh` | **Tested** (BF16, FP8 Linear) |
+| FSDP2 | (actor only) | `benchmark_verl_actor_memory.py` | **Tested** (BF16, LoRA) |
+| DDP | (actor only) | `benchmark_verl_actor_memory.py` | **Tested** (BF16, LoRA, FP8PM+LoRA) |
+| FSDP2 | vLLM | `run_grpo_fsdp2_vllm.sh` | Blocked (vLLM-ROCm) |
+| Megatron | SGLang | `run_grpo_megatron_sglang.sh` | Not tested |
 
 All scripts are in `examples/rl/verl/` and support:
 - `LUMEN_FP8=1` to enable FP8 Linear
 - `FP8_PARAM_MANAGER=1` to enable FP8ParamManager (DDP only)
 - `USE_8BIT_ADAM=1` to enable 8-bit Adam
+
+### VERL Actor Memory Benchmark
+
+The standalone actor benchmark (`benchmark_verl_actor_memory.py`) isolates the
+training memory footprint without SGLang/vLLM rollout overhead:
+
+```bash
+torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
+    --config bf16        # BF16 full finetune (FSDP2)
+    --config lora        # BF16 + LoRA r=16 (FSDP2)
+    --config fp8pm_lora  # FP8PM + LoRA + 8-bit Adam (DDP)
+    --config bf16_ddp    # BF16 full finetune (DDP)
+    --config lora_ddp    # BF16 + LoRA r=16 (DDP)
+```
 
 ---
 
@@ -209,8 +270,11 @@ All scripts are in `examples/rl/verl/` and support:
    `fsdp_post_all_gather` hooks to quantize before communication and dequantize
    after, enabling FSDP to shard FP8 parameters.
 
-3. **LoRA + FP8PM**: Needs LoRA adapters to handle FP8 base weights (dequant
-   before LoRA forward, or custom LoRA implementation).
+3. **LoRA + FP8PM**: Fully supported on DDP with two fixes:
+   - PEFT adapter dtype: re-cast LoRA params to BF16 after `get_peft_model`
+   - Dequant memory leak: replaced `F.linear` with `_FP8LinearFunc` custom
+     autograd that saves FP8 weight + scale (not full BF16 copy) for backward,
+     reducing 70B peak from 210 GB to 73 GB
 
 4. **FP8 Linear overhead**: AITER FP8 GEMM kernels on MI300X are untuned,
    causing 10-30% slowdown. Kernel optimization would make compute-path FP8
@@ -245,7 +309,27 @@ MODEL_NAME=/path/to/llama-2-70b NUM_PROCESSES=8 MAX_STEPS=5 \
 bash examples/rl/trl/run_grpo_fsdp.sh 1
 ```
 
-### VERL GRPO (Demo D)
+### VERL Actor Memory Benchmark (Demo D)
+
+```bash
+# BF16 baseline (FSDP2)
+torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
+    --config bf16 --steps 3 --micro_bs 2 --seq_len 256
+
+# LoRA (FSDP2) — 27.6% memory savings
+torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
+    --config lora --steps 3 --micro_bs 2 --seq_len 256
+
+# FP8PM + LoRA + 8-bit Adam (DDP) — 81.7% memory savings
+torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
+    --config fp8pm_lora --steps 3 --micro_bs 2 --seq_len 256
+
+# BF16 DDP baseline (for FP8PM comparison)
+torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
+    --config bf16_ddp --steps 3 --micro_bs 2 --seq_len 256
+```
+
+### VERL Full Pipeline (FSDP2 + SGLang rollout)
 
 ```bash
 # FSDP2 + SGLang — BF16 baseline
@@ -255,18 +339,6 @@ bash examples/rl/verl/run_grpo_fsdp2.sh
 # FSDP2 + SGLang — FP8 Linear
 LUMEN_FP8=1 MODEL_NAME=/path/to/llama-3.1-8b MAX_STEPS=10 \
 bash examples/rl/verl/run_grpo_fsdp2.sh
-
-# FSDP2 + vLLM
-LUMEN_FP8=1 MODEL_NAME=/path/to/llama-3.1-8b MAX_STEPS=10 \
-bash examples/rl/verl/run_grpo_fsdp2_vllm.sh
-
-# Megatron + SGLang
-LUMEN_FP8=1 MODEL_NAME=/path/to/llama-3.1-8b MAX_STEPS=10 \
-bash examples/rl/verl/run_grpo_megatron_sglang.sh
-
-# Megatron + vLLM
-LUMEN_FP8=1 MODEL_NAME=/path/to/llama-3.1-8b MAX_STEPS=10 \
-bash examples/rl/verl/run_grpo_megatron_vllm.sh
 ```
 
 ### Model-Specific Benchmarks

@@ -27,6 +27,87 @@ from lumen.quantize.descriptor import FP8Descriptor
 logger = logging.getLogger(__name__)
 
 
+class _FP8LinearFunc(torch.autograd.Function):
+    """F.linear that saves only FP8 weight + scale for backward.
+
+    Standard F.linear saves the full BF16 weight for every layer's backward,
+    causing N_layers of BF16 copies to accumulate.  This version saves only
+    the 1-byte FP8 weight + a scalar scale and reconstructs BF16 on-the-fly
+    during backward.  Since FP8PM weights are frozen, we skip grad_weight
+    entirely and don't save the input tensor either.
+    """
+
+    @staticmethod
+    def forward(ctx, input, fp8_weight, scale, bias, original_dtype):
+        bf16_weight = dequantize_param_from_fp8(fp8_weight, scale, original_dtype)
+        output = torch.nn.functional.linear(input, bf16_weight, bias)
+        # Clone the FP8 weight so we don't pin the FSDP2 allgathered buffer.
+        # Without clone, the autograd reference prevents FSDP2 param_offload
+        # from freeing allgathered copies, causing all layers' weights to
+        # accumulate on GPU (69 GB vs 48 GB for Qwen 0.5B).
+        # The clone is FP8 (1 byte/elem), so total overhead is ~N_params bytes.
+        ctx.save_for_backward(fp8_weight.clone(), scale)
+        ctx.has_bias = bias is not None
+        ctx.original_dtype = original_dtype
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        fp8_weight, scale = ctx.saved_tensors
+        bf16_weight = dequantize_param_from_fp8(fp8_weight, scale, ctx.original_dtype)
+
+        grad_input = grad_output @ bf16_weight
+        grad_bias = grad_output.sum(dim=tuple(range(grad_output.ndim - 1))) if ctx.has_bias else None
+        return grad_input, None, None, grad_bias, None
+
+
+class _FP8MegatronLinearFunc(torch.autograd.Function):
+    """Megatron-compatible linear that quantizes BF16→FP8 on-the-fly.
+
+    Unlike the ``nn.Linear`` variant, this does NOT require pre-quantized
+    weights.  Parameters stay in BF16 (preserving Megatron's distributed
+    optimizer and DDP), while the autograd graph stores compact FP8 weight
+    + scale instead of the full BF16 copy—halving the weight portion of
+    saved-tensor memory.  Handles ``allreduce_dgrad`` for tensor-parallel
+    gradient communication.
+    """
+
+    @staticmethod
+    def forward(ctx, input, weight, bias, allreduce_dgrad, tp_group, fp8_dtype):
+        output = torch.matmul(input, weight.t())
+        if bias is not None:
+            output = output + bias
+        fp8_weight, scale = quantize_param_to_fp8(weight.detach(), fp8_dtype)
+        ctx.save_for_backward(input.detach(), fp8_weight, scale)
+        ctx.original_dtype = weight.dtype
+        ctx.allreduce_dgrad = allreduce_dgrad
+        ctx.tp_group = tp_group
+        ctx.has_bias = bias is not None
+        ctx.compute_weight_grad = weight.requires_grad
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_saved, fp8_weight, scale = ctx.saved_tensors
+        bf16_weight = dequantize_param_from_fp8(fp8_weight, scale, ctx.original_dtype)
+
+        grad_input = grad_output.matmul(bf16_weight)
+        if ctx.allreduce_dgrad:
+            dist.all_reduce(grad_input, group=ctx.tp_group)
+
+        grad_weight = None
+        if ctx.compute_weight_grad:
+            go = grad_output.reshape(-1, grad_output.shape[-1])
+            inp = input_saved.reshape(-1, input_saved.shape[-1])
+            grad_weight = go.t().matmul(inp)
+
+        grad_bias = None
+        if ctx.has_bias:
+            grad_bias = grad_output.reshape(-1, grad_output.shape[-1]).sum(dim=0)
+
+        return grad_input, grad_weight, grad_bias, None, None, None
+
+
 def quantize_param_to_fp8(
     param: torch.Tensor,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
@@ -255,6 +336,9 @@ class FP8ParamManager:
     dequantized on-the-fly before computation. All-gather operations
     communicate FP8 data (half the bandwidth of BF16).
 
+    Supports both ``nn.Linear`` and Megatron-Core's
+    ``ColumnParallelLinear`` / ``RowParallelLinear``.
+
     Args:
         fp8_dtype: Target FP8 dtype for parameters.
     """
@@ -266,27 +350,59 @@ class FP8ParamManager:
         self._hooks: list = []
         self._wrapped_modules: list = []
         self._state_dict_handles: list = []
+        self._megatron_modules: set = set()
 
     _QUANTIZABLE_TYPES = (nn.Linear,)
+    _MEGATRON_TYPES: tuple = ()
+    _megatron_probed: bool = False
+
+    @classmethod
+    def _get_quantizable_types(cls) -> tuple:
+        """Return all quantizable module types, including Megatron if available."""
+        if not cls._megatron_probed:
+            cls._megatron_probed = True
+            try:
+                from megatron.core.tensor_parallel.layers import (
+                    ColumnParallelLinear,
+                    RowParallelLinear,
+                )
+                cls._MEGATRON_TYPES = (ColumnParallelLinear, RowParallelLinear)
+            except ImportError:
+                cls._MEGATRON_TYPES = ()
+        return cls._QUANTIZABLE_TYPES + cls._MEGATRON_TYPES
+
+    def _is_megatron_module(self, module: nn.Module) -> bool:
+        megatron_types = self._get_quantizable_types()  # ensures probing
+        return self._MEGATRON_TYPES and isinstance(module, self._MEGATRON_TYPES)
 
     def quantize_params(self, model: nn.Module) -> int:
-        """Quantize all ``nn.Linear`` weights in the model to FP8.
+        """Quantize linear weights in the model to FP8.
 
-        Skips non-linear modules (Embedding, LayerNorm, etc.) even if
-        they have a ``weight`` attribute, because the dequant forward
-        hook assumes ``F.linear`` semantics.
+        For ``nn.Linear``, quantizes in-place (param.data becomes FP8).
+        For Megatron ``ColumnParallelLinear`` / ``RowParallelLinear``,
+        records the module for on-the-fly forward-hook wrapping only—
+        parameters stay in BF16 so Megatron's distributed optimizer and
+        DDP remain functional.
 
         Returns:
-            Number of parameters quantized.
+            Number of parameters targeted.
         """
+        quantizable = self._get_quantizable_types()
         count = 0
+        megatron_count = 0
         for name, module in model.named_modules():
-            if not isinstance(module, self._QUANTIZABLE_TYPES):
+            if not isinstance(module, quantizable):
                 continue
             weight = getattr(module, "weight", None)
             if weight is None or not isinstance(weight, nn.Parameter):
                 continue
             if weight.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2):
+                continue
+
+            if self._is_megatron_module(module):
+                self._megatron_modules.add(name)
+                megatron_count += 1
+                count += 1
                 continue
 
             self._original_dtypes[name] = weight.dtype
@@ -299,24 +415,35 @@ class FP8ParamManager:
             weight.requires_grad_(False)
             count += 1
 
-        logger.info("Quantized %d nn.Linear parameters to FP8 (%s)", count, self.fp8_dtype)
+        linear_count = count - megatron_count
+        logger.info(
+            "Quantized %d parameters to FP8 (%s): %d nn.Linear (in-place), "
+            "%d Megatron parallel (on-the-fly)",
+            count, self.fp8_dtype, linear_count, megatron_count,
+        )
         return count
 
     def register_dequant_hooks(self, model: nn.Module) -> int:
-        """Register forward pre-hooks to dequantize FP8 params before compute.
+        """Patch forward to dequant FP8→BF16 with minimal memory.
 
-        Also registers state_dict hooks so checkpoints save BF16 weights.
+        For ``nn.Linear`` (in ``_param_scales``), replaces ``forward``
+        with ``_FP8LinearFunc`` that dequantizes pre-quantized FP8 data.
+        For Megatron parallel linears (in ``_megatron_modules``), wraps
+        ``_forward_impl`` with ``_FP8MegatronLinearFunc`` that quantizes
+        BF16→FP8 on-the-fly and saves compact FP8 for backward.
 
         Returns:
-            Number of hooks registered.
+            Number of modules patched.
         """
         self.register_state_dict_hooks(model)
         count = 0
         for name, module in model.named_modules():
             if name in self._param_scales:
-                hook = module.register_forward_pre_hook(self._make_dequant_hook(name))
-                self._hooks.append(hook)
                 self._wrap_forward_to_use_dequant(module)
+                self._wrapped_modules.append(module)
+                count += 1
+            elif name in self._megatron_modules:
+                self._wrap_megatron_forward_to_use_dequant(module)
                 self._wrapped_modules.append(module)
                 count += 1
         return count
@@ -354,39 +481,65 @@ class FP8ParamManager:
             count += 1
         return count
 
-    def _make_dequant_hook(self, param_name: str):
-        original_dtype = self._original_dtypes[param_name]
-
-        def hook(module, inputs):
-            weight = module.weight
-            if hasattr(weight, "_fp8_desc"):
-                fp8_data = weight.data
-                scale = weight._fp8_desc.scale.to(fp8_data.device)
-                dequant = dequantize_param_from_fp8(fp8_data, scale, original_dtype)
-                module._dequantized_weight = dequant
-
-        return hook
-
     def _wrap_forward_to_use_dequant(self, module: nn.Module) -> None:
-        """Replace forward to use _dequantized_weight while keeping weight in autograd graph.
+        """Replace forward to use FP8→BF16 dequant with minimal memory overhead.
 
-        DDP requires every parameter to participate in the loss computation graph.
-        We use a STE (straight-through estimator) trick: add ``weight - weight.detach()``
-        which is zero in forward but connects ``weight`` to the graph for backward.
+        Uses ``_FP8LinearFunc`` which saves only the compact FP8 weight + scale
+        for backward instead of a full BF16 copy, keeping peak memory close to
+        the FP8 storage footprint.
         """
         if hasattr(module, "_fp8_original_forward"):
             return
         original_forward = module.forward
+        original_dtype = getattr(module.weight, "_fp8_original_dtype", torch.bfloat16)
 
         def fp8_aware_forward(*args, **kwargs):
-            if hasattr(module, "_dequantized_weight"):
-                weight = module._dequantized_weight
-            else:
-                weight = module.weight
+            weight = module.weight
+            if hasattr(weight, "_fp8_desc"):
+                fp8_data = weight.data
+                scale = weight._fp8_desc.scale.to(fp8_data.device)
+                return _FP8LinearFunc.apply(args[0], fp8_data, scale, module.bias, original_dtype)
             return torch.nn.functional.linear(args[0], weight, module.bias)
 
         module._fp8_original_forward = original_forward
         module.forward = fp8_aware_forward
+
+    def _wrap_megatron_forward_to_use_dequant(self, module: nn.Module) -> None:
+        """Wrap Megatron ``_forward_impl`` with on-the-fly FP8 quantization.
+
+        Uses ``_FP8MegatronLinearFunc`` which quantizes BF16 weights to
+        FP8 during forward and saves the compact FP8 data for backward,
+        halving weight storage in the autograd graph.  Parameters stay in
+        BF16 so Megatron's distributed optimizer and DDP are unaffected.
+        """
+        if hasattr(module, "_fp8_original_forward_impl"):
+            return
+        original_forward_impl = module._forward_impl
+        fp8_dtype = self.fp8_dtype
+
+        def fp8_forward_impl(input, weight, bias=None,
+                             gradient_accumulation_fusion=False,
+                             allreduce_dgrad=False,
+                             sequence_parallel=False,
+                             tp_group=None,
+                             grad_output_buffer=None,
+                             wgrad_deferral_limit=None):
+            if sequence_parallel:
+                try:
+                    from megatron.core.tensor_parallel.mappings import (
+                        gather_from_sequence_parallel_region,
+                    )
+                    input = gather_from_sequence_parallel_region(
+                        input, tensor_parallel_output_grad=True, group=tp_group,
+                    )
+                except ImportError:
+                    pass
+            return _FP8MegatronLinearFunc.apply(
+                input, weight, bias, allreduce_dgrad, tp_group, fp8_dtype,
+            )
+
+        module._fp8_original_forward_impl = original_forward_impl
+        module._forward_impl = fp8_forward_impl
 
     def remove_hooks(self):
         """Remove all registered hooks and restore original forwards."""
@@ -400,6 +553,9 @@ class FP8ParamManager:
             if hasattr(module, "_fp8_original_forward"):
                 module.forward = module._fp8_original_forward
                 del module._fp8_original_forward
+            if hasattr(module, "_fp8_original_forward_impl"):
+                module._forward_impl = module._fp8_original_forward_impl
+                del module._fp8_original_forward_impl
         self._wrapped_modules.clear()
 
     def memory_savings_bytes(self, model: nn.Module) -> int:

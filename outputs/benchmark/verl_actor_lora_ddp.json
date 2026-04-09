@@ -1,0 +1,21 @@
+{
+  "config": "lora_ddp",
+  "desc": "BF16 + LoRA r=16 (DDP)",
+  "model": "/dev/shm/model/llama-3.1-8b",
+  "world_size": 8,
+  "steps": 3,
+  "micro_bs": 2,
+  "seq_len": 256,
+  "avg_peak_gb": 21.8,
+  "max_peak_gb": 21.89,
+  "all_peaks_gb": [
+    21.89,
+    21.89,
+    21.74,
+    21.74,
+    21.74,
+    21.74,
+    21.89,
+    21.74
+  ]
+}

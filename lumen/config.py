@@ -278,10 +278,11 @@ class LumenConfig:
     # -----------------------------------------------------------------------
 
     def _apply_fp8_param_manager(self, model):
-        """Replace ``nn.Linear`` weights with FP8 storage via FP8ParamManager.
+        """Replace linear weights with FP8 storage via FP8ParamManager.
 
-        Must run on raw ``nn.Linear`` before LoRA wrapping so that adapter
-        weights stay BF16/trainable.
+        Targets ``nn.Linear`` and Megatron ``ColumnParallelLinear`` /
+        ``RowParallelLinear``.  Must run before LoRA wrapping so that
+        adapter weights stay BF16/trainable.
         """
         import torch
 
@@ -294,7 +295,14 @@ class LumenConfig:
         return mgr
 
     def _apply_lora(self, model):
-        """Apply LoRA adapters via HuggingFace PEFT and freeze the base model."""
+        """Apply LoRA adapters via HuggingFace PEFT and freeze the base model.
+
+        When FP8ParamManager is active, PEFT's ``_move_adapter_to_device_of_base_layer``
+        casts LoRA adapter weights to FP8 (matching the quantized base weight dtype).
+        We fix this by re-casting all LoRA adapter parameters back to BF16 so they
+        remain trainable with standard arithmetic.
+        """
+        import torch
         from peft import LoraConfig, TaskType, get_peft_model
 
         peft_config = LoraConfig(
@@ -305,6 +313,19 @@ class LumenConfig:
             target_modules=list(self.lora_target_modules),
         )
         model = get_peft_model(model, peft_config)
+
+        if self.fp8_param_manager:
+            fixed = 0
+            for name, param in model.named_parameters():
+                if "lora_" in name and param.dtype in (
+                    torch.float8_e4m3fn, torch.float8_e4m3fnuz,
+                    torch.float8_e5m2, torch.float8_e5m2fnuz,
+                ):
+                    param.data = param.data.to(torch.bfloat16)
+                    param.requires_grad_(True)
+                    fixed += 1
+            if fixed:
+                _rank0_print(f"> Fixed {fixed} LoRA params cast to FP8 by PEFT -> BF16")
 
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in model.parameters())
