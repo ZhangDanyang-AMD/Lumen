@@ -8,7 +8,7 @@ Lumen is **non-invasive** with:
 
 - **One-line enablement** — `quant.enable(model)` patches an existing model for quantized training without changing model code or checkpoint format.
 - **Unified `QuantConfig`** — A single configuration object governs format, scaling strategy, amax algorithm, activation/gradient quantization, and all precision-related knobs.
-- **Backend-agnostic** — The same quantization semantics work across **FSDP** and **Megatron-LM** backends, so switching parallelism strategies does not require re-engineering precision paths.
+- **Backend-agnostic** — The same quantization semantics work across **FSDP**, **FSDP2**, and **Megatron-LM** backends, so switching parallelism strategies does not require re-engineering precision paths. RL training (GRPO, PPO, DAPO) works with both **SGLang** and **vLLM** rollout engines on ROCm.
 
 Lumen is **fast** with:
 
@@ -39,6 +39,7 @@ architecture
 
 examples/llama2_sft
 examples/llama31_pretrain
+examples/rl_training
 ```
 
 ```{toctree}
@@ -50,6 +51,7 @@ advance/lora
 advance/distributed
 advance/rl_training
 advance/rl_lora
+advance/feature_catalog
 ```
 
 ```{toctree}

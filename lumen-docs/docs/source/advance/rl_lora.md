@@ -47,7 +47,7 @@ This guide explains how to enable LoRA in RL training and configure related para
 
 ### VERL Backend (FSDP2 + SGLang/vLLM)
 
-1. LoRA is available through VERL's `RayPPOTrainer` with the FSDP2 backend. When Lumen FP8 features are enabled, VERL uses `lumen.rl.verl.verl_entry` as the entry point.
+1. LoRA is available through VERL's `RayPPOTrainer` with the **FSDP2 backend only**. When Lumen FP8 features are enabled, VERL uses `lumen.rl.verl.verl_entry` as the entry point. Both SGLang and vLLM are supported as rollout engines.
 
 2. Required configurations for LoRA:
 
@@ -58,15 +58,26 @@ This guide explains how to enable LoRA in RL training and configure related para
 3. Recommended options:
 
    - `LUMEN_FP8=1`: enable FP8 quantized linear for the actor model
-   - `FP8_PARAM_MANAGER=1`: enable FP8 parameter manager for ~62% peak memory reduction
+   - `FP8_PARAM_MANAGER=1`: enable FP8 parameter manager for -25% peak VRAM (no offload) or -5% (with offload)
    - `actor_rollout_ref.ref.fsdp_config.param_offload=true`: offload reference model to CPU
 
-4. Example:
+4. Example (SGLang rollout):
 
    ```bash
    LUMEN_FP8=1 FP8_PARAM_MANAGER=1 \
    bash examples/rl/verl/run_grpo_fsdp2.sh
    ```
+
+5. Example (vLLM rollout):
+
+   ```bash
+   LUMEN_FP8=1 FP8_PARAM_MANAGER=1 \
+   bash examples/rl/verl/run_grpo_fsdp2_vllm.sh
+   ```
+
+### VERL Backend (Megatron) — LoRA Not Supported
+
+**LoRA with Megatron is not supported.** PEFT expects HuggingFace model structure, not Megatron's `ColumnParallelLinear`/`RowParallelLinear` layers. Use full fine-tuning with Megatron FP8PM (on-the-fly quantization) instead, or use the FSDP2 backend for LoRA + FP8.
 
 ## Best Practices and Notes
 
@@ -128,7 +139,15 @@ LUMEN_FP8=1 bash examples/rl/verl/run_grpo_fsdp2.sh
 LUMEN_FP8=1 FP8_PARAM_MANAGER=1 bash examples/rl/verl/run_grpo_fsdp2.sh
 ```
 
-### VERL + Megatron + SGLang (multi-node, MoE/TP/PP)
+### VERL + GRPO + LoRA (FSDP2 + vLLM, 4× MI300X)
+
+```bash
+# With FP8 + LoRA + FP8 param manager (vLLM rollout)
+LUMEN_FP8=1 FP8_PARAM_MANAGER=1 \
+bash examples/rl/verl/run_grpo_fsdp2_vllm.sh
+```
+
+### VERL + Megatron + SGLang (full fine-tuning only, no LoRA)
 
 ```bash
 bash examples/rl/verl/run_grpo_megatron_sglang.sh
@@ -136,10 +155,11 @@ bash examples/rl/verl/run_grpo_megatron_sglang.sh
 
 ## Supported Algorithms
 
-| Algorithm | Framework | LoRA + FP8 Status |
-|-----------|-----------|-------------------|
-| GRPO | TRL | Validated |
-| GRPO | VERL (FSDP2) | Validated |
-| GRPO | VERL (Megatron) | Supported |
-| PPO | TRL / VERL | Supported |
-| DAPO | TRL | Supported |
+| Algorithm | Framework | Rollout | LoRA + FP8 Status |
+|-----------|-----------|---------|-------------------|
+| GRPO | TRL | Built-in | Validated |
+| GRPO | VERL (FSDP2) | SGLang | Validated |
+| GRPO | VERL (FSDP2) | vLLM | Validated |
+| GRPO | VERL (Megatron) | SGLang / vLLM | **Not supported** (LoRA incompatible with Megatron layers) |
+| PPO | TRL / VERL (FSDP2) | SGLang / vLLM | Supported |
+| DAPO | TRL | Built-in | Supported |
