@@ -46,11 +46,11 @@ html_theme_options = {
     'source_branch': 'main',
     'source_directory': 'lumen-docs/docs/source/',
     'light_css_variables': {
-        'color-brand-primary': '#ed1c24',
+        'color-brand-primary': '#2d3036',
         'color-brand-content': '#c41922',
     },
     'dark_css_variables': {
-        'color-brand-primary': '#ff4654',
+        'color-brand-primary': '#e0e0e0',
         'color-brand-content': '#ff4654',
     },
 }
