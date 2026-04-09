@@ -8,7 +8,9 @@
 
 This module provides the Lumen-patched VERL training entrypoint. It
 monkey-patches VERL's FSDP and Megatron workers to inject Lumen FP8/norm/attn
-optimizations into the model build pipeline.
+optimizations into the model build pipeline.  When LoRA is requested for the
+Megatron backend, it monkey-patches ``make_megatron_module`` to inject a
+LoRA callback into the model creation pipeline (applied before DDP wrapping).
 
 Usage:
     python -m lumen.rl.verl.verl_entry --config-path configs/grpo_fsdp_lumen.yaml
@@ -18,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +113,70 @@ def _patch_optimizer_for_weight_cache(fsdp_module):
             worker_cls.init_model = _patched_init_model
 
 
+def _patch_megatron_lora(lora_rank: int, lora_alpha: float, lora_dropout: float) -> None:
+    """Monkey-patch ``make_megatron_module`` to inject LoRA before DDP wrapping.
+
+    Hooks into ``bridge.get_model`` (mbridge path) to append a
+    ``post_model_creation_callback`` that applies
+    :func:`lumen.models.lora_adapter.apply_megatron_lora` to the freshly
+    created GPTModel **before** Megatron wraps it with DDP.  Only the actor
+    build (``wrap_with_ddp=True``) is affected; the reference model is left
+    unchanged.
+    """
+    try:
+        import verl.utils.megatron_utils as mutils
+    except ImportError:
+        logger.warning("> verl.utils.megatron_utils not available — skipping LoRA patch")
+        return
+
+    _original_make = mutils.make_megatron_module
+
+    def _lora_callback(model, **_kwargs):
+        from lumen.models.lora_adapter import apply_megatron_lora
+
+        apply_megatron_lora(model, rank=lora_rank, alpha=lora_alpha, dropout=lora_dropout)
+
+    def _patched_make(wrap_config, *args, **kwargs):
+        bridge = kwargs.get("bridge")
+        provider = kwargs.get("provider")
+
+        is_actor_build = getattr(wrap_config, "wrap_with_ddp", False)
+        is_mbridge_path = bridge is not None and provider is None
+
+        if is_actor_build and is_mbridge_path:
+            _original_get_model = bridge.get_model
+
+            def _lora_get_model(*gm_args, **gm_kwargs):
+                callbacks = list(gm_kwargs.get("post_model_creation_callbacks", []))
+                callbacks.append(_lora_callback)
+                gm_kwargs["post_model_creation_callbacks"] = callbacks
+                return _original_get_model(*gm_args, **gm_kwargs)
+
+            bridge.get_model = _lora_get_model
+            try:
+                return _original_make(wrap_config, *args, **kwargs)
+            finally:
+                bridge.get_model = _original_get_model
+
+        return _original_make(wrap_config, *args, **kwargs)
+
+    mutils.make_megatron_module = _patched_make
+    logger.info(
+        "> Patched make_megatron_module for LoRA injection: rank=%d, alpha=%.1f, dropout=%.2f",
+        lora_rank, lora_alpha, lora_dropout,
+    )
+
+
 def main():
     """Lumen-aware VERL entrypoint.
 
     Parses lumen-specific config from the VERL YAML, patches the workers,
     then delegates to VERL's standard training loop.
+
+    When ``LORA_RANK`` > 0, ``make_megatron_module`` is monkey-patched to
+    inject a LoRA callback that runs before DDP wrapping.  Lumen's own
+    PEFT LoRA (``LumenConfig._apply_lora``) is always skipped for Megatron
+    — the custom adapter handles insertion before DDP.
     """
     from lumen.rl.verl.config import VerlLumenArgs
 
@@ -130,10 +190,15 @@ def main():
     use_8bit_adam = os.environ.get("USE_8BIT_ADAM", "0") == "1"
     model_path = os.environ.get("MODEL_NAME", "")
 
+    lora_rank = int(os.environ.get("LORA_RANK", "0"))
+    lora_alpha = float(os.environ.get("LORA_ALPHA", "32"))
+    lora_dropout = float(os.environ.get("LORA_DROPOUT", "0.0"))
+
     any_lumen = (
         lumen_fp8 or lumen_norm or lumen_fp8_attn != "none"
         or lumen_fp8_weight_cache or lumen_fp8_activation_store
         or lumen_fp8_param_gather or fp8_param_manager
+        or lora_rank > 0
     )
     if any_lumen:
         lumen_args = VerlLumenArgs(
@@ -149,6 +214,9 @@ def main():
         )
         patch_verl_fsdp_workers(lumen_args)
         patch_verl_megatron_workers(lumen_args)
+
+    if lora_rank > 0:
+        _patch_megatron_lora(lora_rank, lora_alpha, lora_dropout)
 
     from verl.trainer.main_ppo import main as verl_main
     verl_main()

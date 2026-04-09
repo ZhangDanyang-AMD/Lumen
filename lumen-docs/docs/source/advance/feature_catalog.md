@@ -364,7 +364,7 @@ class PipelinedGemmReduceScatter:
 | LoRA (FSDP path) | HuggingFace PEFT LoRA adapters with FSDP/FSDP2 distributed training | `apply_lora(model, args)` when `lora_rank > 0` | SUPPORTED |
 | LoRA (Megatron path) | Megatron-Core LoraAdapter integration for TP-aware LoRA | Via Megatron config | SUPPORTED |
 | LoRA + FP8 | LoRA adapters on top of FP8-quantized base model | `quant.enable(model)` then `apply_lora(model, args)` | SUPPORTED |
-| LoRA + RL Training | LoRA with GRPO/PPO reinforcement learning pipelines (FSDP2 only; Megatron LoRA unsupported) | TRL / VERL integration paths | SUPPORTED |
+| LoRA + RL Training | LoRA with GRPO/PPO reinforcement learning pipelines (FSDP2 and Megatron) | TRL / VERL integration paths | SUPPORTED |
 | VERL + vLLM Rollout | vLLM V1 as rollout engine for VERL RL training on ROCm (requires `get_device_uuid` fix) | `run_grpo_fsdp2_vllm.sh` / `run_grpo_megatron_vllm.sh` | SUPPORTED |
 | VERL + SGLang Rollout | SGLang as rollout engine for VERL RL training | `run_grpo_fsdp2.sh` / `run_grpo_megatron_sglang.sh` | SUPPORTED |
 

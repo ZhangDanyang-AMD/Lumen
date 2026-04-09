@@ -47,8 +47,8 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   - v2 (in-place quantization) crashed distributed optimizer. v3 (on-the-fly) works.
   - Megatron+vLLM with rollout TP=2 hangs during weight update (confirmed: vLLM TP>=2 still broken on ROCm). Must use TP=1.
 - Known issue: on-the-fly quantization causes throughput regression (369 vs 704 tok/s for SGLang, 291 vs 338 tok/s for vLLM = -14%). Memory savings are significant (-29% with SGLang), negligible with vLLM (vLLM KV cache dominates).
-- Remaining limitation: LoRA with Megatron is still unsupported (PEFT expects HuggingFace model structure, not Megatron parallel layers). This is a PEFT limitation, not Lumen.
-- Status: FP8PM resolved (memory savings confirmed); LoRA open (PEFT limitation); throughput regression noted as known tradeoff
+- LoRA with Megatron: RESOLVED. Implemented `MegatronLoraAdapter` (`lumen/models/lora_adapter.py`) — a custom TP-aware LoRA wrapper for `ColumnParallelLinear`/`RowParallelLinear`. Injected via `post_model_creation_callbacks` in `make_megatron_module` (before DDP wrapping). Env var: `LORA_RANK=32`. Bypasses PEFT entirely; uses direct parameter injection with correct TP all-reduce for `RowParallelLinear`.
+- Status: FP8PM resolved (memory savings confirmed); LoRA resolved (custom adapter); throughput regression noted as known tradeoff
 
 ### [2026-04-08 verl-megatron-nccl-hip-init]
 - Symptom: VERL Megatron + SGLang test fails with `ValueError: ProcessGroupNCCL is only supported with GPUs, no GPUs found!` in Ray worker processes

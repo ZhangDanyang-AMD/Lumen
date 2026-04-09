@@ -216,13 +216,13 @@ FP8 Linear on VERL+FSDP2: +4% allocated memory, -25% throughput (no savings).
 
 ## Compatibility Matrix
 
-| Feature | DDP | FSDP1 | FSDP2 |
-|---------|-----|-------|-------|
-| FP8ParamManager | yes | no (mixed dtype) | no (NCCL FP8) |
-| FP8 Linear | yes | yes | yes |
-| LoRA | yes | caution (dtype) | caution (DTensor) |
-| FP8PM + LoRA | yes (fixed) | no | no |
-| 8-bit Adam | yes | yes | yes |
+| Feature | DDP | FSDP1 | FSDP2 | Megatron (mbridge) |
+|---------|-----|-------|-------|--------------------|
+| FP8ParamManager | yes | no (mixed dtype) | no (NCCL FP8) | yes (on-the-fly) |
+| FP8 Linear | yes | yes | yes | — |
+| LoRA | yes | caution (dtype) | caution (DTensor) | yes (custom TP-aware adapter) |
+| FP8PM + LoRA | yes (fixed) | no | no | yes |
+| 8-bit Adam | yes | yes | yes | — |
 
 ---
 
@@ -236,13 +236,15 @@ workers) and via `benchmark_verl_actor_memory.py` (direct torchrun benchmark):
 | FSDP2 | SGLang | `run_grpo_fsdp2.sh` | **Tested** (BF16, FP8 Linear) |
 | FSDP2 | (actor only) | `benchmark_verl_actor_memory.py` | **Tested** (BF16, LoRA) |
 | DDP | (actor only) | `benchmark_verl_actor_memory.py` | **Tested** (BF16, LoRA, FP8PM+LoRA) |
-| FSDP2 | vLLM | `run_grpo_fsdp2_vllm.sh` | Blocked (vLLM-ROCm) |
-| Megatron | SGLang | `run_grpo_megatron_sglang.sh` | Not tested |
+| FSDP2 | vLLM | `run_grpo_fsdp2_vllm.sh` | **Tested** (BF16, FP8PM) |
+| Megatron | SGLang | `run_grpo_megatron_sglang.sh` | **Tested** (BF16, FP8PM, LoRA+FP8PM) |
+| Megatron | vLLM | `run_grpo_megatron_vllm.sh` | **Tested** (BF16, FP8PM) |
 
 All scripts are in `examples/rl/verl/` and support:
 - `LUMEN_FP8=1` to enable FP8 Linear
-- `FP8_PARAM_MANAGER=1` to enable FP8ParamManager (DDP only)
+- `FP8_PARAM_MANAGER=1` to enable FP8ParamManager (DDP / Megatron)
 - `USE_8BIT_ADAM=1` to enable 8-bit Adam
+- `LORA_RANK=32` to enable LoRA (Megatron backend uses custom TP-aware adapter)
 
 ### VERL Actor Memory Benchmark
 
@@ -270,11 +272,13 @@ torchrun --nproc_per_node=8 examples/rl/verl/benchmark_verl_actor_memory.py \
    `fsdp_post_all_gather` hooks to quantize before communication and dequantize
    after, enabling FSDP to shard FP8 parameters.
 
-3. **LoRA + FP8PM**: Fully supported on DDP with two fixes:
-   - PEFT adapter dtype: re-cast LoRA params to BF16 after `get_peft_model`
-   - Dequant memory leak: replaced `F.linear` with `_FP8LinearFunc` custom
-     autograd that saves FP8 weight + scale (not full BF16 copy) for backward,
-     reducing 70B peak from 210 GB to 73 GB
+3. **LoRA + FP8PM**: Fully supported on DDP (PEFT) and Megatron (custom adapter):
+   - **DDP/FSDP path**: PEFT adapter dtype re-cast to BF16 after `get_peft_model`;
+     dequant memory leak fixed via `_FP8LinearFunc` custom autograd (saves FP8
+     weight + scale, not full BF16 copy — reduced 70B peak from 210 GB to 73 GB)
+   - **Megatron path**: Custom `MegatronLoraAdapter` (`lumen/models/lora_adapter.py`)
+     injects TP-aware LoRA via forward hooks on `ColumnParallelLinear`/`RowParallelLinear`.
+     Bypasses PEFT entirely; uses `LORA_RANK` env var. Tested with FP8PM + SGLang.
 
 4. **FP8 Linear overhead**: AITER FP8 GEMM kernels on MI300X are untuned,
    causing 10-30% slowdown. Kernel optimization would make compute-path FP8
@@ -339,6 +343,30 @@ bash examples/rl/verl/run_grpo_fsdp2.sh
 # FSDP2 + SGLang — FP8 Linear
 LUMEN_FP8=1 MODEL_NAME=/path/to/llama-3.1-8b MAX_STEPS=10 \
 bash examples/rl/verl/run_grpo_fsdp2.sh
+```
+
+### VERL Megatron Pipeline
+
+```bash
+# Megatron + SGLang — BF16 baseline
+MODEL_NAME=/path/to/qwen2.5-0.5b-instruct NUM_GPUS=4 MAX_STEPS=2 \
+bash examples/rl/verl/run_grpo_megatron_sglang.sh
+
+# Megatron + SGLang — FP8PM
+FP8_PARAM_MANAGER=1 MODEL_NAME=/path/to/qwen2.5-0.5b-instruct NUM_GPUS=4 MAX_STEPS=2 \
+bash examples/rl/verl/run_grpo_megatron_sglang.sh
+
+# Megatron + SGLang — LoRA + FP8PM
+FP8_PARAM_MANAGER=1 LORA_RANK=32 MODEL_NAME=/path/to/qwen2.5-0.5b-instruct NUM_GPUS=4 MAX_STEPS=2 \
+bash examples/rl/verl/run_grpo_megatron_sglang.sh
+
+# Megatron + vLLM — BF16 baseline
+MODEL_NAME=/path/to/qwen2.5-0.5b-instruct NUM_GPUS=4 MAX_STEPS=2 \
+bash examples/rl/verl/run_grpo_megatron_vllm.sh
+
+# Megatron + vLLM — FP8PM
+FP8_PARAM_MANAGER=1 MODEL_NAME=/path/to/qwen2.5-0.5b-instruct NUM_GPUS=4 MAX_STEPS=2 \
+bash examples/rl/verl/run_grpo_megatron_vllm.sh
 ```
 
 ### Model-Specific Benchmarks

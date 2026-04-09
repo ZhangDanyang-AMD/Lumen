@@ -91,7 +91,7 @@ In-place quantization was tried first but crashed Megatron's distributed optimiz
 
 Injection point: `verl/workers/engine/megatron/transformer_impl.py:_build_megatron_module()`, gated by `FP8_PARAM_MANAGER=1` env var. Only applied to the actor model (not the reference model).
 
-**LoRA with Megatron** remains unsupported — PEFT expects HuggingFace model structure, not Megatron parallel layers.
+**LoRA with Megatron** is now supported via Lumen's `MegatronLoraAdapter`, which wraps `ColumnParallelLinear`/`RowParallelLinear` with TP-aware low-rank adapters injected before DDP wrapping. Set `LORA_RANK=32` to enable.
 
 ### 4. vLLM V1 works on ROCm after `get_device_uuid` fix
 

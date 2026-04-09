@@ -39,6 +39,9 @@ export LUMEN_FP8_ACTIVATION_STORE="${LUMEN_FP8_ACTIVATION_STORE:-0}"
 export LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
 export FP8_PARAM_MANAGER="${FP8_PARAM_MANAGER:-0}"
 export USE_8BIT_ADAM="${USE_8BIT_ADAM:-0}"
+export LORA_RANK="${LORA_RANK:-0}"
+export LORA_ALPHA="${LORA_ALPHA:-32}"
+export LORA_DROPOUT="${LORA_DROPOUT:-0.0}"
 
 echo "=== VERL + Lumen GRPO — Megatron + SGLang rollout ==="
 echo "Model:        ${MODEL_NAME}"
@@ -49,12 +52,14 @@ echo "Actor TP:     ${ACTOR_TP}"
 echo "Rollout TP:   ${ROLLOUT_TP}"
 echo "FP8:          ${LUMEN_FP8}"
 echo "FP8 PM:       ${FP8_PARAM_MANAGER}"
+echo "LoRA rank:    ${LORA_RANK}"
 echo ""
 
 VERL_ENTRY="verl.trainer.main_ppo"
 if [ "${LUMEN_FP8}" = "1" ] || [ "${LUMEN_FP8_ATTN}" != "none" ] || [ "${LUMEN_NORM}" = "1" ] \
    || [ "${LUMEN_FP8_WEIGHT_CACHE}" = "1" ] || [ "${LUMEN_FP8_ACTIVATION_STORE}" = "1" ] \
-   || [ "${LUMEN_FP8_PARAM_GATHER}" = "1" ] || [ "${FP8_PARAM_MANAGER}" = "1" ]; then
+   || [ "${LUMEN_FP8_PARAM_GATHER}" = "1" ] || [ "${FP8_PARAM_MANAGER}" = "1" ] \
+   || [ "${LORA_RANK}" != "0" ]; then
     VERL_ENTRY="lumen.rl.verl.verl_entry"
 fi
 
