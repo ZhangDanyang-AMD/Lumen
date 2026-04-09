@@ -49,6 +49,7 @@ advance/fp8_training
 advance/lora
 advance/distributed
 advance/rl_training
+advance/rl_lora
 ```
 
 ```{toctree}
