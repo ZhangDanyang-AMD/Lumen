@@ -20,7 +20,9 @@ A comprehensive inventory of all Lumen features organized by domain: **Quantizat
 | FP8 Grouped GEMM (MoE) | FP8 expert GEMM for MoE layers, fused and sequential fallback | `--moe-grouped-gemm` | delayed, dynamic, per_token, blockwise, mxfp8 | SUPPORTED |
 | FP8 Activation Store | Save MLP activations as FP8 uint8 in backward pass (~50% memory reduction) | `--lumen-fp8-activation-store` | dynamic (quantize to FP8) | SUPPORTED |
 | FP8 Weight Gradients | FP8 GEMM in wgrad path (MXFP8 only; others forced BF16) | `--linear-fp8-wgrad` | mxfp8 | SUPPORTED |
-| FP8 Param All-Gather (Layer 1) | Store parameters in FP8 with lazy re-quant on access + optimizer hook | `--lumen-fp8-param-gather` | -- | PARTIAL |
+| FP8 Param All-Gather (Layer 1) | Store parameters in FP8 with lazy re-quant on access + optimizer hook | `--lumen-fp8-param-gather` | -- | SUPPORTED |
+| FP8 Param Manager (FSDP2) | In-place FP8 param storage for FSDP2, -25% VRAM (no offload) or -5% (offload) | `FP8_PARAM_MANAGER=1` | -- | SUPPORTED |
+| FP8 Param Manager (Megatron) | On-the-fly BF16→FP8 quantization for Megatron ColumnParallel/RowParallel, -29% VRAM | `FP8_PARAM_MANAGER=1` | -- | SUPPORTED |
 | Scaling Manager | Amax history tracking, delayed scaling lifecycle, cross-rank sync, warmup + reset | Internal (`ScalingManager`) | delayed | SUPPORTED |
 | Blockwise2D Quantization | 2D block FP8 scaling for attention and linear backward (Lumen-only) | `--linear-fp8-scaling blockwise2d` | blockwise2d | LUMEN-ONLY |
 | Per-Token FP8 Scaling | Per-row FP8 quantization for attention (Lumen-only) | `scaling_type=per_token` | per_token | LUMEN-ONLY |
@@ -362,7 +364,9 @@ class PipelinedGemmReduceScatter:
 | LoRA (FSDP path) | HuggingFace PEFT LoRA adapters with FSDP/FSDP2 distributed training | `apply_lora(model, args)` when `lora_rank > 0` | SUPPORTED |
 | LoRA (Megatron path) | Megatron-Core LoraAdapter integration for TP-aware LoRA | Via Megatron config | SUPPORTED |
 | LoRA + FP8 | LoRA adapters on top of FP8-quantized base model | `quant.enable(model)` then `apply_lora(model, args)` | SUPPORTED |
-| LoRA + RL Training | LoRA with GRPO/PPO reinforcement learning pipelines | TRL / VERL integration paths | SUPPORTED |
+| LoRA + RL Training | LoRA with GRPO/PPO reinforcement learning pipelines (FSDP2 only; Megatron LoRA unsupported) | TRL / VERL integration paths | SUPPORTED |
+| VERL + vLLM Rollout | vLLM V1 as rollout engine for VERL RL training on ROCm (requires `get_device_uuid` fix) | `run_grpo_fsdp2_vllm.sh` / `run_grpo_megatron_vllm.sh` | SUPPORTED |
+| VERL + SGLang Rollout | SGLang as rollout engine for VERL RL training | `run_grpo_fsdp2.sh` / `run_grpo_megatron_sglang.sh` | SUPPORTED |
 
 ### 3.2 API Reference
 

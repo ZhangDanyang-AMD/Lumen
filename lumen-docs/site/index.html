@@ -277,7 +277,7 @@ footer a:hover { color: var(--text-primary); }
       Quantized Training for LLMs
     </h1>
     <p class="subtitle">
-      A lightweight framework that manages the quantized training lifecycle — forward, backward, optimizer, and communication — with one-line non-invasive patching on AMD Instinct hardware.
+      A lightweight framework that manages the quantized training lifecycle — forward, backward, optimizer, and communication — with one-line non-invasive patching on AMD Instinct hardware. Now with VERL FSDP2 &amp; Megatron RL, SGLang and vLLM rollout on ROCm.
     </p>
     <div class="badges">
       <span class="badge"><span class="dot red"></span>FP8 E4M3 / E5M2 / MXFP8</span>
@@ -325,7 +325,7 @@ footer a:hover { color: var(--text-primary); }
       <div class="feature-card">
         <div class="icon" style="background:rgba(0,0,0,0.04); color:var(--text-secondary);">&#9879;</div>
         <h3>Backend-Agnostic</h3>
-        <p>Same quantization semantics across FSDP, FSDP2, and Megatron-LM backends. Supports SFT, pre-training, and RL workloads (GRPO, PPO, DAPO).</p>
+        <p>Same quantization semantics across FSDP, FSDP2, and Megatron-LM backends. Supports SFT, pre-training, and RL workloads (GRPO, PPO, DAPO) with SGLang or vLLM rollout.</p>
       </div>
     </div>
   </div>
@@ -477,16 +477,15 @@ optimizer.step()</pre>
 quant.<span class="fn">enable</span>(model, config=config)</pre>
       </div>
       <div class="code-block">
-        <div class="code-header"><span class="lang-dot" style="background:var(--purple)"></span> RL Training (TRL + GRPO)</div>
-<pre><span class="kw">from</span> lumen.rl.trl.runner <span class="kw">import</span> run_grpo
+        <div class="code-header"><span class="lang-dot" style="background:var(--purple)"></span> RL Training (VERL + FSDP2 + SGLang/vLLM)</div>
+<pre><span class="cm"># VERL + FSDP2 + SGLang with FP8 Param Manager</span>
+<span class="cm"># -25% peak VRAM vs BF16, 1.3x faster vs Megatron</span>
+FP8_PARAM_MANAGER=<span class="num">1</span> \
+NUM_GPUS=<span class="num">4</span> ROLLOUT_TP=<span class="num">2</span> \
+bash examples/rl/verl/run_grpo_fsdp2.sh
 
-<span class="fn">run_grpo</span>(
-    model_name=<span class="str">"meta-llama/Llama-2-70b-hf"</span>,
-    quant_format=<span class="str">"fp8_e4m3"</span>,
-    scaling=<span class="str">"delayed"</span>,
-    fsdp_strategy=<span class="str">"FULL_SHARD"</span>,
-    lora_r=<span class="num">16</span>,
-)</pre>
+<span class="cm"># Also works with vLLM rollout on ROCm</span>
+bash examples/rl/verl/run_grpo_fsdp2_vllm.sh</pre>
       </div>
     </div>
   </div>
@@ -549,52 +548,61 @@ quant.<span class="fn">enable</span>(model, config=config)</pre>
 <section class="rl-section" id="rl">
   <div class="container">
     <h2 class="section-title">RL Training</h2>
-    <p class="section-sub">FP8 quantized training for RLHF post-training with TRL and VERL integration</p>
+    <p class="section-sub">FP8 quantized training for RLHF post-training with TRL and VERL — SGLang and vLLM rollout on MI300X</p>
     <div class="rl-grid">
       <div class="rl-card">
-        <h3>Validated Results — LLaMA-2-70B GRPO</h3>
-        <p>8x MI300X, 30 steps, Pearson correlation vs baseline</p>
+        <h3>FSDP2 vs Megatron — SGLang Rollout</h3>
+        <p>Qwen2.5-0.5B, 4× MI300X, GRPO, FP8 Param Manager</p>
         <table>
-          <thead><tr><th>Metric</th><th>Lumen</th><th>Baseline</th><th>Pearson r</th></tr></thead>
+          <thead><tr><th>Configuration</th><th>Peak VRAM</th><th>Throughput</th><th>Savings</th></tr></thead>
           <tbody>
-            <tr><td>Reward</td><td>0.364</td><td>0.347</td><td>0.776</td></tr>
-            <tr><td>Response length</td><td>162.6</td><td>166.3</td><td>0.835</td></tr>
-            <tr><td>Entropy</td><td>1.935</td><td>1.915</td><td>0.906</td></tr>
+            <tr><td>FSDP2 BF16 (offload)</td><td>48.06 GB</td><td>797 tok/s</td><td>baseline</td></tr>
+            <tr><td><strong>FSDP2 FP8PM (offload)</strong></td><td><strong>45.50 GB</strong></td><td><strong>942 tok/s</strong></td><td><strong>-5%</strong></td></tr>
+            <tr><td><strong>FSDP2 FP8PM (no offload)</strong></td><td><strong>54.87 GB</strong></td><td><strong>913 tok/s</strong></td><td><strong>-25%</strong></td></tr>
+            <tr><td>Megatron BF16 (offload)</td><td>70.52 GB</td><td>704 tok/s</td><td>N/A</td></tr>
+            <tr><td><strong>Megatron FP8PM (offload)</strong></td><td><strong>50.06 GB</strong></td><td><strong>369 tok/s</strong></td><td><strong>-29%</strong></td></tr>
           </tbody>
         </table>
       </div>
       <div class="rl-card">
-        <h3>VERL vs TRL Memory Comparison</h3>
-        <p>Peak memory per GPU — VERL + FSDP2 + SGLang vs TRL + FSDP1</p>
+        <h3>FSDP2 vs Megatron — vLLM Rollout</h3>
+        <p>Qwen2.5-0.5B, 4× MI300X, GRPO, vLLM V1 on ROCm</p>
         <table>
-          <thead><tr><th>Model</th><th>TRL + FSDP1</th><th>VERL + FSDP2</th><th>Reduction</th></tr></thead>
+          <thead><tr><th>Configuration</th><th>Peak VRAM</th><th>Throughput</th><th>Weight Update</th></tr></thead>
           <tbody>
-            <tr><td>Llama-3.1-8B</td><td>34.57 GB</td><td>11.76 GB</td><td>~66%</td></tr>
-            <tr><td>Qwen2.5-32B</td><td>124.18 GB</td><td>38.43 GB</td><td>~69%</td></tr>
+            <tr><td>FSDP2 BF16 (gpu_util=0.1)</td><td>34.26 GB</td><td>445 tok/s</td><td>1.28s</td></tr>
+            <tr><td><strong>FSDP2 FP8PM (gpu_util=0.1)</strong></td><td><strong>29.80 GB</strong></td><td><strong>477 tok/s</strong></td><td><strong>1.04s</strong></td></tr>
+            <tr><td>FSDP2 BF16 (gpu_util=0.4)</td><td>125.75 GB</td><td>1,766 tok/s</td><td>0.47s</td></tr>
+            <tr><td><strong>FSDP2 FP8PM (gpu_util=0.4)</strong></td><td><strong>125.78 GB</strong></td><td><strong>1,871 tok/s</strong></td><td><strong>0.55s</strong></td></tr>
+            <tr><td>Megatron BF16 (vLLM)</td><td>85.01 GB</td><td>338 tok/s</td><td>2.03s</td></tr>
           </tbody>
         </table>
       </div>
       <div class="rl-card">
-        <h3>Supported Algorithms</h3>
-        <p>RL post-training algorithms with FP8 quantized Actor and Reference models</p>
+        <h3>Supported Algorithms &amp; Rollout Engines</h3>
+        <p>RL post-training with FP8 quantized Actor — SGLang and vLLM rollout</p>
         <table>
           <thead><tr><th>Algorithm</th><th>Framework</th><th>Status</th></tr></thead>
           <tbody>
             <tr><td>GRPO</td><td>TRL</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (FSDP2 + SGLang)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (FSDP2 + vLLM)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (Megatron + SGLang)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (Megatron + vLLM)</td><td><span class="tag tag-green">Validated</span></td></tr>
             <tr><td>PPO</td><td>TRL / VERL</td><td><span class="tag tag-green">Supported</span></td></tr>
             <tr><td>DAPO</td><td>TRL</td><td><span class="tag tag-blue">Supported</span></td></tr>
           </tbody>
         </table>
       </div>
       <div class="rl-card">
-        <h3>Training Backends</h3>
-        <p>Multiple integration paths for different scales</p>
+        <h3>Training Backends &amp; Rollout</h3>
+        <p>FSDP2 and Megatron with SGLang or vLLM rollout on ROCm</p>
         <table>
-          <thead><tr><th>Config</th><th>Backend</th><th>Best For</th></tr></thead>
+          <thead><tr><th>Config</th><th>Rollout</th><th>Best For</th></tr></thead>
           <tbody>
-            <tr><td>TRL + FSDP1/2</td><td>quant.enable + Accelerate</td><td>Quick experiments</td></tr>
-            <tr><td>VERL + FSDP2</td><td>VERL FSDPWorker</td><td>Large-scale RL</td></tr>
-            <tr><td>VERL + Megatron</td><td>VERL MegatronWorker</td><td>MoE / TP+PP+EP</td></tr>
+            <tr><td>TRL + FSDP1/2</td><td>Built-in</td><td>Quick experiments</td></tr>
+            <tr><td>VERL + FSDP2</td><td>SGLang / vLLM</td><td>Large-scale RL (1.3× faster vs Megatron)</td></tr>
+            <tr><td>VERL + Megatron</td><td>SGLang / vLLM</td><td>MoE / TP+PP+EP</td></tr>
           </tbody>
         </table>
       </div>
