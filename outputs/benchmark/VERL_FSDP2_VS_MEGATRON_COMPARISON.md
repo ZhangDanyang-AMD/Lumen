@@ -72,10 +72,10 @@ All 4 GPUs host both FSDP2 training and vLLM rollout (TP=2, 2 replicas).
 
 **Fix**: `ctx.save_for_backward(fp8_weight.clone(), scale)` in `lumen/quantize/fp8_params.py`. The clone creates an independent FP8 copy (~0.5 GB for Qwen 0.5B), allowing FSDP2 to free the allgathered buffer.
 
-| Mode | BF16 | FP8PM (before fix) | FP8PM (after fix) | Savings |
+| Mode | BF16 | FP8PM (after fix) | Savings |
 |---|---|---|---|---|
-| With offload | 48.06 GB | 69.18 GB (+44%) | **45.50 GB** | **-5%** |
-| Without offload | 73.49 GB | — | **54.87 GB** | **-25%** |
+| With offload | 48.06 GB | **45.50 GB** | **-5%** |
+| Without offload | 73.49 GB | **54.87 GB** | **-25%** |
 
 FP8PM now works correctly with offloading. Without offloading still gives the largest savings because FP8 params stay on GPU at half the size of BF16.
 

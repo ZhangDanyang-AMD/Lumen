@@ -649,10 +649,10 @@ bash examples/rl/verl/run_grpo_fsdp2_vllm.sh</pre>
         <h4>1. FP8PM saves memory with both offload modes (after clone fix)</h4>
         <p><code>_FP8LinearFunc.forward</code> previously pinned FSDP2's allgathered weight tensors on GPU, causing +44% memory regression with offloading (48→69 GB). <strong>Fix:</strong> <code>ctx.save_for_backward(fp8_weight.clone(), scale)</code> in <code>lumen/quantize/fp8_params.py</code>.</p>
         <table>
-          <thead><tr><th>Mode</th><th>BF16</th><th>FP8PM (before fix)</th><th>FP8PM (after fix)</th><th>Savings</th></tr></thead>
+          <thead><tr><th>Mode</th><th>BF16</th><th>FP8PM (after fix)</th><th>Savings</th></tr></thead>
           <tbody>
-            <tr><td>With offload</td><td>48.06 GB</td><td>69.18 GB (+44%)</td><td><strong>45.50 GB</strong></td><td><strong>-5%</strong></td></tr>
-            <tr><td>Without offload</td><td>73.49 GB</td><td>—</td><td><strong>54.87 GB</strong></td><td><strong>-25%</strong></td></tr>
+            <tr><td>With offload</td><td>48.06 GB</td><td><strong>45.50 GB</strong></td><td><strong>-5%</strong></td></tr>
+            <tr><td>Without offload</td><td>73.49 GB</td><td><strong>54.87 GB</strong></td><td><strong>-25%</strong></td></tr>
           </tbody>
         </table>
 
