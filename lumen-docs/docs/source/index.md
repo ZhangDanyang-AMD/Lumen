@@ -39,6 +39,7 @@ architecture
 
 examples/llama2_sft
 examples/llama31_pretrain
+examples/rl_training
 ```
 
 ```{toctree}
@@ -50,6 +51,7 @@ advance/lora
 advance/distributed
 advance/rl_training
 advance/rl_lora
+advance/feature_catalog
 ```
 
 ```{toctree}
