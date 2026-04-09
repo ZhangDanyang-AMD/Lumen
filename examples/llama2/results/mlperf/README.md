@@ -153,6 +153,109 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 | **Other** | 214 | ~70 | 3.1x | Memcpy, dropout, clone |
 | **Total** | **6,079** | **~4,020** | **1.51x** | |
 
+### Detailed 1,537ms Gap Breakdown (v40 5,348ms vs MLPerf 3,811ms)
+
+After v39/v40 optimizations (fused SwiGLU backward, fused quant+amax, overlapped
+grad reduce, RECOMPUTE_NUM_LAYERS=19), the raw profile gap of ~2,060ms narrowed to
+**1,537ms**. The ~523ms was absorbed by optimizations applied between the v35 profile
+snapshot and v40. The remaining gap decomposes as follows:
+
+| # | Root Cause | Est. ms | % of 1,537ms | Evidence |
+|---|-----------|---------|-------------|---------|
+| 1 | **SwiGLU forward elementwise not fused** | 300–400 | 20–26% | `aten::mul` 527ms/step (20,466 calls), `aten::silu` 100ms/step; v39 fused bwd only; TE uses single fused kernel for full SwiGLU fwd+bwd |
+| 2 | **Copy/dtype conversion overhead** | 250–350 | 16–23% | `aten::copy_` 381ms/step (12,777 calls), `aten::clone` 105ms/step (8,149 calls); weight `.t().contiguous()`, FP8↔BF16 casts; TE `cast_transpose_fusion_kernel_optimized` does both in one pass |
+| 3 | **CPU kernel launch dispatch** | 200–300 | 13–20% | 57K launches/step × ~5μs = 285ms CPU wait; TE ~7K launches; GPU idle bubbles between dispatch; `aten::copy_` alone: 304ms CPU time/step |
+| 4 | **FP8 quant/scale pipeline residual** | 100–200 | 7–13% | `aten::clamp` 57ms/step, `_dynamic_per_tensor_quant` 62ms/step remain after fused quant+amax; TE `delayed_scaling_recipe` amax update is ~6.5μs/tensor vs Lumen ~200μs |
+| 5 | **Memory allocator pressure (99.68%)** | 100–200 | 7–13% | 99.68% utilization vs TE 82%; amplifies all categories via fragmented free-list scans, `cudaFree`/`cudaMalloc` fallback; causes 13.3% post-eval regression (5,348→6,060ms) |
+| 6 | **Activation checkpoint recompute dispatch** | 100–150 | 7–10% | `CheckpointFunctionBackward` 1,398ms/step (23% of GPU time); Python-level `tensor_parallel.checkpoint` replay overhead; TE may use lighter mechanism or graph capture |
+| 7 | **Cat / tensor concatenation** | 50–80 | 3–5% | `aten::cat` 1,287 calls/step (123ms); LoRA A×B concat + gradient AllReduce prep; TE pre-allocates buffers |
+| | **Total** | **~1,500–1,680** | **~100%** | |
+
+#### Per-root-cause kernel-level evidence
+
+**Root cause 1 — SwiGLU forward elementwise**
+
+Lumen's SwiGLU forward still launches separate kernels:
+
+| Kernel | ms/step | Calls/step | Role |
+|--------|---------|-----------|------|
+| `aten::mul` | 527 | 6,822 | gate × up (SwiGLU) + grad element ops |
+| `aten::silu` | 100 | 741 | SiLU(gate) in forward |
+| `aten::sigmoid` | 82 | 1,280 | SiLU backward (sigmoid component) |
+
+~60% of the `aten::mul` time originates from the SwiGLU path. v39's `LUMEN_FUSED_SWIGLU=1`
+fused the backward only. TE's `USE_TE_SWIGLU=1` computes the entire SiLU(gate) × up forward
+and backward in a single C++ kernel with zero separate elementwise launches.
+
+**Root cause 2 — Copy/dtype conversion**
+
+| Kernel | ms/step | Calls/step | Primary source |
+|--------|---------|-----------|---------------|
+| `aten::copy_` | 381 | 12,777 | Weight transpose `.t().contiguous()`, dtype casts |
+| `aten::clone` | 105 | 8,149 | Autograd defensive copies |
+| `aten::contiguous` | 57 | 1,476 | Non-contiguous → contiguous for GEMM |
+| `Memcpy DtoD` | 79 | 7,730 | Device-to-device copies |
+
+TE's `cast_transpose_fusion_kernel_optimized` writes both row-major and column-major
+FP8 in a single kernel pass (~100μs/layer). The transposed output is consumed directly
+by backward GEMMs, eliminating all intermediate copy/contiguous calls.
+
+**Root cause 3 — CPU kernel launch overhead**
+
+| Metric | Lumen | TE (est.) | Ratio |
+|--------|-------|----------|-------|
+| Kernel launches / step | ~57,000 | ~7,000 | **8.1x** |
+| CPU dispatch time / step | ~285ms | ~35ms | 8.1x |
+| GPU idle bubbles | Significant | Minimal | — |
+
+Each HIP launch incurs ~5μs CPU API call + ~3μs dispatch. Between launches the GPU idles
+waiting for the next kernel submission. TE's extensive fusion reduces launch count by ~8x,
+which compresses GPU bubbles proportionally. `aten::copy_` alone accounts for 304ms/step
+of CPU time — time during which the GPU is largely idle.
+
+**Root cause 4 — FP8 quant/scale residual**
+
+v39/v40 fused `abs + amax` into a single kernel (`LUMEN_FUSED_QUANT_AMAX=1`), saving
+~377ms/step. Remaining overhead:
+
+| Kernel | ms/step | Calls/step |
+|--------|---------|-----------|
+| `aten::clamp` (scale clamping) | 57 | 811 |
+| `_dynamic_per_tensor_quant` | 62 | 481 |
+| `_static_per_tensor_quant` | 48 | 481 |
+
+TE's `delayed_scaling_recipe` performs the amax-to-scale computation in ~6.5μs per tensor
+(profile line `delayed_scaling_recipe:: ... 130μs / 20 calls = 6.5μs`). Lumen's path
+still requires a separate `clamp` kernel and two distinct quant kernels per tensor.
+
+**Root cause 5 — Memory allocator pressure**
+
+Not a discrete kernel cost but a multiplicative amplifier:
+
+| Metric | Lumen v40 | TE / MLPerf |
+|--------|----------|-------------|
+| GPU memory utilization | 99.68% | ~82% |
+| Free headroom | ~500 MiB | ~35 GiB |
+| Post-eval step time regression | +13.3% | -0.8% |
+| BF16 autograd intermediates | ~112 GiB (58% of 192 GiB) | Minimal (C++ fusion) |
+
+At 99.68% utilization the PyTorch caching allocator has almost no free blocks.
+Every `torch.empty()` must scan a fragmented free list, and frequent
+`cudaFree`/`cudaMalloc` fallbacks occur. After eval (which temporarily allocates
+activations for all 80 layers without checkpointing), the allocator cannot
+defragment, causing a permanent 13.3% slowdown for all subsequent training steps.
+
+**Root cause 6 — Activation checkpoint overhead**
+
+`CheckpointFunctionBackward` consumes 1,398ms/step (23% of GPU time). This includes:
+- Full forward re-execution for 19 checkpointed layers (v40 `RECOMPUTE_NUM_LAYERS=19`)
+- Python-level `tensor_parallel.checkpoint` dispatch overhead per layer
+- Memory allocation/deallocation for recomputed activations at high utilization
+
+TE's approach (possibly using CUDA/HIP graph capture for the checkpoint region, or a
+lighter C++-level checkpoint implementation) avoids the Python dispatch overhead and
+benefits from pre-allocated graph buffers.
+
 ### Key Findings
 
 1. **GEMM and Attention are NOT the bottleneck.** They account for ~64% of GPU time
@@ -199,24 +302,30 @@ TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
 | Align eval frequency (`LUMEN_EVAL_ALIGNED=1`) | ~15% wall-clock | Easy | Implemented |
 | Fused Norm + FP8 Quant (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Medium | Implemented |
 | Eliminate redundant syncs (`LUMEN_SKIP_BACKEND_SYNC=1`) | ~1–2% step time | Medium | Implemented |
-| Fix post-eval allocator fragmentation | **-1,200ms (19%) post-eval steps** | Medium | Awaiting validation |
+| Fix post-eval allocator fragmentation | **-11.1% total time** | Medium | **v38b: validated** |
 
 ### Post-Eval Performance: Lumen vs MLPerf Reference
 
-| Metric | Lumen | MLPerf MI300X (avg of 10) |
-|--------|-------|---------------------------|
-| **Pre-eval ms/step** | 5,840 | 3,811 |
-| **Post-eval ms/step** | 7,120 | 3,778 |
-| **Delta** | **+1,280 (+21.9%)** | **-33 (-0.8%)** |
-| Recovery | Never | N/A (no degradation) |
-| Eval duration | ~48s | ~31s |
-| Eval iterations | 22 | ~22 |
+| Metric | Lumen v37 | Lumen v38b | MLPerf MI300X (avg of 10) |
+|--------|-----------|------------|---------------------------|
+| **Pre-eval ms/step** | 5,898 | 5,809 | 3,811 |
+| **Post-eval#1 ms/step** | 7,167 | 6,586 | 3,778 |
+| **Post-eval#1 delta** | **+21.7%** | **+13.4%** | **-0.8%** |
+| Subsequent eval delta | +0.7–2.8% | +0.6–2.4% | 0% |
+| Total training time | 7,268s | **6,458s (-11.1%)** | ~4,180s |
+| Final val_loss | 0.9188 | 0.9194 | ~0.92 |
+
+v38b applies four fixes: forced activation recompute during eval (`LUMEN_EVAL_RECOMPUTE=1`),
+warmup eval pass to prime allocator (`LUMEN_WARMUP_EVAL_STEPS=2`), explicit GC around
+eval (`LUMEN_MANUAL_GC=1`), and `empty_cache()` after eval (`LUMEN_POST_EVAL_CACHE_CLEAR=1`).
+A second `reset_fp8_state()` after the warmup eval pass prevents FP8 scale corruption.
 
 Root cause: Megatron's `transformer_block.py` skips activation checkpointing during
 eval (`self.training=False`), allocating activations for all 80 layers vs 21 during
 training. At 96% memory, this fragments the ROCm allocator and the fragmentation
 persists after training resumes. The MLPerf/NeMo/TE stack avoids this (likely via
-TE's memory management, CUDA graphs, or a different eval path).
+TE's memory management, CUDA graphs, or a different eval path). The v38b fixes
+reduce the regression from +22% to +13% and prevent compounding across evaluations.
 
 ### Profiling Method
 

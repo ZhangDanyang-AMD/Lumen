@@ -404,6 +404,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
+                fp8_weight_cache=getattr(module, "_fp8_weight_data", None),
+                fp8_weight_scale=getattr(module, "_fp8_weight_scale", None),
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
             )
@@ -483,6 +485,92 @@ def _replace_forward(
 
     module._original_forward = original_forward
     module.forward = quant_forward
+
+
+def store_weights_fp8(
+    model: nn.Module,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+) -> int:
+    """Pre-quantize patched ``nn.Linear`` weights to FP8 and cache them.
+
+    Must be called **after** :func:`enable`.  Each patched layer's BF16
+    weight is quantized to FP8 and stored as a non-parameter buffer
+    ``module._fp8_weight_data`` alongside its scale ``module._fp8_weight_scale``.
+    The original BF16 ``nn.Parameter`` is kept for DDP gradient sync and
+    the optimizer.
+
+    The ``quant_forward`` path detects ``_fp8_weight_data`` and feeds
+    the cached FP8 weight directly to the GEMM, **skipping the per-forward
+    re-quantization** that ``quant.enable`` normally performs.
+
+    After each ``optimizer.step()`` the BF16 master weight has been
+    updated, so :func:`register_fp8_weight_optimizer_hooks` re-quantizes
+    the master into the FP8 cache to keep it in sync.
+
+    Returns:
+        Number of linear layers with cached FP8 weights.
+    """
+    fp8_max = torch.finfo(fp8_dtype).max
+    count = 0
+    for _name, module in model.named_modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        weight = getattr(module, "weight", None)
+        if weight is None or not isinstance(weight, nn.Parameter):
+            continue
+        if hasattr(module, "_fp8_weight_data"):
+            continue
+
+        with torch.no_grad():
+            amax = weight.data.abs().amax().clamp(min=1e-12)
+            scale = (amax / fp8_max).float()
+            fp8_data = (weight.data.float() * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(fp8_dtype)
+
+        module.register_buffer("_fp8_weight_data", fp8_data, persistent=False)
+        module.register_buffer("_fp8_weight_scale", scale, persistent=False)
+        module._fp8_weight_dtype = fp8_dtype
+        count += 1
+
+    logger.info("store_weights_fp8: cached %d linear weights in %s", count, fp8_dtype)
+    return count
+
+
+def register_fp8_weight_optimizer_hooks(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+) -> None:
+    """Register a post-step hook on *optimizer* to refresh FP8 weight caches.
+
+    After ``optimizer.step()`` updates the BF16 master weights, this hook
+    re-quantizes each patched layer's weight to FP8 and writes it into the
+    ``_fp8_weight_data`` buffer so the next forward uses fresh cached data.
+    """
+    modules_with_cache = [
+        m for m in model.modules() if hasattr(m, "_fp8_weight_data") and hasattr(m, "_fp8_weight_scale")
+    ]
+
+    if not modules_with_cache:
+        logger.warning("register_fp8_weight_optimizer_hooks: no FP8 cached modules found")
+        return
+
+    logger.info(
+        "register_fp8_weight_optimizer_hooks: managing %d FP8 cached layers",
+        len(modules_with_cache),
+    )
+
+    def _post_step(opt, args, kwargs):
+        with torch.no_grad():
+            for m in modules_with_cache:
+                w = m.weight
+                fp8_dt = getattr(m, "_fp8_weight_dtype", torch.float8_e4m3fn)
+                fp8_max_val = torch.finfo(fp8_dt).max
+                amax = w.data.abs().amax().clamp(min=1e-12)
+                scale = (amax / fp8_max_val).float()
+                fp8_data = (w.data.float() * (1.0 / scale)).clamp(-fp8_max_val, fp8_max_val).to(fp8_dt)
+                m._fp8_weight_data.copy_(fp8_data)
+                m._fp8_weight_scale.copy_(scale)
+
+    optimizer.register_step_post_hook(_post_step)
 
 
 def disable(model: nn.Module) -> None:

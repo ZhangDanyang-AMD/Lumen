@@ -188,6 +188,17 @@ def _probe_aiter_fused_quant():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_silu_mul_fp8():
+    """True if AITER fused SwiGLU + per-tensor FP8 quant kernel is importable."""
+    try:
+        from aiter.ops.triton.quant.fused_fp8_quant import fused_silu_mul_fp8_per_tensor_static_quant as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_gmm():
     try:
         from aiter.ops.triton.gmm import gmm as _  # noqa: F401
@@ -378,6 +389,28 @@ def _probe_aiter_fused_ungated():
     """Check if AITER Triton fused ungated feed-forward is available."""
     try:
         from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_ungated as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_swiglu():
+    """Check if AITER Triton fused SwiGLU fwd/bwd kernels are available."""
+    try:
+        from aiter.ops.triton.activation import swiglu_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fast_transpose():
+    """Check if AITER Triton fast 2D transpose kernel is available."""
+    try:
+        from aiter.ops.triton.quant.fast_transpose import fast_transpose_2d as _  # noqa: F401
 
         return True
     except (ImportError, OSError):

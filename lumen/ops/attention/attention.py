@@ -5,6 +5,7 @@
 ###############################################################################
 
 import logging
+import os as _os
 from typing import Optional
 
 import torch
@@ -497,7 +498,135 @@ class AttentionTritonBlockwise2DFunction(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
-_mark_allow_in_graph(AttentionTritonFunction, AttentionTritonMXFP8Function, AttentionTritonBlockwise2DFunction)
+_LUMEN_FP8_ATTN_BWD = _os.environ.get("LUMEN_FP8_ATTN_BWD", "0") == "1"
+
+
+class AttentionCsrcFP8BwdFunction(torch.autograd.Function):
+    """CK csrc forward + Triton FP8 backward.
+
+    Uses AITER's highly optimized CK forward kernel (BF16), but routes the
+    backward through Lumen's Triton FP8 backward kernels which quantize dO,
+    Q, K to FP8 blockwise for reduced memory bandwidth.
+
+    Controlled by ``LUMEN_FP8_ATTN_BWD=1``.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        q,
+        k,
+        v,
+        dropout_p,
+        softmax_scale,
+        causal,
+        window_size,
+        bias,
+        alibi_slopes,
+        deterministic,
+        grad_quant_type,
+    ):
+        result = flash_attn_func(
+            q,
+            k,
+            v,
+            dropout_p=dropout_p,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            window_size=window_size,
+            bias=bias,
+            alibi_slopes=alibi_slopes,
+            deterministic=deterministic,
+            return_lse=True,
+        )
+        if isinstance(result, tuple):
+            out, lse = result[0], result[1]
+        else:
+            out = result
+            lse = None
+
+        ctx.save_for_backward(q, k, v, out, lse)
+        ctx.softmax_scale = softmax_scale
+        ctx.causal = causal
+        ctx.dropout_p = dropout_p
+        ctx.grad_quant_type = grad_quant_type
+        return out
+
+    @staticmethod
+    def backward(ctx, do):
+        q, k, v, o, lse = ctx.saved_tensors
+
+        from lumen.kernels.attention.attention_impl import attention_backward as triton_fp8_bwd
+        from lumen.kernels.attention.attention_impl import (
+            get_f8_fwd_dtype,
+        )
+        from lumen.quantize.scaling_manager import ScalingManager
+
+        B, S_Q, H_Q, D = q.shape
+        _, S_K, H_K, _ = k.shape
+
+        fp8_dt = get_f8_fwd_dtype()
+        q_fp8, q_scale = ScalingManager.quantize_block_fp8(q, FIXED_BLOCK_M, fp8_dt)
+        k_fp8, k_scale = ScalingManager.quantize_block_fp8(k, FIXED_BLOCK_M, fp8_dt)
+        v_fp8, v_scale, p_scale = ScalingManager.quantize_v_fp8(v, fp8_dt)
+
+        if lse is not None and lse.dim() == 3:
+            seqlen_q = q.shape[1]
+            num_blocks = (seqlen_q + FIXED_BLOCK_M - 1) // FIXED_BLOCK_M
+            lse_interleaved = torch.zeros(
+                B,
+                H_Q,
+                num_blocks * 2 * FIXED_BLOCK_M,
+                dtype=torch.float32,
+                device=q.device,
+            )
+            for blk in range(num_blocks):
+                start = blk * FIXED_BLOCK_M
+                end = min(start + FIXED_BLOCK_M, seqlen_q)
+                lse_interleaved[:, :, blk * 2 * FIXED_BLOCK_M : blk * 2 * FIXED_BLOCK_M + (end - start)] = lse[
+                    :, :, start:end
+                ]
+            lse_for_bwd = lse_interleaved
+        else:
+            lse_for_bwd = lse
+
+        dq, dk, dv = triton_fp8_bwd(
+            do,
+            q_fp8,
+            k_fp8,
+            v_fp8,
+            o,
+            q_scale,
+            k_scale,
+            v_scale,
+            p_scale,
+            lse_for_bwd,
+            0,
+            0,
+            S_Q,
+            S_K,
+            ctx.softmax_scale,
+            ctx.causal,
+            alibi_slopes=None,
+            use_fp8=True,
+            dropout_p=ctx.dropout_p,
+            force_triton=True,
+        )
+
+        gqt = ctx.grad_quant_type
+        dq = quantize_grad_tensor(dq, gqt)
+        dk = quantize_grad_tensor(dk, gqt)
+        dv = quantize_grad_tensor(dv, gqt)
+
+        return dq, dk, dv, None, None, None, None, None, None, None, None
+
+
+_mark_allow_in_graph(
+    AttentionTritonFunction,
+    AttentionTritonMXFP8Function,
+    AttentionTritonBlockwise2DFunction,
+    AttentionCsrcFP8BwdFunction,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +829,21 @@ def attention(
                 return_attn_probs,
                 torch.is_grad_enabled(),
                 False,
+                grad_quant_type,
+            )
+
+        if _LUMEN_FP8_ATTN_BWD and _needs_grad and _csrc_bias is None and alibi_slopes is None:
+            return AttentionCsrcFP8BwdFunction.apply(
+                q,
+                k,
+                v,
+                dropout_p,
+                softmax_scale,
+                causal,
+                window_size,
+                _csrc_bias,
+                alibi_slopes,
+                deterministic,
                 grad_quant_type,
             )
 

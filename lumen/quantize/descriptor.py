@@ -4,12 +4,30 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
 
 __all__ = ["FP8Descriptor"]
+
+_USE_FAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE_V2", "0") == "1"
+_TRANSPOSE_CACHE_ENABLED = os.environ.get("LUMEN_TRANSPOSE_CACHE", "1") != "0"
+_fast_transpose_fn = None
+
+
+def _get_fast_transpose():
+    global _fast_transpose_fn
+    if _fast_transpose_fn is not None:
+        return _fast_transpose_fn
+    try:
+        from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+        _fast_transpose_fn = fast_transpose_fp8
+    except (ImportError, OSError):
+        _fast_transpose_fn = False
+    return _fast_transpose_fn
 
 
 @dataclass
@@ -27,7 +45,18 @@ class FP8Descriptor:
 
     @property
     def transpose_cached(self) -> torch.Tensor:
+        if not _TRANSPOSE_CACHE_ENABLED:
+            if _USE_FAST_TRANSPOSE and self.data.dim() == 2 and self.data.is_cuda:
+                fn = _get_fast_transpose()
+                if fn:
+                    return fn(self.data)
+            return self.data.t().contiguous()
         if self._transpose is None:
+            if _USE_FAST_TRANSPOSE and self.data.dim() == 2 and self.data.is_cuda:
+                fn = _get_fast_transpose()
+                if fn:
+                    self._transpose = fn(self.data)
+                    return self._transpose
             self._transpose = self.data.t().contiguous()
         return self._transpose
 

@@ -267,31 +267,39 @@ class FP8ParamManager:
         self._wrapped_modules: list = []
         self._state_dict_handles: list = []
 
+    _QUANTIZABLE_TYPES = (nn.Linear,)
+
     def quantize_params(self, model: nn.Module) -> int:
-        """Quantize all linear weights in the model to FP8.
+        """Quantize all ``nn.Linear`` weights in the model to FP8.
+
+        Skips non-linear modules (Embedding, LayerNorm, etc.) even if
+        they have a ``weight`` attribute, because the dequant forward
+        hook assumes ``F.linear`` semantics.
 
         Returns:
             Number of parameters quantized.
         """
         count = 0
         for name, module in model.named_modules():
-            if isinstance(module, nn.Linear) or hasattr(module, "weight"):
-                weight = getattr(module, "weight", None)
-                if weight is None or not isinstance(weight, nn.Parameter):
-                    continue
-                if weight.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2):
-                    continue
+            if not isinstance(module, self._QUANTIZABLE_TYPES):
+                continue
+            weight = getattr(module, "weight", None)
+            if weight is None or not isinstance(weight, nn.Parameter):
+                continue
+            if weight.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2):
+                continue
 
-                self._original_dtypes[name] = weight.dtype
-                fp8_weight, scale = quantize_param_to_fp8(weight.data, self.fp8_dtype)
-                self._param_scales[name] = scale
+            self._original_dtypes[name] = weight.dtype
+            fp8_weight, scale = quantize_param_to_fp8(weight.data, self.fp8_dtype)
+            self._param_scales[name] = scale
 
-                weight.data = fp8_weight.to(weight.device)
-                weight._fp8_desc = FP8Descriptor(data=weight.data, scale=scale, fp8_dtype=self.fp8_dtype)
-                weight._fp8_original_dtype = self._original_dtypes[name]
-                count += 1
+            weight.data = fp8_weight.to(weight.device)
+            weight._fp8_desc = FP8Descriptor(data=weight.data, scale=scale, fp8_dtype=self.fp8_dtype)
+            weight._fp8_original_dtype = self._original_dtypes[name]
+            weight.requires_grad_(False)
+            count += 1
 
-        logger.info("Quantized %d parameters to FP8 (%s)", count, self.fp8_dtype)
+        logger.info("Quantized %d nn.Linear parameters to FP8 (%s)", count, self.fp8_dtype)
         return count
 
     def register_dequant_hooks(self, model: nn.Module) -> int:
@@ -327,7 +335,8 @@ class FP8ParamManager:
                     continue
                 orig_dtype = getattr(param, "_fp8_original_dtype", torch.bfloat16)
                 param._state_dict_data_backup = param.data
-                param.data = (param.data.to(torch.float32) / param._fp8_desc.scale).to(orig_dtype)
+                scale = param._fp8_desc.scale.to(param.data.device)
+                param.data = (param.data.to(torch.float32) / scale).to(orig_dtype)
 
         def _post_save(module, state_dict, prefix, local_metadata):
             for _name, param in module._parameters.items():
@@ -351,13 +360,20 @@ class FP8ParamManager:
         def hook(module, inputs):
             weight = module.weight
             if hasattr(weight, "_fp8_desc"):
-                dequant = dequantize_param_from_fp8(weight._fp8_desc.data, weight._fp8_desc.scale, original_dtype)
+                fp8_data = weight.data
+                scale = weight._fp8_desc.scale.to(fp8_data.device)
+                dequant = dequantize_param_from_fp8(fp8_data, scale, original_dtype)
                 module._dequantized_weight = dequant
 
         return hook
 
     def _wrap_forward_to_use_dequant(self, module: nn.Module) -> None:
-        """Replace forward to use _dequantized_weight when set by pre-hook."""
+        """Replace forward to use _dequantized_weight while keeping weight in autograd graph.
+
+        DDP requires every parameter to participate in the loss computation graph.
+        We use a STE (straight-through estimator) trick: add ``weight - weight.detach()``
+        which is zero in forward but connects ``weight`` to the graph for backward.
+        """
         if hasattr(module, "_fp8_original_forward"):
             return
         original_forward = module.forward

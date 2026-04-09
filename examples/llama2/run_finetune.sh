@@ -99,6 +99,14 @@ if [ "${LUMEN_FUSED_MLP:-0}" = "1" ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --lumen-fused-mlp"
 fi
 
+if [ "${LUMEN_MANUAL_GC:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --manual-gc"
+fi
+
+if [ -n "${LUMEN_LOG_INTERVAL:-}" ]; then
+    LOG_INTERVAL="${LUMEN_LOG_INTERVAL}"
+fi
+
 
 ###############################################################################
 # MEGATRON BACKEND
@@ -192,6 +200,8 @@ run_megatron() {
 
     DIST_OPT_ARGS=""
     [ "${USE_DIST_OPTIMIZER:-0}" = "1" ] && DIST_OPT_ARGS="--use-distributed-optimizer"
+    [ "${OVERLAP_GRAD_REDUCE:-0}" = "1" ] && DIST_OPT_ARGS="${DIST_OPT_ARGS} --overlap-grad-reduce"
+    [ "${LUMEN_HIP_GRAPHS:-0}" = "1" ] && DIST_OPT_ARGS="${DIST_OPT_ARGS} --lumen-hip-graphs"
 
     RESET_ARGS="--reset-position-ids --reset-attention-mask --eod-mask-loss"
     if [ "${DISABLE_RESET_FLAGS:-0}" = "1" ]; then

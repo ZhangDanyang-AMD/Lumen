@@ -972,6 +972,128 @@ Write back only meaningful tests or experiments that change confidence in a hypo
 
 - Status: open — profiling complete, optimization roadmap identified
 
+### [2026-04-08 v39-phase1-opts]
+- Symptom: v38b pre-eval 5,809ms/step vs MLPerf 3,811ms — still 52% gap after post-eval fixes
+- v39 changes (Phase 1-2 optimizations from speed gap plan):
+  1. Runtime tunables (CPU perf governor, THP, page cache drop, ASLR disabled)
+  2. NCCL tuning (32 channels, 32 CTAs, NVLS disabled, AVOID_RECORD_STREAMS)
+  3. Allocator: max_split_size_mb=512
+  4. Log interval: 10 (reduced from 1)
+  5. Post-eval re-warmup (LUMEN_POST_EVAL_REWARM=1)
+  6. CUBLAS_FORCE_XMMA_KERNEL_INIT=DEVICE, OMP_NUM_THREADS=1, hipBLASLt preference
+  7. Fused SwiGLU Triton kernel (LUMEN_FUSED_SWIGLU=1) — AITER-hosted, Lumen dispatches
+  8. Fused fast transpose (LUMEN_FUSED_CAST_TRANSPOSE_V2=1) — AITER-hosted
+  9. FP8 attention backward (LUMEN_FP8_ATTN_BWD) — DISABLED due to cu_seqlens bug (see below)
+- v39 crash: First run crashed on backward pass with `RuntimeError: lumen::attention_triton_backward_impl() Expected a value of type 'int' for argument 'cu_seqlens_q' but instead found type 'NoneType'`
+  - Root cause: `AttentionCsrcFP8BwdFunction.backward` passed `None` for cu_seqlens_q/cu_seqlens_k instead of `0` (integer) required for non-varlen BSHD layout
+  - Fix: Changed `None, None, S_Q, S_K` to `0, 0, S_Q, S_K` in the `triton_fp8_bwd` call and added `force_triton=True`
+  - Feature disabled (LUMEN_FP8_ATTN_BWD=0) for v39 due to additional LSE format mismatch between CK forward (dense BxHxS) and Triton backward (interleaved blocks). Needs dedicated integration work.
+- v39 results (run in progress, through step 610/1024):
+  | Metric | v37 | v38b | v39 | MLPerf ref |
+  |--------|-----|------|-----|------------|
+  | Pre-eval ms/step | 5,898 | 5,809 | **5,428** | 3,811 |
+  | Post-eval#1 ms/step | 7,167 | 6,586 | **6,070** | 3,778 |
+  | Post-eval#1 delta | +21.7% | +13.4% | **+11.8%** | -0.8% |
+  | val_loss @ 192 | 0.9504 | 0.9453 | **0.9453** | ~0.94 |
+  | val_loss @ 384 | 0.9343 | — | **0.9318** | ~0.93 |
+  | val_loss @ 576 | 0.9273 | — | **0.9222** | ~0.92 |
+  | Memory | 0.9615 | — | 0.9794→0.9837 | ~0.82 |
+- Pre-eval improvement: 5,809→5,428ms = **-381ms (-6.6%)**
+- Post-eval improvement: 6,586→6,070ms = **-516ms (-7.8%)**
+- Convergence: val_loss matches v38b exactly. Passes <0.925 at step 576.
+- Stability: 0 NaN, 0 skipped through 610 steps.
+
+- **Remaining gap analysis** (v39 pre-eval 5,428ms vs MLPerf 3,811ms = **1,617ms / 42.4% gap**):
+
+  The gap breakdown from profiling (scaled to v39 baseline):
+
+  | Source | Est. Time | % of Gap | Difficulty | Notes |
+  |--------|----------|----------|-----------|-------|
+  | **Checkpoint recompute overhead** | 500-800ms | 30-50% | Hard | Lumen recomputes 21/80 layers; TE may use CUDA graphs or overlapped recompute that hides latency. `CheckpointFunctionBackward` was ~4.2s/3 steps in profile. |
+  | **SwiGLU elementwise ops** | 300-500ms | 19-31% | Medium | `aten::mul` alone was 1,580ms/3 steps. TE fuses entire SwiGLU fwd+bwd into single kernel. v39 fused SwiGLU may partially address this (need new profile). |
+  | **FP8 quant/cast/transpose pipeline** | 200-400ms | 12-25% | Medium | TE's `cast_transpose_fusion_kernel_optimized` replaces Lumen's separate abs→amax→quant→transpose chain |
+  | **Copy/dtype overhead** | 200-300ms | 12-19% | Medium | 38K+ aten::copy_ calls (1,144ms/3 steps). TE avoids via in-place FP8 ops |
+  | **CPU dispatch / kernel launch** | 100-200ms | 6-12% | Hard | ~57K kernel launches/step vs TE's ~15K; 5µs overhead each = ~285ms |
+  | **Memory allocator pressure** | 100-200ms | 6-12% | Hard | 98.37% memory usage vs TE's ~82%. High pressure causes allocator thrashing |
+
+  Key structural differences that limit per-kernel optimizations:
+  1. **Memory usage 98.4% vs 82%**: Lumen at near-capacity, no room for workspace buffers, causes allocator fragmentation and prevents aggressive fusion (which needs temp buffers)
+  2. **Kernel launch count ~57K vs ~15K**: TE's fusion reduces total launches by ~3-4x. Each launch has ~5µs CPU overhead.
+  3. **Checkpoint forward recompute**: The 21-layer recompute (ACL=21) runs the full forward again during backward, adding ~500ms+ per step that may be better hidden with overlapped compute in TE
+
+- **quant.enable() interface change**: The `LumenConfig.enable()` return type was changed from `manager` to `(manager, model)` to support LoRA wrapping via PEFT. Updated callers in `megatron.py` and `fsdp.py` to destructure the new return.
+
+- Status: open — v39 running, collecting full data. quant.enable() callers updated.
+
+### [2026-04-08 fused-swiglu-quant]
+- Symptom: 857ms/step in elementwise ops (SwiGLU mul/sigmoid/silu separate kernels)
+- Possible bug: not a bug — missing fusion
+- Implementation: Added `LUMEN_FUSED_SWIGLU_QUANT=1` env var flag
+  - `lumen/models/megatron_patches.py`: Extended `_PatchedSwiGLUFunction.forward` to call AITER's `fused_silu_mul_fp8_per_tensor_static_quant` which fuses SiLU + mul + FP8 quant in one kernel
+  - `lumen/models/_swiglu_fp8_fuse.py`: New module with thread-local cache bridge between SwiGLU activation and downstream FC2 GEMM
+  - `lumen/modules/parallel_linear.py`: `_do_gemm` picks up fused FP8 cache via `pop_swiglu_fp8_cache()` as `pre_quantized_input`
+  - `lumen/ops/dispatch.py`: Added `_probe_aiter_fused_silu_mul_fp8()` probe
+- Expected savings: ~757ms/step (12.5%) from eliminating separate silu + mul + FP8 quant kernels
+- v36b root cause analysis (2026-04-08): **Feature does REDUNDANT work, net negative or neutral.**
+  1. Megatron always needs BF16 SwiGLU output, so `_swiglu_mod.swiglu(input)` runs regardless (line 181).
+  2. `try_fused_swiglu_fp8` then re-runs the ENTIRE SwiGLU from raw input via AITER fused kernel — doubling compute.
+  3. It also computes `bf16_output.detach().abs().amax()` (extra GPU sync) to derive scale before the fused kernel call.
+  4. The only savings is skipping `_quantize_core` for FC2 input (~100ms), but `update_amax(abs+amax)` still runs on the BF16 output.
+  5. Net: adds ~300ms SwiGLU recompute + ~100ms abs/amax, saves ~100ms quant step. **Negative ROI.**
+  - To fix properly: need to either (a) replace Megatron's SwiGLU entirely so BF16 output comes from dequanting the FP8 result, or (b) fuse only the FP8 quant step at FC2 entry without recomputing SwiGLU.
+- Status: **ineffective — needs redesign**
+
+### [2026-04-08 fused-cast-transpose]
+- Symptom: 486ms/step in copy/cast ops (38K copy_ calls for separate transpose + contiguous)
+- Possible bug: not a bug — missing fusion
+- Implementation: Added `LUMEN_FUSED_CAST_TRANSPOSE=1` env var flag
+  - `lumen/ops/quantize/cast_transpose.py`: New Triton kernel `_cast_transpose_fp8_kernel` that fuses BF16→FP8 quantization with matrix transpose in one kernel, producing both row-major and transposed FP8 outputs
+  - `lumen/quantize/scaling_manager.py`: `_quantize_core` uses `cast_transpose_fp8` when enabled, returning `FP8Descriptor` with pre-populated `_transpose` so `transpose_cached` never calls `.t().contiguous()`
+  - `_probe_cast_transpose()` cached probe added
+- Expected savings: ~426ms/step (7.0%) from eliminating separate abs→amax→quant→transpose→copy chain
+- v36 test (2026-04-08): **Caused 2x memory overhead** — kernel produces both row-major AND transposed FP8 tensors, doubling FP8 storage. This pushed memory from 0.9653 to 0.9796 earlier, causing ROCm allocator thrashing. Step times regressed from ~6.0s to ~12.8s/step after eval. Feature disabled in v36b.
+- Status: implemented but disabled — needs in-place transpose or lazy approach to avoid memory duplication
+
+### [2026-04-08 fused-quant-scale]
+- Symptom: 407ms/step in FP8 quant/scale ops (abs→amax→clamp→quant as separate kernels)
+- Possible bug: not a bug — missing fusion
+- Implementation: Added `LUMEN_FUSED_QUANT_SCALE=1` env var flag
+  - `lumen/quantize/scaling_manager.py`: `_quantize_core` per-tensor delayed/dynamic path now uses AITER's `static_per_tensor_quant_fp8_i8` (1 kernel) instead of `(tensor * (1.0 / scale)).clamp().to(dtype)` (3+ kernels)
+  - `_aiter_static_quant()` method and `_probe_aiter_static_quant()` probe added
+- Expected savings: ~353ms/step (5.8%) from reducing 5-6 kernel launches to 1
+- v36b root cause analysis (2026-04-08): **Provides small savings (~200ms), well below 353ms estimate.**
+  - The original estimate incorrectly attributed `abs()` (674ms) and `amax()` (549ms) to the quant path. Those are from `update_amax()` which runs AFTER quantization and is NOT eliminated by this fusion.
+  - The actual savings is only from replacing `mul(1/scale) + clamp + to(dtype)` (~170ms clamp + fraction of mul/cast) with one AITER kernel.
+  - Measured: post-eval step time improved from 7,472ms (v35) → 7,266ms (v36b), ~206ms savings. This ~200ms is the real ceiling for this fusion alone.
+- Status: **working but overestimated** — provides ~200ms/step (2.8%), not 353ms
+
+### [2026-04-08 v36b-fusion-gap-analysis]
+- Symptom: v36b (FUSED_SWIGLU_QUANT + FUSED_QUANT_SCALE) only ~200ms faster than v35, not ~1110ms as expected
+- Root cause: **Profiling estimates incorrectly attributed kernel time to fusion targets**
+  - v35 step times: pre-eval 6,151ms, post-eval-1 7,374ms, post-eval-2 7,472ms
+  - v36b step times: pre-eval 6,281ms (+130ms), post-eval-1 7,171ms (-203ms), post-eval-2 7,266ms (-206ms)
+  - Pre-eval is SLOWER (+130ms): Triton kernel compilation overhead + SwiGLU recompute from fused path
+- Evidence from v35 profile analysis:
+  - `abs()`: 674ms/9630 calls, `amax()`: 549ms/4812 calls — attributed to FP8 quant, but actually from `update_amax()` which runs AFTER quantization and is NOT eliminated by any fusion
+  - `silu()`: 299ms, `sigmoid()`: 247ms — attributed to SwiGLU fusion target, but BF16 SwiGLU must always run for Megatron compatibility
+  - `_static_per_tensor_quant_fp8_i8_kernel`: already 145ms in v35 profile — AITER quant kernel already in use from `quant_fp8_tensorwise_impl` in `ops.py`
+- Status: resolved — led to v37 implementation
+
+### [2026-04-08 fused-quant-amax-v37]
+- Symptom: `update_amax` (abs+amax) costs ~1,223ms/step — separate full-tensor pass after each quant
+- Implementation: New Triton kernel `_static_quant_amax_kernel` in `lumen/ops/quantize/quant_amax_fused.py`
+  - Single-pass: reads tensor once, computes per-row `max(abs(x))` via `tl.atomic_max`, and quantizes `x * (1/scale)` to FP8 simultaneously
+  - `scaling_manager.py`: `_quantize_core` uses fused kernel when `LUMEN_FUSED_QUANT_AMAX=1` is set; directly appends returned amax to `amax_history` (bypasses `update_amax`)
+  - Probe function `_probe_fused_quant_amax()` validates kernel on first use
+- v37 test (2026-04-08):
+  - Pre-eval (steps 6-14): **5,775ms** vs v35's 6,151ms → **-377ms (-6.1%)**
+  - Post-eval (steps 193-303): **7,406ms** vs v35's 7,403ms → essentially neutral
+  - Val_loss @ 192: **0.9477** (v37) vs 0.9526 (v35) — better convergence, confirms numerical correctness
+  - Memory: 0.9615 (identical to v35 at 0.9614) — no memory overhead
+- Analysis: Pre-eval savings are real (~377ms from eliminating the separate abs+amax pass). Post-eval is neutral because post-eval time is dominated by other factors (memory allocator overhead after eval, which affects all GPU ops equally). The fused kernel eliminates ~1,223ms of separate abs+amax work but the net savings is only ~377ms pre-eval, suggesting some of the 9,630 abs() and 4,812 amax() calls in v35 profile were from OTHER callers (not just `update_amax`), or the Triton kernel's `tl.atomic_max` contention partially offsets the savings.
+- Lazy transpose was also investigated but `FP8Descriptor.transpose_cached` is already lazy. The 1,144ms in `aten::copy_` comes from `.t().contiguous()` in backward GEMM wgrad/dgrad paths which are intrinsic to GEMM TN layout and cannot be deferred.
+- Status: **implemented and verified** — delivers 6.1% pre-eval speedup
+
 ## Ruled Out
 
 ### [2026-04-03 fp8-param-storage-divergence]
@@ -1014,6 +1136,259 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   - run_v19_full.sh adds `python /home/danyzhan/patch_lora_scaling.py "${MEGATRON_ROOT}"` to fix it
 - Fix: apply patch_lora_scaling.py which changes `self.lora_alpha = alpha` to `self.lora_alpha = alpha / rank if rank > 0 else alpha`
 - Status: resolved — v19 completed full 1024 steps. Best val_loss=0.938 at step 768/864/960. Zero divergence, grad_norm 0.1-1.5 throughout.
+
+### [2026-04-08 post-eval-persistent-slowdown]
+- Symptom: Lumen training step time jumps +19% after first evaluation (step 192) and never recovers. v35: 6,194→7,391 ms/step (+1,197ms). v37: 5,840→7,120 ms/step (+1,280ms). Slowdown persists for all remaining steps (verified through step 1024 in v35). Memory usage stays constant at 96.15-96.21%.
+- **MLPerf reference shows zero degradation**: across all 10 MI300X results, post-eval throughput is actually 0.8% faster than pre-eval (3,811→3,778 ms/step). Throughput std dev < 0.001 across runs.
+- Root cause hypothesis: **Activation checkpointing disabled during eval causes ROCm allocator fragmentation**.
+  - Megatron's `transformer_block.py` line 669: `if self.config.recompute_granularity == 'full' and self.training:` — recompute is skipped when `self.training=False` (during `model.eval()`)
+  - Training: only 21/80 layers' activations stored (recompute-num-layers=21)
+  - Eval: all 80 layers' activations stored (no recompute since `self.training=False`)
+  - At 96% memory, eval's 80-layer allocation pattern fragments the ROCm allocator block cache
+  - When training resumes (21-layer pattern), cached blocks don't match → persistent allocator thrashing
+- Evidence:
+  - MLPerf reference (NeMo/Lightning + TE): 0% post-eval degradation (10 runs, all <1% delta)
+  - Lumen v35 (Megatron pretrain): +19.3% degradation (6,194→7,391), never recovers through 1024 steps
+  - Lumen v37 (Megatron pretrain): +21.9% degradation (5,840→7,120), never recovers through 384 steps
+  - `manual_gc = False`, `empty_unused_memory_level = 0` → no explicit GC/cache-clear around eval
+  - `manual_gc_eval = True` but guarded by `args.manual_gc and args.manual_gc_eval` → dead code since `manual_gc=False`
+  - Memory metric stays flat at 96.15% — fragmentation is invisible to `memory_allocated()`
+  - Eval duration: Lumen ~48s (v37) / ~55s (v35) vs MLPerf ~31s
+- Quantified impact on throughput:
+  | Metric | Lumen v37 | Lumen v35 | MLPerf ref |
+  |--------|-----------|-----------|------------|
+  | Pre-eval ms/step | 5,840 | 6,194 | 3,811 |
+  | Post-eval ms/step | 7,120 | 7,391 | 3,778 |
+  | Delta | +1,280 (+21.9%) | +1,197 (+19.3%) | -33 (-0.8%) |
+  | Eval duration | ~48s | ~55s | ~31s |
+  | Eval iterations | 22 | 22 | ~22 (173 samples / 8 GBS) |
+- Proposed fixes (in priority order):
+  1. **Force activation checkpointing during eval**: Override `self.training` check or keep recompute active in eval mode. This prevents the 80-layer activation explosion.
+  2. **Pre-allocate eval memory**: Run a dummy eval forward pass during warmup to prime the allocator, then `empty_cache()` before real training starts (MLPerf does this: `warmup_validation_steps`).
+  3. **Set `manual_gc=True, manual_gc_eval=True`**: Enable the explicit GC path to clean up eval objects (currently dead code since `manual_gc=False`).
+  4. **Reduce eval_iters**: Use fewer eval iterations to minimize allocator disruption.
+- Implementation (v38):
+  1. **LUMEN_EVAL_RECOMPUTE=1** (`megatron_patches.py` patch #8): Monkey-patches `TransformerBlock.forward` to temporarily set `self.training=True` during eval forward pass, so the `_checkpointed_forward` path is taken. Uses try/finally to restore `self.training=False` after. Only the TransformerBlock's training flag is toggled; child modules stay in eval mode (dropout disabled).
+  2. **LUMEN_WARMUP_EVAL_STEPS=2** (`megatron.py` `_run_warmup_eval_pass`): Runs 2 synthetic eval forward passes with `model.eval()` + `torch.no_grad()` after training warmup completes but before real data. Calls `empty_cache()` afterward to start clean. This primes the ROCm allocator with the eval allocation pattern.
+  3. **LUMEN_MANUAL_GC=1** (`run_finetune.sh` → `--manual-gc`): Enables Megatron's `args.manual_gc=True` so the `gc.collect()` calls around evaluation are no longer dead code. Disables Python's automatic GC and runs collection explicitly before and after eval.
+  4. **LUMEN_POST_EVAL_CACHE_CLEAR=1** (`megatron_patches.py` patch #9): Wraps Megatron's `evaluate()` to call `torch.cuda.empty_cache()` after every eval run. Resets the ROCm allocator's block pool so training resumes with a clean cache.
+- v38 result: **DIVERGED** — loss exploded from 4.2 at step 6 to 16.5 at step 108. Grad norms 100-1000x larger than v37 from the very first real step.
+  - Root cause: Fix 2 (warmup eval pass) ran forward passes through FP8 layers with synthetic data *after* `reset_fp8_state()`, polluting amax history with wrong scale factors. When real training started, the corrupted FP8 scales caused massive gradient norms → divergence.
+  - Evidence: v38 step 6 grad_norm=353 vs v37 step 6 grad_norm=2.67. Loss gap widened every step. No eval had occurred yet (first eval at step 192).
+  - Fix: Added a second `reset_fp8_state(model)` call *after* `_run_warmup_eval_pass()` in `megatron.py` to clear corrupted amax state.
+- v38b result (with FP8 reset fix): Training converges normally, loss curve matches v37 exactly.
+  - Post-eval regression **reduced from +21.3% to +12.4%** (v37: 5,898→7,156ms; v38b: 5,809→6,529ms).
+  - Second eval at step 384 does NOT compound: step times stay at ~6,460ms before and after eval #2.
+  - Only 1-step spike after each eval (~7,470ms), then immediate recovery to the new baseline.
+  - val_loss tracks v37: 0.9504 at step 192, 0.9343 at step 384.
+  - Remaining +12% regression likely from eval-specific allocations (validation data buffers, output tensors) that fragment even with activation checkpointing forced.
+- v38b FINAL result (complete 1024-step run):
+  - **val_loss: 0.9194 (step 960)** — matches v37's 0.9188 within noise (diff < 0.001)
+  - **Pre-eval speed: 5,809ms** vs v37's 5,898ms (-1.5% faster due to GC overhead removal)
+  - **Post-eval regression: +13.4% at eval#1** (5,810→6,586ms) vs v37's +21.7%
+  - **Subsequent evals: <1% delta** (eval#2 +0.9%, eval#3 +0.6%, eval#5 +0.8%)
+  - **Total training time: 6,458s** vs v37's 7,268s (**-11.1% faster overall**)
+  - The one-time +13% regression after eval#1 is a permanent level shift, but no further compounding. The MLPerf reference shows 0%, so there's still room for improvement.
+  - Key insight: the residual +13% is likely from eval-specific allocations (validation data buffers, output gather tensors) that fragment even with recompute forced. The warmup eval pass primes the allocator but cannot fully prevent it.
+  | Metric | v37 | v38b | MLPerf ref |
+  |--------|-----|------|------------|
+  | Pre-eval ms/step | 5,898 | 5,809 | 3,811 |
+  | Post-eval#1 ms/step | 7,167 | 6,586 | 3,778 |
+  | Post-eval#1 delta | +21.7% | +13.4% | -0.8% |
+  | Subsequent eval delta | +0.7-2.8% | +0.6-2.4% | 0% |
+  | Total time (s) | 7,268 | 6,458 | ~4,180 |
+  | Final val_loss | 0.9188 | 0.9194 | 0.92 |
+- Status: **resolved (partial)** — post-eval regression reduced from +22% to +13%. Further optimization possible but diminishing returns.
+
+### [2026-04-08 v40-phase2-speed-gap]
+- Symptom: v39 pre-eval 5,596ms vs MLPerf 3,811ms = 1,785ms (47%) gap. Post-eval 6,070ms = 2,259ms (60%) gap.
+- Phase 2 changes in v40:
+  - P0a: LUMEN_TRANSPOSE_CACHE=0 (disable FP8 weight transpose caching)
+  - P0b: RECOMPUTE_NUM_LAYERS=19 (from 21; 15 OOMed)
+  - P2: overlap_grad_reduce=True (Megatron bucketed async AllReduce)
+  - P3a: Fused quant+amax extended to backward path (quantize_bwd_delayed)
+  - P4: SwiGLU backward already fused (confirmed)
+  - DBG: quant.enable() model identity assertion added
+- v40 results (through step 300, run in progress):
+  | Metric | v39 | v40 | Delta | MLPerf ref |
+  |--------|-----|-----|-------|------------|
+  | Pre-eval ms/step | 5,596 | **5,348** | **-248 (-4.4%)** | 3,811 |
+  | Post-eval#1 ms/step | 6,070 | **~6,060** | -10 (-0.2%) | 3,778 |
+  | Post-eval#1 delta | +8.5% | +13.3% | worse | -0.8% |
+  | val_loss @ 192 | 0.9453 | 0.9491 | +0.004 | ~0.94 |
+  | Memory | 0.9837 | 0.9968 | +1.3% | ~0.82 |
+- Analysis:
+  - Pre-eval improvement is real: 248ms from 2 fewer recompute layers + overlapped grad reduce.
+  - Post-eval regression is WORSE (13.3% vs v39's 8.5%) because memory went from 98.37% to 99.68%. Higher memory pressure = worse allocator fragmentation after eval.
+  - RECOMPUTE_NUM_LAYERS=15 OOMed (Failed to CUDA calloc 536870912 bytes). P0a (transpose cache off) did not free enough memory for 6 fewer recompute layers.
+  - RECOMPUTE_NUM_LAYERS=19 fits but at 99.68% — essentially no headroom. Transpose cache savings were less than expected.
+  - val_loss 0.9491 at step 192 vs v39's 0.9453 — slightly worse, within noise for different ACL setting.
+  - The mem_usages=-89485766.7030 after eval is a memory reporting overflow, not a real value.
+- Remaining gap: v40 pre-eval 5,348ms vs MLPerf 3,811ms = **1,537ms (40%)**. Post-eval ~6,060ms = **2,249ms (59%)**.
+- Next steps:
+  1. Wait for v40 to complete and check val_loss convergence.
+  2. The memory wall (99.68%) limits further ACL tuning. Need to find other memory savings.
+  3. Post-eval regression getting worse — memory pressure is the root cause. Need to keep ACL at 21 and find speed improvements that don't increase memory.
+- **Detailed gap breakdown** (v40 pre-eval 5,348ms vs MLPerf 3,811ms = **1,537ms/step**):
+  | Source | Est. ms/step | % of Gap | Addressed? |
+  |--------|-------------|----------|------------|
+  | Checkpoint recompute dispatch overhead | 400-600 | 26-39% | Partially (19 vs 21 ACL) |
+  | SwiGLU backward elementwise | 100-300 | 7-20% | Yes (fused bwd) — need profile |
+  | Copy/dtype overhead (38K copy_ calls) | 200-300 | 13-20% | No |
+  | CPU dispatch / kernel launch (30K/step) | 200-300 | 13-20% | No (needs HIP graphs) |
+  | Memory allocator pressure (99.68%) | 100-200 | 7-13% | Worse |
+  | NCCL AllReduce | 50-100 | 3-7% | Partially (overlap_grad_reduce) |
+  | Quant/amax pipeline | 50-100 | 3-7% | Partially (fused bwd amax) |
+  Key structural blockers:
+  1. HIP Graph Capture (P5) — single biggest lever, ~500-700ms potential, but very hard with NCCL + dynamic control flow.
+  2. Memory wall (99.68% vs TE's 82%) — prevents buffer pools, workspace allocs, reduced checkpointing. Root cause: Lumen stores separate FP8 descriptors + scale tensors + Python state per layer that TE avoids with C++ fusion.
+  3. TE's `cast_transpose_fusion_kernel_optimized` writes both row-major and transposed FP8 in one pass; Lumen still does a separate transpose kernel per weight even with on-demand path.
+- v40 final results (stopped at step 760/1024, loss target reached):
+  | Metric | v39 | v40 | Delta | MLPerf ref |
+  |--------|-----|-----|-------|------------|
+  | Pre-eval ms/step | 5,596 | **5,348** | **-248 (-4.4%)** | 3,811 |
+  | Post-eval ms/step | 6,070 | **~6,060** | -10 (-0.2%) | 3,778 |
+  | val_loss @ 192 | 0.9453 | 0.9491 | +0.004 | ~0.94 |
+  | val_loss @ 384 | — | 0.9334 | — | — |
+  | val_loss @ 576 | — | 0.9232 | — | — |
+  | Memory | 0.9837 | 0.9968 | +1.3% | ~0.82 |
+  val_loss converged below 0.92 target. Run healthy (0 NaN, 0 skipped).
+- Status: **resolved** — v40 reached loss target. Phase 2 delivered -4.4% pre-eval speedup. Remaining 1,537ms gap addressed by Phase 3 (v41).
+
+### [2026-04-08 v41-phase3-implementation]
+- Phase 3 changes implemented for v41:
+  - **P5: HIP Graph Capture** — Per-layer forward+backward graph capture following TE/MLPerf pattern:
+    - `LumenGraphedLayer` autograd.Function in `lumen/utils/hip_graphs.py`: captures separate fwd/bwd CUDA graphs per transformer layer, replays via static buffer copy + graph.replay()
+    - `capture_lumen_graphs()`: iterates `model.decoder.layers`, creates synthetic sample inputs `(seq_len, micro_bs, hidden_size)`, wraps each layer with graph capture
+    - `install_hip_graphs_hook()` in `megatron.py`: chains on `setup_model_and_optimizer`, gated on `--lumen-hip-graphs`
+    - Wired into `finetune_llama2.py` alongside existing hooks
+    - `run_finetune.sh`: added `LUMEN_HIP_GRAPHS=1` -> `--lumen-hip-graphs` flag wiring
+    - Expected savings: ~300-500ms/step (eliminates ~20K of 30K kernel launches)
+  - **P6: Fused cast+transpose+amax kernel** — single Triton kernel replaces 3 separate kernels:
+    - `cast_transpose_amax_fp8` in `cast_transpose.py`: tile-based, reads BF16 once, writes row-major FP8 + transposed FP8 + atomic amax
+    - Top-priority branch in `ScalingManager._quantize_core`: when both `LUMEN_FUSED_CAST_TRANSPOSE=1` AND `LUMEN_FUSED_QUANT_AMAX=1`, uses combined kernel
+    - Expected savings: ~150-250ms/step (eliminates 4,800 amax + 9,600 abs + separate transpose calls)
+  - **P6b: hipBLASLt pre-transposed weight** — avoids redundant `.t().contiguous()`:
+    - `dispatch_gemm` extracts `FP8Descriptor._transpose` and passes to `gemm_per_tensor`
+    - `_gemm_per_tensor_hipblas` accepts optional `w_transposed` parameter
+    - Expected savings: ~50ms/step (eliminates 1,821 transpose copies in GEMM path)
+  - **Memory strategy**: RECOMPUTE_NUM_LAYERS stays at 21 (not v40's 19) to keep memory below 98%, giving graph capture headroom for static buffers
+- v41 launch script: `/home/danyzhan/run_v41_phase3.sh`
+  - Key env vars: `LUMEN_FUSED_CAST_TRANSPOSE=1`, `LUMEN_FUSED_QUANT_AMAX=1`, `LUMEN_HIP_GRAPHS=1`
+  - Target: v40 5,348ms -> ~4,600-4,800ms/step
+- v41 first launch: **OOM on first training step** (all 8 GPUs)
+  - Root cause: `cast_transpose_amax_fp8` stored `_transpose` in FP8Descriptor, doubling FP8 weight memory (80 layers × 4 weights × ~448 MiB extra = ~3.5 GiB)
+  - Combined with RECOMPUTE_NUM_LAYERS=21 (already 99.68% memory), pushed over 192 GiB
+  - HIP graph capture code never executed (no log messages) — `--lumen-hip-graphs` not recognized by Megatron arg parser
+  - Fix: (1) deleted `_transpose` from fused kernel return, (2) disabled HIP graphs for now
+- v41 second launch: fused cast+transpose+amax enabled but `_transpose` NOT stored (memory fix)
+  - Result: ~5,490ms/step — **WORSE than v40** by ~140ms
+  - Root cause: kernel computes row-major + transposed FP8 + amax but discards transpose = wasted writes
+  - Also RECOMPUTE_NUM_LAYERS=21 vs v40's 19 = ~200ms extra recompute overhead
+  - Conclusion: P6 fused cast+transpose kernel is net-negative when transpose output is unused
+- v41 third launch (final): disabled `LUMEN_FUSED_CAST_TRANSPOSE`, matched v40 config exactly (RECOMPUTE=19)
+  - **Completed successfully** (1024/1024 steps, 0 NaN, 0 skipped)
+  - val_loss trajectory: 0.9481 -> 0.9329 -> 0.9223 -> 0.9241 -> **0.9194** (target reached)
+  - Pre-eval ms/step: **~5,335** (steps 20-190, v40 was ~5,348 — within noise)
+  - Post-eval ms/step: **~5,940-6,060** (v40 was ~6,060 — same)
+  - Memory: 0.9968 (same as v40)
+  - Confirms v40 baseline reproducibility. P6 kernel does NOT help without memory for transpose storage.
+- **Conclusions from Phase 3 attempt**:
+  1. HIP Graph Capture (P5): not viable — Megatron arg parser doesn't accept `--lumen-hip-graphs`, and memory is too tight for static buffers. Requires deep Megatron integration (custom arg parsing) + significant memory reduction first.
+  2. Fused cast+transpose+amax (P6): net-negative when transpose is discarded. Only valuable IF pre-transposed weight can be stored (requires ~3.5 GiB free). Memory wall is the fundamental blocker.
+  3. Pre-transposed weight for hipBLASLt (P6b): cannot benefit without stored transpose.
+  4. **Memory wall (99.68%) is the root cause** preventing both P5 and P6 from delivering value.
+- Status: **resolved** — v41 completed, baseline confirmed. Phase 3 optimizations blocked by memory wall.
+
+### [2026-04-09 v42-memory-wall-distributed-analysis]
+- Symptom: v40/v41 at 99.68% GPU memory utilization (191.4 GiB of 192 GiB), causing:
+  1. Post-eval regression of +13% (5,348→6,060ms) that never recovers
+  2. Allocator fragmentation/thrashing on all GPU ops
+  3. Inability to enable fused cast+transpose (needs ~3.5 GiB free)
+  4. Inability to enable HIP graphs (needs static buffer headroom)
+
+- **Multi-GPU sync / distributed analysis** (2026-04-09):
+  | Aspect | Lumen v40/v41 | Notes |
+  |--------|--------------|-------|
+  | overlap_grad_reduce | True | Bucketed async AllReduce during backward |
+  | Gradient buckets | 2 (40M + 4.5M params) | 45M total LoRA params |
+  | Gradient volume | ~170 MB (FP32) | Tiny — only LoRA weights |
+  | NCCL AllReduce time | 119ms (2% of GPU time) | NOT a bottleneck |
+  | NCCL config | 32 channels, 32 CTAs, loopback | Standard MI300X tuning |
+  | use_distributed_optimizer | False | Correct for single-node with tiny LoRA |
+  | overlap_param_gather | False | Irrelevant without distributed optimizer |
+
+  **CONCLUSION**: Distributed communication is well-optimized and NOT a significant
+  source of the speed gap. AllReduce is only 2% of GPU time and overlapped with backward.
+
+- **Data pipeline analysis** (2026-04-09):
+  | Aspect | Lumen | Notes |
+  |--------|-------|-------|
+  | num_workers | 2 (Megatron default) | |
+  | pin_memory | No (Megatron path) | Only FSDP path uses it |
+  | Data size per step | ~64 KB per GPU | MBS=1, SEQ=8192, int64 |
+  | Data loading | np.load (in-memory) | Entire dataset fits in RAM |
+  | CPU→GPU transfer | broadcast_data | Standard Megatron path |
+
+  **CONCLUSION**: Data pipeline is NOT a bottleneck. 64 KB per sample at MBS=1
+  transfers in <0.1ms. Even without pin_memory/prefetching, data is ready
+  well before the GPU needs it.
+
+- **Memory wall deep analysis** (2026-04-09):
+  The 99.68% memory utilization breakdown:
+
+  | Component | Memory (GiB) | % of 192 GiB |
+  |-----------|-------------|---------------|
+  | FP8 model weights (80 layers + embed) | 64.2 | 33.4% |
+  | BF16 autograd intermediates (61 layers) | ~112 | 58.3% |
+  | FP8 saved activations (61 layers × 4 linears) | 15.3 | 7.9% |
+  | LoRA params + optimizer + gradients | 0.7 | 0.4% |
+  | **Total** | **~192** | **~100%** |
+
+  **The killer: 112 GiB of BF16 autograd intermediates** in the 61 non-recomputed
+  layers (layers 19-79). Each layer saves ~1.8 GiB of BF16 tensors for backward:
+  - RMSNorm input: 128 MB
+  - QKV output: 160 MB
+  - Attention output: 128 MB
+  - RMSNorm2 input: 128 MB
+  - FC1 gate+up output: **896 MB** (largest single tensor)
+  - SwiGLU output: **448 MB**
+
+  **Why TE uses ~82%**: TE's C++ fused kernels (LayerNormLinear, SwiGLU) compute
+  backward without storing the BF16 intermediate outputs in the autograd graph.
+  Lumen's Python autograd forces each op to save its own inputs.
+
+- **CRITICAL FINDING**: `LUMEN_MLP_RECOMPUTE=1` was NOT enabled in v39/v40/v41!
+  This feature exists in `megatron_patches.py` (install_mlp_recompute) and was
+  used in the older `run_tp1_dp8.sh` launch script, but was never wired into
+  `run_finetune.sh` or the v39+ launch scripts. It wraps the MLP sublayer with
+  `tensor_parallel.checkpoint`, freeing the BF16 FC1 output (896 MB) and SwiGLU
+  output (448 MB) per non-recomputed layer.
+
+- **v42 plan** — Memory reduction via selective MLP recompute:
+  1. `LUMEN_MLP_RECOMPUTE=1` + `LUMEN_MLP_RECOMPUTE_LAYERS=20`
+     - 20 non-recomputed layers get MLP-only recompute
+     - Frees 20 × ~1.3 GiB = ~26 GiB of BF16 intermediates
+     - Cost: 20 × ~16ms MLP forward recompute = ~320ms/step
+  2. `RECOMPUTE_NUM_LAYERS=21` (back to MLPerf reference, from v40's 19)
+     - 2 more fully recomputed layers: frees additional ~4.2 GiB, costs ~110ms
+  3. `max_split_size_mb=256` (from 512) — smaller allocator splits
+
+  Expected memory: ~90% (down from 99.68%). Expected pre-eval step time: ~5,780ms
+  (v40's 5,348 + 320 MLP recomp + 110 extra ACL). Expected post-eval: ~5,780ms
+  (NO regression, vs v40's 6,060 = 13% worse post-eval).
+
+  Net wall-clock with 5 eval intervals:
+  - v40: 5,348×190 + 6,060×830 = ~6,045s training
+  - v42: 5,780×1020 = ~5,896s training — **2.5% faster overall** with uniform timing
+
+- Enhanced `install_mlp_recompute()` in `megatron_patches.py`:
+  Added `LUMEN_MLP_RECOMPUTE_LAYERS` env var to control how many non-recomputed
+  layers get MLP-only recompute (default: all). Counter-based: first N non-recomputed
+  layers encountered during the first forward pass get their MLP wrapped.
+
+- Status: open — v42 ready to launch
+- Launch script: `/home/danyzhan/run_v42_memory.sh`
 
 ## Entry Template
 

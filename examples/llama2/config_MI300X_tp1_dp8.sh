@@ -112,6 +112,7 @@ export DIST_TIMEOUT_MINUTES=120
 # With attention-only LoRA, optimizer states are small (~45M params * 12 bytes
 # = 540 MB per GPU). Distributed optimizer is not needed.
 export USE_DIST_OPTIMIZER=0
+export OVERLAP_GRAD_REDUCE=1
 
 # ---- Experiment management ---------------------------------------------------
 export TAG=""
@@ -152,7 +153,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 export PYTORCH_TUNABLEOP_ENABLED=1
 export PYTORCH_TUNABLEOP_FILENAME="tunableop_results.csv"
 export OMP_NUM_THREADS=1
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
 export TORCHDYNAMO_DISABLE=1
 
 # ---- NCCL / ROCm -----------------------------------------------------------

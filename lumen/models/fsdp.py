@@ -425,7 +425,7 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     from lumen.config import LumenConfig
 
     cfg = LumenConfig.from_args(args)
-    cfg.enable(model, dp_group=dp_group)
+    _manager, model = cfg.enable(model, dp_group=dp_group)
 
 
 def reset_fp8_state(model: nn.Module) -> None:

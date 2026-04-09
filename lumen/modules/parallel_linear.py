@@ -169,6 +169,39 @@ def _pg_rank(group):
     return torch.distributed.get_rank(group=group)
 
 
+def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_fp8_activation: bool):
+    """Attach fused SwiGLU FP8 cache when this GEMM quantizes activations; else clear it."""
+    try:
+        from lumen.models._swiglu_fp8_fuse import (
+            discard_swiglu_fp8_cache,
+            pop_swiglu_fp8_cache,
+        )
+    except ImportError:
+        return pre_quantized_input
+
+    if pre_quantized_input is not None:
+        discard_swiglu_fp8_cache()
+        return pre_quantized_input
+
+    if consume_fp8_activation:
+        cached = pop_swiglu_fp8_cache()
+        if cached is not None:
+            return cached
+        return None
+
+    discard_swiglu_fp8_cache()
+    return None
+
+
+def _discard_swiglu_fp8_cache_safe() -> None:
+    try:
+        from lumen.models._swiglu_fp8_fuse import discard_swiglu_fp8_cache
+
+        discard_swiglu_fp8_cache()
+    except ImportError:
+        pass
+
+
 def _do_gemm(
     input_,
     weight,
@@ -229,6 +262,10 @@ def _do_gemm(
 
     if _fp8_stored and scaling_type != "none":
         gemm_scale = 1.0 / weight._fp8_desc.scale
+        _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
+            pre_quantized_input,
+            consume_fp8_activation=True,
+        )
         return quantized_linear(
             input_,
             weight,
@@ -242,13 +279,14 @@ def _do_gemm(
             deferred_wgrad=deferred_wgrad,
             pre_quantized_weight=(weight.data, gemm_scale),
             activation_tensor_id=activation_tensor_id,
-            pre_quantized_input=pre_quantized_input,
+            pre_quantized_input=_pqi,
         )
 
     if _fp8_stored:
         orig_dtype = getattr(weight, "_fp8_original_dtype", torch.bfloat16)
         weight_bf16 = (weight.data.to(torch.float32) / weight._fp8_desc.scale).to(orig_dtype)
         if delay_wgrad:
+            _discard_swiglu_fp8_cache_safe()
             return quantized_linear(
                 input_,
                 weight_bf16,
@@ -261,9 +299,14 @@ def _do_gemm(
                 delay_wgrad=delay_wgrad,
                 deferred_wgrad=deferred_wgrad,
             )
+        _discard_swiglu_fp8_cache_safe()
         return F.linear(input_, weight_bf16, bias)
 
     if scaling_type != "none" or delay_wgrad:
+        _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
+            pre_quantized_input,
+            consume_fp8_activation=(scaling_type != "none"),
+        )
         return quantized_linear(
             input_,
             weight,
@@ -276,8 +319,9 @@ def _do_gemm(
             delay_wgrad=delay_wgrad,
             deferred_wgrad=deferred_wgrad,
             activation_tensor_id=activation_tensor_id,
-            pre_quantized_input=pre_quantized_input,
+            pre_quantized_input=_pqi,
         )
+    _discard_swiglu_fp8_cache_safe()
     return F.linear(input_, weight, bias)
 
 

@@ -885,37 +885,61 @@ def make_lumen_model_provider(
 
     The returned callable keeps task semantics in the supplied ``model_builder``
     while applying the shared infrastructure assembly in a fixed order:
-    LoRA, pre-quant module flags, FP8 enablement, optional FP8 parallel-linear
-    enablement, then post-quant features.
+
+    1. Megatron LoRA (uses ``megatron.core.transformer.lora_adapter``,
+       separate from PEFT — handled by *lora_applier*)
+    2. ``LumenConfig.enable()`` — FP8ParamManager, norm patching, pre-quant,
+       ``quant.enable``, post-quant (PEFT LoRA skipped via ``lora_rank=0``)
+    3. Megatron-specific ``enable_fp8_for_parallel_linear`` (optional)
     """
 
     def model_provider(pre_process=True, post_process=True, vp_stage=None):
         import os
+        from dataclasses import replace as _replace
+
+        from lumen.config import LumenConfig
 
         args = get_args()
         model = model_builder(args, pre_process, post_process, vp_stage)
 
+        # 1. Megatron LoRA (not PEFT — stays separate)
         if getattr(args, "lora_rank", 0) > 0:
             lora_applier(model, args)
             if getattr(args, "lora_a2a", False):
                 os.environ["LORA_A2A"] = "1"
                 print_rank_0("> LoRA A2A communication optimisation enabled")
 
-        apply_lumen_pre_quant(model, args)
+        # 2. Unified LumenConfig.enable() — skip PEFT LoRA (handled above)
+        cfg = LumenConfig.from_args(args)
+        cfg = _replace(cfg, lora_rank=0)
 
-        if getattr(args, "linear_fp8", False):
-            fp8_applier(model, args)
-            if getattr(args, "lumen_linear", False):
-                scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
-                enable_fp8_for_parallel_linear(
-                    model,
-                    scaling_type=scaling_type,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                )
+        dp_group = None
+        if cfg.reduce_amax:
+            import torch.distributed as dist
+            from megatron.core import parallel_state
 
-        apply_lumen_post_quant(model, args)
+            if dist.is_initialized():
+                dp_group = parallel_state.get_data_parallel_group()
+
+        _original_model = model
+        _manager, model = cfg.enable(model, dp_group=dp_group)
+        assert model is _original_model, (
+            f"quant.enable() returned a different model object "
+            f"(type {type(model).__name__} vs {type(_original_model).__name__}). "
+            f"This indicates unexpected model wrapping (e.g. LoRA) that may "
+            f"break Megatron's parameter management."
+        )
+
+        # 3. Megatron-specific parallel linear FP8 (not covered by LumenConfig)
+        if getattr(args, "linear_fp8", False) and getattr(args, "lumen_linear", False):
+            scaling_type = getattr(args, "linear_fp8_scaling", "dynamic")
+            enable_fp8_for_parallel_linear(
+                model,
+                scaling_type=scaling_type,
+                fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
+                gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
+                delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
+            )
 
         if getattr(args, "fp8_param_storage", False):
             _shrink_frozen_weights_to_fp8(model)
@@ -1054,6 +1078,71 @@ def install_fp8_param_storage_hook() -> None:
 
     _setup_with_fp8_storage._lumen_fp8_param_storage_hook = True
     _mt_training.setup_model_and_optimizer = _setup_with_fp8_storage
+
+
+def install_hip_graphs_hook() -> None:
+    """Hook setup_model_and_optimizer to capture HIP graphs for transformer layers.
+
+    When ``--lumen-hip-graphs`` is active, this wraps each transformer layer's
+    forward+backward in pre-captured CUDA/HIP graphs to eliminate kernel launch
+    overhead (~30K launches/step reduced to ~10K).
+
+    Must be installed after all other setup hooks (fp8_param_gather, fp8_param_storage)
+    so graph capture sees the final model structure.
+    """
+    import megatron.training.training as _mt_training
+
+    current_setup = _mt_training.setup_model_and_optimizer
+    if getattr(current_setup, "_lumen_hip_graphs_hook", False):
+        return
+
+    def _setup_with_hip_graphs(*args, **kwargs):
+        model, optimizer, scheduler = current_setup(*args, **kwargs)
+        train_args = get_args()
+
+        if not getattr(train_args, "lumen_hip_graphs", False):
+            return model, optimizer, scheduler
+
+        if not model:
+            return model, optimizer, scheduler
+
+        from lumen.utils.hip_graphs import capture_lumen_graphs
+
+        targets = model if isinstance(model, list) else [model]
+        for m in targets:
+            unwrapped = m
+            while hasattr(unwrapped, "module"):
+                unwrapped = unwrapped.module
+
+            seq_len = train_args.seq_length
+            tp = getattr(train_args, "tensor_model_parallel_size", 1)
+            sp = getattr(train_args, "sequence_parallel", False)
+            cp = getattr(train_args, "context_parallel_size", 1)
+
+            if sp:
+                seq_len = seq_len // tp
+            seq_len = seq_len // cp
+
+            micro_bs = train_args.micro_batch_size
+            hidden_size = train_args.hidden_size
+
+            count = capture_lumen_graphs(
+                unwrapped,
+                seq_len=seq_len,
+                micro_batch_size=micro_bs,
+                hidden_size=hidden_size,
+                num_warmup=3,
+            )
+            if count > 0:
+                print_rank_0(
+                    f"> HIP graphs: captured {count} transformer layers "
+                    f"(seq={seq_len}, mbs={micro_bs}, hidden={hidden_size})"
+                )
+
+        return model, optimizer, scheduler
+
+    _setup_with_hip_graphs._lumen_hip_graphs_hook = True
+    _mt_training.setup_model_and_optimizer = _setup_with_hip_graphs
 
 
 def _patch_meta_materializer() -> None:
@@ -1487,6 +1576,54 @@ def reset_fp8_state(model):
     print_rank_0("> FP8 state reset after warmup")
 
 
+_WARMUP_EVAL_STEPS = int(os.environ.get("LUMEN_WARMUP_EVAL_STEPS", "0"))
+
+
+def _run_warmup_eval_pass(model, args):
+    """Run synthetic forward passes in eval mode to prime the GPU allocator.
+
+    The MLPerf reference runs ``warmup_validation_steps`` before real
+    training so that the eval-time allocation pattern is already present
+    in the allocator's block cache.  This prevents the first real eval
+    from fragmenting the cache and causing a permanent step-time
+    regression.
+
+    The forward pass includes the loss computation path so that all
+    eval-specific tensors (loss gather, metric buffers) are also
+    pre-allocated in the cache.
+
+    Controlled by ``LUMEN_WARMUP_EVAL_STEPS`` (default 0 = disabled).
+    """
+    n = _WARMUP_EVAL_STEPS
+    if n <= 0:
+        return
+
+    print_rank_0(f"> Running {n} warmup eval forward passes to prime allocator ...")
+
+    unwrapped = model
+    while hasattr(unwrapped, "module"):
+        unwrapped = unwrapped.module
+
+    unwrapped.eval()
+    with torch.no_grad():
+        for _ in range(n):
+            tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+                args, zero_last_loss_mask=True
+            )
+            output = unwrapped(tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask)
+            if output is not None:
+                losses = output.view(-1).float()
+                lm = loss_mask.view(-1).float()
+                _ = torch.sum(losses * lm)
+                _ = lm.sum()
+    unwrapped.train()
+
+    torch.cuda.empty_cache()
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+    print_rank_0(f"> Warmup eval pass done ({n} steps). Allocator primed.")
+
+
 # ---------------------------------------------------------------------------
 # Loss function + early stopping
 # ---------------------------------------------------------------------------
@@ -1558,6 +1695,9 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
                         except StopIteration:
                             pass
                 else:
+                    if getattr(args, "linear_fp8", False):
+                        reset_fp8_state(model)
+                    _run_warmup_eval_pass(model, args)
                     if getattr(args, "linear_fp8", False):
                         reset_fp8_state(model)
                     if torch.distributed.is_initialized():
