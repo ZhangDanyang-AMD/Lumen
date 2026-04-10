@@ -9,15 +9,30 @@
 Provides graph-capture wrappers that record a training step (or sub-step)
 into a replayable HIP graph, reducing kernel launch overhead. Handles
 FP8 scaling manager state updates that must remain graph-safe.
+
+Key classes:
+
+- ``LumenGraphedCallable`` — wraps a single callable in a forward-only graph.
+- ``LumenGraphedModule``   — wraps an ``nn.Module`` via ``LumenGraphedCallable``.
+- ``LumenGraphedLayer``    — per-layer forward+backward graph capture with a
+  custom ``autograd.Function`` that replays separate forward and backward
+  CUDA graphs.  Modelled after TE's ``Graphed`` autograd function.
+- ``capture_lumen_graphs`` — captures all transformer layers of a Megatron
+  GPTModel and replaces their ``forward`` with graphed wrappers.
 """
 
 import logging
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Forward-only graph capture (unchanged from original)
+# ---------------------------------------------------------------------------
 
 
 class LumenGraphedCallable:
@@ -68,11 +83,9 @@ class LumenGraphedCallable:
             self._graph = None
             return
 
-        # Create static input buffers
         self._static_inputs = tuple(a.clone() if isinstance(a, torch.Tensor) else a for a in args)
         self._input_shapes = tuple(a.shape if isinstance(a, torch.Tensor) else None for a in args)
 
-        # Warmup
         s = torch.cuda.Stream(device=device)
         s.wait_stream(torch.cuda.current_stream(device))
         with torch.cuda.stream(s):
@@ -80,7 +93,6 @@ class LumenGraphedCallable:
                 self._fn(*self._static_inputs, **kwargs)
         torch.cuda.current_stream(device).wait_stream(s)
 
-        # Capture
         self._graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self._graph, pool=self._pool, stream=s):
             self._static_output = self._fn(*self._static_inputs, **kwargs)
@@ -89,7 +101,6 @@ class LumenGraphedCallable:
         if self._graph is None:
             return self._fn(*args, **kwargs)
 
-        # Copy inputs into static buffers
         for static, new in zip(self._static_inputs, args):
             if isinstance(static, torch.Tensor) and isinstance(new, torch.Tensor):
                 if static.shape != new.shape:
@@ -98,7 +109,6 @@ class LumenGraphedCallable:
                     return self._static_output
                 static.copy_(new)
 
-        # Replay graph
         self._graph.replay()
         return self._static_output
 
@@ -172,3 +182,209 @@ def lumen_make_graphed_callables(
         gc = LumenGraphedCallable(fn, args, num_warmup=num_warmup, pool=pool)
         graphed.append(gc)
     return graphed
+
+
+# ---------------------------------------------------------------------------
+# Per-layer forward+backward graph capture (P5)
+# ---------------------------------------------------------------------------
+
+
+class _GraphedLayerFn(torch.autograd.Function):
+    """Custom autograd Function that replays pre-captured forward and backward
+    CUDA/HIP graphs instead of re-executing the layer's ops.
+
+    Static buffers for inputs/outputs/grads are created during capture and
+    reused across iterations via ``copy_``.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        static_fwd_input,
+        static_fwd_output,
+        fwd_graph,
+        static_bwd_grad_output,
+        static_bwd_grad_input,
+        bwd_graph,
+        real_input,
+    ):
+        static_fwd_input.copy_(real_input)
+        fwd_graph.replay()
+
+        ctx.static_bwd_grad_output = static_bwd_grad_output
+        ctx.static_bwd_grad_input = static_bwd_grad_input
+        ctx.bwd_graph = bwd_graph
+
+        return static_fwd_output.detach().clone().requires_grad_()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        ctx.static_bwd_grad_output.copy_(grad_output)
+        ctx.bwd_graph.replay()
+        return (
+            None,  # static_fwd_input
+            None,  # static_fwd_output
+            None,  # fwd_graph
+            None,  # static_bwd_grad_output
+            None,  # static_bwd_grad_input
+            None,  # bwd_graph
+            ctx.static_bwd_grad_input.clone(),  # real_input grad
+        )
+
+
+class LumenGraphedLayer:
+    """Captures a transformer layer's forward and backward into separate
+    CUDA/HIP graphs and provides a ``__call__`` that replays them.
+
+    Usage::
+
+        graphed = LumenGraphedLayer(layer, sample_hidden, sample_kwargs)
+        # Replace layer forward:
+        layer._original_forward = layer.forward
+        layer.forward = graphed
+
+    Args:
+        layer: The ``nn.Module`` transformer layer.
+        sample_input: Hidden states tensor ``(S, B, H)`` with ``requires_grad=True``.
+        sample_kwargs: Dict of non-grad keyword arguments (attention_mask, etc.).
+        num_warmup: Warmup iterations before capture.
+    """
+
+    def __init__(
+        self,
+        layer: nn.Module,
+        sample_input: torch.Tensor,
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+        num_warmup: int = 3,
+    ):
+        self.layer = layer
+        self._enabled = True
+        device = sample_input.device
+        kwargs = sample_kwargs or {}
+
+        pool = getattr(torch.cuda, "graph_pool_handle", lambda: None)() if torch.cuda.is_available() else None
+
+        # --- Static buffers ---
+        self._static_input = sample_input.clone().requires_grad_(True)
+        self._static_kwargs = {k: (v.clone() if isinstance(v, torch.Tensor) else v) for k, v in kwargs.items()}
+
+        # --- Warmup ---
+        s = torch.cuda.Stream(device=device)
+        s.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(s):
+            for _ in range(num_warmup):
+                out = layer(self._static_input, **self._static_kwargs)
+                if isinstance(out, tuple):
+                    out = out[0]
+                grad = torch.ones_like(out)
+                out.backward(grad)
+                self._static_input.grad = None
+        torch.cuda.current_stream(device).wait_stream(s)
+
+        # --- Capture forward ---
+        self._fwd_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self._fwd_graph, pool=pool, stream=s):
+            fwd_out = layer(self._static_input, **self._static_kwargs)
+            if isinstance(fwd_out, tuple):
+                fwd_out = fwd_out[0]
+        self._static_output = fwd_out
+
+        # --- Capture backward ---
+        self._static_grad_output = torch.ones_like(fwd_out)
+        self._bwd_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self._bwd_graph, pool=pool, stream=s):
+            self._static_output.backward(self._static_grad_output, retain_graph=True)
+        self._static_grad_input = (
+            self._static_input.grad.clone()
+            if self._static_input.grad is not None
+            else torch.zeros_like(self._static_input)
+        )
+
+    def __call__(self, hidden_states, **kwargs):
+        if not self._enabled:
+            return self.layer(hidden_states, **kwargs)
+
+        for k, v in kwargs.items():
+            if k in self._static_kwargs and isinstance(v, torch.Tensor):
+                self._static_kwargs[k].copy_(v)
+
+        return _GraphedLayerFn.apply(
+            self._static_input,
+            self._static_output,
+            self._fwd_graph,
+            self._static_grad_output,
+            self._static_grad_input,
+            self._bwd_graph,
+            hidden_states,
+        )
+
+    def disable(self):
+        self._enabled = False
+
+    def enable(self):
+        self._enabled = True
+
+
+def capture_lumen_graphs(
+    model: nn.Module,
+    seq_len: int,
+    micro_batch_size: int,
+    hidden_size: int,
+    num_warmup: int = 3,
+    device: str = "cuda",
+) -> int:
+    """Capture HIP/CUDA graphs for each transformer layer in a Megatron model.
+
+    Iterates ``model.decoder.layers`` and replaces each layer's ``forward``
+    with a :class:`LumenGraphedLayer` wrapper that replays pre-captured
+    forward and backward graphs.
+
+    Args:
+        model: Megatron GPTModel (or the unwrapped model with ``.decoder.layers``).
+        seq_len: Sequence length (post TP/SP/CP division).
+        micro_batch_size: Per-GPU micro-batch size.
+        hidden_size: Model hidden dimension.
+        num_warmup: Warmup iterations before capture.
+        device: CUDA device.
+
+    Returns:
+        Number of layers captured.
+    """
+    if not hasattr(model, "decoder") or model.decoder is None:
+        logger.warning("Model has no decoder attribute, skipping graph capture")
+        return 0
+    if not hasattr(model.decoder, "layers"):
+        logger.warning("Model decoder has no layers attribute, skipping graph capture")
+        return 0
+
+    layers = model.decoder.layers
+    if len(layers) == 0:
+        return 0
+
+    torch.cuda.synchronize()
+
+    captured = 0
+    for l_no, layer in enumerate(layers):
+        sample_input = torch.ones(
+            (seq_len, micro_batch_size, hidden_size),
+            dtype=torch.bfloat16,
+            requires_grad=True,
+            device=device,
+        )
+
+        try:
+            graphed = LumenGraphedLayer(
+                layer,
+                sample_input,
+                num_warmup=num_warmup,
+            )
+            layer._original_forward = layer.forward
+            layer.forward = graphed
+            captured += 1
+        except Exception as e:
+            logger.warning(
+                f"Failed to capture graph for layer {l_no}: {e}. " "Falling back to eager execution for this layer."
+            )
+
+    logger.info(f"Captured HIP graphs for {captured}/{len(layers)} transformer layers")
+    return captured

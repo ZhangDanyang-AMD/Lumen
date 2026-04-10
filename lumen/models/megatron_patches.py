@@ -22,7 +22,12 @@ classes are imported) to apply every patch.  Individual installers can
 also be called selectively.
 """
 
+import os
+
 import torch
+
+_FUSED_SWIGLU_QUANT = os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1"
+
 
 # ── 1. FusedLayerNorm → Lumen RMSNorm / LayerNorm ──────────────────────────
 
@@ -150,6 +155,8 @@ def install_swiglu_fp8():
     1. Uses ``float8_e4m3fnuz`` on MI300X (instead of hard-coded ``float8_e4m3fn``).
     2. Processes the backward in 1024-row chunks when FP8 input store is active,
        reducing peak transient memory from 896 MiB to 112 MiB for Llama-70B.
+    3. When ``LUMEN_FUSED_SWIGLU_QUANT=1``, runs AITER's fused SiLU+mul+FP8 quant
+       after SwiGLU forward so the next FP8 GEMM can skip separate activation quant.
     """
     try:
         from megatron.core.fusions import fused_bias_swiglu as _swiglu_mod
@@ -175,7 +182,15 @@ def install_swiglu_fp8():
             ctx.save_for_backward(input_for_backward)
             ctx.ori_input_dtype = input.dtype
             ctx.fp8_input_store = fp8_input_store
-            return _swiglu_mod.swiglu(input)
+            bf16_out = _swiglu_mod.swiglu(input)
+            if _FUSED_SWIGLU_QUANT:
+                try:
+                    from lumen.models._swiglu_fp8_fuse import try_fused_swiglu_fp8
+
+                    try_fused_swiglu_fp8(input, bf16_out)
+                except Exception:
+                    pass
+            return bf16_out
 
         @staticmethod
         def backward(ctx, grad_output):
@@ -205,6 +220,48 @@ def install_swiglu_fp8():
     _swiglu_mod._lumen_fp8_dtype_patched = True
 
 
+# ── 5b. Fused SwiGLU activation via Triton ────────────────────────────────
+
+_FUSED_SWIGLU = os.environ.get("LUMEN_FUSED_SWIGLU", "0") == "1"
+
+
+def install_fused_swiglu_triton():
+    """Replace Megatron's ``swiglu`` / ``swiglu_back`` with single-kernel
+    Triton fused implementations.
+
+    The original ``@jit_fuser`` implementations expand into 6-8 separate
+    elementwise kernels per call (chunk, silu, sigmoid, mul, add, cat).
+    The Triton kernels handle the full forward and backward in one launch
+    each, saving ~400-600ms/step at LLaMA-70B scale.
+
+    Controlled by ``LUMEN_FUSED_SWIGLU=1``.
+    """
+    if not _FUSED_SWIGLU:
+        return
+
+    try:
+        from megatron.core.fusions import fused_bias_swiglu as _swiglu_mod
+    except ImportError:
+        return
+
+    if getattr(_swiglu_mod, "_lumen_triton_swiglu_patched", False):
+        return
+
+    from lumen.ops.fused_swiglu import _probe_aiter_swiglu
+
+    if not _probe_aiter_swiglu():
+        import logging
+
+        logging.getLogger(__name__).warning("LUMEN_FUSED_SWIGLU=1 but AITER SwiGLU kernels not available — skipping")
+        return
+
+    from lumen.ops.fused_swiglu import fused_swiglu, fused_swiglu_backward
+
+    _swiglu_mod.swiglu = fused_swiglu
+    _swiglu_mod.swiglu_back = fused_swiglu_backward
+    _swiglu_mod._lumen_triton_swiglu_patched = True
+
+
 # ── 6. MLP-only recompute ──────────────────────────────────────────────────
 
 
@@ -213,7 +270,12 @@ def install_mlp_recompute():
     ``tensor_parallel.checkpoint`` when ``LUMEN_MLP_RECOMPUTE=1``.
 
     This frees intermediate BF16 tensors (FC1_out, SwiGLU_out) that
-    would otherwise stay alive in the autograd graph (~389 MiB/layer).
+    would otherwise stay alive in the autograd graph (~1.3 GiB/layer).
+
+    ``LUMEN_MLP_RECOMPUTE_LAYERS`` controls how many non-recomputed layers
+    get MLP-only recompute (default: all).  Set to e.g. ``20`` to only
+    recompute MLP for the first 20 non-recomputed layers, balancing memory
+    savings (~1.3 GiB/layer) vs compute overhead (~30ms/layer).
     """
     import os
 
@@ -233,18 +295,24 @@ def install_mlp_recompute():
     _OrigTransformerLayer = _tl_mod.TransformerLayer
     _orig_forward = _OrigTransformerLayer.forward
 
+    _mlp_recompute_count = [0]
+    _max_mlp_recompute = int(os.environ.get("LUMEN_MLP_RECOMPUTE_LAYERS", "9999"))
+
     def _patched_forward(self, *args, **kwargs):
         if os.environ.get("LUMEN_MLP_RECOMPUTE", "0") != "1" or not self.training:
             return _orig_forward(self, *args, **kwargs)
 
         if not hasattr(self, "_lumen_mlp_recompute_installed"):
             self._lumen_mlp_recompute_installed = True
-            if (
+            should_recompute = (
                 hasattr(self, "mlp")
                 and not isinstance(self.mlp, _IdentityOp)
                 and not getattr(self, "recompute_mlp", False)
-            ):
+                and _mlp_recompute_count[0] < _max_mlp_recompute
+            )
+            if should_recompute:
                 _orig_mlp_fwd = self.mlp.forward
+                _mlp_recompute_count[0] += 1
 
                 def _recompute_mlp_forward(hidden_states, *a, **kw):
                     from megatron.core import tensor_parallel
@@ -310,6 +378,150 @@ def remap_lora_state_dict(module, state_dict):
     return new_sd
 
 
+# ── Fused RoPE (apex → Megatron rope_utils) ────────────────────────────────
+
+_FUSED_ROPE_INSTALLED = False
+
+
+def install_fused_rope():
+    """Register apex fused RoPE into Megatron's rope_utils.
+
+    Enables ``apply_rope_fusion=True`` without TransformerEngine.  The apex
+    kernel delegates to AITER on ROCm (MI300X), matching TE's fused path.
+
+    Megatron passes ``interleaved=`` kwarg that apex doesn't accept, so we
+    wrap to strip unsupported keywords.
+    """
+    global _FUSED_ROPE_INSTALLED
+    if _FUSED_ROPE_INSTALLED:
+        return
+    try:
+        import megatron.core.models.common.embeddings.rope_utils as rope_utils
+        from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
+
+        def _compat_fused_rope(t, freqs, **kwargs):
+            return _apex_rope(t, freqs)
+
+        rope_utils.fused_apply_rotary_pos_emb = _compat_fused_rope
+        _FUSED_ROPE_INSTALLED = True
+    except ImportError:
+        pass
+
+
+# ── 8. Force activation recompute during eval ───────────────────────────────
+
+
+def install_eval_recompute():
+    """Keep activation checkpointing active during ``model.eval()`` so that
+    evaluation forward passes use the same 21-layer recompute pattern as
+    training instead of storing all 80 layers' activations.
+
+    Without this, the eval forward pass at 96%+ GPU memory creates a
+    different allocation pattern that fragments the ROCm block cache.
+    The fragmentation persists after ``model.train()`` resumes, causing
+    a permanent +20% step-time regression.
+
+    Controlled by ``LUMEN_EVAL_RECOMPUTE=1``.
+    """
+    if os.environ.get("LUMEN_EVAL_RECOMPUTE", "0") != "1":
+        return
+
+    try:
+        from megatron.core.transformer import transformer_block as _tb_mod
+    except ImportError:
+        return
+
+    if getattr(_tb_mod, "_lumen_eval_recompute_patched", False):
+        return
+
+    _OrigTransformerBlock = _tb_mod.TransformerBlock
+    _orig_forward = _OrigTransformerBlock.forward
+
+    def _forward_with_eval_recompute(self, *args, **kwargs):
+        if not self.training and self.config.recompute_granularity == "full":
+            self.training = True
+            try:
+                return _orig_forward(self, *args, **kwargs)
+            finally:
+                self.training = False
+        return _orig_forward(self, *args, **kwargs)
+
+    _OrigTransformerBlock.forward = _forward_with_eval_recompute
+    _tb_mod._lumen_eval_recompute_patched = True
+
+
+# ── 9. Post-eval memory cache clear ─────────────────────────────────────────
+
+
+def install_post_eval_cache_clear():
+    """Call ``torch.cuda.empty_cache()`` after every evaluation run to
+    reset the ROCm allocator's cached block pool.
+
+    This prevents fragmented eval-phase blocks from polluting the
+    training allocation pattern.  There is a brief re-warmup cost on the
+    first post-eval training step, but subsequent steps return to
+    pre-eval speed.
+
+    Controlled by ``LUMEN_POST_EVAL_CACHE_CLEAR=1``.
+    """
+    if os.environ.get("LUMEN_POST_EVAL_CACHE_CLEAR", "0") != "1":
+        return
+
+    try:
+        import megatron.training.training as _train_mod
+    except ImportError:
+        return
+
+    if getattr(_train_mod, "_lumen_post_eval_cache_clear_patched", False):
+        return
+
+    _orig_evaluate = _train_mod.evaluate
+    _do_rewarm = os.environ.get("LUMEN_POST_EVAL_REWARM", "0") == "1"
+
+    def _evaluate_with_cache_clear(*args, **kwargs):
+        result = _orig_evaluate(*args, **kwargs)
+        torch.cuda.empty_cache()
+        if _do_rewarm:
+            _post_eval_rewarm()
+        return result
+
+    _train_mod.evaluate = _evaluate_with_cache_clear
+    _train_mod._lumen_post_eval_cache_clear_patched = True
+
+
+def _post_eval_rewarm():
+    """Allocate and free training-shaped tensors after eval + empty_cache to
+    re-prime the ROCm allocator with the training block layout.
+
+    This forces the allocator to create block splits that match training
+    tensor sizes, so the first real training step after eval doesn't
+    suffer from suboptimal allocations.
+
+    Controlled by ``LUMEN_POST_EVAL_REWARM=1`` (requires POST_EVAL_CACHE_CLEAR).
+    """
+    try:
+        from megatron.training import get_args
+    except ImportError:
+        return
+
+    args = get_args()
+    seq_len = getattr(args, "seq_length", 8192)
+    mbs = getattr(args, "micro_batch_size", 1)
+    hidden = getattr(args, "hidden_size", 8192)
+
+    shapes = [
+        (mbs * seq_len, hidden),
+        (mbs * seq_len, hidden * 4),
+        (mbs * seq_len, hidden * 2),
+        (mbs, seq_len),
+    ]
+    buffers = []
+    for shape in shapes:
+        buffers.append(torch.empty(shape, dtype=torch.bfloat16, device="cuda"))
+    del buffers
+    torch.cuda.synchronize()
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
@@ -324,4 +536,8 @@ def install_all():
     install_mmap_checkpoint()
     install_requires_grad_fix()
     install_swiglu_fp8()
+    install_fused_swiglu_triton()
     install_mlp_recompute()
+    install_fused_rope()
+    install_eval_recompute()
+    install_post_eval_cache_clear()

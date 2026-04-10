@@ -31,6 +31,7 @@ GEMM backends are selected automatically:
 """
 
 import logging as _logging
+import os
 from typing import Optional
 
 import torch
@@ -47,8 +48,11 @@ from lumen.ops.dispatch import (
     try_backends,
 )
 from lumen.quantize.config import _get_float8_e4m3
+from lumen.quantize.descriptor import FP8Descriptor
 
 _logger = _logging.getLogger(__name__)
+
+_PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
 
 __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
@@ -65,6 +69,12 @@ def _mark_allow_in_graph(cls):
 # ---------------------------------------------------------------------------
 # Quantization helpers (all via AITER)
 # ---------------------------------------------------------------------------
+
+_E5M2_DTYPES = frozenset({torch.float8_e5m2, torch.float8_e5m2fnuz})
+
+
+def _is_e5m2(dtype):
+    return dtype in _E5M2_DTYPES
 
 
 def _quant_per_tensor_hip(x, dtype):
@@ -100,36 +110,70 @@ def _quant_blockwise(x, dtype, block_size=128):
     return x_fp8.view(orig_shape), x_scales
 
 
-def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, tensor_id=None, backward=False):
+def _safe_fp8_desc(x_fp8, x_scale, fp8_dtype):
+    """Return an FP8Descriptor, sanitizing zero-scale quantization artifacts.
+
+    AITER quantization kernels compute ``scale = amax / DTYPE_MAX`` and
+    ``quantized = input / scale``.  When input is all-zero (e.g. during
+    warmup steps with zero loss_mask), ``scale = 0`` and the division
+    produces ``NaN`` in the FP8 tensor.  We detect this and return clean
+    zeros so that NaN does not propagate through the backward graph.
+
+    The scale check uses ``item()`` (GPU→CPU sync) but this is only
+    relevant for per-tensor scales and the zero case is extremely rare
+    (warmup steps only).
+    """
+    if x_scale.numel() == 1 and x_scale.item() == 0.0:
+        x_fp8 = torch.zeros_like(x_fp8)
+        x_scale = torch.ones(1, dtype=torch.float32, device=x_fp8.device)
+    return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
+
+
+def quantize_input(
+    x_2d,
+    scaling_type,
+    fp8_dtype,
+    block_size=128,
+    manager=None,
+    tensor_id=None,
+    backward=False,
+) -> Optional[FP8Descriptor]:
     """Quantize input tensor according to scaling_type (all via AITER).
 
-    Returns ``(x_quant, x_scale)`` where x_scale shape depends on mode:
+    Returns an :class:`~lumen.quantize.descriptor.FP8Descriptor` bundling ``data`` and
+    ``scale``, or ``None`` when ``scaling_type == "none"`` (BF16 passthrough).
+
+    Scale tensor shapes by mode:
     - per-tensor: ``(1,)``
     - per-token: ``(M, 1)``
     - blockwise / blockwise2d: ``(M, ceil(N/block_size))``
     - mxfp8: ``(scales_shape,)``
-    - none: ``(None, None)``
     """
     if scaling_type == "none":
-        return x_2d, None
+        return None
 
     if scaling_type == "delayed":
         if manager is not None:
-            return manager.quantize(tensor_id or "input", x_2d, backward=backward)
+            result = manager.quantize(tensor_id or "input", x_2d, backward=backward)
+            if isinstance(result, tuple):
+                return FP8Descriptor(data=result[0], scale=result[1], fp8_dtype=fp8_dtype)
+            return result
         backends = []
-        if _probe_aiter_quant():
+        if _probe_aiter_quant() and not _is_e5m2(fp8_dtype):
             backends.append((Backend.CK, lambda: _quant_per_tensor_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
-        return try_backends(backends, op_name="quant_delayed_per_tensor")
+        x_fp8, x_scale = try_backends(backends, op_name="quant_delayed_per_tensor")
+        return _safe_fp8_desc(x_fp8, x_scale, fp8_dtype)
 
     if scaling_type == "dynamic":
         backends = []
-        if _probe_aiter_quant():
+        if _probe_aiter_quant() and not _is_e5m2(fp8_dtype):
             backends.append((Backend.CK, lambda: _quant_per_tensor_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
-        return try_backends(backends, op_name="quant_per_tensor")
+        x_fp8, x_scale = try_backends(backends, op_name="quant_per_tensor")
+        return _safe_fp8_desc(x_fp8, x_scale, fp8_dtype)
 
     if scaling_type == "per_token":
         backends = []
@@ -137,10 +181,12 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
             backends.append((Backend.CK, lambda: _quant_per_token_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_token_triton(x_2d, fp8_dtype)))
-        return try_backends(backends, op_name="quant_per_token")
+        x_fp8, x_scale = try_backends(backends, op_name="quant_per_token")
+        return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
     if scaling_type in ("blockwise", "blockwise2d"):
-        return _quant_blockwise(x_2d, fp8_dtype, block_size)
+        x_fp8, x_scale = _quant_blockwise(x_2d, fp8_dtype, block_size)
+        return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
     if scaling_type == "mxfp8":
         from lumen.ops.quantize.ops import convert_to_mxfp8
@@ -149,15 +195,16 @@ def quantize_input(x_2d, scaling_type, fp8_dtype, block_size=128, manager=None, 
         mxfp8_block = 32 if block_size > 64 else block_size
         x_2d, _orig_m = pad_to_block(x_2d, mxfp8_block, dim=0)
         x_2d, _orig_n = pad_to_block(x_2d, mxfp8_block, dim=-1)
-        return convert_to_mxfp8(x_2d, block_size=mxfp8_block, axis=-1, float8_dtype_pt=fp8_dtype)
+        x_fp8, x_scale = convert_to_mxfp8(x_2d, block_size=mxfp8_block, axis=-1, float8_dtype_pt=fp8_dtype)
+        return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
     raise ValueError(f"Unknown scaling_type={scaling_type!r}")
 
 
 def _fp8_store_activation(input_2d, fp8_dtype):
     """Quantize activation for memory-efficient storage in save_for_backward."""
-    input_fp8, scale = quantize_input(input_2d, "dynamic", fp8_dtype)
-    return input_fp8, scale
+    desc = quantize_input(input_2d, "dynamic", fp8_dtype)
+    return desc.data, desc.scale
 
 
 def _fp8_restore_activation(input_fp8, scale, target_dtype):
@@ -175,19 +222,51 @@ def _fp8_restore_activation(input_fp8, scale, target_dtype):
 # ---------------------------------------------------------------------------
 
 
-def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
+def ensure_hipblaslt_ready():
+    """Pre-initialize hipBLASLt workspace (256 MiB via raw HIP).
+
+    Must be called **after** ``torch.cuda.set_device(local_rank)`` so the
+    allocation lands on the correct GPU.  Safe to call multiple times — only
+    the first invocation per process allocates.
+
+    By reserving the workspace early (before model loading), PyTorch's caching
+    allocator sees less free VRAM and adjusts peak usage downward, preventing
+    the OOM that occurs when hipBLASLt is lazily initialized during backward.
+    """
+    import lumen.ops.quantize.linear as _self
+
+    if getattr(_self, "_hipblas_initialized", False):
+        return
+
+    if not _probe_aiter_hipblas():
+        return
+
+    from aiter.ops.gradlib import hipb_create_extension
+
+    hipb_create_extension()
+    _self._hipblas_initialized = True
+
+    try:
+        import aiter.tuned_gemm as _tg
+
+        _tg.extensions_created = True
+    except (ImportError, AttributeError):
+        pass
+
+    _logger.info("hipBLASLt workspace pre-allocated (256 MiB)")
+
+
+def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
     """hipBLASLt per-tensor GEMM via AITER hipb_mm.
 
     hipb_mm computes mat1 @ mat2 (NN layout).  Lumen's dispatch convention
     passes w as (N, K), so we must transpose to (K, N) before calling hipb_mm.
+    If ``w_transposed`` is already provided (e.g. from FP8Descriptor._transpose),
+    it is used directly to avoid the expensive .t().contiguous() copy.
     """
-    from aiter.ops.gradlib import hipb_create_extension, hipb_mm
+    from aiter.ops.gradlib import hipb_mm
 
-    import lumen.ops.quantize.linear as _self
-
-    if not getattr(_self, "_hipblas_initialized", False):
-        hipb_create_extension()
-        _self._hipblas_initialized = True
+    ensure_hipblaslt_ready()
     sa = (
         scale_a.float().reshape(1, 1)
         if isinstance(scale_a, torch.Tensor)
@@ -198,7 +277,8 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w):
         if isinstance(scale_w, torch.Tensor)
         else torch.tensor([[scale_w]], dtype=torch.float32, device=w_fp8.device)
     )
-    return hipb_mm(a_fp8, w_fp8.t().contiguous(), -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
+    w_t = w_transposed if w_transposed is not None else w_fp8.t().contiguous()
+    return hipb_mm(a_fp8, w_t, -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
 def _expand_per_tensor_scale(scale, size):
@@ -228,21 +308,109 @@ def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
     return gemm_a8w8(a_fp8, w_fp8, sa, sw)
 
 
-def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w):
+def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
     """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends.
 
-    hipBLASLt is tried last because ``hipb_create_extension`` / ``hipb_mm``
-    can SIGSEGV in ``mp.spawn`` child processes (known multi-GPU issue in the
-    gradlib C++ globals).  CK and Triton are safe to run first.
+    When ``LUMEN_PREFER_HIPBLASLT=1``, hipBLASLt is tried first to match TE's
+    GEMM backend (AMD MLPerf reference uses ``NVTE_USE_HIPBLASLT=1``).
+
+    Otherwise hipBLASLt is tried last because ``hipb_create_extension`` /
+    ``hipb_mm`` can SIGSEGV in ``mp.spawn`` child processes (known multi-GPU
+    issue in the gradlib C++ globals).  CK and Triton are safe to run first.
+
+    ``w_transposed`` is an optional pre-computed ``(K, N)`` contiguous
+    transpose of ``w_fp8``, used by hipBLASLt to skip ``.t().contiguous()``.
     """
     backends = []
+    if _PREFER_HIPBLASLT and _probe_aiter_hipblas():
+        backends.append(
+            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed))
+        )
     if _probe_aiter_ck_gemm():
         backends.append((Backend.CK, lambda: _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
-    if _probe_aiter_hipblas():
-        backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w)))
+    if not _PREFER_HIPBLASLT and _probe_aiter_hipblas():
+        backends.append(
+            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed))
+        )
     return try_backends(backends, op_name="gemm_per_tensor")
+
+
+def _gemm_per_tensor_hipblas_mixed(a_fp8, w_fp8, scale_a, scale_w):
+    """hipBLASLt mixed-dtype FP8 GEMM for dgrad: ``grad(M,N) @ weight(N,K)``.
+
+    For dgrad: ``a_fp8`` is the gradient ``(M, N_out)`` and ``w_fp8`` is the
+    weight ``(N_out, K_in)``.  hipb_mm computes ``mat1 @ mat2`` so we pass
+    them directly — no transpose needed (saving ~224 MiB contiguous copy).
+    """
+    from aiter.ops.gradlib import hipb_mm
+
+    ensure_hipblaslt_ready()
+    sa = (
+        scale_a.float().reshape(1, 1)
+        if isinstance(scale_a, torch.Tensor)
+        else torch.tensor([[scale_a]], dtype=torch.float32, device=a_fp8.device)
+    )
+    sw = (
+        scale_w.float().reshape(1, 1)
+        if isinstance(scale_w, torch.Tensor)
+        else torch.tensor([[scale_w]], dtype=torch.float32, device=w_fp8.device)
+    )
+    return hipb_mm(a_fp8, w_fp8, -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
+
+
+def gemm_per_tensor_mixed(a_fp8, w_fp8, scale_a, scale_w):
+    """Mixed-dtype FP8 dgrad GEMM: ``Y = grad(M,N) @ weight(N,K)``.
+
+    For hybrid backward: ``a_fp8`` is E5M2 gradient ``(M, N_out)`` and
+    ``w_fp8`` is E4M3 weight ``(N_out, K_in)``.  Uses hipBLASLt which
+    supports mixed FP8 dtypes and NN layout natively.
+
+    The hipBLASLt workspace must be pre-allocated (via
+    :func:`ensure_hipblaslt_ready`) before model loading to avoid OOM.
+    """
+    backends = []
+    if _probe_aiter_hipblas():
+        backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas_mixed(a_fp8, w_fp8, scale_a, scale_w)))
+    return try_backends(backends, op_name="gemm_per_tensor_mixed")
+
+
+def _gemm_wgrad_hipblas(grad_fp8, input_fp8, scale_grad, scale_input):
+    """FP8 wgrad via hipBLASLt: ``dW = grad^T @ input``.
+
+    Computes ``hipb_mm(grad^T, input)`` where grad is ``(M, N_out)`` and
+    input is ``(M, K_in)``, producing ``(N_out, K_in)`` = weight shape.
+
+    Supports mixed-dtype: grad can be E5M2, input can be E4M3 (matching TE).
+    """
+    from aiter.ops.gradlib import hipb_mm
+
+    ensure_hipblaslt_ready()
+    g_t = grad_fp8.t().contiguous()
+    sg = (
+        scale_grad.float().reshape(1, 1)
+        if isinstance(scale_grad, torch.Tensor)
+        else torch.tensor([[scale_grad]], dtype=torch.float32, device=grad_fp8.device)
+    )
+    si = (
+        scale_input.float().reshape(1, 1)
+        if isinstance(scale_input, torch.Tensor)
+        else torch.tensor([[scale_input]], dtype=torch.float32, device=input_fp8.device)
+    )
+    return hipb_mm(g_t, input_fp8, -1, out_dtype=torch.bfloat16, scaleA=sg, scaleB=si)
+
+
+def gemm_wgrad_fp8(grad_fp8, input_fp8, scale_grad, scale_input):
+    """FP8 weight gradient GEMM: ``dW = grad^T @ input``.
+
+    Uses hipBLASLt for mixed or same-dtype FP8 GEMM, matching TE's
+    ``fp8_wgrad=True`` behavior.
+    """
+    backends = []
+    if _probe_aiter_hipblas():
+        backends.append((Backend.HIPBLAS, lambda: _gemm_wgrad_hipblas(grad_fp8, input_fp8, scale_grad, scale_input)))
+    return try_backends(backends, op_name="gemm_wgrad_fp8")
 
 
 def _gemm_per_token_triton(a_fp8, w_fp8, scale_a, scale_w):
@@ -310,7 +478,7 @@ def gemm_bf16(a, w, bias=None):
     return try_backends(backends, op_name="gemm_bf16")
 
 
-def dispatch_gemm(a, w, scale_a, scale_w, scaling_type, bias=None):
+def dispatch_gemm(a, w, scale_a=None, scale_w=None, scaling_type="none", bias=None):
     """Route GEMM to the appropriate AITER backend based on scaling_type.
 
     All kernels compute ``Y = A @ W^T`` (TN layout).  ``w`` must have
@@ -319,22 +487,37 @@ def dispatch_gemm(a, w, scale_a, scale_w, scaling_type, bias=None):
     For backward dgrad, pass ``weight.t().contiguous()`` as ``w`` so that
     ``A @ W^T = grad @ weight``.
 
+    ``a`` and ``w`` may each be a plain :class:`torch.Tensor` or an
+    :class:`~lumen.quantize.descriptor.FP8Descriptor`.  When an argument
+    is a descriptor, its ``.data`` and ``.scale`` fields are unpacked
+    automatically, overriding the corresponding ``scale_*`` parameter.
+
     Args:
-        a: Activation / LHS tensor ``(M, K)``.
-        w: Weight / RHS tensor ``(N, K)``.
-        scale_a: Activation scale.
-        scale_w: Weight scale.
+        a: Activation / LHS tensor ``(M, K)``, or :class:`FP8Descriptor`.
+        w: Weight / RHS tensor ``(N, K)``, or :class:`FP8Descriptor`.
+        scale_a: Activation scale (ignored for that side if ``a`` is a descriptor).
+        scale_w: Weight scale (ignored for that side if ``w`` is a descriptor).
         scaling_type: One of the 6 supported modes.
         bias: Optional bias.
 
     Returns:
         Output tensor ``(M, N)``.
     """
+    w_transposed = None
+    if isinstance(a, FP8Descriptor):
+        scale_a = a.scale
+        a = a.data
+    if isinstance(w, FP8Descriptor):
+        scale_w = w.scale
+        if w._transpose is not None:
+            w_transposed = w._transpose
+        w = w.data
+
     if scaling_type == "none":
         return gemm_bf16(a, w, bias)
 
     if scaling_type in ("delayed", "dynamic"):
-        out = gemm_per_tensor(a, w, scale_a, scale_w)
+        out = gemm_per_tensor(a, w, scale_a, scale_w, w_transposed)
     elif scaling_type == "per_token":
         out = gemm_per_token(a, w, scale_a, scale_w)
     elif scaling_type in ("blockwise", "blockwise2d"):
@@ -384,6 +567,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
         delay_wgrad: bool = False,
         deferred_wgrad=None,
         fp8_activation_store: bool = False,
+        activation_tensor_id: Optional[str] = None,
+        pre_quantized_input: Optional[tuple] = None,
         fp8_weight_cache: Optional[torch.Tensor] = None,
         fp8_weight_scale: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -408,12 +593,19 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         if not quantize_activation:
             if fp8_weight_cache is not None and fp8_weight_scale is not None:
-                weight_fp8 = fp8_weight_cache.contiguous()
-                weight_scale = fp8_weight_scale
-                if weight_scale.device != weight_fp8.device:
-                    weight_scale = weight_scale.to(weight_fp8.device)
+                from lumen.quantize.descriptor import FP8Descriptor as _FP8D
+
+                weight_desc = _FP8D(
+                    data=fp8_weight_cache.contiguous(),
+                    scale=(
+                        fp8_weight_scale.to(fp8_weight_cache.device)
+                        if fp8_weight_scale.device != fp8_weight_cache.device
+                        else fp8_weight_scale
+                    ),
+                    fp8_dtype=fp8_dtype,
+                )
             else:
-                weight_fp8, weight_scale = quantize_input(
+                weight_desc = quantize_input(
                     weight.contiguous(),
                     scaling_type,
                     fp8_dtype,
@@ -421,15 +613,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     scaling_manager,
                     tensor_id,
                 )
-            weight_dequant = (weight_fp8.to(input.dtype) * weight_scale).to(input.dtype)
+            weight_dequant = (weight_desc.data.to(input.dtype) * weight_desc.scale).to(input.dtype)
             output = gemm_bf16(input, weight_dequant, bias)
             if fp8_activation_store:
                 input_2d = input.reshape(-1, input.shape[-1]).contiguous()
                 input_store, input_scale = _fp8_store_activation(input_2d, fp8_dtype)
-                ctx.save_for_backward(input_store, input_scale, weight_fp8, weight_scale)
+                ctx.save_for_backward(input_store, input_scale, weight_desc.data, weight_desc.scale)
                 ctx._input_shape = input.shape
             else:
-                ctx.save_for_backward(input, weight_fp8, weight_scale)
+                ctx.save_for_backward(input, weight_desc.data, weight_desc.scale)
             ctx.fp8_activation_store = fp8_activation_store
             ctx.scaling_manager = scaling_manager
             ctx.has_bias = bias is not None
@@ -445,19 +637,40 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         input_2d = input.reshape(-1, input.shape[-1]).contiguous()
 
-        input_fp8, input_scale = quantize_input(
-            input_2d,
-            scaling_type,
-            fp8_dtype,
-            block_size,
-        )
-        if fp8_weight_cache is not None and fp8_weight_scale is not None:
-            weight_fp8 = fp8_weight_cache.contiguous()
-            weight_scale = fp8_weight_scale
-            if weight_scale.device != weight_fp8.device:
-                weight_scale = weight_scale.to(weight_fp8.device)
+        if pre_quantized_input is not None:
+            from lumen.quantize.descriptor import FP8Descriptor
+
+            input_fp8, input_scale = pre_quantized_input
+            input_desc = FP8Descriptor(
+                data=input_fp8,
+                scale=input_scale,
+                fp8_dtype=fp8_dtype,
+            )
         else:
-            weight_fp8, weight_scale = quantize_input(
+            _act_mgr = scaling_manager if activation_tensor_id else None
+            _act_tid = activation_tensor_id or "activation"
+            input_desc = quantize_input(
+                input_2d,
+                scaling_type,
+                fp8_dtype,
+                block_size,
+                _act_mgr,
+                _act_tid,
+            )
+        if fp8_weight_cache is not None and fp8_weight_scale is not None:
+            from lumen.quantize.descriptor import FP8Descriptor as _FP8D
+
+            weight_desc = _FP8D(
+                data=fp8_weight_cache.contiguous(),
+                scale=(
+                    fp8_weight_scale.to(fp8_weight_cache.device)
+                    if fp8_weight_scale.device != fp8_weight_cache.device
+                    else fp8_weight_scale
+                ),
+                fp8_dtype=fp8_dtype,
+            )
+        else:
+            weight_desc = quantize_input(
                 weight.contiguous(),
                 scaling_type,
                 fp8_dtype,
@@ -467,13 +680,18 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
 
         # Forward: Y = input @ weight^T  (TN layout, weight is [N, K])
-        output = dispatch_gemm(input_fp8, weight_fp8, input_scale, weight_scale, scaling_type)
+        output = dispatch_gemm(input_desc, weight_desc, scaling_type=scaling_type)
         output = output.view(*input.shape[:-1], weight.shape[0])
 
         if bias is not None:
             output = output + bias
 
-        ctx.save_for_backward(input_fp8, weight_fp8, input_scale, weight_scale)
+        ctx.save_for_backward(
+            input_desc.data,
+            input_desc.scale,
+            weight_desc.data,
+            weight_desc.scale,
+        )
         ctx.fp8_activation_store = False
         ctx.scaling_manager = scaling_manager
         ctx.scaling_type = scaling_type
@@ -548,8 +766,24 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return (
-                grad_input, grad_weight, grad_bias,
-                None, None, None, None, None, None, None, None, None, None, None, None, None,
+                grad_input,
+                grad_weight,
+                grad_bias,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
 
         if not ctx.quantize_activation:
@@ -612,13 +846,30 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return (
-                grad_input, grad_weight, grad_bias,
-                None, None, None, None, None, None, None, None, None, None, None, None, None,
+                grad_input,
+                grad_weight,
+                grad_bias,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
 
-        input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
+        input_data, input_scale, weight_data, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
         block_size = ctx.block_size
+        weight_desc = FP8Descriptor.from_tensors(weight_data, weight_scale, fp8_dtype)
 
         mgr = ctx.scaling_manager
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
@@ -633,68 +884,88 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
         else:
             bwd_scaling = "dynamic" if scaling_type in ("per_token", "blockwise", "blockwise2d") else scaling_type
-            grad_fp8, grad_scale = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
+            grad_desc = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
+            grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
 
-        # dgrad: grad @ weight  →  dispatch(grad, weight^T) since kernel does A @ W^T
-        # Fall back to BF16 dequant when:
-        #  1. Hybrid mode (E4M3 fwd / E5M2 bwd) — AITER FP8 GEMM kernels
-        #     don't support mixed-dtype operands.
-        #  2. Forward used per_token / blockwise quantization — weight_scale
-        #     is multi-element and incompatible with the per-tensor dgrad GEMM.
-        # Dequant weight BEFORE transposing so scale dimensions align.
-        from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
-
-        _mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
         _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
-        if _mixed_dtype or _needs_dequant:
-            grad_bf16 = (grad_fp8.float() * grad_scale).bfloat16()
-            weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
+        if _needs_dequant:
+            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
+            grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
+            weight_bf16 = _dequant_fp8_weight(weight_data, weight_scale, block_size).bfloat16()
             grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
+        elif grad_fp8.dtype != weight_data.dtype:
+            grad_input = gemm_per_tensor_mixed(
+                grad_fp8,
+                weight_data,
+                grad_scale,
+                weight_desc.scale,
+            )
         else:
             grad_input = dispatch_gemm(
                 grad_fp8,
-                weight_fp8.t().contiguous(),
+                weight_desc.transpose_cached,
                 grad_scale,
-                weight_scale,
+                weight_desc.scale,
                 bwd_scaling,
             )
-        grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
+        grad_input = grad_input.view(*grad_output.shape[:-1], weight_data.shape[-1])
 
-        # wgrad: grad^T @ input  →  dispatch(grad^T, input^T)
-        # AITER's per-tensor FP8 GEMM backends (hipBLASLt / CK) crash with
-        # uncatchable SIGABRT on transposed wgrad tensors regardless of
-        # dimension, so always dequantize to BF16 before computing wgrad.
-        # In hybrid mode, the same mixed-dtype constraint applies.
+        # wgrad: dW = grad^T @ input
+        #
+        # CK/Triton dispatch_gemm crashes (SIGABRT) on transposed wgrad
+        # tensors in delayed/dynamic mode.  hipBLASLt handles NN layout
+        # natively via gemm_wgrad_fp8, so use it when available.  This
+        # also matches TE's fp8_wgrad=True behavior (FP8 GEMM for wgrad).
         _MIN_FP8_K = 64
         wgrad_k = grad_fp8.shape[0]
+        _hipblas_ok = _probe_aiter_hipblas()
         _use_fp8_wgrad = (
-            ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and bwd_scaling not in ("delayed", "dynamic") and not _mixed_dtype
+            ctx.fp8_wgrad and wgrad_k >= _MIN_FP8_K and (_hipblas_ok or bwd_scaling not in ("delayed", "dynamic"))
         )
 
         if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
             _use_fp8 = _use_fp8_wgrad
+            _use_hipblas = _hipblas_ok
             _grad_fp8 = grad_fp8
-            _input_fp8 = input_fp8
+            _input_data = input_data
             _grad_scale = grad_scale
             _input_scale = input_scale
             _bwd_scaling = bwd_scaling
             _mgr = mgr
             _w_ref = ctx.weight_ref
             _gaf = ctx.gradient_accumulation_fusion
-            _block_size = block_size
 
             def _wgrad_fn():
                 if _use_fp8:
-                    gw = dispatch_gemm(
-                        _grad_fp8.t().contiguous(),
-                        _input_fp8.t().contiguous(),
-                        _grad_scale,
-                        _input_scale,
-                        _bwd_scaling,
-                    )
+                    if _use_hipblas and _bwd_scaling in ("delayed", "dynamic"):
+                        gw = gemm_wgrad_fp8(
+                            _grad_fp8,
+                            _input_data,
+                            _grad_scale,
+                            _input_scale,
+                        )
+                    else:
+                        _g = _grad_fp8
+                        _gs = _grad_scale
+                        if _g.dtype != _input_data.dtype:
+                            _recast = quantize_input(
+                                (_g.bfloat16() * _gs.bfloat16()).contiguous().reshape(-1, _g.shape[-1]),
+                                _bwd_scaling,
+                                _input_data.dtype,
+                                block_size,
+                            )
+                            _g, _gs = _recast.data, _recast.scale
+                        gw = dispatch_gemm(
+                            _g.t().contiguous(),
+                            _input_data.t().contiguous(),
+                            _gs,
+                            _input_scale,
+                            _bwd_scaling,
+                        )
                 else:
-                    g_bf16 = _dequant_fp8_weight(_grad_fp8, _grad_scale, _block_size).bfloat16()
-                    i_bf16 = _dequant_fp8_weight(_input_fp8, _input_scale, _block_size).bfloat16()
+                    g_bf16 = (_grad_fp8.bfloat16() * _grad_scale.bfloat16()).contiguous()
+                    i_bf16 = (_input_data.bfloat16() * _input_scale.bfloat16()).contiguous()
                     gw = dispatch_gemm(
                         g_bf16.t().contiguous(),
                         i_bf16.t().contiguous(),
@@ -715,16 +986,34 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_weight = None
         else:
             if _use_fp8_wgrad:
-                grad_weight = dispatch_gemm(
-                    grad_fp8.t().contiguous(),
-                    input_fp8.t().contiguous(),
-                    grad_scale,
-                    input_scale,
-                    bwd_scaling,
-                )
+                if _hipblas_ok and bwd_scaling in ("delayed", "dynamic"):
+                    grad_weight = gemm_wgrad_fp8(
+                        grad_fp8,
+                        input_data,
+                        grad_scale,
+                        input_scale,
+                    )
+                else:
+                    _g = grad_fp8
+                    _gs = grad_scale
+                    if _g.dtype != input_data.dtype:
+                        _recast = quantize_input(
+                            (_g.bfloat16() * _gs.bfloat16()).contiguous().reshape(-1, _g.shape[-1]),
+                            bwd_scaling,
+                            input_data.dtype,
+                            block_size,
+                        )
+                        _g, _gs = _recast.data, _recast.scale
+                    grad_weight = dispatch_gemm(
+                        _g.t().contiguous(),
+                        input_data.t().contiguous(),
+                        _gs,
+                        input_scale,
+                        bwd_scaling,
+                    )
             else:
-                grad_bf16 = _dequant_fp8_weight(grad_fp8, grad_scale, block_size).bfloat16()
-                input_bf16 = _dequant_fp8_weight(input_fp8, input_scale, block_size).bfloat16()
+                grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
+                input_bf16 = (input_data.bfloat16() * input_scale.bfloat16()).contiguous()
                 grad_weight = dispatch_gemm(
                     grad_bf16.t().contiguous(),
                     input_bf16.t().contiguous(),
@@ -743,12 +1032,172 @@ class QuantizedLinearFunction(torch.autograd.Function):
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
 
         return (
-            grad_input, grad_weight, grad_bias,
-            None, None, None, None, None, None, None, None, None, None, None, None, None,
+            grad_input,
+            grad_weight,
+            grad_bias,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
 
 
 _mark_allow_in_graph(QuantizedLinearFunction)
+
+
+class FP8StoredLinearFunction(torch.autograd.Function):
+    """Linear for weights already stored in FP8 (FP8 param storage).
+
+    Unlike :class:`QuantizedLinearFunction`, the weight is never passed as a
+    BF16 tensor — only the compact FP8 data + scale enter the autograd graph.
+    This prevents PyTorch from pinning a full BF16 copy per layer for the
+    entire forward pass, which is critical for fitting 70B models in 192 GB.
+
+    Forward:  quantize input → FP8 GEMM with pre-quantized weight
+    Backward: re-dequantize weight from saved FP8 for dgrad; no wgrad
+              (frozen base weights).
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        input: torch.Tensor,
+        weight_fp8: torch.Tensor,
+        weight_scale: torch.Tensor,
+        bias: Optional[torch.Tensor],
+        scaling_manager,
+        scaling_type: str,
+        fp8_dtype: torch.dtype,
+        block_size: int,
+        tensor_id: str,
+        gradient_accumulation_fusion: bool,
+        delay_wgrad: bool,
+        deferred_wgrad,
+        activation_tensor_id: Optional[str] = None,
+        pre_quantized_input: Optional[tuple] = None,
+    ) -> torch.Tensor:
+        input_2d = input.reshape(-1, input.shape[-1]).contiguous()
+
+        if pre_quantized_input is not None:
+            input_fp8, input_scale = pre_quantized_input
+        else:
+            _act_mgr = scaling_manager if activation_tensor_id else None
+            _act_tid = activation_tensor_id or "activation"
+            input_desc = quantize_input(
+                input_2d,
+                scaling_type,
+                fp8_dtype,
+                block_size,
+                _act_mgr,
+                _act_tid,
+            )
+            input_fp8, input_scale = input_desc.data, input_desc.scale
+
+        N = weight_fp8.shape[0]
+        output = dispatch_gemm(
+            input_fp8,
+            weight_fp8,
+            input_scale,
+            weight_scale,
+            scaling_type,
+        )
+        output = output.view(*input.shape[:-1], N)
+
+        if bias is not None:
+            output = output + bias
+
+        ctx.save_for_backward(input_fp8, weight_fp8, input_scale, weight_scale)
+        ctx.scaling_manager = scaling_manager
+        ctx.scaling_type = scaling_type
+        ctx.fp8_dtype = fp8_dtype
+        ctx.block_size = block_size
+        ctx.has_bias = bias is not None
+        ctx.input_shape = input.shape
+        ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
+        ctx.delay_wgrad = delay_wgrad
+        ctx.deferred_wgrad = deferred_wgrad
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
+        fp8_dtype = ctx.fp8_dtype
+        block_size = ctx.block_size
+        scaling_type = ctx.scaling_type
+
+        mgr = ctx.scaling_manager
+        bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
+
+        grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+
+        bwd_scaling = "dynamic" if scaling_type in ("per_token", "blockwise", "blockwise2d") else scaling_type
+        grad_desc = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
+        grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
+
+        weight_desc = FP8Descriptor.from_tensors(weight_fp8, weight_scale, fp8_dtype)
+
+        _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
+        if _needs_dequant:
+            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
+            grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
+            weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
+            grad_input = dispatch_gemm(
+                grad_bf16,
+                weight_bf16.t().contiguous(),
+                None,
+                None,
+                "none",
+            )
+        elif grad_fp8.dtype != weight_fp8.dtype:
+            grad_input = gemm_per_tensor_mixed(
+                grad_fp8,
+                weight_fp8,
+                grad_scale,
+                weight_desc.scale,
+            )
+        else:
+            grad_input = dispatch_gemm(
+                grad_fp8,
+                weight_desc.transpose_cached,
+                grad_scale,
+                weight_desc.scale,
+                bwd_scaling,
+            )
+        grad_input = grad_input.view(*grad_output.shape[:-1], weight_fp8.shape[-1])
+
+        grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
+
+        return (
+            grad_input,
+            None,  # weight_fp8 (no grad — frozen)
+            None,  # weight_scale
+            grad_bias,
+            None,  # scaling_manager
+            None,  # scaling_type
+            None,  # fp8_dtype
+            None,  # block_size
+            None,  # tensor_id
+            None,  # gradient_accumulation_fusion
+            None,  # delay_wgrad
+            None,  # deferred_wgrad
+            None,  # activation_tensor_id
+            None,  # pre_quantized_input
+        )
+
+
+_mark_allow_in_graph(FP8StoredLinearFunction)
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +1224,9 @@ def quantized_linear(
     fp8_activation_store: bool = False,
     fp8_weight_cache: Optional[torch.Tensor] = None,
     fp8_weight_scale: Optional[torch.Tensor] = None,
+    pre_quantized_weight: Optional[tuple] = None,
+    activation_tensor_id: Optional[str] = None,
+    pre_quantized_input: Optional[tuple] = None,
 ) -> torch.Tensor:
     """Functional quantized linear with multi-backend fallback (all AITER).
 
@@ -800,6 +1252,10 @@ def quantized_linear(
             :func:`~lumen.quantize.store_weights_fp8`).  When provided,
             ``quantize_input`` is skipped for the weight.
         fp8_weight_scale: Scale for *fp8_weight_cache*.
+        pre_quantized_weight: Optional ``(fp8_tensor, scale)`` tuple when the
+            weight is already stored in FP8.  Bypasses weight quantization
+            and avoids materializing a full BF16 weight tensor in the
+            autograd graph.
 
     Returns:
         Output tensor ``[*, out_features]``.
@@ -812,6 +1268,24 @@ def quantized_linear(
         from lumen.quantize import ScalingManager
 
         scaling_manager = ScalingManager(fp8_dtype=fp8_dtype)
+
+    if pre_quantized_weight is not None:
+        return FP8StoredLinearFunction.apply(
+            input,
+            pre_quantized_weight[0],
+            pre_quantized_weight[1],
+            bias,
+            scaling_manager,
+            scaling_type,
+            fp8_dtype,
+            block_size,
+            tensor_id,
+            gradient_accumulation_fusion,
+            delay_wgrad,
+            deferred_wgrad,
+            activation_tensor_id,
+            pre_quantized_input,
+        )
 
     return QuantizedLinearFunction.apply(
         input,
@@ -828,6 +1302,8 @@ def quantized_linear(
         delay_wgrad,
         deferred_wgrad,
         fp8_activation_store,
+        activation_tensor_id,
+        pre_quantized_input,
         fp8_weight_cache,
         fp8_weight_scale,
     )

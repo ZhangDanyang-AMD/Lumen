@@ -14,6 +14,7 @@ arguments) remains in the per-model subpackages.
 """
 
 import logging
+import os
 from functools import partial
 from typing import Callable, Optional
 
@@ -176,17 +177,24 @@ def _patch_norms_in_spec(spec, norm_cls=None):
     - Block-level specs (``TransformerBlockSubmodules`` with
       ``layer_specs`` and ``final_layernorm``)
     - Layer-level specs (``ModuleSpec`` with ``submodules``)
+
+    IdentityOp placeholders (used for disabled modules like cross-attention
+    norms in decoder-only models) are preserved and never replaced.
     """
+    from megatron.core.transformer.identity_op import IdentityOp
+
     if norm_cls is None:
         norm_cls = _MegatronCompatibleTLNorm
 
     for attr in _NORM_ATTRS:
-        if getattr(spec, attr, None) is not None:
+        cur = getattr(spec, attr, None)
+        if cur is not None and cur is not IdentityOp:
             setattr(spec, attr, norm_cls)
 
     if hasattr(spec, "submodules") and spec.submodules is not None:
         for attr in _NORM_ATTRS:
-            if getattr(spec.submodules, attr, None) is not None:
+            cur = getattr(spec.submodules, attr, None)
+            if cur is not None and cur is not IdentityOp:
                 setattr(spec.submodules, attr, norm_cls)
 
     layer_specs = getattr(spec, "layer_specs", None)
@@ -423,7 +431,7 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     _override_te_args_for_lumen(args)
 
     if config is None:
-        args.apply_rope_fusion = False
+        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -489,7 +497,7 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
     _override_te_args_for_lumen(args)
 
     if config is None:
-        args.apply_rope_fusion = False
+        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -536,7 +544,88 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         vp_stage=vp_stage,
     )
 
+    if getattr(args, "lumen_fused_mlp", False):
+        _patch_fused_swiglu_mlp(model)
+
     return model
+
+
+def _patch_fused_swiglu_mlp(model):
+    """Patch Megatron MLP forward to use AITER fused SwiGLU when available.
+
+    Replaces the fc1 → SwiGLU → fc2 pipeline with a single AITER Triton
+    kernel call (``ff_a16w16_fused_gated``) that fuses gate+up GEMM,
+    SiLU activation, element-wise multiply, and down GEMM.
+
+    Only activates when: gated_linear_unit=True, no MLP bias, the AITER
+    fused gated kernel is available, AND batch size M <= 64 (the fused
+    kernel is slower than decomposed GEMMs for large M).  For training
+    with large sequence lengths (M=8192), this will fall back to the
+    original path.  Main benefit is for inference or small-batch scenarios.
+    """
+    from lumen.ops.dispatch import _probe_aiter_fused_gated
+
+    if not _probe_aiter_fused_gated():
+        print_rank_0("WARNING: --lumen-fused-mlp requested but AITER fused gated kernel unavailable")
+        return
+
+    from megatron.core.transformer.mlp import MLP
+
+    patched = 0
+    for module in model.modules():
+        if not isinstance(module, MLP):
+            continue
+        if not getattr(module.config, "gated_linear_unit", False):
+            continue
+        if getattr(module.config, "add_bias_linear", False):
+            continue
+
+        _orig_forward = module.forward
+
+        def _make_fused_forward(mlp_module, orig_fwd):
+            _w_down_cache = [None]
+
+            def _fused_forward(hidden_states, per_token_scale=None):
+                try:
+                    from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_gated
+
+                    w_fc1 = mlp_module.linear_fc1.weight
+                    w_fc2 = mlp_module.linear_fc2.weight
+
+                    orig_shape = hidden_states.shape
+                    x_2d = hidden_states.reshape(-1, orig_shape[-1]).contiguous()
+
+                    M = x_2d.shape[0]
+                    if M > 64:
+                        return orig_fwd(hidden_states, per_token_scale=per_token_scale)
+
+                    x_bf16 = x_2d.bfloat16() if x_2d.dtype != torch.bfloat16 else x_2d
+                    w1_bf16 = w_fc1.bfloat16() if w_fc1.dtype != torch.bfloat16 else w_fc1
+
+                    w2_data = w_fc2.data if not hasattr(w_fc2, "data") else w_fc2
+                    w2_bf16 = w2_data.bfloat16() if w2_data.dtype != torch.bfloat16 else w2_data
+                    if _w_down_cache[0] is None or _w_down_cache[0].data_ptr() != w2_bf16.data_ptr():
+                        _w_down_cache[0] = w2_bf16.t().contiguous()
+                    w_down = _w_down_cache[0]
+
+                    out = ff_a16w16_fused_gated(
+                        x_bf16,
+                        w1_bf16,
+                        w_down,
+                        dtype=torch.bfloat16,
+                        activation="silu",
+                    )
+                    out = out.reshape(orig_shape[:-1] + (out.shape[-1],))
+                    return out, None
+                except Exception:
+                    return orig_fwd(hidden_states, per_token_scale=per_token_scale)
+
+            return _fused_forward
+
+        module.forward = _make_fused_forward(module, _orig_forward)
+        patched += 1
+
+    print_rank_0(f"Patched {patched} MLP modules with AITER fused SwiGLU forward")
 
 
 def _patch_mla_attention(spec):
@@ -663,7 +752,8 @@ def apply_lora(model: GPTModel, args) -> None:
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
     print_rank_0(
-        f"> LoRA applied (rank={args.lora_rank}, alpha={args.lora_alpha}) — "
+        f"> LoRA applied (rank={args.lora_rank}, alpha={args.lora_alpha}, "
+        f"target={target}) — "
         f"trainable: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
     )
 
@@ -805,6 +895,9 @@ def make_lumen_model_provider(
 
     def model_provider(pre_process=True, post_process=True, vp_stage=None):
         import os
+        from dataclasses import replace as _replace
+
+        from lumen.config import LumenConfig
 
         from dataclasses import replace as _replace
 
@@ -828,10 +921,18 @@ def make_lumen_model_provider(
         if cfg.reduce_amax:
             import torch.distributed as dist
             from megatron.core import parallel_state
+
             if dist.is_initialized():
                 dp_group = parallel_state.get_data_parallel_group()
 
-        cfg.enable(model, dp_group=dp_group)
+        _original_model = model
+        _manager, model = cfg.enable(model, dp_group=dp_group)
+        assert model is _original_model, (
+            f"quant.enable() returned a different model object "
+            f"(type {type(model).__name__} vs {type(_original_model).__name__}). "
+            f"This indicates unexpected model wrapping (e.g. LoRA) that may "
+            f"break Megatron's parameter management."
+        )
 
         # 3. Megatron-specific parallel linear FP8 (not covered by LumenConfig)
         if getattr(args, "linear_fp8", False) and getattr(args, "lumen_linear", False):
@@ -844,9 +945,53 @@ def make_lumen_model_provider(
                 delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
             )
 
+        if getattr(args, "fp8_param_storage", False):
+            _shrink_frozen_weights_to_fp8(model)
+
         return model
 
     return model_provider
+
+
+def _shrink_frozen_weights_to_fp8(model) -> None:
+    """Tag frozen 2-D weights for FP8 storage.
+
+    At this point the model might still be on meta device or already on CUDA.
+    We tag the weights with metadata and install load/forward hooks.  If the
+    weight is already materialized on CUDA, we also shrink it to a 1-element
+    FP8 placeholder.  If on meta device, we just tag it — the patched
+    materializer will create FP8-sized tensors later.
+    """
+    import torch
+
+    fp8_dtype = torch.float8_e4m3fnuz
+    count = 0
+    for _name, module in model.named_modules():
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, torch.nn.Parameter):
+            continue
+        if w.requires_grad:
+            continue
+        if w.ndim < 2:
+            continue
+
+        orig_shape = w.shape
+        orig_dtype = w.dtype
+        w._fp8_orig_shape = orig_shape
+        w._fp8_original_dtype = orig_dtype
+        w._fp8_dtype = fp8_dtype
+        w._fp8_storage_enabled = True
+
+        if str(w.device) != "meta":
+            device = w.device
+            tiny = torch.zeros(1, dtype=fp8_dtype, device=device)
+            w.data = tiny
+
+        _wrap_load_from_state_dict(module, fp8_dtype)
+        _install_fp8_forward_hooks(module, fp8_dtype)
+        count += 1
+
+    print_rank_0(f"> FP8 param storage: tagged {count} frozen weights for FP8 storage")
 
 
 def install_fp8_param_gather_hook() -> None:
@@ -899,12 +1044,18 @@ def install_fp8_param_storage_hook() -> None:
             or getattr(train_args, "fp8", "")
             or getattr(train_args, "linear_fp8_format", "")
         )
-        if _fmt == "hybrid":
+        _want_hipblaslt = _fmt == "hybrid" or os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
+        if _want_hipblaslt:
             try:
                 from lumen.ops.quantize.linear import ensure_hipblaslt_ready
 
                 ensure_hipblaslt_ready()
-                print_rank_0("> hipBLASLt workspace pre-allocated for hybrid FP8 backward")
+                _reason = (
+                    "LUMEN_PREFER_HIPBLASLT"
+                    if os.environ.get("LUMEN_PREFER_HIPBLASLT") == "1"
+                    else "hybrid FP8 backward"
+                )
+                print_rank_0(f"> hipBLASLt workspace pre-allocated for {_reason}")
             except Exception as e:
                 print_rank_0(f"> WARNING: hipBLASLt pre-init failed: {e}")
 
@@ -931,6 +1082,72 @@ def install_fp8_param_storage_hook() -> None:
 
     _setup_with_fp8_storage._lumen_fp8_param_storage_hook = True
     _mt_training.setup_model_and_optimizer = _setup_with_fp8_storage
+
+
+def install_hip_graphs_hook() -> None:
+    """Hook setup_model_and_optimizer to capture HIP graphs for transformer layers.
+
+    When ``--lumen-hip-graphs`` is active, this wraps each transformer layer's
+    forward+backward in pre-captured CUDA/HIP graphs to eliminate kernel launch
+    overhead (~30K launches/step reduced to ~10K).
+
+    Must be installed after all other setup hooks (fp8_param_gather, fp8_param_storage)
+    so graph capture sees the final model structure.
+    """
+    import megatron.training.training as _mt_training
+
+    current_setup = _mt_training.setup_model_and_optimizer
+    if getattr(current_setup, "_lumen_hip_graphs_hook", False):
+        return
+
+    def _setup_with_hip_graphs(*args, **kwargs):
+        model, optimizer, scheduler = current_setup(*args, **kwargs)
+        train_args = get_args()
+
+        if not getattr(train_args, "lumen_hip_graphs", False):
+            return model, optimizer, scheduler
+
+        if not model:
+            return model, optimizer, scheduler
+
+        from lumen.utils.hip_graphs import capture_lumen_graphs
+
+        targets = model if isinstance(model, list) else [model]
+        for m in targets:
+            unwrapped = m
+            while hasattr(unwrapped, "module"):
+                unwrapped = unwrapped.module
+
+            seq_len = train_args.seq_length
+            tp = getattr(train_args, "tensor_model_parallel_size", 1)
+            sp = getattr(train_args, "sequence_parallel", False)
+            cp = getattr(train_args, "context_parallel_size", 1)
+
+            if sp:
+                seq_len = seq_len // tp
+            seq_len = seq_len // cp
+
+            micro_bs = train_args.micro_batch_size
+            hidden_size = train_args.hidden_size
+
+            count = capture_lumen_graphs(
+                unwrapped,
+                seq_len=seq_len,
+                micro_batch_size=micro_bs,
+                hidden_size=hidden_size,
+                num_warmup=3,
+            )
+            if count > 0:
+                print_rank_0(
+                    f"> HIP graphs: captured {count} transformer layers "
+                    f"(seq={seq_len}, mbs={micro_bs}, hidden={hidden_size})"
+                )
+
+        return model, optimizer, scheduler
+
+    _setup_with_hip_graphs._lumen_hip_graphs_hook = True
+    _mt_training.setup_model_and_optimizer = _setup_with_hip_graphs
+
 
 
 def _patch_meta_materializer() -> None:
@@ -1364,6 +1581,54 @@ def reset_fp8_state(model):
     print_rank_0("> FP8 state reset after warmup")
 
 
+_WARMUP_EVAL_STEPS = int(os.environ.get("LUMEN_WARMUP_EVAL_STEPS", "0"))
+
+
+def _run_warmup_eval_pass(model, args):
+    """Run synthetic forward passes in eval mode to prime the GPU allocator.
+
+    The MLPerf reference runs ``warmup_validation_steps`` before real
+    training so that the eval-time allocation pattern is already present
+    in the allocator's block cache.  This prevents the first real eval
+    from fragmenting the cache and causing a permanent step-time
+    regression.
+
+    The forward pass includes the loss computation path so that all
+    eval-specific tensors (loss gather, metric buffers) are also
+    pre-allocated in the cache.
+
+    Controlled by ``LUMEN_WARMUP_EVAL_STEPS`` (default 0 = disabled).
+    """
+    n = _WARMUP_EVAL_STEPS
+    if n <= 0:
+        return
+
+    print_rank_0(f"> Running {n} warmup eval forward passes to prime allocator ...")
+
+    unwrapped = model
+    while hasattr(unwrapped, "module"):
+        unwrapped = unwrapped.module
+
+    unwrapped.eval()
+    with torch.no_grad():
+        for _ in range(n):
+            tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+                args, zero_last_loss_mask=True
+            )
+            output = unwrapped(tokens, position_ids, attention_mask, labels=labels, loss_mask=loss_mask)
+            if output is not None:
+                losses = output.view(-1).float()
+                lm = loss_mask.view(-1).float()
+                _ = torch.sum(losses * lm)
+                _ = lm.sum()
+    unwrapped.train()
+
+    torch.cuda.empty_cache()
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+    print_rank_0(f"> Warmup eval pass done ({n} steps). Allocator primed.")
+
+
 # ---------------------------------------------------------------------------
 # Loss function + early stopping
 # ---------------------------------------------------------------------------
@@ -1435,6 +1700,9 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
                         except StopIteration:
                             pass
                 else:
+                    if getattr(args, "linear_fp8", False):
+                        reset_fp8_state(model)
+                    _run_warmup_eval_pass(model, args)
                     if getattr(args, "linear_fp8", False):
                         reset_fp8_state(model)
                     if torch.distributed.is_initialized():
@@ -1583,6 +1851,15 @@ def add_common_megatron_args(parser):
         action="store_true",
         default=False,
         help="Store and all-gather parameters in FP8 for reduced communication volume.",
+    )
+    safe_add_argument(
+        lumen,
+        "--fp8-param-storage",
+        action="store_true",
+        default=False,
+        help="Store frozen base-model weights in FP8 after checkpoint loading. "
+        "Halves model weight memory (~140GB→~70GB for 70B) enabling TP=1 on "
+        "192GB GPUs. Weights are dequantized on-the-fly during forward pass.",
     )
     safe_add_argument(
         lumen,

@@ -105,6 +105,8 @@ class LumenLinear(nn.Module):
             backend=self.backend_type,
             fp8_dtype=self.fp8_dtype,
             block_size=self.block_size,
+            pre_quantized_weight=pqw,
+            activation_tensor_id=getattr(self, "_activation_tensor_id", None),
         )
 
     def extra_repr(self) -> str:

@@ -91,6 +91,22 @@ if [ "${USE_SDMA}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --use-sdma"
 fi
 
+if [ "${LUMEN_FUSED_ROPE:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-fused-rope"
+fi
+
+if [ "${LUMEN_FUSED_MLP:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-fused-mlp"
+fi
+
+if [ "${LUMEN_MANUAL_GC:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --manual-gc"
+fi
+
+if [ -n "${LUMEN_LOG_INTERVAL:-}" ]; then
+    LOG_INTERVAL="${LUMEN_LOG_INTERVAL}"
+fi
+
 
 ###############################################################################
 # MEGATRON BACKEND
@@ -172,8 +188,26 @@ run_megatron() {
     [ "${LUMEN_RMSNORM}" -eq 1 ] && LUMEN_RMSNORM_ARGS="--lumen-rmsnorm"
     [ "${LUMEN_NORM:-0}" -eq 1 ] && LUMEN_RMSNORM_ARGS="${LUMEN_RMSNORM_ARGS} --lumen-norm"
 
+    RECOMPUTE_ARGS=""
+    if [ -n "${RECOMPUTE_GRANULARITY:-}" ]; then
+        RECOMPUTE_ARGS="--recompute-granularity ${RECOMPUTE_GRANULARITY} --recompute-method ${RECOMPUTE_METHOD} --recompute-num-layers ${RECOMPUTE_NUM_LAYERS}"
+    fi
+
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
+    MEMORY_ARGS=""; [ "${LOG_MEMORY:-0}" -eq 1 ] && MEMORY_ARGS="--log-memory-to-tensorboard"
+    LR_DECAY_ARGS=""; [ -n "${LR_DECAY_ITERS:-}" ] && LR_DECAY_ARGS="--lr-decay-iters ${LR_DECAY_ITERS}"
+
+    DIST_OPT_ARGS=""
+    [ "${USE_DIST_OPTIMIZER:-0}" = "1" ] && DIST_OPT_ARGS="--use-distributed-optimizer"
+    [ "${OVERLAP_GRAD_REDUCE:-0}" = "1" ] && DIST_OPT_ARGS="${DIST_OPT_ARGS} --overlap-grad-reduce"
+    [ "${LUMEN_HIP_GRAPHS:-0}" = "1" ] && DIST_OPT_ARGS="${DIST_OPT_ARGS} --lumen-hip-graphs"
+
+    RESET_ARGS="--reset-position-ids --reset-attention-mask --eod-mask-loss"
+    if [ "${DISABLE_RESET_FLAGS:-0}" = "1" ]; then
+        RESET_ARGS=""
+        echo "[CONFIG] reset_position_ids/reset_attention_mask/eod_mask_loss DISABLED (MLPerf alignment)"
+    fi
 
     echo "================================================================"
     echo "LLaMA2 SFT — MEGATRON backend"
@@ -183,7 +217,9 @@ run_megatron() {
     echo "  Batch:    MBS=${MBS} GBS=${GBS} | seq_len=${SEQ_LEN}"
     echo "  Lumen attn: ${LUMEN_ATTN_BACKEND}$(case "${LUMEN_ATTN_BACKEND}" in *fp8) echo " (fp8_quant=${LUMEN_FP8_QUANT})";; esac) rmsnorm=${LUMEN_RMSNORM}"
     echo "  LoRA:     rank=${LORA_RANK} a2a=${LORA_A2A}"
-    echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
+    echo "  FP8:      training=${FP8_TRAINING} format=${FP8_FORMAT} scaling=${FP8_SCALING} algo=${FP8_AMAX_ALGO} hist=${FP8_AMAX_HISTORY}"
+    echo "  FP8 det:  block_size=${FP8_BLOCK_SIZE} reduce_amax=${FP8_REDUCE_AMAX} activation=${FP8_ACTIVATION} wgrad=${FP8_WGRAD:-1}"
+    echo "  Memory:   log=${LOG_MEMORY:-0}"
     echo "  SDMA:     use=${USE_SDMA} mori=${MORI_ENABLE_SDMA}"
     echo "  Target:   log_ppl=${TARGET_LOG_PPL} step_atol=${STEP_TIME_ATOL}"
     echo "  Ckpt:     use=${USE_CKPT} save=${SAVE_CKPT} fp8_params=${FP8_PARAMS} start_step=${CKPT_START_STEP}"
@@ -205,6 +241,7 @@ run_megatron() {
         --normalization RMSNorm \
         --swiglu \
         --untie-embeddings-and-output-weights \
+        --make-vocab-size-divisible-by ${MAKE_VOCAB_DIVISIBLE_BY:-128} \
         --disable-bias-linear \
         --attention-dropout 0.0 \
         --hidden-dropout 0.0 \
@@ -220,12 +257,13 @@ run_megatron() {
         --lr ${LR} --min-lr ${MIN_LR} \
         --lr-decay-style cosine \
         --lr-warmup-iters ${LR_WARMUP_STEPS} \
+        ${LR_DECAY_ARGS} \
         --weight-decay ${WEIGHT_DECAY} \
         --clip-grad ${GRADIENT_CLIP} \
-        --adam-beta1 0.9 --adam-beta2 0.999 --adam-eps 1e-8 \
+        --adam-beta1 ${ADAM_BETA1:-0.9} --adam-beta2 ${ADAM_BETA2:-0.999} --adam-eps ${ADAM_EPS:-1e-8} \
         --${PRECISION} \
         --no-gradient-accumulation-fusion \
-        --reset-position-ids --reset-attention-mask --eod-mask-loss \
+        ${RESET_ARGS} \
         --tokenizer-type HuggingFaceTokenizer \
         --tokenizer-model ${TOKENIZER} \
         --train-data-path ${TRAIN_DATA} \
@@ -244,6 +282,7 @@ run_megatron() {
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
         ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
+        ${RECOMPUTE_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
         ${DIST_OPT_ARGS} \
         --distributed-timeout-minutes ${DIST_TIMEOUT_MINUTES:-120} \

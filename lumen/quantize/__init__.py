@@ -406,6 +406,8 @@ def _replace_forward(
                 fp8_activation_store=_fp8_act_store,
                 fp8_weight_cache=getattr(module, "_fp8_weight_data", None),
                 fp8_weight_scale=getattr(module, "_fp8_weight_scale", None),
+                pre_quantized_weight=_get_pre_quant_weight(),
+                activation_tensor_id=_act_tensor_id,
             )
 
     else:
@@ -446,6 +448,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
+                pre_quantized_weight=_get_pre_quant_weight(),
+                activation_tensor_id=_act_tensor_id,
             )
 
             if is_row_parallel and seq_parallel:
@@ -495,19 +499,9 @@ def store_weights_fp8(
     The original BF16 ``nn.Parameter`` is kept for DDP gradient sync and
     the optimizer.
 
-    **Why not true FP8 parameter storage?** PyTorch's autograd engine
-    does not support FP8 ``nn.Parameter`` tensors — type promotion
-    between Float8 and BFloat16 is not implemented, and
-    ``ufunc_add_CUDA`` for FP8 gradient accumulation does not exist.
-    DDP ``all_reduce`` also cannot handle FP8 tensors.  True FP8
-    parameter storage requires framework-level support (FSDP with FP8
-    communication or a custom all-reduce).
-
     The ``quant_forward`` path detects ``_fp8_weight_data`` and feeds
     the cached FP8 weight directly to the GEMM, **skipping the per-forward
-    re-quantization** that ``quant.enable`` normally performs.  This saves
-    compute time (no ``quantize_input`` call on the weight each forward)
-    while keeping gradients and optimizer in BF16.
+    re-quantization** that ``quant.enable`` normally performs.
 
     After each ``optimizer.step()`` the BF16 master weight has been
     updated, so :func:`register_fp8_weight_optimizer_hooks` re-quantizes
@@ -552,8 +546,7 @@ def register_fp8_weight_optimizer_hooks(
     ``_fp8_weight_data`` buffer so the next forward uses fresh cached data.
     """
     modules_with_cache = [
-        m for m in model.modules()
-        if hasattr(m, "_fp8_weight_data") and hasattr(m, "_fp8_weight_scale")
+        m for m in model.modules() if hasattr(m, "_fp8_weight_data") and hasattr(m, "_fp8_weight_scale")
     ]
 
     if not modules_with_cache:

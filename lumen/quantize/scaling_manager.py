@@ -5,6 +5,7 @@
 ###############################################################################
 
 import logging
+import os
 from collections import defaultdict, deque
 from typing import Dict, Optional, Set, Tuple
 
@@ -21,6 +22,60 @@ from lumen.quantize.config import (
 from lumen.quantize.descriptor import FP8Descriptor
 
 logger = logging.getLogger(__name__)
+
+_FUSED_QUANT_SCALE = os.environ.get("LUMEN_FUSED_QUANT_SCALE", "0") == "1"
+_FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
+_FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
+_AITER_STATIC_QUANT_AVAILABLE: Optional[bool] = None
+_CAST_TRANSPOSE_AVAILABLE: Optional[bool] = None
+_FUSED_QUANT_AMAX_AVAILABLE: Optional[bool] = None
+
+
+def _probe_aiter_static_quant() -> bool:
+    """Return True if AITER static per-tensor FP8 quant is importable (cached)."""
+    global _AITER_STATIC_QUANT_AVAILABLE
+    if _AITER_STATIC_QUANT_AVAILABLE is not None:
+        return _AITER_STATIC_QUANT_AVAILABLE
+    try:
+        from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8  # noqa: F401
+
+        _AITER_STATIC_QUANT_AVAILABLE = True
+    except ImportError:
+        _AITER_STATIC_QUANT_AVAILABLE = False
+    return _AITER_STATIC_QUANT_AVAILABLE
+
+
+def _probe_cast_transpose() -> bool:
+    """Return True if Triton fused cast+transpose can run on this machine (cached)."""
+    global _CAST_TRANSPOSE_AVAILABLE
+    if _CAST_TRANSPOSE_AVAILABLE is not None:
+        return _CAST_TRANSPOSE_AVAILABLE
+    try:
+        import triton  # noqa: F401
+
+        if not torch.cuda.is_available():
+            _CAST_TRANSPOSE_AVAILABLE = False
+            return False
+        from lumen.ops.quantize.cast_transpose import _TORCH_TO_TL_FP8
+
+        _CAST_TRANSPOSE_AVAILABLE = bool(_TORCH_TO_TL_FP8)
+    except (ImportError, OSError, ValueError):
+        _CAST_TRANSPOSE_AVAILABLE = False
+    return _CAST_TRANSPOSE_AVAILABLE
+
+
+def _probe_fused_quant_amax() -> bool:
+    """Return True if the fused quant+amax Triton kernel is functional (cached)."""
+    global _FUSED_QUANT_AMAX_AVAILABLE
+    if _FUSED_QUANT_AMAX_AVAILABLE is not None:
+        return _FUSED_QUANT_AMAX_AVAILABLE
+    try:
+        from lumen.ops.quantize.quant_amax_fused import _probe_fused_quant_amax as _probe
+
+        _FUSED_QUANT_AMAX_AVAILABLE = _probe()
+    except (ImportError, OSError):
+        _FUSED_QUANT_AMAX_AVAILABLE = False
+    return _FUSED_QUANT_AMAX_AVAILABLE
 
 
 def _get_quant_ops():
@@ -487,6 +542,21 @@ class ScalingManager:
     # Quantize core (shared by both on-the-fly and FP8 param paths)
     # ------------------------------------------------------------------
 
+    def _aiter_static_quant(self, tensor: torch.Tensor, scale: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
+        """Fused per-tensor static quant via AITER Triton (x / scale -> fp8)."""
+        from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8
+
+        if tensor.dim() == 2:
+            tensor_2d = tensor.contiguous()
+        else:
+            tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+        qx = torch.empty_like(tensor_2d, dtype=fp8_dtype)
+        scale_in = scale.float().reshape(1).contiguous()
+        if scale_in.device != tensor.device:
+            scale_in = scale_in.to(device=tensor.device)
+        static_per_tensor_quant_fp8_i8(qx, tensor_2d, scale_in)
+        return qx.view(tensor.shape)
+
     def _quantize_core(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Core quantization logic (delegates to format-specific paths)."""
         if self.config.scaling == ScalingType.NONE:
@@ -526,7 +596,67 @@ class ScalingManager:
             fp8_tensor = (flat / row_scale).clamp(-fp8_max, fp8_max).to(dtype)
             return FP8Descriptor(data=fp8_tensor.view(orig_shape), scale=row_scale, fp8_dtype=dtype)
 
-        fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
+        if (
+            _FUSED_CAST_TRANSPOSE
+            and _FUSED_QUANT_AMAX
+            and _probe_cast_transpose()
+            and _probe_fused_quant_amax()
+            and tensor.is_cuda
+            and tensor.dim() == 2
+        ):
+            from lumen.ops.quantize.cast_transpose import (
+                _TORCH_TO_TL_FP8,
+                cast_transpose_amax_fp8,
+            )
+
+            if dtype in _TORCH_TO_TL_FP8:
+                tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+                fp8_data, _fp8_data_t, amax = cast_transpose_amax_fp8(
+                    tensor_2d,
+                    scale,
+                    dtype,
+                    clamp_max=float(fp8_max),
+                )
+                del _fp8_data_t
+                self.amax_history[tensor_id].append(amax)
+                return FP8Descriptor(
+                    data=fp8_data.view(tensor.shape),
+                    scale=scale,
+                    fp8_dtype=dtype,
+                )
+
+        if _FUSED_CAST_TRANSPOSE and _probe_cast_transpose() and tensor.is_cuda and tensor.dim() == 2:
+            from lumen.ops.quantize.cast_transpose import _TORCH_TO_TL_FP8, cast_transpose_fp8
+
+            if dtype in _TORCH_TO_TL_FP8:
+                tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+                fp8_data, fp8_data_t = cast_transpose_fp8(
+                    tensor_2d,
+                    scale,
+                    dtype,
+                    clamp_max=float(fp8_max),
+                )
+                fp8_tensor = fp8_data.view(tensor.shape)
+                self.update_amax(tensor_id, tensor)
+                return FP8Descriptor(
+                    data=fp8_tensor,
+                    scale=scale,
+                    fp8_dtype=dtype,
+                    _transpose=fp8_data_t,
+                )
+
+        if _FUSED_QUANT_AMAX and _probe_fused_quant_amax() and tensor.is_cuda:
+            from lumen.ops.quantize.quant_amax_fused import static_quant_with_amax
+
+            tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+            fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype)
+            self.amax_history[tensor_id].append(amax)
+            return FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
+
+        if _FUSED_QUANT_SCALE and _probe_aiter_static_quant():
+            fp8_tensor = self._aiter_static_quant(tensor, scale, dtype)
+        else:
+            fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
         self.update_amax(tensor_id, tensor)
         return FP8Descriptor(data=fp8_tensor, scale=scale, fp8_dtype=dtype)
 
@@ -576,6 +706,15 @@ class ScalingManager:
             amax = torch.stack(list(history)).amax().to(device=tensor.device)
 
         scale = self._compute_scale(amax, fp8_max)
+
+        if _FUSED_QUANT_AMAX and _probe_fused_quant_amax() and tensor.is_cuda:
+            from lumen.ops.quantize.quant_amax_fused import static_quant_with_amax
+
+            tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+            fp8_2d, new_amax = static_quant_with_amax(tensor_2d, scale, dtype)
+            self.amax_history[tensor_id].append(new_amax)
+            return fp8_2d.view(tensor.shape), scale
+
         fp8_tensor = (tensor / scale).clamp(-fp8_max, fp8_max).to(dtype)
         self.amax_history[tensor_id].append(tensor.detach().abs().amax())
         return fp8_tensor, scale

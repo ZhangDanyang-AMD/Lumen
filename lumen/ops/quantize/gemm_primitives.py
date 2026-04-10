@@ -16,7 +16,7 @@ from typing import Callable, Optional
 
 import torch
 
-from lumen.ops.quantize.linear import FP8Descriptor, dispatch_gemm, quantize_input
+from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
 
 
 def compute_dgrad_bf16(
@@ -146,10 +146,12 @@ def compute_dgrad_fp8(
     """Compute FP8 dgrad for a single grad chunk.
 
     Quantizes *grad_chunk* (BF16) to FP8 and dispatches the dgrad GEMM
-    against the pre-quantized *weight_fp8*.  Falls back to BF16 GEMM when
-    the operand dtypes are mixed (hybrid E4M3/E5M2 mode) **or** when the
-    forward weight scale is multi-element (per_token / blockwise) and
-    therefore incompatible with the per-tensor dgrad GEMM.
+    against the pre-quantized *weight_fp8*.  When the gradient is quantized
+    to a different FP8 dtype (e.g. E5M2 in hybrid mode) and the weight is
+    E4M3, uses mixed-dtype FP8 GEMM via hipBLASLt.
+
+    Falls back to BF16 GEMM when the forward weight scale is multi-element
+    (per_token / blockwise) and therefore incompatible with per-tensor dgrad.
 
     Args:
         grad_chunk: ``[S_chunk, N]`` gradient chunk (BF16).
@@ -160,33 +162,27 @@ def compute_dgrad_fp8(
         fp8_dtype: FP8 dtype (e.g. ``torch.float8_e4m3fn``).
         block_size: Block size for block-wise quantization.
     """
+    from lumen.ops.quantize.linear import gemm_per_tensor_mixed
+
     bwd_scaling = _bwd_scaling_for(scaling_type)
+
     bwd_dtype = getattr(scaling_manager, "fp8_dtype_bwd", fp8_dtype) if scaling_manager else fp8_dtype
 
     grad_flat = grad_chunk.reshape(-1, grad_chunk.shape[-1]).contiguous()
-    grad_desc = quantize_input(
-        grad_flat,
-        bwd_scaling,
-        bwd_dtype,
-        block_size,
-    )
+    grad_desc = quantize_input(grad_flat, bwd_scaling, bwd_dtype, block_size)
     grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
 
-    mixed_dtype = weight_fp8.dtype != grad_fp8.dtype
     _needs_dequant = scaling_type in ("per_token", "blockwise", "blockwise2d")
     if _needs_dequant:
         grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
         weight_bf16 = _dequant_fp8_weight(weight_fp8, weight_scale, block_size).bfloat16()
         result = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
-    elif mixed_dtype:
-        grad_recast = quantize_input(grad_flat, bwd_scaling, fp8_dtype, block_size)
-        weight_desc = FP8Descriptor.from_tensors(weight_fp8, weight_scale, fp8_dtype)
-        result = dispatch_gemm(
-            grad_recast.data,
-            weight_desc.transpose_cached,
-            grad_recast.scale,
-            weight_desc.scale,
-            bwd_scaling,
+    elif grad_fp8.dtype != weight_fp8.dtype:
+        result = gemm_per_tensor_mixed(
+            grad_fp8,
+            weight_fp8,
+            grad_scale,
+            weight_scale,
         )
     else:
         result = dispatch_gemm(

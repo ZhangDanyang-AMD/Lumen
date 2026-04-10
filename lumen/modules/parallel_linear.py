@@ -169,6 +169,39 @@ def _pg_rank(group):
     return torch.distributed.get_rank(group=group)
 
 
+def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_fp8_activation: bool):
+    """Attach fused SwiGLU FP8 cache when this GEMM quantizes activations; else clear it."""
+    try:
+        from lumen.models._swiglu_fp8_fuse import (
+            discard_swiglu_fp8_cache,
+            pop_swiglu_fp8_cache,
+        )
+    except ImportError:
+        return pre_quantized_input
+
+    if pre_quantized_input is not None:
+        discard_swiglu_fp8_cache()
+        return pre_quantized_input
+
+    if consume_fp8_activation:
+        cached = pop_swiglu_fp8_cache()
+        if cached is not None:
+            return cached
+        return None
+
+    discard_swiglu_fp8_cache()
+    return None
+
+
+def _discard_swiglu_fp8_cache_safe() -> None:
+    try:
+        from lumen.models._swiglu_fp8_fuse import discard_swiglu_fp8_cache
+
+        discard_swiglu_fp8_cache()
+    except ImportError:
+        pass
+
+
 def _do_gemm(
     input_,
     weight,
@@ -180,6 +213,8 @@ def _do_gemm(
     gradient_accumulation_fusion=False,
     delay_wgrad=False,
     deferred_wgrad=None,
+    activation_tensor_id=None,
+    pre_quantized_input=None,
 ):
     """Route to Lumen FP8 GEMM or standard F.linear.
 
@@ -227,6 +262,10 @@ def _do_gemm(
 
     if _fp8_stored and scaling_type != "none":
         gemm_scale = 1.0 / weight._fp8_desc.scale
+        _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
+            pre_quantized_input,
+            consume_fp8_activation=True,
+        )
         return quantized_linear(
             input_,
             weight,
@@ -239,12 +278,15 @@ def _do_gemm(
             delay_wgrad=delay_wgrad,
             deferred_wgrad=deferred_wgrad,
             pre_quantized_weight=(weight.data, gemm_scale),
+            activation_tensor_id=activation_tensor_id,
+            pre_quantized_input=_pqi,
         )
 
     if _fp8_stored:
         orig_dtype = getattr(weight, "_fp8_original_dtype", torch.bfloat16)
         weight_bf16 = (weight.data.to(torch.float32) / weight._fp8_desc.scale).to(orig_dtype)
         if delay_wgrad:
+            _discard_swiglu_fp8_cache_safe()
             return quantized_linear(
                 input_,
                 weight_bf16,
@@ -257,9 +299,14 @@ def _do_gemm(
                 delay_wgrad=delay_wgrad,
                 deferred_wgrad=deferred_wgrad,
             )
+        _discard_swiglu_fp8_cache_safe()
         return F.linear(input_, weight_bf16, bias)
 
     if scaling_type != "none" or delay_wgrad:
+        _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
+            pre_quantized_input,
+            consume_fp8_activation=(scaling_type != "none"),
+        )
         return quantized_linear(
             input_,
             weight,
@@ -271,7 +318,10 @@ def _do_gemm(
             gradient_accumulation_fusion=gradient_accumulation_fusion,
             delay_wgrad=delay_wgrad,
             deferred_wgrad=deferred_wgrad,
+            activation_tensor_id=activation_tensor_id,
+            pre_quantized_input=_pqi,
         )
+    _discard_swiglu_fp8_cache_safe()
     return F.linear(input_, weight, bias)
 
 
@@ -485,6 +535,7 @@ class LumenColumnParallelLinear(nn.Module):
                 gradient_accumulation_fusion=self.gradient_accumulation_fusion,
                 delay_wgrad=self.delay_wgrad,
                 deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+                activation_tensor_id=getattr(self, "_activation_tensor_id", None),
             )
 
         gather = self.gather_output
@@ -539,6 +590,7 @@ class LumenColumnParallelLinear(nn.Module):
         comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
 
         gemm_bias = self.bias if not self.skip_bias_add else None
+        _act_tid = getattr(self, "_activation_tensor_id", None)
         out_local = _do_gemm(
             input_parallel,
             weight,
@@ -550,6 +602,7 @@ class LumenColumnParallelLinear(nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             delay_wgrad=self.delay_wgrad,
             deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+            activation_tensor_id=_act_tid,
         )
 
         input_gathered = comm.wait_allgather_dim0(stream=sdma_stream)
@@ -566,6 +619,7 @@ class LumenColumnParallelLinear(nn.Module):
             gradient_accumulation_fusion=self.gradient_accumulation_fusion,
             delay_wgrad=self.delay_wgrad,
             deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+            activation_tensor_id=_act_tid,
         )
         output_parallel = torch.cat([out_local, out_remaining], dim=0)
         return output_parallel, self.bias if self.skip_bias_add else None
@@ -831,6 +885,7 @@ class LumenRowParallelLinear(nn.Module):
                 gradient_accumulation_fusion=self.gradient_accumulation_fusion,
                 delay_wgrad=self.delay_wgrad,
                 deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
+                activation_tensor_id=getattr(self, "_activation_tensor_id", None),
             )
 
             if self.explicit_expert_comm:

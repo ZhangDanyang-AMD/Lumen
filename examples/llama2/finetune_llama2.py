@@ -39,7 +39,12 @@ def _run_megatron():
         lumen_gpt_builder,
         train_valid_test_datasets_provider,
     )
-    from lumen.models.megatron import install_fp8_param_gather_hook, make_lumen_model_provider
+    from lumen.models.megatron import (
+        install_fp8_param_gather_hook,
+        install_fp8_param_storage_hook,
+        install_hip_graphs_hook,
+        make_lumen_model_provider,
+    )
 
     model_provider = make_lumen_model_provider(
         lumen_gpt_builder,
@@ -47,6 +52,8 @@ def _run_megatron():
         fp8_applier=apply_fp8_training,
     )
     install_fp8_param_gather_hook()
+    install_fp8_param_storage_hook()
+    install_hip_graphs_hook()
 
     train_valid_test_datasets_provider.is_distributed = True
 

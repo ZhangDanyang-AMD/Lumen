@@ -14,10 +14,16 @@ first successful result, logging fallbacks as warnings.
 
 import functools
 import logging
+import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
+
+_SKIP_BACKEND_SYNC = os.environ.get("LUMEN_SKIP_BACKEND_SYNC", "0") == "1"
+
+_backend_cache: Dict[str, int] = {}
+_BACKEND_WARMUP_CALLS = 3
 
 try:
     from triton.compiler.errors import CompilationError as _TritonCompilationError
@@ -175,6 +181,17 @@ def _probe_aiter_hipblas():
 def _probe_aiter_fused_quant():
     try:
         from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_per_tensor_static_quant as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_silu_mul_fp8():
+    """True if AITER fused SwiGLU + per-tensor FP8 quant kernel is importable."""
+    try:
+        from aiter.ops.triton.quant.fused_fp8_quant import fused_silu_mul_fp8_per_tensor_static_quant as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
@@ -378,6 +395,28 @@ def _probe_aiter_fused_ungated():
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_swiglu():
+    """Check if AITER Triton fused SwiGLU fwd/bwd kernels are available."""
+    try:
+        from aiter.ops.triton.activation import swiglu_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fast_transpose():
+    """Check if AITER Triton fast 2D transpose kernel is available."""
+    try:
+        from aiter.ops.triton.quant.fast_transpose import fast_transpose_2d as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Core fallback dispatcher
 # ---------------------------------------------------------------------------
@@ -398,9 +437,13 @@ def try_backends(
     because AITER JIT wrappers raise ``map::at`` when a kernel config
     lookup fails.  If all fail, raises the last exception.
 
-    A ``torch.cuda.synchronize()`` is issued after each backend call so
-    that asynchronous GPU errors are detected immediately, allowing the
-    fallback chain to actually recover from kernel failures.
+    After a backend succeeds ``_BACKEND_WARMUP_CALLS`` consecutive times
+    for a given ``op_name``, the winning index is cached and subsequent
+    calls skip the fallback chain entirely.
+
+    ``torch.cuda.synchronize()`` is issued during warmup for error
+    detection.  After warmup (or when ``LUMEN_SKIP_BACKEND_SYNC=1``),
+    sync is skipped to reduce host-device round-trip overhead.
     """
     _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError, IndexError, KeyError)
     if _TritonCompilationError is not None:
@@ -408,12 +451,36 @@ def try_backends(
     if _TritonOutOfResources is not None:
         _catchable = _catchable + (_TritonOutOfResources,)
 
+    cached_idx = _backend_cache.get(op_name)
+    if cached_idx is not None and cached_idx < len(backends):
+        _, fn = backends[cached_idx]
+        return fn(*args, **kwargs)
+
     last_exc = None
-    for backend, fn in backends:
+    for i, (backend, fn) in enumerate(backends):
         try:
             result = fn(*args, **kwargs)
-            if torch.cuda.is_available():
+            if torch.cuda.is_available() and not _SKIP_BACKEND_SYNC:
                 torch.cuda.synchronize()
+
+            hit_count = _backend_cache.get(op_name + ":hits", 0) + 1
+            prev_idx = _backend_cache.get(op_name + ":prev", i)
+            if prev_idx == i:
+                _backend_cache[op_name + ":hits"] = hit_count
+            else:
+                _backend_cache[op_name + ":hits"] = 1
+            _backend_cache[op_name + ":prev"] = i
+
+            if hit_count >= _BACKEND_WARMUP_CALLS:
+                _backend_cache[op_name] = i
+                logger.debug(
+                    "%s: locked to %s backend (index %d) after %d successes",
+                    op_name,
+                    backend.value,
+                    i,
+                    hit_count,
+                )
+
             return result
         except _catchable as exc:
             logger.warning(
@@ -422,6 +489,9 @@ def try_backends(
                 backend.value,
                 exc,
             )
+            _backend_cache.pop(op_name, None)
+            _backend_cache.pop(op_name + ":hits", None)
+            _backend_cache.pop(op_name + ":prev", None)
             last_exc = exc
     raise RuntimeError(f"{op_name}: all AITER backends exhausted. Last error: {last_exc}") from last_exc
 

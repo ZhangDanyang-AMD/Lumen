@@ -1,0 +1,163 @@
+
+================================================================================
+te_layernorm_linear
+================================================================================
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+autograd::engine::evaluate_function: _LayerNormLinea...         0.39%     190.889us        12.62%       6.135ms     613.531us       0.000us         0.00%      25.908ms       2.591ms            10
+                               _LayerNormLinearBackward         9.20%       4.469ms        12.23%       5.944ms     594.442us      25.777ms        50.40%      25.908ms       2.591ms            10
+                                       _LayerNormLinear        10.92%       5.305ms        12.27%       5.963ms     596.313us      23.796ms        46.53%      23.796ms       2.380ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      12.314ms        24.08%      12.314ms       1.231ms            10
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us      11.799ms        23.07%      11.799ms       1.180ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      11.179ms        21.86%      11.179ms       1.118ms            10
+                               _rmsnorm_fwd_triton_impl         0.00%       0.000us         0.00%       0.000us       0.000us      10.879ms        21.27%      10.879ms       1.088ms            10
+                                   hipStreamIsCapturing         0.04%      18.590us         0.04%      18.590us       0.929us       2.308ms         4.51%       2.308ms     115.416us            20
+autograd::engine::evaluate_function: torch::autograd...         0.16%      77.701us         0.95%     463.730us      11.593us       0.000us         0.00%       1.311ms      32.773us            40
+                        torch::autograd::AccumulateGrad         0.22%     105.665us         0.79%     386.029us       9.651us       0.000us         0.00%       1.311ms      32.773us            40
+                                             aten::add_         0.23%     113.143us         0.51%     249.544us       8.318us       1.311ms         2.56%       1.311ms      43.697us            30
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.311ms         2.56%       1.311ms      43.697us            30
+                                 _cast_transpose_triton         0.00%       0.000us         0.00%       0.000us       0.000us       1.118ms         2.19%       1.118ms     111.781us            10
+                                    _rmsnorm_bwd_triton         0.00%       0.000us         0.00%       0.000us       0.000us       1.090ms         2.13%       1.090ms     108.990us            10
+cast_transpose_fusion_kernel_optimized(transformer_e...         0.00%       0.000us         0.00%       0.000us       0.000us     912.814us         1.78%     912.814us      91.281us            10
+void transformer_engine::detail::reduce_dbias_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us     137.429us         0.27%     137.429us      13.743us            10
+                                              aten::cat         0.89%     430.718us         1.81%     878.279us      43.914us     132.242us         0.26%     132.242us       6.612us            20
+                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     132.242us         0.26%     132.242us       6.612us            20
+transformer_engine::delayed_scaling_recipe::(anonymo...         0.00%       0.000us         0.00%       0.000us       0.000us     130.360us         0.25%     130.360us       6.518us            20
+                          _rmsnorm_bwd_dg_reduce_triton         0.00%       0.000us         0.00%       0.000us       0.000us      77.611us         0.15%      77.611us       7.761us            10
+                                       aten::reciprocal         0.17%      84.514us         0.32%     157.684us      15.768us      63.295us         0.12%      63.295us       6.330us            10
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      63.295us         0.12%      63.295us       6.330us            10
+                                   hipDeviceSynchronize        72.79%      35.376ms        72.79%      35.376ms      17.688ms       8.298us         0.02%       8.298us       4.149us             2
+                                        hipLaunchKernel         1.05%     511.345us         1.05%     511.345us       7.305us       6.454us         0.01%       6.454us       0.092us            70
+                                           aten::detach         0.07%      36.019us         0.17%      81.969us       4.098us       0.000us         0.00%       0.000us       0.000us            20
+                                                 detach         0.09%      45.950us         0.09%      45.950us       2.298us       0.000us         0.00%       0.000us       0.000us            20
+                                             aten::view         0.26%     126.753us         0.26%     126.753us       1.408us       0.000us         0.00%       0.000us       0.000us            90
+                                            aten::empty         0.82%     399.670us         0.82%     399.670us       2.104us       0.000us         0.00%       0.000us       0.000us           190
+                            hipGetDevicePropertiesR0600         0.15%      74.507us         0.15%      74.507us       0.621us       0.000us         0.00%       0.000us       0.000us           120
+                                 hipPointerGetAttribute         0.11%      51.540us         0.11%      51.540us       0.224us       0.000us         0.00%       0.000us       0.000us           230
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+Self CPU time total: 48.597ms
+Self CUDA time total: 51.143ms
+
+
+================================================================================
+te_linear_proj
+================================================================================
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+autograd::engine::evaluate_function: _LinearBackward...         0.59%     180.912us        13.66%       4.221ms     422.125us       0.000us         0.00%      20.394ms       2.039ms            10
+                                        _LinearBackward         9.78%       3.023ms        13.08%       4.040ms     404.034us      20.285ms        61.48%      20.394ms       2.039ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      19.080ms        57.83%      19.080ms     954.014us            20
+                                                _Linear        12.32%       3.807ms        14.03%       4.335ms     433.482us      11.256ms        34.12%      11.256ms       1.126ms            10
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us       9.306ms        28.21%       9.306ms     930.648us            10
+                                 _cast_transpose_triton         0.00%       0.000us         0.00%       0.000us       0.000us       1.950ms         5.91%       1.950ms      97.488us            20
+autograd::engine::evaluate_function: torch::autograd...         0.25%      76.133us         1.17%     360.561us      12.019us       0.000us         0.00%       1.231ms      41.021us            30
+                        torch::autograd::AccumulateGrad         0.28%      85.462us         0.92%     284.428us       9.481us       0.000us         0.00%       1.231ms      41.021us            30
+                                             aten::add_         0.30%      91.636us         0.55%     168.903us       8.445us       1.231ms         3.73%       1.231ms      61.531us            20
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.231ms         3.73%       1.231ms      61.531us            20
+cast_transpose_fusion_kernel_optimized(transformer_e...         0.00%       0.000us         0.00%       0.000us       0.000us     991.555us         3.01%     991.555us      99.155us            10
+void transformer_engine::detail::reduce_dbias_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us     154.988us         0.47%     154.988us      15.499us            10
+transformer_engine::delayed_scaling_recipe::(anonymo...         0.00%       0.000us         0.00%       0.000us       0.000us     117.731us         0.36%     117.731us       5.887us            20
+                                              aten::cat         0.70%     216.902us         1.14%     351.595us      17.580us     108.310us         0.33%     108.310us       5.416us            20
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     108.310us         0.33%     108.310us       5.416us            20
+                                       aten::reciprocal         0.35%     106.731us         0.61%     188.340us      18.834us      54.837us         0.17%      54.837us       5.484us            10
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      54.837us         0.17%      54.837us       5.484us            10
+                                           aten::detach         0.10%      30.256us         0.22%      69.208us       3.460us       0.000us         0.00%       0.000us       0.000us            20
+                                                 detach         0.13%      38.952us         0.13%      38.952us       1.948us       0.000us         0.00%       0.000us       0.000us            20
+                                   hipStreamIsCapturing         0.05%      14.002us         0.05%      14.002us       0.700us       0.000us         0.00%       0.000us       0.000us            20
+                                             aten::view         0.43%     131.499us         0.43%     131.499us       1.315us       0.000us         0.00%       0.000us       0.000us           100
+                                            aten::empty         1.23%     381.316us         1.23%     381.316us       2.383us       0.000us         0.00%       0.000us       0.000us           160
+                                          aten::reshape         0.24%      73.257us         0.48%     148.166us       2.117us       0.000us         0.00%       0.000us       0.000us            70
+                            hipGetDevicePropertiesR0600         0.22%      67.903us         0.22%      67.903us       0.679us       0.000us         0.00%       0.000us       0.000us           100
+                                 hipPointerGetAttribute         0.08%      24.886us         0.08%      24.886us       0.207us       0.000us         0.00%       0.000us       0.000us           120
+                                  hipModuleLaunchKernel         0.55%     169.657us         0.55%     169.657us       5.655us       0.000us         0.00%       0.000us       0.000us            30
+                               hipExtModuleLaunchKernel         0.54%     166.910us         0.54%     166.910us       5.564us       0.000us         0.00%       0.000us       0.000us            30
+                                        hipLaunchKernel         1.47%     454.122us         1.47%     454.122us       5.677us       0.000us         0.00%       0.000us       0.000us            80
+                                      hipGetProcAddress         0.17%      51.474us         0.17%      51.474us       0.735us       0.000us         0.00%       0.000us       0.000us            70
+                                       hipCtxGetCurrent         0.03%       9.409us         0.03%       9.409us       0.188us       0.000us         0.00%       0.000us       0.000us            50
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+Self CPU time total: 30.897ms
+Self CUDA time total: 32.995ms
+
+
+================================================================================
+te_linear_fc1
+================================================================================
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+autograd::engine::evaluate_function: _LinearBackward...         0.08%     177.867us         1.78%       4.058ms     405.841us       0.000us         0.00%     145.219ms      14.522ms            10
+                                        _LinearBackward         1.26%       2.880ms         1.70%       3.881ms     388.054us     145.101ms        62.86%     145.219ms      14.522ms            10
+                                                _Linear         1.65%       3.766ms         1.89%       4.321ms     432.065us      76.880ms        33.31%      76.880ms       7.688ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      71.354ms        30.91%      71.354ms       7.135ms            10
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us      68.910ms        29.85%      68.910ms       6.891ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      68.214ms        29.55%      68.214ms       6.821ms            10
+autograd::engine::evaluate_function: torch::autograd...         0.03%      67.472us         0.15%     348.482us      11.616us       0.000us         0.00%       8.603ms     286.780us            30
+                        torch::autograd::AccumulateGrad         0.03%      77.670us         0.12%     281.010us       9.367us       0.000us         0.00%       8.603ms     286.780us            30
+                                             aten::add_         0.04%      90.978us         0.08%     175.674us       8.784us       8.603ms         3.73%       8.603ms     430.171us            20
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       8.603ms         3.73%       8.603ms     430.171us            20
+                                 _cast_transpose_triton         0.00%       0.000us         0.00%       0.000us       0.000us       7.970ms         3.45%       7.970ms     398.480us            20
+cast_transpose_fusion_kernel_optimized(transformer_e...         0.00%       0.000us         0.00%       0.000us       0.000us       5.273ms         2.28%       5.273ms     527.274us            10
+void transformer_engine::detail::reduce_dbias_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us     199.651us         0.09%     199.651us      19.965us            10
+transformer_engine::delayed_scaling_recipe::(anonymo...         0.00%       0.000us         0.00%       0.000us       0.000us     125.669us         0.05%     125.669us       6.283us            20
+                                              aten::cat         0.09%     214.178us         0.16%     369.178us      18.459us     117.851us         0.05%     117.851us       5.893us            20
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     117.851us         0.05%     117.851us       5.893us            20
+                                       aten::reciprocal         0.05%     104.117us         0.08%     183.353us      18.335us      59.608us         0.03%      59.608us       5.961us            10
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      59.608us         0.03%      59.608us       5.961us            10
+                                           aten::detach         0.01%      26.455us         0.03%      62.580us       3.129us       0.000us         0.00%       0.000us       0.000us            20
+                                                 detach         0.02%      36.125us         0.02%      36.125us       1.806us       0.000us         0.00%       0.000us       0.000us            20
+                                   hipStreamIsCapturing         0.01%      12.773us         0.01%      12.773us       0.639us       0.000us         0.00%       0.000us       0.000us            20
+                                             aten::view         0.06%     131.359us         0.06%     131.359us       1.314us       0.000us         0.00%       0.000us       0.000us           100
+                                            aten::empty         0.17%     379.220us         0.17%     379.220us       2.370us       0.000us         0.00%       0.000us       0.000us           160
+                                          aten::reshape         0.04%      83.930us         0.07%     158.681us       2.267us       0.000us         0.00%       0.000us       0.000us            70
+                            hipGetDevicePropertiesR0600         0.03%      66.607us         0.03%      66.607us       0.666us       0.000us         0.00%       0.000us       0.000us           100
+                                 hipPointerGetAttribute         0.01%      30.287us         0.01%      30.287us       0.252us       0.000us         0.00%       0.000us       0.000us           120
+                                  hipModuleLaunchKernel         0.08%     172.413us         0.08%     172.413us       5.747us       0.000us         0.00%       0.000us       0.000us            30
+                               hipExtModuleLaunchKernel         0.08%     175.237us         0.08%     175.237us       5.841us       0.000us         0.00%       0.000us       0.000us            30
+                                        hipLaunchKernel         0.20%     468.149us         0.20%     468.149us       5.852us       0.000us         0.00%       0.000us       0.000us            80
+                                      hipGetProcAddress         0.02%      47.863us         0.02%      47.863us       0.684us       0.000us         0.00%       0.000us       0.000us            70
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+Self CPU time total: 228.480ms
+Self CUDA time total: 230.827ms
+
+
+================================================================================
+te_linear_fc2
+================================================================================
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+autograd::engine::evaluate_function: _LinearBackward...         0.18%     209.454us         3.95%       4.606ms     460.590us       0.000us         0.00%      70.251ms       7.025ms            10
+                                        _LinearBackward         2.84%       3.315ms         3.77%       4.396ms     439.645us      70.130ms        58.86%      70.251ms       7.025ms            10
+Cijk_Alik_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      69.031ms        57.94%      69.031ms       3.452ms            20
+                                                _Linear         3.31%       3.859ms         3.78%       4.407ms     440.718us      45.234ms        37.96%      45.234ms       4.523ms            10
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us      38.530ms        32.34%      38.530ms       3.853ms            10
+                                 _cast_transpose_triton         0.00%       0.000us         0.00%       0.000us       0.000us       6.704ms         5.63%       6.704ms     335.178us            20
+autograd::engine::evaluate_function: torch::autograd...         0.07%      79.777us         0.34%     394.010us      13.134us       0.000us         0.00%       3.536ms     117.854us            30
+                        torch::autograd::AccumulateGrad         0.08%      93.440us         0.27%     314.233us      10.474us       0.000us         0.00%       3.536ms     117.854us            30
+                                             aten::add_         0.10%     111.075us         0.16%     190.259us       9.513us       3.536ms         2.97%       3.536ms     176.781us            20
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       3.536ms         2.97%       3.536ms     176.781us            20
+cast_transpose_fusion_kernel_optimized(transformer_e...         0.00%       0.000us         0.00%       0.000us       0.000us     867.431us         0.73%     867.431us      86.743us            10
+void transformer_engine::detail::reduce_dbias_kernel...         0.00%       0.000us         0.00%       0.000us       0.000us     169.742us         0.14%     169.742us      16.974us            10
+transformer_engine::delayed_scaling_recipe::(anonymo...         0.00%       0.000us         0.00%       0.000us       0.000us     130.440us         0.11%     130.440us       6.522us            20
+                                              aten::cat         0.22%     252.931us         0.33%     385.215us      19.261us     121.262us         0.10%     121.262us       6.063us            20
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     121.262us         0.10%     121.262us       6.063us            20
+                                       aten::reciprocal         0.09%     105.285us         0.16%     185.870us      18.587us      61.330us         0.05%      61.330us       6.133us            10
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      61.330us         0.05%      61.330us       6.133us            10
+                                           aten::detach         0.02%      26.932us         0.06%      66.926us       3.346us       0.000us         0.00%       0.000us       0.000us            20
+                                                 detach         0.03%      39.994us         0.03%      39.994us       2.000us       0.000us         0.00%       0.000us       0.000us            20
+                                   hipStreamIsCapturing         0.01%      12.487us         0.01%      12.487us       0.624us       0.000us         0.00%       0.000us       0.000us            20
+                                             aten::view         0.13%     149.653us         0.13%     149.653us       1.497us       0.000us         0.00%       0.000us       0.000us           100
+                                            aten::empty         0.34%     398.071us         0.34%     398.071us       2.488us       0.000us         0.00%       0.000us       0.000us           160
+                                          aten::reshape         0.06%      75.195us         0.14%     160.634us       2.295us       0.000us         0.00%       0.000us       0.000us            70
+                            hipGetDevicePropertiesR0600         0.06%      73.431us         0.06%      73.431us       0.734us       0.000us         0.00%       0.000us       0.000us           100
+                                 hipPointerGetAttribute         0.03%      29.609us         0.03%      29.609us       0.247us       0.000us         0.00%       0.000us       0.000us           120
+                                  hipModuleLaunchKernel         0.14%     169.198us         0.14%     169.198us       5.640us       0.000us         0.00%       0.000us       0.000us            30
+                               hipExtModuleLaunchKernel         0.15%     169.793us         0.15%     169.793us       5.660us       0.000us         0.00%       0.000us       0.000us            30
+                                        hipLaunchKernel         0.38%     445.686us         0.38%     445.686us       5.571us       0.000us         0.00%       0.000us       0.000us            80
+                                      hipGetProcAddress         0.05%      54.102us         0.05%      54.102us       0.773us       0.000us         0.00%       0.000us       0.000us            70
+                                       hipCtxGetCurrent         0.01%       9.556us         0.01%       9.556us       0.191us       0.000us         0.00%       0.000us       0.000us            50
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
+Self CPU time total: 116.728ms
+Self CUDA time total: 119.151ms
