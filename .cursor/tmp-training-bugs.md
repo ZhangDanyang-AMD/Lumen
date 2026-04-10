@@ -15,6 +15,30 @@ Write back only meaningful tests or experiments that change confidence in a hypo
 
 ## Open
 
+### [2026-04-10 fp8-training-alignment-repro]
+- Goal: Reproduce VERL FP8 RL benchmarks using Lumen on MI350X, showing FP8 training aligns with BF16 when both use FP8 rollout.
+- Reference: https://github.com/verl-project/verl/blob/main/docs/advance/fp8.md (Qwen3-8B-Base, Qwen3-30B-A3B-Base, Qwen3-30B-A3B)
+- Setup: VERL 0.8.0.dev, vLLM 0.9.2rc2, 8x MI350X, DAPO recipe via main_ppo with DAPO overrides
+- Environment check:
+  - DAPO reward manager: YES
+  - Decoupled clipping: YES (cliprange_low, cliprange_high)
+  - Token-level loss: YES (loss_agg_mode=token-mean)
+  - Rollout correction (TIS): YES (rollout_is=token, rollout_is_threshold=2.0)
+  - Overlong reward buffer: YES (DAPORewardManager)
+  - vLLM FP8 rollout: YES (quantization=fp8)
+  - Qwen3 + Qwen3MoE support: YES (vLLM + HF transformers 4.57.1)
+  - Dynamic sampling (filter_groups): config exists, NOT in RayPPOTrainer loop (both BF16/FP8 skip it, comparison remains fair)
+- Models downloaded: qwen3-8b-base (16GB), qwen3-30b-a3b-base (57GB), qwen3-30b-a3b (57GB) to /dev/shm/model/
+- Data downloaded: dapo-math-17k.parquet (286MB), aime-2024.parquet (29KB) to Lumen/data/
+- Scripts: Lumen/examples/rl/verl/dapo/ (7 experiment scripts + common.sh + smoke_test.sh)
+- Experiment structure (restructured): 
+  - Exp 1 (8B dense): 1A BF16, 1B FP8 rollout+TIS, 1C FP8 rollout no TIS, 1D FP8 E2E (Lumen FP8PM)
+  - Exp 2 (30B MoE unified): 2A BF16+TIS (shared baseline), 2B FP8 rollout+TIS, 2C FP8 E2E (Lumen FP8PM)
+  - Old exp 3 (separate 30B baseline) eliminated — 2A serves as shared baseline for all 30B comparisons
+- Risks: vLLM FP8 rollout untested on ROCm; Qwen3 MoE + FSDP2 untested; FP8PM + FSDP2 + MoE untested
+- Next: Run smoke test (2-step BF16 with Qwen3-8B), then full experiments
+- Status: open (setup complete, no runs yet)
+
 ### [2026-04-09 fp8pm-fsdp2-memory-regression] — FIXED
 - Symptom: FSDP2+SGLang with FP8ParamManager uses MORE GPU memory than BF16 baseline when offloading is enabled (69.18 GB vs 48.06 GB peak).
 - Root cause: `_FP8LinearFunc.forward` calls `ctx.save_for_backward(fp8_weight, scale)` which pins a reference to the allgathered parameter tensor. FSDP2 `param_offload` expects to reclaim allgathered memory after each module's forward, but the autograd reference prevents this. Result: ALL layers' allgathered FP8 weights accumulate on GPU until backward.
