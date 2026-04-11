@@ -26,9 +26,11 @@ logger = logging.getLogger(__name__)
 _FUSED_QUANT_SCALE = os.environ.get("LUMEN_FUSED_QUANT_SCALE", "0") == "1"
 _FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
 _FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
+_FUSED_QUANT_TRANSPOSE_CPP = os.environ.get("LUMEN_FUSED_QUANT_TRANSPOSE_CPP", "0") == "1"
 _AITER_STATIC_QUANT_AVAILABLE: Optional[bool] = None
 _CAST_TRANSPOSE_AVAILABLE: Optional[bool] = None
 _FUSED_QUANT_AMAX_AVAILABLE: Optional[bool] = None
+_HIP_CAST_TRANSPOSE_AVAILABLE: Optional[bool] = None
 
 
 def _probe_aiter_static_quant() -> bool:
@@ -76,6 +78,20 @@ def _probe_fused_quant_amax() -> bool:
     except (ImportError, OSError):
         _FUSED_QUANT_AMAX_AVAILABLE = False
     return _FUSED_QUANT_AMAX_AVAILABLE
+
+
+def _probe_hip_cast_transpose() -> bool:
+    """Return True if the HIP C++ fused quant+transpose kernel is available (cached)."""
+    global _HIP_CAST_TRANSPOSE_AVAILABLE
+    if _HIP_CAST_TRANSPOSE_AVAILABLE is not None:
+        return _HIP_CAST_TRANSPOSE_AVAILABLE
+    try:
+        from lumen.ops.quantize.cast_transpose_hip import _probe_hip_cast_transpose as _probe
+
+        _HIP_CAST_TRANSPOSE_AVAILABLE = _probe()
+    except (ImportError, OSError):
+        _HIP_CAST_TRANSPOSE_AVAILABLE = False
+    return _HIP_CAST_TRANSPOSE_AVAILABLE
 
 
 def _get_quant_ops():
@@ -595,6 +611,23 @@ class ScalingManager:
             row_scale = row_max / fp8_max
             fp8_tensor = (flat / row_scale).clamp(-fp8_max, fp8_max).to(dtype)
             return FP8Descriptor(data=fp8_tensor.view(orig_shape), scale=row_scale, fp8_dtype=dtype)
+
+        if _FUSED_QUANT_TRANSPOSE_CPP and _probe_hip_cast_transpose() and tensor.is_cuda and tensor.dim() == 2:
+            from lumen.ops.quantize.cast_transpose_hip import cast_transpose_amax_fp8_hip
+
+            tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+            fp8_data, _fp8_data_t, amax = cast_transpose_amax_fp8_hip(
+                tensor_2d,
+                scale,
+                dtype,
+            )
+            del _fp8_data_t
+            self.amax_history[tensor_id].append(amax)
+            return FP8Descriptor(
+                data=fp8_data.view(tensor.shape),
+                scale=scale,
+                fp8_dtype=dtype,
+            )
 
         if (
             _FUSED_CAST_TRANSPOSE

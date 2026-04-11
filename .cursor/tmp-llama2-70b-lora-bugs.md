@@ -2262,6 +2262,45 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   - Updated profiling summary header in lumen_latest_profile_summary.txt
 - Status: **resolved** — AITER updated, training validated, scripts and docs updated.
 
+### [2026-04-11 csrc-hip-fused-quant-transpose]
+- Symptom: Investigated whether the HIP C++ fused quant+transpose+amax kernel
+  in `lumen/csrc/fused_quant_transpose.cu` could replace the Triton kernel and
+  provide performance improvement.
+- Changes made:
+  - Updated `setup.py` to compile `lumen/csrc/fused_quant_transpose.cu` as a
+    CppExtension via `torch.utils.cpp_extension`.
+  - Fixed `__half`/`__hip_bfloat16` → `float` conversion (use `__half2float`/
+    `__bfloat162float` instead of `static_cast` to work with
+    `__HIP_NO_HALF_CONVERSIONS__`).
+  - Fixed FP8 type selection: use `USE_ROCM` (always defined by PyTorch hipcc
+    builds) instead of `__gfx942__` (device-only macro) to select
+    `__hip_fp8_e4m3_fnuz` consistently on both host and device sides.
+  - Upgraded kernel to v2: 64×64 tiles (from 32×32), bank-conflict-free shared
+    memory (+1 column padding), `#pragma unroll`, tighter warp reduction.
+  - Created `lumen/ops/quantize/cast_transpose_hip.py` Python dispatch wrapper.
+  - Wired into `_quantize_core()` in `scaling_manager.py` with
+    `LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1` env var (priority above Triton path).
+- Microbenchmark results (single GPU, 100 iterations):
+  - (4096, 8192): Triton=0.095ms  HIP=0.094ms  **1.01x** (parity)
+  - (8192, 4096): Triton=0.088ms  HIP=0.096ms  **0.91x** (HIP slightly slower)
+  - (1024, 8192): Triton=0.038ms  HIP=0.031ms  **1.23x** (HIP wins on smaller shapes)
+- End-to-end training results (LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1, 8x MI300X):
+  - Pre-eval step time: ~5,629ms (baseline with Triton: ~5,608ms)
+  - Memory: 97.63%
+  - grad_norm: stable 0.11–1.22
+  - Loss converging normally
+  - **No measurable improvement** over the existing Triton cast+transpose+amax
+    kernel — the Triton path is already well-optimized for AMD GPU.
+- Conclusion: The HIP C++ kernel is functionally correct (100% bitwise match
+  with Triton on all shapes and all 8 GPUs), but provides no performance
+  benefit. The existing Triton fused cast+transpose+amax path is optimal.
+  Keeping `LUMEN_FUSED_QUANT_TRANSPOSE_CPP=0` (default) is recommended.
+  The code remains available as a reference or fallback.
+- Build note: Must set `PYTORCH_ROCM_ARCH=gfx942` when running
+  `python setup.py build_ext --inplace` to target MI300X only.
+  Without it, hipcc attempts gfx942+gfx950 and may fail on gfx950.
+- Status: **resolved** — kernel works but no perf gain; Triton path remains default.
+
 ## Entry Template
 
 ```markdown

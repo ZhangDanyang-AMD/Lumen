@@ -4,6 +4,23 @@ from setuptools import find_packages, setup
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
+# HIP C++ extensions — built only when ROCm / hipcc is available
+ext_modules = []
+cmdclass = {}
+try:
+    from torch.utils.cpp_extension import BuildExtension, CppExtension
+
+    ext_modules.append(
+        CppExtension(
+            name="lumen.csrc._fused_quant_transpose",
+            sources=[os.path.join(this_dir, "lumen", "csrc", "fused_quant_transpose.cu")],
+            extra_compile_args=["-O3"],
+        )
+    )
+    cmdclass["build_ext"] = BuildExtension
+except ImportError:
+    pass
+
 setup(
     name="lumen",
     version="0.3.0",
@@ -11,6 +28,8 @@ setup(
     long_description=open(os.path.join(this_dir, "README.md")).read(),
     long_description_content_type="text/markdown",
     packages=find_packages(exclude=["tests*"]),
+    ext_modules=ext_modules,
+    cmdclass=cmdclass,
     python_requires=">=3.8",
     install_requires=[
         "torch>=2.0",
