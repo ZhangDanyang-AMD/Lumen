@@ -6,4 +6,6 @@ build/
 *.so
 *.o
 .eggs/
-docs/
+/docs/
+outputs/2026-*/
+tunableop_results*.csv
