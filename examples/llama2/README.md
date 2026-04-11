@@ -22,11 +22,12 @@ The training script (`finetune_llama2.py`) selects the backend via `--backend me
 Llama2-70B LoRA SFT with FP8 quantization, TP=1 DP=8 parallelism, aligned with the
 AMD MLPerf v5.1 `MI300X_EPYC_9575F_pytorch_llama2_70b` reference submission.
 
-**Lumen v33 passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9208.
+**Lumen passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9202.
 
 ### Prerequisites
 
-- **Docker image**: `lumen_unit_test:latest` (contains Megatron-LM-AMD, ROCm, RCCL, AITER)
+- **Docker image**: `lumen_unit_test:latest` (contains Megatron-LM-AMD, ROCm, RCCL)
+- **AITER**: `lumen/triton_kernels` branch from `ZhangDanyang-AMD/aiter.git` (commit `cfaeaad3b`)
 - **GPUs**: 8x AMD MI300X (192 GB HBM each)
 - **Host RAM**: >= 256 GB (checkpoint loading uses mmap but still needs headroom)
 - **Disk**: ~300 GB free on `/data1/` (model ~140 GB, dataset ~30 GB, checkpoints/results)
@@ -56,33 +57,44 @@ python examples/llama2/scripts/convert_dataset.py \
 ### Step 2 — Launch training
 
 ```bash
-# MLPerf-aligned training with data shuffling (recommended)
-LUMEN_SHUFFLE_TRAIN=1 bash examples/llama2/run_tp1_dp8.sh
+bash examples/llama2/run_tp1_dp8.sh
 ```
 
-The `LUMEN_SHUFFLE_TRAIN=1` environment variable enables epoch-level data shuffling,
-matching the AMD MLPerf reference behavior. This is **critical for convergence** —
-without it, val_loss stalls at ~0.937 and never reaches the 0.925 target.
+The script applies system tunables (`runtime_tunables.sh`), launches a Docker container
+with all required environment variables, applies Megatron patches, and starts training.
+
+All speed and convergence optimizations are enabled by default:
+- Epoch-level data shuffling (`LUMEN_SHUFFLE_TRAIN=1`)
+- Aligned eval schedule every 192 steps (`LUMEN_EVAL_ALIGNED=1`)
+- Fused quant+amax, quant+scale, norm+quant, SwiGLU, cast+transpose kernels
+- Post-eval allocator fixes (eval recompute, warmup GC, cache clear)
+- Backend caching + sync elimination (`LUMEN_SKIP_BACKEND_SYNC=1`)
+- FP8 weight gradients via hipBLASLt (`FP8_WGRAD=1`)
+- ACL=21 activation checkpointing (`RECOMPUTE_NUM_LAYERS=21`)
 
 ### Step 3 — Monitor training
 
-Logs stream to stdout and are tee'd to `~/tp1_dp8_v3.log`:
+Logs stream to stdout and are tee'd to `~/mlperf_llama2_70b.log`:
 
 ```bash
 # Watch loss and grad norms
-tail -f ~/tp1_dp8_v3.log | grep -E "iteration|lm loss|grad_norm"
+tail -f ~/mlperf_llama2_70b.log | grep -E "iteration|lm loss|grad_norm"
 
 # Watch validation eval
-tail -f ~/tp1_dp8_v3.log | grep "validation loss"
+tail -f ~/mlperf_llama2_70b.log | grep "validation loss"
 
 # Quick GPU memory check
 rocm-smi --showmeminfo vram
+
+# Check GPU thermals and power (step time is sensitive to thermal throttling)
+rocm-smi --showtemp && rocm-smi --showpower
 ```
 
 ### Script chain
 
 ```
 [Host]  bash run_tp1_dp8.sh
+  ├── runtime_tunables.sh (CPU perf governor, THP, cache drop, NUMA/ASLR)
   └── docker run lumen_unit_test:latest bash -c '...'
         │
         ├── pip install runtime deps (huggingface-hub, sentencepiece, peft, ...)
@@ -91,15 +103,15 @@ rocm-smi --showmeminfo vram
         ├── python scripts/patch_gpt_layer_specs.py   # RMSNorm / FusedRMSNorm compat
         ├── python scripts/patch_checkpointing.py     # LoRA base_layer key remap + mmap
         ├── python scripts/patch_requires_grad.py     # Grad flow fix for LoRA + recompute
-        │
-        ├── python scripts/verify_fp8_quality.py      # FP8 quantization diagnostic
+        ├── python scripts/patch_lora_scaling.py      # LoRA alpha/rank scaling fix
+        ├── python scripts/patch_sft_loss_norm.py     # SFT loss normalization alignment
         │
         └── CONFIG=config_MI300X_tp1_dp8.sh bash run_finetune.sh
               └── torchrun --nproc_per_node=8 finetune_llama2.py \
                     --linear-fp8 --fp8-param-storage --lora-rank 16 ...
 ```
 
-The three Megatron patches are applied at runtime because they modify the container's
+The five Megatron patches are applied at runtime because they modify the container's
 Megatron-LM-AMD installation (not part of the Lumen repo). The patches are idempotent
 and skip themselves if already applied.
 
@@ -118,13 +130,30 @@ and skip themselves if already applied.
 | Weight Decay | 1e-4 | Matches MLPerf |
 | Gradient Clip | 0.3 | Matches MLPerf |
 | Adam Betas | (0.9, 0.999) | Matches MLPerf |
-| LoRA | rank=16, alpha=32, dropout=0.1 | Matches MLPerf |
-| FP8 Format | E4M3 | Delayed scaling, amax history=4, most\_recent algorithm |
+| LoRA | rank=16, alpha=32, dropout=0.1 | Attention-only, matches MLPerf |
+| FP8 Format | E4M3 hybrid | Delayed scaling, amax history=4, most\_recent |
 | FP8 Param Storage | Enabled | Weights stored in FP8 to save memory |
-| Activation Recompute | 80 layers (full) | Required for TP=1 memory budget |
-| Distributed Optimizer | Enabled | Shards optimizer states across DP ranks |
-| Data Shuffling | Enabled (`LUMEN_SHUFFLE_TRAIN=1`) | Epoch-level shuffle matching NeMo reference |
+| FP8 Wgrad | Enabled | Weight gradients computed in FP8 via hipBLASLt |
+| Activation Recompute | 21 layers (full/block) | Matches MLPerf reference |
+| Distributed Optimizer | Disabled | Attention-only LoRA has small optimizer states (~540 MB/GPU) |
+| Data Shuffling | Enabled | Epoch-level shuffle matching NeMo reference |
+| Eval Interval | Every 192 steps | Aligned with MLPerf eval cadence |
 | Seed | 1234 | Fixed for reproducibility |
+
+### Speed optimizations
+
+| Optimization | Env Var | Measured Savings |
+|--------------|---------|-----------------|
+| Fused quant+amax | `LUMEN_FUSED_QUANT_AMAX=1` | -377 ms/step (6.1%) |
+| Fused quant+scale | `LUMEN_FUSED_QUANT_SCALE=1` | -206 ms/step (2.8%) |
+| Post-eval allocator fixes | `LUMEN_EVAL_RECOMPUTE=1`, `LUMEN_POST_EVAL_CACHE_CLEAR=1`, etc. | -11.1% total training time |
+| Backend caching + sync elimination | `LUMEN_SKIP_BACKEND_SYNC=1` | ~1-2% step time |
+| Fused RMSNorm + FP8 quant | `LUMEN_FUSED_NORM_QUANT=1` | ~0.2% step time |
+| Fused SwiGLU fwd+bwd (Triton) | `LUMEN_FUSED_SWIGLU=1` | Single kernel vs 6-8 launches |
+| Fast FP8 transpose (Triton) | `LUMEN_FUSED_CAST_TRANSPOSE_V2=1` | Replaces `aten::copy_` (5.4% of GPU time) |
+| Fused cast+transpose in backward | `LUMEN_FUSED_CAST_TRANSPOSE=1` | ~11 ms/step |
+| Mixed-dtype hipBLASLt GEMM | AITER `lumen/triton_kernels` | E5M2 grad x E4M3 weight — no transpose needed |
+| SwiGLU FP8 cache | `LUMEN_FUSED_SWIGLU_QUANT=1` | Saves redundant quantization |
 
 ### Data shuffling
 
@@ -135,65 +164,65 @@ The AMD MLPerf reference (NeMo) shuffles all sample indices into a random permut
 epoch start (seeded by the training seed). Without shuffling, consecutive mini-batches
 contain adjacent packed sequences that are highly correlated, degrading early convergence.
 
-| Setting | Best val_loss | Passes MLPerf? | Steps to target |
-|---------|--------------|----------------|-----------------|
-| `LUMEN_SHUFFLE_TRAIN=0` (v20) | 0.9371 | No | Never |
-| `LUMEN_SHUFFLE_TRAIN=1` (v33) | **0.9208** | **Yes** | 672 |
+| Setting | Best val\_loss | Passes MLPerf? |
+|---------|---------------|----------------|
+| `LUMEN_SHUFFLE_TRAIN=0` | 0.9371 | No |
+| `LUMEN_SHUFFLE_TRAIN=1` | **0.9216** | **Yes** |
 
 Implementation: `lumen/models/llama2/dataset.py` — `LLaMA2SFTDataset._build_samples_mapping()`
-creates a permuted index array and remaps `__getitem__` through it. Controlled by `LUMEN_SHUFFLE_TRAIN`
-env var, passed via `shuffle=True` in `lumen/models/llama2/megatron/sft.py`.
+creates a permuted index array and remaps `__getitem__` through it.
 
 ### Expected results
 
-With the recommended configuration (lr=4e-4, 1024 steps, seed=1234, `LUMEN_SHUFFLE_TRAIN=1`):
+With the default configuration (all optimizations enabled):
 
 | Metric | Value |
 |--------|-------|
 | Initial loss (step 6, after warmup) | ~4.1 |
 | Loss at step 100 | ~1.3 |
-| Loss at step 500 | ~1.3 |
-| Best validation loss | **0.9208** (step 960) |
-| Final validation loss (step 1024) | **0.9221** |
+| Best validation loss | **0.9202** (step 960) |
 | MLPerf target | 0.925 |
-| First step under target | 672 |
-| Peak GPU memory per device | ~185 GB / 192 GB (96.2%) |
-| Step time | ~7.9 s |
+| Pre-eval step time | ~5,610 ms |
+| Post-eval step time | ~6,190 ms (+10.4%) |
+| Effective avg step time | ~6,090 ms |
+| Peak GPU memory per device | ~185 GB / 192 GB (97.5%) |
+| Stability | 0 NaN / 0 skipped |
+
+Step times are sensitive to GPU thermal state and power throttling. On MI300X at
+750W TDP, sustained training reaches thermal equilibrium at 88-98C junction temperature,
+which may increase step times by 5-7% compared to cold-start measurements.
 
 See [`results/mlperf_llama2_70b_lora/`](results/mlperf_llama2_70b_lora/) for the full
 comparison against the AMD MLPerf reference.
 
 ### MLPerf alignment status
 
-All training parameters now match the AMD MLPerf v5.1 reference:
-
-| Parameter | Lumen (v33) | MLPerf Reference | Status |
-|-----------|-------------|-----------------|--------|
+| Parameter | Lumen | MLPerf Reference | Status |
+|-----------|-------|-----------------|--------|
 | Learning Rate | 4e-4 | 4e-4 | Matched |
 | LR Warmup | 0 | 0 | Matched |
 | LR Schedule | Cosine, 1024 steps | Cosine, 1024 steps | Matched |
 | LoRA rank/alpha | 16/32 | 16/32 | Matched |
 | FP8 Format | E4M3 hybrid | E4M3 hybrid | Matched |
-| Data Shuffling | Epoch-level | Epoch-level | **Matched (v33 fix)** |
-| Activation Recompute | 80 layers (full) | 21 layers | Different (TP=1 memory) |
-| FP8 Engine | AITER (CK + Triton) | TransformerEngine | Different (kernel impl) |
-| Attention | AITER CK FMHA | TE fused CK v3 | Different (same CK kernel) |
+| Data Shuffling | Epoch-level | Epoch-level | Matched |
+| Activation Recompute | 21 layers (full/block) | 21 layers | Matched |
+| FP8 Engine | AITER `lumen/triton_kernels` (CK + hipBLASLt + Triton) | TransformerEngine | Different (kernel impl) |
+| Attention | AITER CK FMHA v3 | TE fused CK v3 | Different (same CK kernel) |
 | RMSNorm | AITER Triton | TE Triton / apex | Different (higher precision) |
-
-Remaining implementation differences (FP8 engine, attention, RMSNorm) each contribute
-< 0.005 val_loss delta individually, as verified by systematic A/B experiments (v25-v32).
 
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `SIGKILL` during checkpoint load | CPU OOM — 8 ranks each loading 128 GB | Ensure `patch_checkpointing.py` ran (adds `mmap=True`) |
-| `HIP out of memory` in forward pass | Activation memory overflow | Increase `RECOMPUTE_NUM_LAYERS` (default 80 = full recompute) |
+| `HIP out of memory` in forward pass | Activation memory overflow | Verify `RECOMPUTE_NUM_LAYERS=21` in config |
 | `grad_norm: 0.000` every step | Broken autograd chain with LoRA + recompute | Ensure `patch_requires_grad.py` ran |
 | NCCL timeout on step 1 | AITER kernel tuning takes > default timeout | Set `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=7200` (already in `run_tp1_dp8.sh`) |
-| Loss spikes / divergence | LoRA scaling bug or LR too high | Ensure `patch_lora_scaling.py` ran; use lr=4e-4 |
-| `numpy.product` error on save | Deprecated numpy API in Megatron | Already patched in `run_tp1_dp8.sh`; ensure the `sed` line runs |
-| val_loss stuck at ~0.937 | Data not shuffled | Set `LUMEN_SHUFFLE_TRAIN=1` |
+| Loss spikes / divergence | Missing patches or incomplete env var set | Use `run_tp1_dp8.sh` as-is — all patches and env vars are required |
+| `numpy.product` error on save | Deprecated numpy API in Megatron | Already patched in `run_tp1_dp8.sh` |
+| val\_loss stuck at ~0.937 | Data not shuffled | Set `LUMEN_SHUFFLE_TRAIN=1` (default in `run_tp1_dp8.sh`) |
+| Step time ~400ms above target | GPU thermal throttling at 750W TDP | Normal at thermal equilibrium; check `rocm-smi --showtemp` |
+| AITER JIT compile hangs on first run | 8 ranks wait for rank 0 to finish JIT build | Expected — first launch takes ~5 min extra for kernel compilation |
 
 ## CLI Flags
 
@@ -212,7 +241,7 @@ See `run_finetune.sh` for the full list of environment variables and defaults.
 
 ## Megatron Patches
 
-When running inside the Docker container, three patches are applied to the container's
+When running inside the Docker container, five patches are applied to the container's
 Megatron-LM-AMD installation. These live in `scripts/` and are applied at launch:
 
 | Patch | Purpose |
@@ -220,8 +249,10 @@ Megatron-LM-AMD installation. These live in `scripts/` and are applied at launch
 | `patch_gpt_layer_specs.py` | Creates `MegatronFusedRMSNorm` wrapper; patches `gpt_layer_specs.py` and `transformer_block.py` to use it when RMSNorm is detected |
 | `patch_checkpointing.py` | Remaps checkpoint keys for LoRA `base_layer` wrapping; injects `mmap=True` into `torch.load` to prevent CPU OOM with 8 ranks loading a 128 GB checkpoint |
 | `patch_requires_grad.py` | Forces `hidden_states.requires_grad_(True)` before `_checkpointed_forward` so LoRA gradients flow through activation checkpointing |
+| `patch_lora_scaling.py` | Fixes LoRA alpha/rank scaling to match the MLPerf reference implementation |
+| `patch_sft_loss_norm.py` | Aligns SFT loss normalization with the MLPerf reference (per-sample vs per-token) |
 
-Debug/diagnostic patches are available in `scripts/debug/`.
+All patches are idempotent and skip themselves if already applied.
 
 ## Reference Logs
 

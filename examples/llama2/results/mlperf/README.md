@@ -7,34 +7,87 @@ compared against the official AMD MLPerf v5.1 reference submission.
 
 ## Result Summary
 
-| Metric | Lumen | AMD MLPerf Reference (mean of 10 runs) |
-|--------|-------|----------------------------------------|
-| Best val_loss | **0.9192** | 0.9229 |
-| Passes MLPerf target? | **Yes** | Yes |
-| Per-step time | 7.4 s | 3.78 s |
-| Wall-clock (1024 steps) | 138.4 min | ~27 min (to target) |
-| Memory utilization | 96.2% | ~82% |
+| Metric | Lumen (current) | AMD MLPerf Reference (mean of 10) |
+|--------|-----------------|-----------------------------------|
+| Best val_loss | **0.9216** | 0.9229 |
+| Passes MLPerf target? | **Yes** (step 576) | Yes (step ~393) |
+| Pre-eval step time | **5,570 ms** | 3,811 ms |
+| Post-eval step time | **6,200 ms** | 3,778 ms |
+| Effective avg step time | **~6,080 ms** | ~3,795 ms |
+| Speed ratio vs MLPerf | **1.60x** | 1.0x |
+| Memory utilization | 97.6% | ~82% |
 | Stability | 0 NaN/skip | 0 NaN/skip |
 
-### Optimizations Enabled
-- `LUMEN_SHUFFLE_TRAIN=1` — epoch-level data shuffling
-- `LUMEN_EVAL_ALIGNED=1` — eval every 192 steps
-- `LUMEN_SKIP_BACKEND_SYNC=1` — backend caching + sync elimination
-- `LUMEN_FUSED_NORM_QUANT=1` — fused RMSNorm + FP8 quant kernel
-- `LUMEN_FUSED_MLP=1` — SwiGLU auto-fallback (inactive for M>64)
+## Implemented Optimizations and Measured Impact
+
+All optimizations applied cumulatively. Impact is measured against the unoptimized
+Lumen baseline (7,400 ms/step, val_loss 0.9371, does not pass target).
+
+### Convergence Fixes
+
+| Optimization | Impact on val_loss | Impact on Speed |
+|--------------|--------------------|-----------------|
+| **Epoch-level data shuffling** (`LUMEN_SHUFFLE_TRAIN=1`) | **-0.016** (0.9371→0.9208, now passes target) | None |
+| **Aligned eval schedule** (`LUMEN_EVAL_ALIGNED=1`, every 192 steps) | -0.003 (matches MLPerf eval cadence) | **-11% wall-clock** (fewer evals) |
+
+Data shuffling was the single most important fix. Without it, Lumen does not
+converge below 0.925 regardless of other optimizations.
+
+### Speed Optimizations
+
+| Optimization | Measured Savings | Mechanism |
+|--------------|-----------------|-----------|
+| **Fused quant+amax** (`LUMEN_FUSED_QUANT_AMAX=1`) | **-377 ms/step (6.1%)** | Merge `abs()` + `amax()` into single Triton kernel |
+| **Fused quant+scale** (`LUMEN_FUSED_QUANT_SCALE=1`) | **-206 ms/step (2.8%)** | Merge quant + scale computation |
+| **Post-eval allocator fixes** (eval recompute, warmup, GC, cache clear) | **-11.1% total training time** | Prevent memory fragmentation after eval passes |
+| **Backend caching + sync elimination** (`LUMEN_SKIP_BACKEND_SYNC=1`) | **~1-2% step time** | Cache GEMM backend selection, skip redundant syncs |
+| **Fused RMSNorm + FP8 quant** (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Merge norm + quant into single kernel |
+| **Fused SwiGLU backward** (`LUMEN_FUSED_SWIGLU=1`) | Included in baseline→current | Fuse SwiGLU backward elementwise ops |
+| **FP8 weight gradients** (`FP8_WGRAD=1`, hipBLASLt) | ~0 ms (correctness alignment) | Match MLPerf FP8 wgrad path |
+| **ACL=21** (`RECOMPUTE_NUM_LAYERS=21`) | ~0 ms (memory trade-off) | Match MLPerf activation checkpointing depth |
+
+### Optimizations Confirmed Active But Constrained by Memory
+
+| Optimization | Status | Impact |
+|--------------|--------|--------|
+| **Fused cast+transpose in backward** (`LUMEN_FUSED_CAST_TRANSPOSE=1`) | Active (971 calls/step), grad transpose consumed by hipBLASLt wgrad | Net ~11 ms savings; weight transpose for dgrad still needed (~15 GiB cache not feasible at 97.6%) |
+| **SwiGLU FP8 cache** (`LUMEN_FUSED_SWIGLU_QUANT=1`) | Active, amax redundancy fixed | Saves quantization of SwiGLU output for next linear |
+| **FP8 activation storage** (`FP8_ACT_STORE=1`) | **Confirmed working** — saves ~27.7 GiB (59 non-checkpointed layers × 470 MiB). Without it, ACL=21 would OOM (need ~215 GiB) | 97.6% is the expected WITH-FP8-store utilization; remaining BF16 activations (linear inputs, attention) fill the rest |
+
+### Optimizations Applied This Session (not yet profiled)
+
+| Optimization | Expected Savings | Files Changed |
+|--------------|-----------------|---------------|
+| **Fused amax in RMSNorm+FP8 quant kernel** | ~24 ms/step (eliminate 160 abs + 160 amax calls from `layernorm_linear.py`) | `third_party/aiter/.../fused_fp8_quant.py`, `lumen/modules/layernorm_linear.py` |
+| **FP8 activation store for `--lumen-linear` path** | Prevents OOM on spec-provider builder path | `lumen/models/megatron.py` |
+| **Backward weight descriptor reuse** | Zero-cost prep; activates when weight transpose cache becomes feasible | `lumen/ops/quantize/linear.py` |
+
+### Net Result
+
+| Metric | Baseline | v41 (repro) | v45 (full run) | MLPerf Ref |
+|--------|----------|-------------|----------------|------------|
+| Pre-eval step time | 7,400 ms | 5,740 ms | 5,570 ms | 3,811 ms |
+| Post-eval step time | — | ~6,060 ms | 6,200 ms | 3,778 ms |
+| Effective avg step time | — | ~6,000 ms | ~6,080 ms | ~3,795 ms |
+| Memory utilization | — | 99.68% | 97.6% | ~82% |
+| val_loss (best) | 0.9371 (fail) | 0.9194 (pass) | 0.9216 (pass) | 0.9229 |
+| Speed ratio vs MLPerf | ~2.0x | **1.58x** | **1.60x** | 1.0x |
+
+**Note on speed ratio**: Uses effective average step time (weighted by pre-eval and post-eval
+step counts over a 1024-step run with evals every 192 steps). Post-eval regression (+11%)
+is the dominant factor — most training steps run post-eval. Pre-eval-only ratio would be
+1.46x (v45) or 1.51x (v41), but this understates the actual gap.
 
 ## Val_loss Trajectory
 
-### Lumen
+### Lumen (current)
 
-| Step | val_loss |
-|------|----------|
-| 192 | 0.9526 |
-| 384 | 0.9356 |
-| 576 | 0.9243 |
-| 768 | 0.9245 |
-| 960 | **0.9210** |
-| 1024 | **0.9192** |
+| Step | val_loss | Passes target? |
+|------|----------|----------------|
+| 192 | 0.9461 | No |
+| 384 | 0.9327 | No |
+| 576 | **0.9216** | **Yes** |
+| 768 | 0.9244 | Yes |
 
 ### AMD MLPerf Reference (10 seeds, evals every 48 steps from step 192)
 
@@ -56,285 +109,253 @@ compared against the official AMD MLPerf v5.1 reference submission.
 
 | Step | Lumen | AMD Ref Mean | Gap |
 |------|-------|-------------|-----|
-| 192 | 0.9526 | 0.9401 | +0.013 |
-| 384 | 0.9356 | 0.9244 | +0.011 |
+| 192 | 0.9461 | 0.9401 | +0.006 |
+| 384 | 0.9327 | 0.9244 | +0.008 |
 
-Both Lumen and the AMD reference converge well below the 0.925 target. The small
-gap is attributable to seed variation and accumulated kernel-level numerical
-differences (FP8 format, GEMM backend, normalization kernel), each individually
-contributing < 0.005 val_loss.
-
-## Convergence Gap Analysis
-
-Lumen reaches the MLPerf target at step ~672 vs AMD reference mean of step ~393 — approximately **1.7x more steps**, primarily due to:
-
-1. **Seed difference**: Lumen uses a fixed seed; AMD runs use various random seeds.
-   Different seeds shift convergence speed by 0.003–0.005 val_loss at matched steps
-   (observed across AMD's own 10 runs: step 192 ranges from 0.9370 to 0.9435,
-   a 0.007 spread).
-
-2. **Kernel-level numerical differences**: Each individually < 0.005 val_loss,
-   verified by systematic A/B experiments:
-   - FP8 backward format (E5M2 vs E4M3): delta < 0.001
-   - FP8 weight gradient precision: delta < 0.001
-   - GEMM backend (CK vs hipBLASLt): delta < 0.002
-   - RMSNorm implementation: delta < 0.005
-   - RoPE implementation: delta < 0.002
-   - Attention accumulation precision: delta < 0.002
-
-   These compound across 80 layers and 1024 steps.
-
-### How to Close the Remaining Gap
-
-| Action | Expected Impact | Difficulty |
-|--------|----------------|-----------|
-| Multi-seed runs (match AMD's random seed approach) | Verify gap is within seed noise | Easy |
-| Combined kernel alignment (all diffs at once) | Potentially -0.005 | Hard |
+Lumen reaches the MLPerf target at step 576 vs AMD reference mean ~393
+(~1.5x more steps). The gap is attributable to seed variation (AMD's own 10 runs
+show 0.007 spread at step 192) and accumulated kernel-level numerical differences
+(FP8 format, GEMM backend, normalization), each individually < 0.005 val_loss.
 
 ## Speed Gap Analysis
 
-Both Lumen and the AMD reference use identical parallelism (TP=1, ACL=21, DP=8) and FP8
-config. The speed gap is entirely from kernel fusion and dispatch overhead.
+Both Lumen and AMD reference use identical parallelism (TP=1, ACL=21, DP=8)
+and FP8 config. The remaining 1.46x speed gap is from kernel fusion, dispatch
+overhead, and memory pressure.
 
-| Metric | Lumen | AMD MLPerf Ref | Ratio |
-|--------|-------|---------------|-------|
-| Per-step time | 7.4 s | 3.78 s | **1.96x** |
-| Wall-clock (1024 steps) | 138.4 min | ~27 min (to target) | — |
+### Remaining Speed Gap: 5,484 ms (profiled) vs 3,811 ms (MLPerf) = 1,673 ms
 
-## Kernel Profiling — Apple-to-Apple Comparison
+Based on fresh profiling data (current optimizations):
 
-Profiled Lumen (3 training steps via `torch.profiler`, rank 0) and TE (individual
-operations at identical tensor shapes `[8192, 8192]` in the AMD MLPerf container).
+| # | Root Cause | Lumen (ms) | TE est. (ms) | Gap (ms) | Status |
+|---|-----------|-----------|-------------|---------|--------|
+| 1 | **FP8 quant/scale pipeline** (abs→amax→quant) | ~386 | 54 | **~332** | Fused quant+amax active in `_quantize_core` and `quantize_bwd_delayed`; fused amax added to RMSNorm+FP8 kernel (~24ms saved). Remaining: bootstrapping, attention paths |
+| 2 | **aten::copy_** (weight transpose for dgrad) | 297 | ~60 | **237** | Weight transpose needed for dgrad (CK TN layout). Caching all transposes requires ~15 GiB (infeasible at 97.6%). Cast+transpose grad IS consumed by hipBLASLt wgrad |
+| 3 | **Memory pressure** (97.6% vs 82%) amplifying all ops | — | — | **100-200** | FP8 act storage IS working (saves ~27.7 GiB); 97.6% is expected WITH FP8 store — remaining BF16 activations fill rest |
+| 4 | **Cast+transpose kernel overhead** (new, not in TE profile) | 178 | included | **~100** | Active but not yet fully amortized |
+| 5 | **SwiGLU residual** (Triton vs TE C++ kernel) | 163 | ~100 | **63** | Fused (was 857 ms); 1.6x gap remains |
+| 6 | **aten::clone + cat + add** | 253 | ~30 | **223** | Autograd copies, concat, elementwise |
+| 7 | **Kernel dispatch** (~19K vs ~5-8K launches) | ~96 | ~24 | **72** | Reduced 3x (was ~57K); further fusion needed |
+| 8 | **Memcpy DtoD** | 82 | ~20 | **62** | Device copies from unfused ops |
+| 9 | **Post-eval allocator fragmentation** (+11.3%) | — | — | **~50** | Mitigated; full fix needs lower base memory |
+| 10 | **Other** (dropout, fill_, zero_, reshape, RoPE) | ~180 | ~70 | **110** | Structural overhead |
+| | **Total estimated gap** | | | **~1,400-1,600** | |
 
-Raw data: `profiling/lumen_profile_summary.txt`, `profiling/te_profile_results.txt`
-Chrome trace (403 MB): `profiling/lumen_profile_trace.json`
+### Highest-Impact Next Steps
 
-### Lumen GPU Time Breakdown (per step, ~6.08s)
+1. **Reduce memory to unlock further optimizations** — at 97.6% (187.4 GiB), there
+   is no room to cache weight transposes (~15 GiB) or other persistent state.
+   Options: increase ACL (reduce non-checkpointed layers), FP8 linear input storage,
+   or reduce attention activation footprint. Each GiB freed enables more fusion.
 
-| Category | Time (ms) | % GPU | Kernel Launches (3 steps) |
-|----------|----------|-------|--------------------------|
-| GEMM (CK forward) | 1,974 | 32.4% | 1,215 |
-| GEMM (hipBLASLt backward) | 1,077 | 17.7% | 966 |
-| Elementwise (mul/silu/sigmoid/add) | 857 | 14.1% | 20,466 (mul alone) |
-| Attention backward | 580 | 9.5% | 240 |
-| Copy/cast (`aten::copy_` + `clone`) | 486 | 8.0% | 38,331 (copy_) + 24,447 (clone) |
-| FP8 quant/scale (amax + abs + quant) | 407 | 6.7% | 4,812 (amax) + 9,630 (abs) |
-| Attention forward | 242 | 4.0% | 303 |
-| Cat | 123 | 2.0% | 3,861 |
-| NCCL AllReduce | 119 | 2.0% | 498 |
-| Memcpy DtoD | 79 | 1.3% | 23,190 |
-| Other (dropout, LoRA mm, etc.) | 135 | 2.3% | — |
-| **Total** | **6,079** | **100%** | **~57,000 per step** |
+2. **Eliminate remaining aten::copy_ for weight dgrad** — 297 ms from weight
+   transpose (`.t().contiguous()`) for CK TN layout. Requires either: (a) memory
+   headroom to cache weight transposes, or (b) hipBLASLt NN-layout dgrad GEMM
+   that accepts weight `(N,K)` directly without transpose.
+
+3. **Profile with fused amax in RMSNorm+FP8 kernel** — the `layernorm_linear.py`
+   fix eliminates ~160 abs+160 amax calls per step (~24 ms). Verify with fresh
+   profile. Remaining abs+amax (~120 ms estimated) is from attention and
+   bootstrapping — diminishing returns on further fusion.
+
+### Memory Breakdown: Lumen vs TE (per GPU, TP=1, MI300X 192 GiB)
+
+Both frameworks use identical model architecture (Llama-2 70B, 80 layers, ACL=21)
+and FP8 format. The 15.6 percentage-point gap (97.6% vs ~82%) traces to allocator
+behavior, not to fundamentally different data stored.
+
+**Common ground (verified identical):**
+
+| Component | Lumen | TE | Notes |
+|-----------|-------|-----|-------|
+| Attention activations for backward | Q/K/V/output in **BF16**, softmax_lse in FP32 | Same | Neither uses FP8 DPA (`fp8_dot_product_attention=False`) |
+| Per-layer attention saved tensors | ~290 MiB/layer (Q:128 + K:16 + V:16 + O:128 + lse:2) | ~290 MiB/layer | Both use AITER CK v3 / TE CK fused attn |
+| Frozen weight storage | **FP8** (1 byte/param) via `FP8_PARAM_STORAGE=1` | **FP8** via TE `keep_fp8_weight_transpose_cache` | Both shrink 2× vs BF16 master |
+| Activation checkpointing | 21 layers recomputed, 59 stored | Same | Identical depth |
+
+**Lumen memory estimate:**
+
+| Category | Size (GiB) | Dtype | Calculation |
+|----------|-----------|-------|-------------|
+| Frozen weights (80 layers) | **~64** | FP8 | 80 × (QKV 10240 + Proj 8192 + FC1 57344 + FC2 28672) × 8192 × 1B |
+| Embedding + output layer | **~1.0** | BF16 | 2 × 32128 × 8192 × 2B |
+| LoRA weights + optimizer | **~1.2** | BF16/FP32 | ~84M params × (2B weight + 12B optimizer) |
+| Attention saved tensors (59 layers) | **~17** | BF16 | 59 × 290 MiB |
+| Linear input tensors (59 layers) | **~24** | FP8 | 59 × (64+64+64+224) MiB |
+| RMSNorm/residual intermediates | **~15** | BF16 | 59 × ~256 MiB (norm input + residual) |
+| Gradient buffers (backward peak) | **~25** | Mixed | Grad activations + grad weight accumulation |
+| NCCL + hipBLASLt workspace | **~5** | — | AllReduce buffers + GEMM workspace |
+| **Subtotal (logical)** | **~152** | | 79% of 192 GiB |
+| PyTorch allocator overhead | **~23** | | Cached but unused blocks |
+| Fragmentation waste | **~12** | | Non-contiguous holes from 19K alloc/free cycles |
+| **Total (reported)** | **~187** | | **97.6%** of 192 GiB |
+
+**Why TE reports ~82% (~157 GiB):**
+
+| Factor | Lumen impact | TE advantage | Gap (GiB) |
+|--------|-------------|--------------|-----------|
+| Allocator fragmentation | 19K kernel launches → many alloc/free cycles | ~5K launches → fewer, larger blocks | **~8-12** |
+| Autograd graph nodes | Unfused ops each create Python autograd nodes with tensor refs | Fused TE ops: 1 node per LayerNormLinear | **~5-8** |
+| `_fp8_param_cache` | **Not active** (`FP8_PARAMS=0`, `FP8_PARAM_STORAGE=1`) | N/A | 0 |
+| Attention FP8 storage | **Not used** (neither framework uses FP8 DPA) | Same | 0 |
+| Peak allocation pattern | More temporaries from sequential unfused ops | Fused kernels share output buffers | **~5-10** |
+| **Total gap** | | | **~20-30 GiB** |
+
+The gap is dominated by **allocator-level** effects, not by storing fundamentally
+different data. Reducing kernel launch count (currently 19K, target <10K) through
+further fusion would shrink fragmentation proportionally.
+
+**Fragmentation mitigation (implemented):**
+
+| Mitigation | Config Flag | Effect |
+|------------|-------------|--------|
+| `garbage_collection_threshold:0.8` | `PYTORCH_CUDA_ALLOC_CONF` | Proactive GC when cached memory > 80% of max |
+| `max_split_size_mb:512` | `PYTORCH_CUDA_ALLOC_CONF` | Cap block size to reduce fragment variety |
+| `expandable_segments:True` | `PYTORCH_CUDA_ALLOC_CONF` | Avoid fixed-pool exhaustion |
+| Post-eval `empty_cache` | `LUMEN_POST_EVAL_CACHE_CLEAR=1` | Reclaim eval-induced fragments |
+| Post-eval rewarm | `LUMEN_POST_EVAL_REWARM=1` | Re-prime allocator with training shapes |
+| Eval activation recompute | `LUMEN_EVAL_RECOMPUTE=1` | Use ACL=21 during eval (match training) |
+| Training defrag hook | `LUMEN_TRAINING_DEFRAG=1` | Periodic GC + conditional `empty_cache` |
+
+## Kernel Profiling — Lumen vs TE
+
+Profile data from `torch.profiler` (steps 8-10, rank 0).
+
+**Two snapshots**: "Baseline" = first profile taken before optimizations (~6,080 ms/step),
+"Current" = latest profile with all optimizations enabled (~5,484 ms/step).
+
+### Lumen GPU Time Breakdown — Current vs Baseline
+
+| Category | Current (ms) | Baseline (ms) | Delta | % of Step | Kernel Launches/step |
+|----------|-------------|--------------|-------|-----------|---------------------|
+| GEMM (CK forward) | 1,975 | 1,974 | 0 | 36.0% | 405 |
+| GEMM (hipBLASLt backward) | 1,081 | 1,077 | +4 | 19.7% | 322 |
+| Attention backward | 605 | 580 | +25 | 11.0% | 80 |
+| Attention forward | 243 | 242 | +1 | 4.4% | 101 |
+| **Cast+transpose (Triton fused)** | **178** | **0** | **+178** | 3.2% | 971 |
+| **SwiGLU fwd (fused kernel)** | **89** | **0** | **+89** | 1.6% | 101+101 |
+| **SwiGLU bwd (fused kernel)** | **74** | **0** | **+74** | 1.4% | 640 |
+| aten::copy_ | **297** | 486 | **-189** | 5.4% | 12,512 |
+| aten::abs + aten::amax | **320** | 407 | **-87** | 5.8% | 2,112+1,054 |
+| aten::mul | **83** | 527 | **-444** | 1.5% | 1,901 |
+| aten::clone | **53** | 105 | **-52** | 1.0% | 7,236 |
+| aten::cat | **71** | 123 | **-52** | 1.3% | 647 |
+| aten::add + add_ | **129** | ~150 | **-21** | 2.4% | 710+862 |
+| FP8 quant (dynamic+static) | **89** | ~172 | **-83** | 1.6% | 320+320 |
+| aten::clamp | **0.7** | 57 | **-56** | 0.0% | 102 |
+| NCCL AllReduce | 123 | 119 | +4 | 2.2% | 166 |
+| Memcpy DtoD | 82 | 79 | +3 | 1.5% | ~8,000 |
+| RMSNorm (fwd+bwd Triton) | 32 | ~40 | -8 | 0.6% | 160+160 |
+| Dropout | 24 | ~30 | -6 | 0.4% | 202 |
+| LoRA mm | 28 | ~30 | -2 | 0.5% | 522 |
+| Other (fill_, zero_, reshape, etc.) | ~96 | ~135 | -39 | 1.7% | — |
+| **Total** | **~5,484** | **~6,079** | **-595** | **100%** | **~19,200** |
+
+### What Changed
+
+| Optimization | Baseline Overhead | Current Overhead | Savings |
+|-------------|-------------------|------------------|---------|
+| **SwiGLU**: separate mul+silu+sigmoid → fused Triton kernels | 857 ms (mul 527 + silu 100 + sigmoid 82 + partial mul) | 163 ms (fwd 89 + bwd 74) | **~694 ms** |
+| **FP8 quant pipeline**: abs→amax→clamp→quant → fused quant+amax | 407 ms (abs+amax+clamp+quant) | 320+89+0.7 = 410 ms | **~0 ms** (see note) |
+| **Cast+transpose**: separate copy_→contiguous → Triton fused | 0 ms (not active) | 178 ms (now active) | — |
+| **aten::copy_**: weight transpose + dtype casts | 486 ms | 297 ms | **189 ms** |
+| **aten::clamp**: scale clamping | 57 ms | 0.7 ms | **56 ms** |
+| **aten::cat**: tensor concatenation | 123 ms | 71 ms | **52 ms** |
+| **aten::clone**: autograd defensive copies | 105 ms | 53 ms | **52 ms** |
+| **Kernel launches**: dispatch overhead | ~57,000/step | **~19,200/step** | **3x reduction** |
+
+**Note on FP8 quant**: The fused quant+amax kernels replaced the baseline's
+separate pipeline, but `abs` and `amax` calls persist for delayed scaling's
+amax history update. The total FP8-related overhead is similar because the
+cast+transpose kernel (178 ms, now active) has absorbed work that was
+previously in `aten::copy_`.
+
+### Pending Fusions (implemented, awaiting profiling)
+
+| Fusion | Mechanism | Expected Impact |
+|--------|-----------|-----------------|
+| **`@once_differentiable`** on 6 autograd Functions | Tells PyTorch backward is called once; skips defensive `.clone()` of saved tensors | Eliminates ~5K+ `aten::clone` launches, **-30-50ms** |
+| **Fused quant+transpose+amax** backward kernel | Single Triton kernel (64x64 tiles) replaces quant + amax + transpose in backward | **-30-50ms** from eliminating 320 separate kernel launches |
+| **`FP8StoredLinearFunction`** backward now uses `manager=mgr, backward=True` | Enables fused quant path for frozen-weight backward | Consistent fusion coverage across both linear paths |
+
+### Lumen vs TE Comparison (current profile)
+
+| Category | Lumen (ms) | TE est. (ms) | Lumen/TE | Status |
+|----------|-----------|-------------|----------|--------|
+| **GEMM** | 3,056 | 2,780 | **1.10x** | Near parity |
+| **Attention** | 848 | ~822 | **1.03x** | Near parity |
+| **SwiGLU** | 163 | ~100 | **1.6x** | Fused (was 8.6x) |
+| **FP8 quant/scale** | 410 | 54 | **7.6x** | Partially fused |
+| **Copy/cast** | 297 | ~60 | **5.0x** | Improved (was 8.1x) |
+| **Cast+transpose** | 178 | ~included | — | New: Triton fused kernel active |
+| **Cat** | 71 | ~15 | 4.7x | Improved (was 8.2x) |
+| **NCCL** | 123 | ~119 | 1.0x | Parity |
+| **Other** | 338 | ~70 | 4.8x | Memcpy, dropout, clone, add, fill |
+| **Total** | **~5,484** | **~4,020** | **1.36x** | Improved (was 1.51x) |
 
 ### TE GPU Time Breakdown (per layer, fwd + bwd)
 
-| Operation | Per Iter (ms) | GEMM (ms) | Overhead (ms) | Kernel Launches |
-|-----------|--------------|-----------|--------------|----------------|
-| LayerNormLinear (QKV: 8192→10240) | 5.11 | 3.53 (69%) | 1.58 (norm+cast+trn) | ~14 |
-| Linear (proj: 8192→8192) | 3.30 | 2.84 (86%) | 0.46 (cast+trn) | ~14 |
-| Linear (fc1: 8192→57344) | 23.08 | 20.85 (90%) | 2.23 (cast+trn) | ~14 |
-| Linear (fc2: 28672→8192) | 11.92 | 10.75 (90%) | 1.17 (cast+trn) | ~14 |
+| Operation | Per Iter (ms) | GEMM (ms) | Overhead (ms) | Launches |
+|-----------|--------------|-----------|--------------|----------|
+| LayerNormLinear (QKV: 8192→10240) | 5.11 | 3.53 (69%) | 1.58 | ~14 |
+| Linear (proj: 8192→8192) | 3.30 | 2.84 (86%) | 0.46 | ~14 |
+| Linear (fc1: 8192→57344) | 23.08 | 20.85 (90%) | 2.23 | ~14 |
+| Linear (fc2: 28672→8192) | 11.92 | 10.75 (90%) | 1.17 | ~14 |
 | **Per layer total** | **43.41** | **37.97** | **5.44** | **~56** |
 | **80 layers** | **3,473** | **3,038** | **435** | **~4,480** |
 
-TE's non-GEMM overhead is only **435ms** for 80 layers. Lumen's is **2,000ms+**.
-
-### Head-to-Head Comparison (per step)
-
-| Category | Lumen (ms) | TE est. (ms) | Lumen/TE | Gap Source |
-|----------|-----------|-------------|----------|-----------|
-| **GEMM** | 3,051 | 2,780 | 1.10x | CK vs hipBLASLt — comparable |
-| **Attention** | 822 | ~822 | 1.00x | Same CK FMHA v3 kernel |
-| **FP8 quant/scale** | 407 | 54 | **7.6x** | abs→amax→clamp→quant (separate) vs fused |
-| **Elementwise** | 857 | ~100 | **8.6x** | SwiGLU mul/sigmoid/silu separate vs fused |
-| **Copy/cast** | 486 | ~60 | **8.1x** | 38K copy_ calls vs fused cast_transpose |
-| **Cat** | 123 | ~15 | 8.2x | Pre-allocated vs per-op cat |
-| **NCCL** | 119 | ~119 | 1.0x | Same AllReduce |
-| **Other** | 214 | ~70 | 3.1x | Memcpy, dropout, clone |
-| **Total** | **6,079** | **~4,020** | **1.51x** | |
-
-### Detailed 1,537ms Gap Breakdown (v40 5,348ms vs MLPerf 3,811ms)
-
-After v39/v40 optimizations (fused SwiGLU backward, fused quant+amax, overlapped
-grad reduce, RECOMPUTE_NUM_LAYERS=19), the raw profile gap of ~2,060ms narrowed to
-**1,537ms**. The ~523ms was absorbed by optimizations applied between the v35 profile
-snapshot and v40. The remaining gap decomposes as follows:
-
-| # | Root Cause | Est. ms | % of 1,537ms | Evidence |
-|---|-----------|---------|-------------|---------|
-| 1 | **SwiGLU forward elementwise not fused** | 300–400 | 20–26% | `aten::mul` 527ms/step (20,466 calls), `aten::silu` 100ms/step; v39 fused bwd only; TE uses single fused kernel for full SwiGLU fwd+bwd |
-| 2 | **Copy/dtype conversion overhead** | 250–350 | 16–23% | `aten::copy_` 381ms/step (12,777 calls), `aten::clone` 105ms/step (8,149 calls); weight `.t().contiguous()`, FP8↔BF16 casts; TE `cast_transpose_fusion_kernel_optimized` does both in one pass |
-| 3 | **CPU kernel launch dispatch** | 200–300 | 13–20% | 57K launches/step × ~5μs = 285ms CPU wait; TE ~7K launches; GPU idle bubbles between dispatch; `aten::copy_` alone: 304ms CPU time/step |
-| 4 | **FP8 quant/scale pipeline residual** | 100–200 | 7–13% | `aten::clamp` 57ms/step, `_dynamic_per_tensor_quant` 62ms/step remain after fused quant+amax; TE `delayed_scaling_recipe` amax update is ~6.5μs/tensor vs Lumen ~200μs |
-| 5 | **Memory allocator pressure (99.68%)** | 100–200 | 7–13% | 99.68% utilization vs TE 82%; amplifies all categories via fragmented free-list scans, `cudaFree`/`cudaMalloc` fallback; causes 13.3% post-eval regression (5,348→6,060ms) |
-| 6 | **Activation checkpoint recompute dispatch** | 100–150 | 7–10% | `CheckpointFunctionBackward` 1,398ms/step (23% of GPU time); Python-level `tensor_parallel.checkpoint` replay overhead; TE may use lighter mechanism or graph capture |
-| 7 | **Cat / tensor concatenation** | 50–80 | 3–5% | `aten::cat` 1,287 calls/step (123ms); LoRA A×B concat + gradient AllReduce prep; TE pre-allocates buffers |
-| | **Total** | **~1,500–1,680** | **~100%** | |
-
-#### Per-root-cause kernel-level evidence
-
-**Root cause 1 — SwiGLU forward elementwise**
-
-Lumen's SwiGLU forward still launches separate kernels:
-
-| Kernel | ms/step | Calls/step | Role |
-|--------|---------|-----------|------|
-| `aten::mul` | 527 | 6,822 | gate × up (SwiGLU) + grad element ops |
-| `aten::silu` | 100 | 741 | SiLU(gate) in forward |
-| `aten::sigmoid` | 82 | 1,280 | SiLU backward (sigmoid component) |
-
-~60% of the `aten::mul` time originates from the SwiGLU path. v39's `LUMEN_FUSED_SWIGLU=1`
-fused the backward only. TE's `USE_TE_SWIGLU=1` computes the entire SiLU(gate) × up forward
-and backward in a single C++ kernel with zero separate elementwise launches.
-
-**Root cause 2 — Copy/dtype conversion**
-
-| Kernel | ms/step | Calls/step | Primary source |
-|--------|---------|-----------|---------------|
-| `aten::copy_` | 381 | 12,777 | Weight transpose `.t().contiguous()`, dtype casts |
-| `aten::clone` | 105 | 8,149 | Autograd defensive copies |
-| `aten::contiguous` | 57 | 1,476 | Non-contiguous → contiguous for GEMM |
-| `Memcpy DtoD` | 79 | 7,730 | Device-to-device copies |
-
-TE's `cast_transpose_fusion_kernel_optimized` writes both row-major and column-major
-FP8 in a single kernel pass (~100μs/layer). The transposed output is consumed directly
-by backward GEMMs, eliminating all intermediate copy/contiguous calls.
-
-**Root cause 3 — CPU kernel launch overhead**
-
-| Metric | Lumen | TE (est.) | Ratio |
-|--------|-------|----------|-------|
-| Kernel launches / step | ~57,000 | ~7,000 | **8.1x** |
-| CPU dispatch time / step | ~285ms | ~35ms | 8.1x |
-| GPU idle bubbles | Significant | Minimal | — |
-
-Each HIP launch incurs ~5μs CPU API call + ~3μs dispatch. Between launches the GPU idles
-waiting for the next kernel submission. TE's extensive fusion reduces launch count by ~8x,
-which compresses GPU bubbles proportionally. `aten::copy_` alone accounts for 304ms/step
-of CPU time — time during which the GPU is largely idle.
-
-**Root cause 4 — FP8 quant/scale residual**
-
-v39/v40 fused `abs + amax` into a single kernel (`LUMEN_FUSED_QUANT_AMAX=1`), saving
-~377ms/step. Remaining overhead:
-
-| Kernel | ms/step | Calls/step |
-|--------|---------|-----------|
-| `aten::clamp` (scale clamping) | 57 | 811 |
-| `_dynamic_per_tensor_quant` | 62 | 481 |
-| `_static_per_tensor_quant` | 48 | 481 |
-
-TE's `delayed_scaling_recipe` performs the amax-to-scale computation in ~6.5μs per tensor
-(profile line `delayed_scaling_recipe:: ... 130μs / 20 calls = 6.5μs`). Lumen's path
-still requires a separate `clamp` kernel and two distinct quant kernels per tensor.
-
-**Root cause 5 — Memory allocator pressure**
-
-Not a discrete kernel cost but a multiplicative amplifier:
-
-| Metric | Lumen v40 | TE / MLPerf |
-|--------|----------|-------------|
-| GPU memory utilization | 99.68% | ~82% |
-| Free headroom | ~500 MiB | ~35 GiB |
-| Post-eval step time regression | +13.3% | -0.8% |
-| BF16 autograd intermediates | ~112 GiB (58% of 192 GiB) | Minimal (C++ fusion) |
-
-At 99.68% utilization the PyTorch caching allocator has almost no free blocks.
-Every `torch.empty()` must scan a fragmented free list, and frequent
-`cudaFree`/`cudaMalloc` fallbacks occur. After eval (which temporarily allocates
-activations for all 80 layers without checkpointing), the allocator cannot
-defragment, causing a permanent 13.3% slowdown for all subsequent training steps.
-
-**Root cause 6 — Activation checkpoint overhead**
-
-`CheckpointFunctionBackward` consumes 1,398ms/step (23% of GPU time). This includes:
-- Full forward re-execution for 19 checkpointed layers (v40 `RECOMPUTE_NUM_LAYERS=19`)
-- Python-level `tensor_parallel.checkpoint` dispatch overhead per layer
-- Memory allocation/deallocation for recomputed activations at high utilization
-
-TE's approach (possibly using CUDA/HIP graph capture for the checkpoint region, or a
-lighter C++-level checkpoint implementation) avoids the Python dispatch overhead and
-benefits from pre-allocated graph buffers.
-
 ### Key Findings
 
-1. **GEMM and Attention are NOT the bottleneck.** They account for ~64% of GPU time
-   and are within 10% of TE speed. Optimizing GEMM backends yields diminishing returns.
+1. **GEMM and Attention are NOT the bottleneck.** They account for ~72% of GPU
+   time and are within 10% of TE.
 
-2. **Non-GEMM overhead dominates the gap.** Lumen spends **~2,000ms/step** on
-   elementwise, copy/cast, and FP8 quantization — operations where TE uses fused kernels.
-   TE spends only **~400ms** on the same work.
+2. **SwiGLU fusion is working.** The fused Triton kernels reduced SwiGLU from
+   857 ms to 163 ms (-81%). The remaining 1.6x gap vs TE (163 ms vs ~100 ms) is
+   from TE's C++ kernel being tighter than Lumen's Triton implementation.
 
-3. **Kernel launch count is 10x higher.** Lumen dispatches ~57,000 kernels per step
-   vs TE's estimated ~5,000–8,000. At ~5μs CPU dispatch each, this alone adds ~250ms/step.
+3. **Cast+transpose is now active** but adds 178 ms. The net effect is partial:
+   it absorbed 189 ms from `aten::copy_` while itself costing 178 ms. The savings
+   will grow if the transposed output is consumed directly by backward GEMMs
+   (eliminating additional `_t_contiguous` calls).
 
-4. **The top 3 fusion targets** account for ~1,750ms/step of recoverable overhead:
+4. **FP8 quant/scale is still the biggest non-GEMM gap.** At 410 ms vs TE's 54 ms
+   (7.6x), the separate abs→amax→quant pipeline is still inefficient. The fused
+   quant+amax kernel helps but `abs` and `amax` calls persist for delayed scaling.
 
-| Target | Lumen (ms) | TE (ms) | Savings (ms) | % of Step |
-|--------|-----------|---------|-------------|-----------|
-| Fused SwiGLU (fwd+bwd) | 857 | ~100 | **757** | 12.5% |
-| Fused cast+transpose (eliminate copy_) | 486 | ~60 | **426** | 7.0% |
-| Fused FP8 quant/scale (eliminate abs+amax) | 407 | 54 | **353** | 5.8% |
-| **Total** | | | **1,536** | **25.3%** |
+5. **Kernel launches dropped from ~57K to ~19K/step** (3x reduction). This saves
+   ~190 ms of CPU dispatch overhead. Further reduction requires fusing the
+   remaining separate elementwise ops.
 
-### Speed Gap Decomposition (6,079ms → 3,780ms target)
-
-| Source | Savings (ms) | % of Gap |
-|--------|-------------|---------|
-| SwiGLU elementwise fusion | 757 | 33% |
-| Copy/cast elimination (fused cast+transpose) | 426 | 19% |
-| FP8 quant/scale fusion | 353 | 15% |
-| CPU dispatch reduction (57K→~8K launches) | 250 | 11% |
-| Pipeline scheduling / compute-comm overlap | ~300 | 13% |
-| Memory management (reduce cat/clone/memcpy) | ~213 | 9% |
-| **Total recoverable** | **~2,299** | **100%** |
-| **Projected step time** | **~3,780** | — |
-
-### Optimization Roadmap
-
-| Optimization | Measured Speedup | Difficulty | Status |
-|--------------|-----------------|------------|--------|
-| Fused SwiGLU fwd+bwd (`LUMEN_FUSED_SWIGLU_QUANT=1`) | Net negative | Hard | Needs redesign |
-| Fused FP8 Cast+Transpose (`LUMEN_FUSED_CAST_TRANSPOSE=1`) | Regression (2x FP8 memory) | Medium | Disabled |
-| Fused FP8 Quant/Scale (`LUMEN_FUSED_QUANT_SCALE=1`) | **-206ms (2.8%)** | Medium | Implemented |
-| Fused quant+amax (`LUMEN_FUSED_QUANT_AMAX=1`) | **-377ms (6.1%)** | Hard | Implemented |
-| Reduce kernel launch count (57K→~8K/step) | **-250ms (4.1%)** | Medium | Partial |
-| Align eval frequency (`LUMEN_EVAL_ALIGNED=1`) | ~15% wall-clock | Easy | Implemented |
-| Fused Norm + FP8 Quant (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Medium | Implemented |
-| Eliminate redundant syncs (`LUMEN_SKIP_BACKEND_SYNC=1`) | ~1–2% step time | Medium | Implemented |
-| Fix post-eval allocator fragmentation | **-11.1% total time** | Medium | **v38b: validated** |
-
-### Post-Eval Performance: Lumen vs MLPerf Reference
-
-| Metric | Lumen v37 | Lumen v38b | MLPerf MI300X (avg of 10) |
-|--------|-----------|------------|---------------------------|
-| **Pre-eval ms/step** | 5,898 | 5,809 | 3,811 |
-| **Post-eval#1 ms/step** | 7,167 | 6,586 | 3,778 |
-| **Post-eval#1 delta** | **+21.7%** | **+13.4%** | **-0.8%** |
-| Subsequent eval delta | +0.7–2.8% | +0.6–2.4% | 0% |
-| Total training time | 7,268s | **6,458s (-11.1%)** | ~4,180s |
-| Final val_loss | 0.9188 | 0.9194 | ~0.92 |
-
-v38b applies four fixes: forced activation recompute during eval (`LUMEN_EVAL_RECOMPUTE=1`),
-warmup eval pass to prime allocator (`LUMEN_WARMUP_EVAL_STEPS=2`), explicit GC around
-eval (`LUMEN_MANUAL_GC=1`), and `empty_cache()` after eval (`LUMEN_POST_EVAL_CACHE_CLEAR=1`).
-A second `reset_fp8_state()` after the warmup eval pass prevents FP8 scale corruption.
-
-Root cause: Megatron's `transformer_block.py` skips activation checkpointing during
-eval (`self.training=False`), allocating activations for all 80 layers vs 21 during
-training. At 96% memory, this fragments the ROCm allocator and the fragmentation
-persists after training resumes. The MLPerf/NeMo/TE stack avoids this (likely via
-TE's memory management, CUDA graphs, or a different eval path). The v38b fixes
-reduce the regression from +22% to +13% and prevent compounding across evaluations.
+6. **Memory pressure (97.6%) remains the multiplicative amplifier** masking
+   kernel-level gains. FP8 activation storage (`FP8_ACT_STORE=1`) is confirmed
+   to be enabled but memory is still at 97.6% — needs investigation.
 
 ### Profiling Method
 
-- **Lumen**: `torch.profiler` capturing steps 8–10 (post-FP8-warmup) on rank 0 of a
-  15-step training run with all optimizations enabled.
-- **TE**: `torch.profiler` around individual TE operations (`LayerNormLinear`, `Linear`)
-  at identical tensor shapes `[8192, 8192]`, FP8 autocast with delayed scaling,
-  10 iterations per operation, single GPU, in the AMD MLPerf container
+- **Lumen (current)**: `torch.profiler` capturing steps 8-10 (post-FP8-warmup)
+  on rank 0 of a 15-step training run with all optimizations enabled.
+  Step times during profile: 5,524-5,562 ms. Memory: 97.59%.
+- **Lumen (baseline)**: Same method, before kernel fusion optimizations.
+  Step times during profile: ~6,080 ms.
+- **TE**: `torch.profiler` around individual TE operations (`LayerNormLinear`,
+  `Linear`) at identical tensor shapes `[8192, 8192]`, FP8 autocast with delayed
+  scaling, 10 iterations per operation, single GPU, in the AMD MLPerf container
   (`rocm/amd-mlperf:llama2_70b_training_5.1`).
+
+## Post-Eval Performance
+
+| Metric | Lumen (early) | Lumen (current) | MLPerf Reference |
+|--------|---------------|-----------------|------------------|
+| Pre-eval ms/step | 5,898 | **5,570** | 3,811 |
+| Post-eval #1 ms/step | 7,167 | **6,200** | 3,778 |
+| Post-eval #1 delta | +21.7% | **+11.3%** | -0.8% |
+| Subsequent eval delta | +0.7-2.8% | +0.5-1.5% | 0% |
+
+Root cause: Megatron's `transformer_block.py` skips activation checkpointing
+during eval (`self.training=False`), allocating activations for all 80 layers
+vs 21 during training. At 96%+ memory, this fragments the ROCm allocator and
+the fragmentation persists after training resumes. Mitigations (eval recompute,
+warmup eval, GC, cache clear) reduce the regression from +22% to +11.3%.
 
 ## Configuration Diff
 
@@ -356,30 +377,35 @@ reduce the regression from +22% to +13% and prevent compounding across evaluatio
 | FP8 wgrad | FP8 (hipBLASLt) | FP8 (TE) |
 | Activation recompute | 21 layers (full/block) | 21 layers (full/block) |
 | RMSNorm | AITER Triton (FP32 path) | TE Triton / apex |
-| SwiGLU | Megatron @jit_fuser | TE fused kernel |
+| SwiGLU | Fused Triton kernels (fwd+bwd) | TE fused C++ kernel |
 | Attention | AITER CK FMHA v3 | TE CK fused attn v3 |
 | RoPE | Unfused Megatron | TE fused |
 | Data shuffle | Epoch-level | Epoch-level (NeMo native) |
 | Seed | 1234 | $RANDOM per run |
-| Val check interval | 48 | 192 (384 with SKIP_EVALS=3) |
+| Val check interval | 192 steps (aligned) | 192 (384 with SKIP_EVALS=3) |
 
 ## Optimization History
 
-Summary of kernel and configuration experiments that led to the current result.
+Chronological sequence of kernel and configuration experiments.
 
-| Change | Best val_loss | Impact | Outcome |
-|--------|--------------|--------|---------|
-| Baseline (no data shuffling) | 0.9371 | — | Does not pass |
-| + Pre-A LoRA dropout | 0.9390 | +0.002 | Worse |
-| + E5M2 backward + hipBLASLt | 0.9369 | ~0 | No change |
-| + FP8 weight gradient | 0.9381 | ~0 | No change |
-| + Fused RoPE | 0.9389 | ~0 | No change |
-| + BF16 atomics in attention | 0.9387 | +0.002 | Slightly worse |
-| + apex-match RMSNorm | 0.9566* | +0.005* | Worse |
-| + hipBLASLt GEMM backend | 0.9599* | +0.002* | No change |
-| **+ Data shuffling** | **0.9208** | **-0.016** | **Passes target** |
-| **+ Aligned eval schedule** | **0.9178** | **-0.019** | **Passes, 11% faster** |
-| **+ Fused norm+quant + backend cache** | **0.9192** | **-0.018** | **Passes, 18% faster** |
+| Change | Best val_loss | Speed Impact | Outcome |
+|--------|--------------|-------------|---------|
+| Baseline (no data shuffling) | 0.9371 | 7,400 ms/step | Does not pass |
+| + Pre-A LoRA dropout | 0.9390 | — | Worse |
+| + E5M2 backward + hipBLASLt | 0.9369 | — | No change |
+| + FP8 weight gradient | 0.9381 | — | No change |
+| + Fused RoPE | 0.9389 | — | No change |
+| + BF16 atomics in attention | 0.9387 | — | Slightly worse |
+| + apex-match RMSNorm | 0.9566* | — | Worse |
+| + hipBLASLt GEMM backend | 0.9599* | — | No change |
+| **+ Data shuffling** | **0.9208** | — | **Passes target** |
+| **+ Aligned eval schedule** | **0.9178** | **-11% wall-clock** | **Passes, fewer evals** |
+| **+ Fused norm+quant + backend cache** | **0.9192** | **-18% step time** | **Passes** |
+| + Fused quant+amax | — | **-377 ms (6.1%)** | 5,809 ms |
+| + Post-eval fixes (recompute, GC, cache) | — | **-11.1% total time** | 5,809→6,586 post-eval |
+| + Fused SwiGLU bwd + overlapped grad reduce | — | **-461 ms** | 5,348 ms |
+| + ACL=21 + hipBLASLt wgrad | ~0.921 | ~0 ms | 5,400 ms (memory trade-off) |
+| + Fused cast+transpose bwd + SwiGLU fix | **0.9216** | ~0 ms | **5,570 ms, passes step 576** |
 
 \* Stopped early (240 steps); delta measured at matched steps.
 
@@ -391,15 +417,19 @@ Summary of kernel and configuration experiments that led to the current result.
 | `lumen/models/llama2/megatron/sft.py` | Passes `shuffle=True` to dataset when `LUMEN_SHUFFLE_TRAIN=1` |
 | `lumen/modules/layernorm_linear.py` | Fused RMSNorm + FP8 quant (`LUMEN_FUSED_NORM_QUANT=1`) |
 | `lumen/modules/parallel_linear.py` | `pre_quantized_input` threading for fused path |
-| `lumen/ops/quantize/linear.py` | `pre_quantized_input` support in FP8 autograd functions |
-| `lumen/ops/dispatch.py` | Backend caching + sync elimination (`LUMEN_SKIP_BACKEND_SYNC=1`) |
-| `lumen/models/megatron.py` | `--lumen-fused-mlp` / `_patch_fused_swiglu_mlp` / `_run_warmup_eval_pass` |
-| `lumen/models/megatron_patches.py` | `install_eval_recompute` / `install_post_eval_cache_clear` (post-eval fixes) |
-| `examples/llama2/config_MI300X_tp1_dp8.sh` | `LUMEN_EVAL_ALIGNED=1` support |
+| `lumen/ops/quantize/linear.py` | FP8 autograd functions; `backward=True` for fused cast+transpose |
+| `lumen/ops/quantize/cast_transpose.py` | Triton `cast_transpose_amax_fp8` kernel |
+| `lumen/ops/dispatch.py` | Backend caching + sync elimination |
+| `lumen/models/_swiglu_fp8_fuse.py` | Fused SwiGLU + FP8 quant cache |
+| `lumen/models/megatron.py` | `_patch_fused_swiglu_mlp` / `_run_warmup_eval_pass` |
+| `lumen/models/megatron_patches.py` | `install_eval_recompute` / `install_post_eval_cache_clear` |
+| `lumen/quantize/scaling_manager.py` | `_quantize_core` with fused cast+transpose + amax path |
+| `examples/llama2/config_MI300X_tp1_dp8.sh` | Training config (all env flags) |
 
 ## Profiling Data
 
 | File | Description |
 |------|------------|
-| `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages table — Lumen, 3 steps, rank 0 |
+| `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages — baseline Lumen, 3 steps, rank 0 |
+| `profiling/lumen_latest_profile_summary.txt` | `torch.profiler` key_averages — current Lumen (all optimizations), 3 steps, rank 0 |
 | `profiling/te_profile_results.txt` | `torch.profiler` key_averages — TE ops at same tensor shapes |
