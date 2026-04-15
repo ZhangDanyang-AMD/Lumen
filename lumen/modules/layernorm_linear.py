@@ -31,6 +31,7 @@ from megatron.core.tensor_parallel.mappings import (
 )
 from megatron.core.tensor_parallel.utils import divide
 from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
+from torch.autograd.function import once_differentiable
 from torch.nn.parameter import Parameter
 
 from lumen.modules.parallel_linear import (
@@ -82,6 +83,7 @@ class _FusedRMSNormFP8Quant(torch.autograd.Function):
         return out_bf16.reshape(x.shape), out_fp8, scale
 
     @staticmethod
+    @once_differentiable
     def backward(ctx, grad_bf16, _grad_fp8, _grad_scale):
         x, weight = ctx.saved_tensors
 
@@ -312,7 +314,11 @@ class LumenLayerNormLinear(nn.Module):
                 w = w + 1.0
 
             x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-            scale = self.scaling_manager.get_scale("activation", x_2d)
+            scale, precomputed_amax = self.scaling_manager.get_scale(
+                "activation",
+                x_2d,
+                return_amax=True,
+            )
             if scale is None:
                 return None
 
@@ -324,7 +330,10 @@ class LumenLayerNormLinear(nn.Module):
                 self.fp8_dtype,
             )
 
-            self.scaling_manager.update_amax("activation", x_2d)
+            if precomputed_amax is not None:
+                self.scaling_manager.update_amax_value("activation", precomputed_amax)
+            else:
+                self.scaling_manager.update_amax("activation", x_2d)
 
             return (ln_out_bf16, out_fp8, out_scale)
         except Exception as e:

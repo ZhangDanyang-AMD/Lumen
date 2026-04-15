@@ -1042,9 +1042,12 @@ def install_fp8_param_storage_hook() -> None:
         )
         _want_hipblaslt = _fmt == "hybrid" or os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
         if _want_hipblaslt:
+            os.environ["LUMEN_PREFER_HIPBLASLT"] = "1"
             try:
-                from lumen.ops.quantize.linear import ensure_hipblaslt_ready
+                import lumen.ops.quantize.linear as _qlinear
 
+                _qlinear._PREFER_HIPBLASLT = True
+                ensure_hipblaslt_ready = _qlinear.ensure_hipblaslt_ready
                 ensure_hipblaslt_ready()
                 _reason = (
                     "LUMEN_PREFER_HIPBLASLT"
@@ -1299,6 +1302,23 @@ def _patch_float16_module() -> None:
     Float16Module.__init__ = _fp8_safe_init
 
 
+def _precompute_fp8_transpose(fp8_data: "torch.Tensor") -> "torch.Tensor":
+    """Pre-compute the transposed layout for an FP8 weight tensor.
+
+    Uses the fast Triton transpose when available, otherwise falls back
+    to ``t().contiguous()``.  Called once at checkpoint load time so that
+    ``FP8Descriptor.transpose_cached`` never needs to compute it lazily.
+    """
+    if fp8_data.dim() == 2 and fp8_data.is_cuda:
+        try:
+            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+            return fast_transpose_fp8(fp8_data)
+        except (ImportError, OSError, RuntimeError):
+            pass
+    return fp8_data.t().contiguous()
+
+
 def _patch_load_checkpoint_for_fp8() -> None:
     """Monkey-patch Megatron's load_checkpoint to convert weights to FP8 after loading.
 
@@ -1367,7 +1387,14 @@ def _patch_load_checkpoint_for_fp8() -> None:
                             )
                         amax = w.data.float().abs().amax().clamp(min=1e-12)
                         w._fp8_scale = (torch.finfo(fp8_dtype).max / amax).to(w.device)
-                        w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
+                        w._fp8_scale_reciprocal = (1.0 / w._fp8_scale).to(w.device)
+                        fp8_data_t = _precompute_fp8_transpose(w.data)
+                        w._fp8_desc = FP8Descriptor(
+                            data=w.data,
+                            scale=w._fp8_scale,
+                            fp8_dtype=fp8_dtype,
+                            _transpose=fp8_data_t,
+                        )
                         w._fp8_orig_shape = w.shape
                         w._fp8_original_dtype = torch.bfloat16
                         w._fp8_storage_enabled = True
@@ -1380,7 +1407,14 @@ def _patch_load_checkpoint_for_fp8() -> None:
                     fp8_data = (w.data.float() * scale).to(fp8_dtype)
                     w.data = fp8_data
                     w._fp8_scale = scale.to(w.device)
-                    w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
+                    w._fp8_scale_reciprocal = (1.0 / scale).to(w.device)
+                    fp8_data_t = _precompute_fp8_transpose(fp8_data)
+                    w._fp8_desc = FP8Descriptor(
+                        data=w.data,
+                        scale=w._fp8_scale,
+                        fp8_dtype=fp8_dtype,
+                        _transpose=fp8_data_t,
+                    )
                     w._fp8_orig_shape = fp8_data.shape
                     w._fp8_original_dtype = torch.bfloat16
                     w._fp8_storage_enabled = True
@@ -1456,7 +1490,14 @@ def _wrap_load_from_state_dict(module, fp8_dtype):
                     fp8_w = (incoming.float() * scale).to(fp8_dtype).to(device)
                     w.data = fp8_w
                     w._fp8_scale = scale.to(device)
-                    w._fp8_desc = FP8Descriptor(data=w.data, scale=w._fp8_scale, fp8_dtype=fp8_dtype)
+                    w._fp8_scale_reciprocal = (1.0 / scale).to(device)
+                    fp8_w_t = _precompute_fp8_transpose(fp8_w)
+                    w._fp8_desc = FP8Descriptor(
+                        data=w.data,
+                        scale=w._fp8_scale,
+                        fp8_dtype=fp8_dtype,
+                        _transpose=fp8_w_t,
+                    )
                     del state_dict[weight_key]
 
                     remaining = {k: v for k, v in state_dict.items() if k.startswith(prefix) and k != weight_key}

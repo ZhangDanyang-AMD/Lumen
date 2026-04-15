@@ -36,6 +36,8 @@ from lumen.core.grad_quant import quantize_grad_tensor
 from lumen.ops.dispatch import (
     Backend,
     _probe_aiter_ck_rmsnorm,
+    _probe_aiter_fused_add_rms_norm,
+    _probe_aiter_fused_add_rmsnorm_pad,
     _probe_aiter_fused_quant,
     _probe_aiter_triton_rmsnorm,
     build_fallback_chain,
@@ -95,6 +97,18 @@ def _get_triton_per_token_quant():
     from aiter.ops.quant import pertoken_quant
 
     return pertoken_quant
+
+
+def _get_ck_fused_add_rms_norm():
+    from aiter.ops.rmsnorm import fused_add_rms_norm_cu
+
+    return fused_add_rms_norm_cu
+
+
+def _get_triton_fused_add_rmsnorm_pad():
+    from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import fused_add_rmsnorm_pad
+
+    return fused_add_rmsnorm_pad
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +238,62 @@ def rmsnorm(
 
 
 # ---------------------------------------------------------------------------
+# Fused residual-add + RMSNorm  (CK → Triton → unfused fallback)
+# ---------------------------------------------------------------------------
+
+
+def fused_add_rmsnorm(
+    x: torch.Tensor,
+    residual: torch.Tensor,
+    weight: torch.Tensor,
+    eps: float = 1e-6,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Fused residual add + RMSNorm: ``residual = x + residual; y = RMSNorm(residual)``.
+
+    Dispatches to AITER CK ``fused_add_rms_norm_cu`` (in-place, preferred)
+    or Triton ``fused_add_rmsnorm_pad`` (allocates output), falling back
+    to unfused ``add_ + rmsnorm`` if neither is available.
+
+    Args:
+        x: Input tensor ``(*, hidden_size)``.
+        residual: Residual tensor (same shape as *x*), **updated in-place**
+            on the CK and unfused paths; cloned first on the Triton path
+            so the caller should use the returned residual.
+        weight: RMSNorm scale ``(hidden_size,)``.
+        eps: Epsilon for numerical stability.
+
+    Returns:
+        ``(normed, residual_out)`` — the normalised output and the
+        updated residual stream.
+    """
+    orig_shape = x.shape
+    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    res_2d = residual.reshape(-1, residual.shape[-1]).contiguous()
+
+    _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
+
+    if _probe_aiter_fused_add_rms_norm():
+        try:
+            fn = _get_ck_fused_add_rms_norm()
+            fn(x_2d, res_2d, weight, eps)
+            return x_2d.reshape(orig_shape), res_2d.reshape(orig_shape)
+        except _catchable as e:
+            logger.warning("fused_add_rmsnorm: CK failed (%s), trying Triton", e)
+
+    if _probe_aiter_fused_add_rmsnorm_pad():
+        try:
+            fn = _get_triton_fused_add_rmsnorm_pad()
+            normed, res_out = fn(x_2d, weight, eps, res=res_2d)
+            return normed.reshape(orig_shape), res_out.reshape(orig_shape)
+        except _catchable as e:
+            logger.warning("fused_add_rmsnorm: Triton pad failed (%s), falling back", e)
+
+    res_2d.add_(x_2d)
+    normed = rmsnorm(res_2d.reshape(orig_shape), weight, eps)
+    return normed, res_2d.reshape(orig_shape)
+
+
+# ---------------------------------------------------------------------------
 # Fused RMSNorm + Quantization for each scaling mode
 # ---------------------------------------------------------------------------
 
@@ -262,6 +332,57 @@ def rmsnorm_delayed_per_tensor(
     fn = _get_triton_per_tensor_quant()
     out_fp8, _ = fn(normed_2d, scale=scale, quant_dtype=fp8_dtype)
     return out_fp8.reshape(orig_shape), scale
+
+
+def rmsnorm_add_delayed_per_tensor(
+    x: torch.Tensor,
+    residual: torch.Tensor,
+    weight: torch.Tensor,
+    eps: float,
+    scale: torch.Tensor,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fused residual-add + RMSNorm + delayed per-tensor FP8 quant.
+
+    ``fused_rms_fp8_per_tensor_static_quant`` supports an optional
+    ``res1`` parameter: ``residual_out = x + residual`` is computed
+    inside the kernel, then RMSNorm + FP8 quant is applied to the result.
+
+    Falls back to ``fused_add_rmsnorm`` + separate quant if the fused
+    kernel is unavailable.
+
+    Returns:
+        ``(x_fp8, scale, residual_out)``
+    """
+    orig_shape = x.shape
+    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    res_2d = residual.reshape(-1, residual.shape[-1]).contiguous()
+
+    if _probe_aiter_fused_quant():
+        try:
+            fn = _get_fused_rms_fp8_per_tensor_static_quant()
+            out_fp8, _, _, res_out = fn(
+                x_2d,
+                weight,
+                eps,
+                scale,
+                dtype_quant=fp8_dtype,
+                res1=res_2d,
+            )
+            return out_fp8.reshape(orig_shape), scale, res_out.reshape(orig_shape)
+        except (RuntimeError, NotImplementedError, TypeError, ValueError) as e:
+            logger.warning("rmsnorm_add_delayed: fused kernel failed (%s), falling back", e)
+
+    normed, res_out = fused_add_rmsnorm(
+        x.reshape(orig_shape),
+        residual.reshape(orig_shape),
+        weight,
+        eps,
+    )
+    normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+    fn = _get_triton_per_tensor_quant()
+    out_fp8, _ = fn(normed_2d, scale=scale, quant_dtype=fp8_dtype)
+    return out_fp8.reshape(orig_shape), scale, res_out
 
 
 def rmsnorm_current_per_tensor(

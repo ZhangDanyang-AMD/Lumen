@@ -25,6 +25,7 @@ also be called selectively.
 import os
 
 import torch
+from torch.autograd.function import once_differentiable
 
 _FUSED_SWIGLU_QUANT = os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1"
 
@@ -193,6 +194,7 @@ def install_swiglu_fp8():
             return bf16_out
 
         @staticmethod
+        @once_differentiable
         def backward(ctx, grad_output):
             input_saved = ctx.saved_tensors[0]
             if not ctx.fp8_input_store:

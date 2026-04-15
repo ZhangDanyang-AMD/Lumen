@@ -35,6 +35,7 @@ import os
 from typing import Optional
 
 import torch
+from torch.autograd.function import once_differentiable
 
 from lumen.ops.dispatch import (
     Backend,
@@ -256,13 +257,16 @@ def ensure_hipblaslt_ready():
     _logger.info("hipBLASLt workspace pre-allocated (256 MiB)")
 
 
-def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
+def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
     """hipBLASLt per-tensor GEMM via AITER hipb_mm.
 
     hipb_mm computes mat1 @ mat2 (NN layout).  Lumen's dispatch convention
     passes w as (N, K), so we must transpose to (K, N) before calling hipb_mm.
     If ``w_transposed`` is already provided (e.g. from FP8Descriptor._transpose),
     it is used directly to avoid the expensive .t().contiguous() copy.
+
+    When *bias* is provided, it is fused into the GEMM epilogue (avoiding a
+    separate ``aten::add`` kernel launch).
     """
     from aiter.ops.gradlib import hipb_mm
 
@@ -278,7 +282,7 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
         else torch.tensor([[scale_w]], dtype=torch.float32, device=w_fp8.device)
     )
     w_t = w_transposed if w_transposed is not None else w_fp8.t().contiguous()
-    return hipb_mm(a_fp8, w_t, -1, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
+    return hipb_mm(a_fp8, w_t, -1, bias=bias, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
 def _expand_per_tensor_scale(scale, size):
@@ -308,7 +312,7 @@ def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
     return gemm_a8w8(a_fp8, w_fp8, sa, sw)
 
 
-def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
+def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
     """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends.
 
     When ``LUMEN_PREFER_HIPBLASLT=1``, hipBLASLt is tried first to match TE's
@@ -320,11 +324,14 @@ def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
 
     ``w_transposed`` is an optional pre-computed ``(K, N)`` contiguous
     transpose of ``w_fp8``, used by hipBLASLt to skip ``.t().contiguous()``.
+
+    When *bias* is provided and hipBLASLt is the selected backend, the bias
+    is fused into the GEMM epilogue, saving a separate kernel launch.
     """
     backends = []
     if _PREFER_HIPBLASLT and _probe_aiter_hipblas():
         backends.append(
-            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed))
+            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed, bias))
         )
     if _probe_aiter_ck_gemm():
         backends.append((Backend.CK, lambda: _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w)))
@@ -332,7 +339,7 @@ def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None):
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
     if not _PREFER_HIPBLASLT and _probe_aiter_hipblas():
         backends.append(
-            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed))
+            (Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed, bias))
         )
     return try_backends(backends, op_name="gemm_per_tensor")
 
@@ -449,6 +456,38 @@ def gemm_blockscale(a_fp8, w_fp8, scale_a, scale_w):
     return try_backends(backends, op_name="gemm_blockscale")
 
 
+def _gemm_blockscale_fused_bias(a_fp8, w_fp8, scale_a, scale_w, bias):
+    """Blockscale FP8 GEMM with bias fused into epilogue: Y = 1.0 * (X @ W^T) + bias."""
+    from aiter.ops.triton.gemm.fused.fused_gemm_a8w8_blockscale_mul_add import (
+        fused_gemm_a8w8_blockscale_mul_add,
+    )
+
+    return fused_gemm_a8w8_blockscale_mul_add(
+        a_fp8,
+        w_fp8,
+        scale_a,
+        scale_w,
+        a=1.0,
+        b=bias,
+        dtype=torch.bfloat16,
+        fuse_type=0,
+    )
+
+
+def gemm_blockscale_with_bias(a_fp8, w_fp8, scale_a, scale_w, bias):
+    """Blockwise FP8 GEMM + bias: tries fused epilogue, falls back to separate add."""
+    from lumen.ops.dispatch import _probe_aiter_fused_gemm_blockscale_mul_add
+
+    backends = []
+    if _probe_aiter_fused_gemm_blockscale_mul_add():
+        backends.append((Backend.TRITON, lambda: _gemm_blockscale_fused_bias(a_fp8, w_fp8, scale_a, scale_w, bias)))
+    if _probe_aiter_ck_gemm():
+        backends.append((Backend.CK, lambda: _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w) + bias))
+    if _probe_aiter_triton_gemm():
+        backends.append((Backend.TRITON, lambda: _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w) + bias))
+    return try_backends(backends, op_name="gemm_blockscale_fused_bias")
+
+
 def _gemm_mxfp8_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_mxfp8 import gemm_mxfp8
 
@@ -516,18 +555,27 @@ def dispatch_gemm(a, w, scale_a=None, scale_w=None, scaling_type="none", bias=No
     if scaling_type == "none":
         return gemm_bf16(a, w, bias)
 
+    _fuse_bias = (
+        bias is not None and scaling_type in ("delayed", "dynamic") and _PREFER_HIPBLASLT and _probe_aiter_hipblas()
+    )
+
+    _fuse_blockscale_bias = bias is not None and scaling_type in ("blockwise", "blockwise2d")
+
     if scaling_type in ("delayed", "dynamic"):
-        out = gemm_per_tensor(a, w, scale_a, scale_w, w_transposed)
+        out = gemm_per_tensor(a, w, scale_a, scale_w, w_transposed, bias=bias if _fuse_bias else None)
     elif scaling_type == "per_token":
         out = gemm_per_token(a, w, scale_a, scale_w)
     elif scaling_type in ("blockwise", "blockwise2d"):
-        out = gemm_blockscale(a, w, scale_a, scale_w)
+        if _fuse_blockscale_bias:
+            out = gemm_blockscale_with_bias(a, w, scale_a, scale_w, bias)
+        else:
+            out = gemm_blockscale(a, w, scale_a, scale_w)
     elif scaling_type == "mxfp8":
         out = gemm_mxfp8(a, w, scale_a, scale_w)
     else:
         raise ValueError(f"Unknown scaling_type={scaling_type!r}")
 
-    if bias is not None:
+    if bias is not None and not _fuse_bias and not _fuse_blockscale_bias:
         out = out + bias
     return out
 
@@ -709,6 +757,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
         return output
 
     @staticmethod
+    @once_differentiable
     def backward(ctx, grad_output: torch.Tensor):
         scaling_type = ctx.scaling_type
 
@@ -894,7 +943,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16()).contiguous()
             weight_bf16 = _dequant_fp8_weight(weight_data, weight_scale, block_size).bfloat16()
             grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
-        elif grad_fp8.dtype != weight_data.dtype:
+        elif _probe_aiter_hipblas():
             grad_input = gemm_per_tensor_mixed(
                 grad_fp8,
                 weight_data,
@@ -1130,6 +1179,7 @@ class FP8StoredLinearFunction(torch.autograd.Function):
         return output
 
     @staticmethod
+    @once_differentiable
     def backward(ctx, grad_output: torch.Tensor):
         input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
@@ -1160,7 +1210,7 @@ class FP8StoredLinearFunction(torch.autograd.Function):
                 None,
                 "none",
             )
-        elif grad_fp8.dtype != weight_fp8.dtype:
+        elif _probe_aiter_hipblas():
             grad_input = gemm_per_tensor_mixed(
                 grad_fp8,
                 weight_fp8,

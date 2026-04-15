@@ -23,6 +23,28 @@ from lumen.quantize.descriptor import FP8Descriptor
 
 logger = logging.getLogger(__name__)
 
+_fused_compute_scale = None
+_fused_amax_abs = None
+
+
+def _get_fused_compute_scale():
+    global _fused_compute_scale
+    if _fused_compute_scale is None:
+        from lumen.kernels.compute_scale import compute_scale
+
+        _fused_compute_scale = compute_scale
+    return _fused_compute_scale
+
+
+def _get_fused_amax_abs():
+    global _fused_amax_abs
+    if _fused_amax_abs is None:
+        from lumen.ops.quantize.quant_amax_fused import fused_amax_abs
+
+        _fused_amax_abs = fused_amax_abs
+    return _fused_amax_abs
+
+
 _FUSED_QUANT_SCALE = os.environ.get("LUMEN_FUSED_QUANT_SCALE", "0") == "1"
 _FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
 _FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
@@ -227,25 +249,43 @@ class ScalingManager:
         returned as ``amax / (fp8_max / (2 ** margin))`` so that the caller
         can divide by the scale to quantize.
         Always returns fp32 to satisfy hipb_mm's scale dtype requirement.
+
+        Uses a single Triton kernel launch on CUDA instead of 4 separate ops
+        (div + gt + ones_like + where).
         """
+        if amax.is_cuda:
+            return _get_fused_compute_scale()(amax, fp8_max, margin=self._margin)
         amax = amax.float()
         effective_max = fp8_max / (2**self._margin)
         scale = amax / effective_max
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))
         return scale
 
-    def get_scale(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
-        """Return the scale factor for this tensor (None for block/mxfp8/per_token/none)."""
+    def get_scale(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False, return_amax: bool = False):
+        """Return the scale factor for this tensor (None for block/mxfp8/per_token/none).
+
+        When *return_amax* is True, returns ``(scale, current_amax)`` so the
+        caller can pass the amax to :meth:`update_amax_value` instead of
+        recomputing ``tensor.abs().amax()``.  The returned ``current_amax``
+        is the amax of **the current tensor** (for history update), which is
+        only computed for the delayed-first-call and dynamic paths.  For
+        delayed with existing history, ``current_amax`` is ``None`` (the
+        tensor was not scanned).
+        """
         recipe = self.recipe
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
 
         if recipe == "none":
-            return None
+            return (None, None) if return_amax else None
 
         if recipe == "delayed":
             history = self.amax_history[tensor_id]
+            current_amax = None
             if len(history) == 0:
-                amax = tensor.abs().amax()
+                current_amax = (
+                    _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
+                )
+                amax = current_amax
             elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
                 amax = history[-1].to(device=tensor.device)
             else:
@@ -261,25 +301,41 @@ class ScalingManager:
                         group=self._dp_group,
                     )
 
-            return self._compute_scale(amax, fp8_max)
+            scale = self._compute_scale(amax, fp8_max)
+            return (scale, current_amax) if return_amax else scale
         elif recipe == "dynamic":
-            amax = tensor.abs().amax()
+            current_amax = (
+                _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
+            )
             if self.config.reduce_amax and self._dp_group is not None:
                 if self._use_sdma:
-                    amax = self._reduce_single_amax_sdma(amax)
+                    current_amax = self._reduce_single_amax_sdma(current_amax)
                 else:
                     torch.distributed.all_reduce(
-                        amax,
+                        current_amax,
                         op=torch.distributed.ReduceOp.MAX,
                         group=self._dp_group,
                     )
-            return self._compute_scale(amax, fp8_max)
+            scale = self._compute_scale(current_amax, fp8_max)
+            return (scale, current_amax) if return_amax else scale
         elif recipe in ("blockwise", "blockwise2d", "mxfp8", "per_token"):
-            return None
+            return (None, None) if return_amax else None
 
     def update_amax(self, tensor_id: str, tensor: torch.Tensor):
-        """Record amax for delayed scaling (tensor-based, no .item() sync)."""
-        self.amax_history[tensor_id].append(tensor.detach().abs().amax())
+        """Record amax for delayed scaling (tensor-based, no .item() sync).
+
+        Uses a fused Triton kernel on CUDA to replace abs()+amax() (2 launches)
+        with a single launch.
+        """
+        t = tensor.detach()
+        if t.is_cuda and t.dim() >= 2:
+            self.amax_history[tensor_id].append(_get_fused_amax_abs()(t))
+        else:
+            self.amax_history[tensor_id].append(t.abs().amax())
+
+    def update_amax_value(self, tensor_id: str, amax: torch.Tensor):
+        """Record a pre-computed amax value, skipping the abs().amax() pass."""
+        self.amax_history[tensor_id].append(amax.detach())
 
     def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Quantize tensor. Returns :class:`~lumen.quantize.descriptor.FP8Descriptor` or ``None``.
@@ -573,12 +629,29 @@ class ScalingManager:
         static_per_tensor_quant_fp8_i8(qx, tensor_2d, scale_in)
         return qx.view(tensor.shape)
 
+    @staticmethod
+    def _eager_transpose(desc: "FP8Descriptor") -> "FP8Descriptor":
+        """Eagerly populate ``_transpose`` on a 2D FP8Descriptor if missing.
+
+        Avoids a lazy recomputation on first ``transpose_cached`` access.
+        Uses fast Triton transpose when available.
+        """
+        if desc._transpose is not None or desc.data.dim() != 2 or not desc.data.is_cuda:
+            return desc
+        try:
+            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+            desc._transpose = fast_transpose_fp8(desc.data)
+        except (ImportError, OSError, RuntimeError):
+            desc._transpose = desc.data.t().contiguous()
+        return desc
+
     def _quantize_core(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Core quantization logic (delegates to format-specific paths)."""
         if self.config.scaling == ScalingType.NONE:
             return None
 
-        scale = self.get_scale(tensor_id, tensor, backward=backward)
+        scale, _precomputed_amax = self.get_scale(tensor_id, tensor, backward=backward, return_amax=True)
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
 
@@ -616,17 +689,17 @@ class ScalingManager:
             from lumen.ops.quantize.cast_transpose_hip import cast_transpose_amax_fp8_hip
 
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
-            fp8_data, _fp8_data_t, amax = cast_transpose_amax_fp8_hip(
+            fp8_data, fp8_data_t, amax = cast_transpose_amax_fp8_hip(
                 tensor_2d,
                 scale,
                 dtype,
             )
-            del _fp8_data_t
             self.amax_history[tensor_id].append(amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
                 fp8_dtype=dtype,
+                _transpose=fp8_data_t,
             )
 
         if (
@@ -644,18 +717,18 @@ class ScalingManager:
 
             if dtype in _TORCH_TO_TL_FP8:
                 tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
-                fp8_data, _fp8_data_t, amax = cast_transpose_amax_fp8(
+                fp8_data, fp8_data_t, amax = cast_transpose_amax_fp8(
                     tensor_2d,
                     scale,
                     dtype,
                     clamp_max=float(fp8_max),
                 )
-                del _fp8_data_t
                 self.amax_history[tensor_id].append(amax)
                 return FP8Descriptor(
                     data=fp8_data.view(tensor.shape),
                     scale=scale,
                     fp8_dtype=dtype,
+                    _transpose=fp8_data_t,
                 )
 
         if _FUSED_CAST_TRANSPOSE and _probe_cast_transpose() and tensor.is_cuda and tensor.dim() == 2:
@@ -670,7 +743,10 @@ class ScalingManager:
                     clamp_max=float(fp8_max),
                 )
                 fp8_tensor = fp8_data.view(tensor.shape)
-                self.update_amax(tensor_id, tensor)
+                if _precomputed_amax is not None:
+                    self.update_amax_value(tensor_id, _precomputed_amax)
+                else:
+                    self.update_amax(tensor_id, tensor)
                 return FP8Descriptor(
                     data=fp8_tensor,
                     scale=scale,
@@ -684,14 +760,19 @@ class ScalingManager:
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
             fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype)
             self.amax_history[tensor_id].append(amax)
-            return FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
+            desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
+            return self._eager_transpose(desc) if not backward else desc
 
-        if _FUSED_QUANT_SCALE and _probe_aiter_static_quant():
+        if tensor.is_cuda and _probe_aiter_static_quant():
             fp8_tensor = self._aiter_static_quant(tensor, scale, dtype)
         else:
             fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
-        self.update_amax(tensor_id, tensor)
-        return FP8Descriptor(data=fp8_tensor, scale=scale, fp8_dtype=dtype)
+        if _precomputed_amax is not None:
+            self.update_amax_value(tensor_id, _precomputed_amax)
+        else:
+            self.update_amax(tensor_id, tensor)
+        desc = FP8Descriptor(data=fp8_tensor, scale=scale, fp8_dtype=dtype)
+        return self._eager_transpose(desc) if not backward else desc
 
     # ------------------------------------------------------------------
     # Reset
@@ -731,8 +812,12 @@ class ScalingManager:
         dtype = self.fp8_dtype_bwd
 
         history = self.amax_history[tensor_id]
+        precomputed_amax = None
         if len(history) == 0:
-            amax = tensor.abs().amax()
+            precomputed_amax = (
+                _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
+            )
+            amax = precomputed_amax
         elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
             amax = history[-1].to(device=tensor.device)
         else:
@@ -748,8 +833,14 @@ class ScalingManager:
             self.amax_history[tensor_id].append(new_amax)
             return fp8_2d.view(tensor.shape), scale
 
-        fp8_tensor = (tensor / scale).clamp(-fp8_max, fp8_max).to(dtype)
-        self.amax_history[tensor_id].append(tensor.detach().abs().amax())
+        if tensor.is_cuda and _probe_aiter_static_quant():
+            fp8_tensor = self._aiter_static_quant(tensor, scale, dtype)
+        else:
+            fp8_tensor = (tensor / scale).clamp(-fp8_max, fp8_max).to(dtype)
+        if precomputed_amax is not None:
+            self.update_amax_value(tensor_id, precomputed_amax)
+        else:
+            self.update_amax(tensor_id, tensor)
         return fp8_tensor, scale
 
     # ------------------------------------------------------------------

@@ -1428,878 +1428,106 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   RECOMPUTE_NUM_LAYERS=21 fixed going forward.
 - Launch script: `/home/danyzhan/run_v42_memory.sh`
 
-### [2026-04-09 v43-speed-phase-BDE]
-- v43 config: RECOMPUTE_NUM_LAYERS=21, v40 baseline flags +
-  LUMEN_TRANSPOSE_CACHE=1, LUMEN_FUSED_CAST_TRANSPOSE_V2=1 (fast_transpose),
-  LUMEN_POST_EVAL_STRATEGY=gc_only, contiguous guards, pre-computed grad transpose
-- v43 results (1024/1024 steps):
-  | Metric | v43 | v40 | MLPerf ref |
-  |--------|-----|-----|------------|
-  | Pre-eval ms/step | **5,460** | 5,348 (RECOMP=19) | 3,811 |
-  | Post-eval ms/step | **~5,980-6,046** | ~6,060 | 3,778 |
-  | Memory | 98.22% | 99.68% | ~82% |
-  | val_loss reached | yes (0.92 target) | yes | yes |
-- Net delta vs v40: +112ms pre-eval due to RECOMPUTE_NUM_LAYERS=21 vs 19 (~200ms extra),
-  offset by ~90ms from contiguous guards + fast_transpose. Post-eval slightly better.
-- Status: **resolved** — baseline with RECOMPUTE=21 established.
-
-### [2026-04-09 v44-cpp-fusions]
-- v44 config changes vs v43:
-  - `LUMEN_FUSED_SWIGLU_QUANT=1` (new — Phase 2 fused SwiGLU+FP8 quant)
-  - `LUMEN_FUSED_QUANT_TRANSPOSE_CPP=0` (Phase 1 C++ disabled — AITER build failed)
-  - `LUMEN_FUSED_CAST_TRANSPOSE=0` (Phase 1 Triton also disabled — same as v43)
-  - Phase 3 backward fused quant+transpose: code present but inactive (no C++ path,
-    no FUSED_CAST_TRANSPOSE stored transpose)
-- Effectively v44 = v43 + LUMEN_FUSED_SWIGLU_QUANT=1 only
-- v44 results so far (step 110/1024, pre-eval only):
-  | Metric | v44 | v43 | MLPerf ref |
-  |--------|-----|-----|------------|
-  | Pre-eval ms/step | **5,510** | 5,460 | 3,811 |
-  | Memory | 97.60% | 98.22% | ~82% |
-- v44 is ~50ms SLOWER than v43 — SwiGLU FP8 quant adds overhead:
-  - Possible cause: `bf16_output.detach().abs().amax()` computed redundantly
-    (line 63 and line 76 of _swiglu_fp8_fuse.py), OR AITER kernel itself slower
-    than separate PyTorch ops when factoring in cache miss from different data layout
-  - The SwiGLU FP8 cache might not be consumed by the next GEMM if the
-    `pop_swiglu_fp8_cache()` integration in `_do_gemm` is not matched correctly
-  - Net: fused SwiGLU FP8 quant is NOT delivering expected savings
-
-- **Remaining gap analysis: v44 5,510ms vs MLPerf 3,811ms = 1,699ms (44.6% slower)**
-
-  | # | Root Cause | Original est. | Status in v44 | Remaining |
-  |---|-----------|---------------|---------------|-----------|
-  | 1 | SwiGLU fwd elementwise not fused | 300-400ms | LUMEN_FUSED_SWIGLU_QUANT=1 active but no savings | **300-400ms** |
-  | 2 | Copy/dtype conversion overhead | 250-350ms | No fused cast+transpose (both C++ and Triton off) | **250-350ms** |
-  | 3 | CPU kernel launch dispatch (57K vs 7K) | 200-300ms | No change — still ~57K launches | **200-300ms** |
-  | 4 | FP8 quant/scale pipeline residual | 100-200ms | FUSED_QUANT_SCALE+FUSED_QUANT_AMAX active | **~50-100ms** |
-  | 5 | Memory allocator pressure (97.6%) | 100-200ms | Improved from 99.68% to 97.6%, still high | **~80-150ms** |
-  | 6 | Activation checkpoint recompute dispatch | 100-150ms | RECOMPUTE=21 (2 more than v40's 19) | **~150-200ms** |
-  | 7 | Cat/tensor concatenation | 50-80ms | No change | **50-80ms** |
-  | | **Total estimated** | | | **~1,080-1,580ms** |
-  | | **Observed gap** | | | **1,699ms** |
-
-- **Why speed hasn't improved despite code changes**:
-  1. Phase 1 (fused quant+transpose) completely inactive — AITER C++ build failed,
-     and LUMEN_FUSED_CAST_TRANSPOSE=0 means Triton path also off
-  2. Phase 2 (SwiGLU FP8) active but net-zero or net-negative — the fused kernel
-     doesn't eliminate the separate `aten::mul` + `aten::silu` PyTorch ops because
-     the cache may not be consumed, or the overhead of computing amax + running
-     AITER kernel exceeds the savings from skipping one quant step
-  3. Phase 3 (backward fused quant+transpose for wgrad) inactive — depends on
-     Phase 1 producing transposed output, which it doesn't
-
-- **What CAN vs CANNOT be solved**:
-
-  **CAN solve (with significant effort)**:
-  1. Root Cause 2: Fused cast+transpose — enable LUMEN_FUSED_CAST_TRANSPOSE=1
-     BUT only store transpose for layers where memory is available. The v41 OOM
-     showed storing transpose for ALL 80 layers costs ~3.5 GiB. Selective storage
-     (e.g., only for 21 recomputed layers where backward is immediate) could work.
-     Est. savings: 100-200ms.
-  2. Root Cause 1: SwiGLU — debug why LUMEN_FUSED_SWIGLU_QUANT=1 doesn't save time.
-     If the cache IS consumed, the savings should be ~100-200ms from eliminating one
-     quant step. If NOT consumed, fix the integration. Est. savings: 50-150ms.
-  3. Root Cause 4+7: Minor kernel fusion (clamp, cat) — incremental. Est. 30-80ms.
-
-  **HARD to solve (structural)**:
-  4. Root Cause 3: CPU kernel launch count (57K→7K) — requires either:
-     - HIP Graph capture (blocked by memory + NCCL + dynamic control flow)
-     - torch.compile (risky, not validated with FP8 + LoRA + AITER)
-     - Rewriting Lumen's Python autograd as C++ CustomOp (months of effort)
-     Est. if solved: 200-300ms. Difficulty: very high.
-  5. Root Cause 5: Memory pressure — 97.6% is better than 99.7% but still far from
-     TE's 82%. Root cause is Python autograd storing ~112 GiB BF16 intermediates.
-     Only solvable by TE-style C++ fusions that don't store intermediates. Est. 80-150ms
-     indirect savings (faster allocator, no post-eval regression).
-  6. Root Cause 6: Checkpoint recompute — RECOMPUTE=21 is fixed. Python-level
-     checkpoint replay is inherently slower than C++ graph capture. Est. 100-200ms,
-     not solvable without HIP graphs or C++ checkpoint.
-
-  **REALISTIC BEST CASE** (with feasible optimizations):
-  - Fix SwiGLU FP8 integration: ~100ms
-  - Selective fused cast+transpose: ~150ms
-  - Minor kernel fusions: ~50ms
-  - Total feasible savings: **~300ms**
-  - Projected: **~5,200ms** (still 36% slower than MLPerf's 3,811ms)
-
-  **THEORETICAL BEST CASE** (if all root causes solved):
-  - All kernel fusion + HIP graphs + C++ autograd: ~1,500ms
-  - Projected: **~4,000ms** (~5% slower than MLPerf)
-  - But this essentially means rewriting Lumen as TE — not practical.
-
-- **[2026-04-09] CORRECTED ANALYSIS: What TE actually does in AMD MLPerf submission**
-
-  Previous gap analysis assumed TE uses features it does NOT use on MI300X. Here is
-  the evidence-based correction from the actual AMD MLPerf v5.1 reference:
-  `/home/danyzhan/training_results_v5.1/AMD/benchmarks/llama2_70b_lora/implementations/MI300X_EPYC_9575F_pytorch_llama2_70b/`
-
-  **CONFIRMED: What the AMD MLPerf reference DOES use**:
-  1. `USE_TE_SWIGLU=1` — TE's fused SwiGLU (tex.swiglu / tex.dswiglu in C++)
-  2. `NVTE_USE_CAST_TRANSPOSE_TRITON=1` — Triton cast+transpose kernel
-  3. `NVTE_USE_OPTIMIZED_HIPIFIED_CAST_TRANSPOSE=0` — C++ hipified version OFF
-  4. `FP8_ACTIVATION=True` (fp8_activation_input_store) — FP8 activation storage
-  5. `NVTE_FUSED_ATTN=1` + `NVTE_FUSED_ATTN_CK=1` + `NVTE_FUSED_ATTN_AOTRITON=1`
-  6. `NVTE_USE_HIPBLASLT=1` — hipBLASLt for GEMMs
-  7. `NVTE_FP8_DPA_BWD=1` — FP8 dot-product attention backward
-  8. `ACG=full && ACM=block && ACL=21` — same activation checkpointing
-  9. `FP8_AMAX_HISTORY=4`, `FP8_AMAX_ALGO=most_recent`, `FP8_REDUCE_AMAX=False`
-  10. `gc.disable()` in train.py — Python GC disabled during training
-  11. Warmup: 5 training + 5 validation synthetic steps, then FP8 stats reset
-  12. `ENABLE_TRANSPOSE_CACHE=0` — transpose cache OFF in reference
-  13. `FUSED_SOFTMAX=0`, `RMSNORM_CAST=0`
-
-  **CONFIRMED: What the AMD MLPerf reference does NOT use**:
-  1. **NO CUDA/HIP graphs** — zero references to MCORE_CUDA_GRAPH, LAYER_CUDA_GRAPH,
-     enable_cuda_graph, external_cuda_graph in config or code. Only NVIDIA GB200/GB300
-     configs use CUDA graphs. AMD MI300X submission does NOT.
-  2. **NO torch.compile / Inductor** — TORCHDYNAMO_DISABLE not found in AMD config
-     (Lumen explicitly sets it to 1)
-  3. **NO TP-comm overlap** — TP_COMM_OVERLAP=False, MC_TP_OVERLAP_AG/RS/RS_DGRAD=False
-  4. **NO sequence parallelism** — SP=False
-  5. **NO distributed optimizer** — single-node, fused_adam
-
-  **The TE architecture on MI300X** (from profiler + source):
-  TE modules are PyTorch autograd.Functions with heavy C++/Triton backends:
-  - `_LayerNormLinear`: fwd = Triton RMSNorm + FP8 quant + hipBLASLt GEMM
-    bwd = hipBLASLt dgrad/wgrad + Triton cast_transpose + Triton RMSNorm bwd
-  - `_Linear`: fwd = FP8 quant + hipBLASLt GEMM
-    bwd = hipBLASLt dgrad/wgrad + Triton cast_transpose
-  - SwiGLU: `tex.swiglu` C++ kernel (fwd), `tex.dswiglu` C++ kernel (bwd)
-  - `delayed_scaling_recipe`: C++ amax→scale update (~6.5μs/tensor)
-  - cast_transpose: Triton kernel (`NVTE_USE_CAST_TRANSPOSE_TRITON=1`) writes
-    row-major FP8 + column-major FP8 in single pass, used for BOTH input quant
-    AND activation storage for backward
-
-  **Per-layer profiled numbers** (from te_profile_results.txt, 10 iterations each):
-  | TE Module | GPU time/iter (ms) | GEMM (ms) | Non-GEMM (ms) | Launches |
-  |-----------|-------------------|-----------|---------------|----------|
-  | LayerNormLinear (QKV 8192→10240) | 5.11 | 3.53 | 1.58 | ~70 |
-  | Linear (proj 8192→8192) | 3.30 | 2.84 | 0.46 | ~80 |
-  | Linear (fc1 8192→57344) | 23.08 | 20.85 | 2.23 | ~80 |
-  | Linear (fc2 28672→8192) | 11.92 | 10.75 | 1.17 | ~80 |
-  | **Per layer** | **43.41** | **37.97** | **5.44** | **~310** |
-  | **80 layers** | **3,473** | **3,038** | **435** | **~24,800** |
-
-  NOTE: The hipLaunchKernel counts in the profiler are PER TE MODULE (70-80 per
-  module per 10 iterations = 7-8 per module per iteration). With 4 modules per layer
-  × 80 layers = ~2,400 launches per step for GEMM+quant path ONLY. Total per step
-  including attention, allreduce, optimizer: likely ~5,000-8,000 — not the ~7,000
-  previously estimated but also not dramatically different.
-
-  **WHY TE is faster — REVISED understanding**:
-
-  The gap is NOT from:
-  - HIP graphs (NOT used on MI300X)
-  - torch.compile (NOT used)
-  - C++ autograd rewrite (TE still uses Python autograd.Function)
-
-  The gap IS from:
-  1. **TE's autograd.Functions save LESS state**: Each `_Linear.forward` and
-     `_LayerNormLinear.forward` are custom autograd.Functions that can control
-     exactly what tensors are saved for backward. They save FP8 quantized tensors
-     (via `fp8_activation_input_store`) instead of BF16 intermediates. This is the
-     key memory difference (82% vs 97.6%).
-
-  2. **Fused cast+transpose inside autograd**: TE's `_cast_transpose_triton` runs
-     as part of the backward of `_Linear`/`_LayerNormLinear`, producing BOTH the
-     row-major quantized gradient AND the column-major transpose needed for wgrad
-     in a single kernel. The per-tensor cost is ~100-400μs depending on size.
-     Since it's inside the autograd.Function, the transpose is immediate (no need
-     to store it separately — it's consumed by the next GEMM call in the same
-     backward function).
-
-  3. **Fused SwiGLU (tex.swiglu / tex.dswiglu)**: C++ kernels that compute
-     SiLU(gate) × up in a single launch (forward) and the corresponding gradient
-     in a single launch (backward). Eliminates aten::mul + aten::silu + aten::sigmoid
-     separate kernels. This is ~300-400ms/step savings.
-
-  4. **Fused RMSNorm + Linear (LayerNormLinear)**: Combines RMSNorm and the
-     following linear's FP8 quant into one forward pass, and fuses the backward
-     of both. Eliminates separate RMSNorm + copy_to_input + quant_input.
-
-  5. **C++ delayed_scaling_recipe**: The amax→scale computation is done in C++
-     (~6.5μs/tensor × 20 tensors = 130μs total per layer). Lumen does this in
-     Python with separate aten::clamp + aten::reciprocal + aten::mul.
-
-  6. **FP8 activation storage (fp8_activation_input_store=True)**: Saves MLP
-     activations (SwiGLU gate/up output) in FP8 instead of BF16 for backward.
-     This halves the per-layer activation memory from ~1.8 GiB to ~0.9 GiB for
-     non-recomputed layers. With 59 non-recomputed layers, this saves
-     59 × 0.9 = ~53 GiB — explaining the 82% vs 97.6% memory difference.
-
-  **REVISED gap breakdown (v44 5,510ms vs MLPerf 3,811ms = 1,699ms)**:
-
-  | # | Root Cause | Est. ms | Solvable in Lumen? | How |
-  |---|-----------|---------|-------------------|-----|
-  | 1 | SwiGLU fwd not fused (mul+silu separate) | **300-400** | YES | Use AITER tex.swiglu equivalent: `fused_silu_mul_fp8_per_tensor_static_quant` already exists. Fix integration in _swiglu_fp8_fuse.py so cache is properly consumed |
-  | 2 | No fused cast+transpose in backward path | **200-300** | YES | TE does this INSIDE its autograd.Function backward. Lumen can do the same by running cast_transpose_amax_fp8 inside QuantizedLinearFunction.backward and consuming the transpose immediately for wgrad — NO need to store it |
-  | 3 | Separate RMSNorm + quant (not fused) | **100-150** | PARTIAL | LUMEN_FUSED_NORM_QUANT=1 exists but may not be as tight as LayerNormLinear |
-  | 4 | Python amax→scale vs C++ delayed_scaling | **50-100** | YES | Already partially done with FUSED_QUANT_AMAX. Can improve further |
-  | 5 | FP8 activation storage not used | **0ms direct, but ~15 GiB memory** | YES | Lumen has FP8_ACT_STORE=1 / FP8_ACTIVATION=1 in config. Verify it's working — if so, memory should be lower |
-  | 6 | Memory pressure amplifier (97.6% vs 82%) | **~100-200** | DEPENDS ON #5 | If FP8 activation storage is working, memory should drop to ~85-90%, reducing allocator pressure |
-  | 7 | Extra kernel launches (~57K vs ~5-8K) | **200-300** | HARD | Caused by aten:: dispatches for unfused ops. Each fix above reduces launches. Cumulative effect. |
-  | 8 | Activation checkpoint Python dispatch | **50-100** | HARD | TE also uses Python checkpoint via NeMo/Megatron. Similar overhead. May be smaller diff than assumed. |
-  | | **Total estimated** | **~1,000-1,550** | | |
-
-  **KEY CORRECTION**: Root Cause 2 (fused cast+transpose) does NOT require storing
-  the transposed output in memory. TE does the cast+transpose INSIDE its backward
-  function and immediately passes it to the wgrad GEMM. The transpose tensor is
-  consumed immediately and freed. This means:
-  - No extra 3.5 GiB of stored transposes
-  - No OOM like v41 experienced
-  - The fused cast+transpose kernel IS viable if done inside the backward
-
-  **KEY CORRECTION**: Root Cause 5 (memory) may already be partially addressed.
-  Lumen config has `FP8_ACT_STORE=1` and `FP8_ACTIVATION=1`. Need to verify
-  whether this is actually taking effect in the current v44 path.
-
-  **ACTIONABLE next steps**:
-  1. Verify FP8 activation storage is working (check memory breakdown)
-  2. Fix SwiGLU fused kernel integration (fix _swiglu_fp8_fuse.py cache consumption)
-  3. Move cast_transpose_amax_fp8 into QuantizedLinearFunction.backward (like TE does)
-     — run it, consume transpose for wgrad immediately, free the transpose tensor
-  4. Rerun with all three fixes — projected: ~4,800-5,000ms
-
-- Status: **open** — corrected analysis based on actual AMD MLPerf reference code.
-
-### [2026-04-09 v45 TE-parity fusions results]
-
-- **Changes implemented**:
-  1. **Fix 1 (SwiGLU)**: Removed redundant `bf16_output.abs().amax()` call in
-     `_swiglu_fp8_fuse.py`. Now back-computes approximate amax from scale
-     (`scale * fp8_max`) instead of running a second full-tensor reduction.
-  2. **Fix 2 (fused cast+transpose in backward)**: Added `manager=mgr`,
-     `tensor_id=..._bwd`, `backward=True` to `quantize_input()` call in
-     `QuantizedLinearFunction.backward` (line 875). This should activate the
-     `cast_transpose_amax_fp8` Triton kernel path in `_quantize_core`, producing
-     both row-major and column-major FP8 grad in one kernel. The `_transpose`
-     field on FP8Descriptor is then consumed by wgrad without separate transpose.
-  3. **Fix 3 (flags)**: `LUMEN_FUSED_CAST_TRANSPOSE=1` (was 0 in v44).
-
-- **v45 Results**:
-  - Pre-eval step time: **~5,570ms** (steps 20-190, avg of 17 measurements)
-  - Post-eval step time: **~6,200ms** (steps 200-280)
-  - val_loss at step 192: **0.9461** (PPL 2.576)
-  - Memory: **97.59% pre-eval, 97.86% post-eval**
-  - Convergence: loss trajectory identical to v43/v44
-
-- **Comparison vs v44**:
-  | Metric | v44 | v45 | Delta |
-  |--------|-----|-----|-------|
-  | Pre-eval step (ms) | ~5,510 | ~5,570 | +60ms (noise) |
-  | Post-eval step (ms) | ~6,150 | ~6,200 | +50ms (noise) |
-  | val_loss @192 | 0.9462 | 0.9461 | -0.0001 |
-  | Memory pre-eval | 97.59% | 97.59% | same |
-
-- **Analysis**: No measurable speed improvement despite code changes.
-  The fused cast+transpose and SwiGLU amax fixes are either:
-  1. Not activating at runtime (probes failing, or the delayed scaling path
-     short-circuits before reaching the fused kernel), OR
-  2. The savings (~50ms SwiGLU + ~200ms cast+transpose) are too small relative
-     to the dominant bottlenecks (97.6% memory pressure causing allocator
-     thrashing, ~57K kernel launches from unfused aten:: ops), OR
-  3. The fused Triton cast_transpose_amax_fp8 kernel is slower than expected
-     on the actual tensor shapes (8192×8192, 8192×28672) due to Triton
-     overhead on MI300X.
-
-  **Memory remains the biggest blocker**: 97.6% utilization means the allocator
-  is constantly fragmenting/defragmenting. Until FP8 activation storage
-  actually reduces memory to ~85-90%, any kernel-level optimization is
-  masked by memory allocator overhead.
-
-  **Key remaining questions**:
-  1. Is `FP8_ACT_STORE=1` / `FP8_ACTIVATION=1` actually storing activations
-     in FP8? Memory should be ~85% if working, but it's 97.6%.
-  2. Are the fused paths actually executing? Need runtime instrumentation
-     (e.g., a counter in `_quantize_core` for how often the cast_transpose
-     branch is taken).
-  3. Post-eval regression (~600ms slower than pre-eval) persists — the
-     gc_only strategy isn't sufficient.
-
-- **Final v45 data (run stopped at step 768)**:
-  - val_loss trajectory: 0.9461 (192) → 0.9327 (384) → **0.9216** (576) → 0.9244 (768)
-  - **Passes MLPerf target (0.925) at step 576**
-  - v45 converges faster than baseline at every eval point
-  - Pre-eval: ~5,570ms, post-eval: ~6,200ms
-  - Post-eval regression: +11.3% (improved from +13.4% in v38b)
-  - README.md updated with full v45 results
-
-- Status: **open** — convergence target met; speed unchanged vs v44, need to
-  investigate FP8 activation storage and verify fused kernel activation at runtime.
-
-### [2026-04-09 latest-profiling-with-all-optimizations]
-
-- **Experiment**: Fresh torch.profiler capture (steps 8-10, rank 0) with all
-  current optimizations enabled. 15-step run, identical config to v45.
-
-- **Key profiling results** (per step, averaged over 3 profiled steps):
-  | Category | Current (ms) | Baseline (ms) | Delta |
-  |----------|-------------|--------------|-------|
-  | GEMM (CK fwd) | 1,975 | 1,974 | 0 |
-  | GEMM (hipBLASLt bwd) | 1,081 | 1,077 | +4 |
-  | Attention (fwd+bwd) | 848 | 822 | +26 |
-  | SwiGLU (fwd+bwd fused) | 163 | 857 (unfused) | **-694** |
-  | Cast+transpose (Triton) | 178 | 0 (inactive) | +178 |
-  | aten::copy_ | 297 | 486 | **-189** |
-  | FP8 abs+amax | 320 | 407 | **-87** |
-  | FP8 quant (dyn+static) | 89 | 172 | **-83** |
-  | aten::clamp | 0.7 | 57 | **-56** |
-  | aten::mul | 83 | 527 | **-444** |
-  | aten::cat | 71 | 123 | **-52** |
-  | aten::clone | 53 | 105 | **-52** |
-  | NCCL AllReduce | 123 | 119 | +4 |
-  | Total | ~5,484 | ~6,079 | **-595** |
-  | Kernel launches/step | ~19,200 | ~57,000 | **3x reduction** |
-
-- **Evidence — what's working**:
-  1. **SwiGLU fusion confirmed active**: `_swiglu_fwd_kernel` (53ms) +
-     `_fused_silu_mul_fp8_per_tensor_static_quant_kernel` (36ms) + `_swiglu_bwd_kernel`
-     (74ms) = 163ms total. Baseline was 857ms from separate mul+silu+sigmoid.
-     **81% reduction confirmed.**
-  2. **Cast+transpose kernel confirmed active**: `_cast_transpose_amax_fp8_kernel`
-     shows 535ms/3steps = 178ms/step, 2,913 calls/3steps = 971 calls/step.
-     This is the Triton fused kernel from `lumen/ops/quantize/cast_transpose.py`.
-  3. **aten::copy_ reduced 39%**: 486→297ms. Cast+transpose absorbed some copy work.
-  4. **aten::clamp nearly eliminated**: 57→0.7ms. Fused quant+scale working.
-  5. **Kernel launches 3x lower**: 57K→19.2K/step. Each fusion reduced launch count.
-
-- **Evidence — what's NOT working as expected**:
-  1. **FP8 quant abs+amax still high (320ms)**: Despite LUMEN_FUSED_QUANT_AMAX=1,
-     `aten::abs` still shows 177ms and `aten::amax` shows 143ms. The fused kernel
-     should have eliminated these. Possible: the fused path only handles some
-     tensors, while delayed scaling history update still calls abs+amax separately.
-  2. **Cast+transpose costs 178ms but only saves 189ms from copy_**: Net savings
-     ~11ms. The transposed output may not be consumed directly by wgrad —
-     additional copy_ calls might still occur for the transpose.
-  3. **Memory still 97.59%**: FP8_ACT_STORE=1 is set but memory unchanged from
-     baseline. FP8 activation storage is likely not functional.
-
-- **Updated gap analysis** (5,484ms profiled vs 3,811ms MLPerf = 1,673ms gap):
-  | Root Cause | Gap (ms) |
-  |-----------|---------|
-  | FP8 quant/scale pipeline (abs→amax→quant) | 356 |
-  | aten::copy_ residual | 237 |
-  | Memory pressure amplifier | 100-200 |
-  | Cast+transpose overhead | ~100 |
-  | SwiGLU residual (Triton vs C++) | 63 |
-  | clone+cat+add | 223 |
-  | Kernel dispatch (~19K vs ~5K) | 72 |
-  | Memcpy DtoD | 62 |
-  | Other | 160 |
-
-- **Key remaining questions**:
-  1. Why does abs+amax (320ms) persist despite LUMEN_FUSED_QUANT_AMAX=1?
-     The fused kernel should eliminate these — need to check if the fused path
-     is only activating for forward, not backward.
-  2. Is the cast+transpose output actually consumed by wgrad? If not, the
-     178ms is pure overhead with no net benefit.
-  3. Why is FP8_ACT_STORE=1 not reducing memory? Need to trace activation
-     storage to verify FP8 tensors are being stored.
-
-- Status: **open** — profiling confirms SwiGLU and cast+transpose are active;
-  FP8 quant pipeline and memory pressure are the next highest-impact targets.
-
-### [2026-04-09 three-investigation-results-and-fixes]
-
-- **Investigation 1: FP8_ACT_STORE=1 memory (97.6%)**
-
-  - **Finding**: FP8 activation storage IS working. The `_PatchedSwiGLUFunction` in
-    `megatron_patches.py` correctly casts SwiGLU input to `float8_e4m3fnuz` for
-    backward. The config flag `activation_func_fp8_input_store` flows through
-    `lumen_gpt_builder` → `bias_swiglu_impl` → `SwiGLUFunction.apply(input, fp8_input_store=True)`.
-
-  - **Why 97.6% is expected**: With ACL=21 (`RECOMPUTE_METHOD=block`,
-    `RECOMPUTE_NUM_LAYERS=21`), 59 layers keep SwiGLU activations in memory.
-    FP8 store saves ~27.7 GiB (59 layers × 470 MiB). Without FP8 store, total
-    would be ~215 GiB — exceeding 192 GiB (would OOM). The 97.6% IS the
-    with-FP8-store utilization; other BF16 activations (linear inputs for wgrad,
-    attention) account for the rest.
-
-  - **Bug found in `lumen_gpt_builder_with_spec`**: The newer builder path
-    (used with `--lumen-linear`) never set `config.activation_func_fp8_input_store`.
-    Fixed by moving the flag assignment outside `if config is None:` in both
-    `lumen_gpt_builder` (legacy) and `lumen_gpt_builder_with_spec`.
-    File: `lumen/models/megatron.py` lines 440-441, 507-508.
-
-  - Status: **resolved** — FP8 store confirmed working for current path;
-    builder fix ensures `--lumen-linear` path also works.
-
-- **Investigation 2: abs+amax (320ms) despite LUMEN_FUSED_QUANT_AMAX=1**
-
-  - **Finding**: Multiple call sites bypass the fused path:
-    1. `layernorm_linear.py:320` — `update_amax("activation", x_2d)` after fused
-       norm+quant. Called ~160× per step (80 layers × 2 norm+quant per layer).
-       Each call does `tensor.detach().abs().amax()` on a [8192, 8192] or
-       [8192, 28672] tensor. **~160 abs + 160 amax calls per step.**
-    2. `get_scale()` bootstrapping — `tensor.abs().amax()` when history is empty.
-       Only affects first step per tensor_id (one-time cost).
-    3. `scaling_manager._quantize_core` fallback paths — when the fused kernel
-       probes fail or tensor is not 2D CUDA. Unlikely in steady state.
-    4. Attention block quant helpers — `do.abs().amax()`, `abs().max()`.
-       These use `abs+max` (not amax) which explains why profiler shows
-       2112 abs vs 1054 amax calls per step (asymmetric).
-
-  - **Fix applied**: Modified AITER fused norm+quant Triton kernel
-    (`_fused_rms_fp8_per_tensor_static_quant_kernel`) to optionally output
-    amax via `tl.atomic_max`. Added `output_amax=True` param to Python wrapper.
-    Updated `_FusedRMSNormFP8Quant.forward` in `layernorm_linear.py` to use
-    fused amax and directly append to `scaling_manager.amax_history["activation"]`
-    instead of calling `update_amax`.
-    Files: `third_party/aiter/.../fused_fp8_quant.py` (kernel + wrapper),
-    `lumen/modules/layernorm_linear.py`.
-
-  - **Expected savings**: ~160 abs + 160 amax calls eliminated per step.
-    At ~0.08ms per abs and ~0.07ms per amax, this saves ~24ms/step.
-    Remaining abs+amax (~140ms) comes from: attention block quant,
-    `_quantize_core` dynamic scaling paths, and `get_scale` bootstrapping.
-
-  - Status: **partially resolved** — layernorm_linear.py fixed; remaining
-    abs+amax is from attention and other non-fused paths.
-
-- **Investigation 3: Is cast+transpose output consumed by wgrad?**
-
-  - **Finding**: **Yes**, when the fused cast+transpose produces `_transpose`
-    on the `FP8Descriptor` and hipBLASLt FP8 wgrad path runs, `grad_transposed`
-    is passed directly to `hipb_mm`. The hipBLAS wgrad skips `_t_contiguous(grad_fp8)`.
-
-  - **Remaining aten::copy_ (297ms) sources**:
-    1. **Weight transpose for dgrad**: `weight_desc.transpose_cached` rebuilds from
-       `FP8Descriptor.from_tensors(saved_weight)` which has `_transpose=None`.
-       The first use does `.t().contiguous()` (or `fast_transpose_fp8`).
-       This hits every backward pass for every linear layer.
-    2. **CK/Triton wgrad path**: `_t_contiguous(input_data)` transposes the saved
-       activation for TN-shaped GEMM.  Only active when hipBLAS fp8 wgrad is not used.
-    3. **`FP8StoredLinearFunction.backward`**: No pre-transposed grad wired in;
-       always uses `weight_desc.transpose_cached` for dgrad. No wgrad needed
-       (frozen weights).
-
-  - **Potential optimization**: Cache weight transpose across forward/backward
-    (weight is constant within a step). Currently each backward rebuilds
-    `FP8Descriptor.from_tensors` without the forward's `_transpose`.
-
-  - Status: **resolved** (question answered) — the grad transpose IS consumed;
-    remaining copy_ is dominated by weight transpose for dgrad.
-
-### [2026-04-09 optimization-attempts]
-
-- **Optimization 1: Weight transpose cache for dgrad**
-
-  - **Goal**: Eliminate aten::copy_ (297ms) from weight transpose in backward by
-    caching the transpose from the cast+transpose kernel in `_fp8_param_cache`.
-  - **Implementation**: Added `keep_transpose` param to `_quantize_core`. Modified
-    `QuantizedLinearFunction.backward` to reuse cached `FP8Descriptor` from
-    `_fp8_param_cache` (with `data_ptr` check for safety).
-  - **Result**: **NOT feasible at 97.6% memory**. Caching all 320 weight transposes
-    would add ~15.6 GiB persistent memory (currently only ~4.6 GiB free).
-    The backward currently transposes one weight at a time (~450 MiB peak for fc1),
-    but caching keeps all 320 alive simultaneously.
-  - **Code left in place**: `keep_transpose` param on `_quantize_core` (default False),
-    backward descriptor reuse logic in `linear.py`. These activate when memory
-    headroom is available (e.g., after increasing ACL or reducing activation memory).
-  - Status: **blocked** — requires memory headroom first.
-
-- **Optimization 2: Backward abs+amax pipeline**
-
-  - **Goal**: Eliminate remaining abs+amax calls in backward paths.
-  - **Finding**: `quantize_bwd_delayed` already uses fused `static_quant_with_amax`
-    when `LUMEN_FUSED_QUANT_AMAX=1` (lines 795-801). The `_quantize_core` fallback
-    (line 733, which calls `update_amax`) is NOT hit when fused kernels are active.
-  - **Remaining abs+amax sources** in steady state:
-    1. `get_scale` bootstrapping (first step only) — negligible
-    2. Attention `Blockwise2DScaleManager.do.abs().amax()` — NOT active for
-       per-tensor delayed scaling config
-    3. `quantize_grad` round-trip (line 882) — only if `quantize_grad` is enabled
-  - **Result**: The fused quant+amax is already covering all major paths.
-    Combined with the `layernorm_linear.py` fix from earlier, the expected
-    abs+amax reduction is ~160 calls/step → ~0 calls/step for the norm+quant
-    path, plus the already-fused `_quantize_core` and `quantize_bwd_delayed`.
-  - Status: **resolved** — all major paths already fused; remaining is negligible.
-
-### [2026-04-09 memory-gap-investigation-and-fragmentation-fixes]
-
-- **Investigation 1: Attention FP8 storage (user hypothesis)**
-
-  - **Hypothesis**: TE uses FP8 attention activation storage (FP8 DPA) while
-    Lumen stores Q/K/V/output in BF16, causing a large memory gap.
-  - **Finding**: **Incorrect.** Neither framework uses FP8 DPA in this config.
-    `fp8_dot_product_attention` defaults to `False` in Megatron-core
-    `TransformerConfig` (line 387). The MLPerf submission does not enable it.
-    Both Lumen (AITER `flash_attn_func`) and TE (`TEDotProductAttention`)
-    save Q, K, V, output in **BF16** + softmax_lse in FP32.
-    Attention saved tensors: ~290 MiB/layer (Q:128+K:16+V:16+O:128+lse:2).
-  - Status: **ruled out** — no gap from attention activation dtype.
-
-- **Investigation 2: `_fp8_param_cache` overhead (user hypothesis)**
-
-  - **Hypothesis**: Lumen's `_fp8_param_cache` duplicates weight memory
-    (BF16 master + FP8 cache), while TE avoids this with built-in recipes.
-  - **Finding**: **Not applicable for current config.**
-    With `FP8_PARAMS=0` and `FP8_PARAM_STORAGE=1`, Lumen uses
-    `_shrink_frozen_weights_to_fp8` → `FP8StoredLinearFunction` path.
-    Frozen weights are stored **only in FP8** (BF16 master replaced with
-    1-element placeholder). The `_fp8_param_cache` dict is NOT populated.
-    TE also uses FP8 weight storage (`keep_fp8_weight_transpose_cache`).
-    There is no duplication.
-  - Status: **ruled out** — `_fp8_param_cache` not used in current config.
-
-- **Investigation 3: Memory fragmentation**
-
-  - **Symptom**: 97.6% memory vs TE's ~82% despite similar data stored.
-  - **Root cause**: Allocator-level effects, not fundamentally different data.
-    1. Lumen's 19K kernel launches (vs TE's ~5K) create many more
-       alloc/free cycles → more fragmented cached blocks (~8-12 GiB waste).
-    2. Unfused ops each create Python autograd nodes with tensor references,
-       extending lifetimes of intermediates (~5-8 GiB overhead).
-    3. More temporaries from sequential unfused ops (peak allocation differs
-       from TE's fused kernels that share output buffers) (~5-10 GiB).
-    Total gap: ~20-30 GiB from allocator overhead + fragmentation.
-  - **Fixes applied**:
-    1. Added `garbage_collection_threshold:0.8` to base config
-       (`config_MI300X_tp1_dp8.sh`) — proactive GC when cached memory
-       exceeds 80% of max reserved.
-    2. Improved post-eval `empty_cache` logic — now auto-triggers
-       `torch.cuda.empty_cache()` even in `gc_only` strategy when
-       memory utilization > 90% (`megatron_patches.py`).
-    3. Added training-step defrag hook (`LUMEN_TRAINING_DEFRAG=1`) —
-       periodic `gc.collect()` every N steps with conditional
-       `empty_cache()` when utilization < threshold
-       (`megatron_patches.py`).
-    4. Added `LUMEN_EMPTY_UNUSED_MEMORY_LEVEL` env var passthrough
-       to Megatron's `--empty-unused-memory-level` (`run_finetune.sh`).
-    5. Improved `_post_eval_rewarm` to use actual `ffn_hidden_size`
-       and allocate largest-first.
-  - **Expected impact**: Fragmentation mitigations reduce the ~12 GiB
-    fragmentation waste. Full resolution requires reducing kernel launch
-    count below ~10K through further fusion (the root cause).
-  - Status: **partially resolved** — allocator config improved; root cause
-    (excessive kernel launches from unfused ops) requires continued fusion.
-
-### [2026-04-09 kernel-fusion-round-2]
-
-- **Optimization 1: `@once_differentiable` on autograd Functions**
-
-  - **Goal**: Eliminate autograd's defensive `.clone()` calls on saved tensors
-    during backward.  PyTorch normally clones saved tensors when a backward
-    function might be called multiple times (higher-order gradients).
-    `@once_differentiable` tells PyTorch these backward functions will only
-    be called once, skipping the clones entirely.
-  - **Applied to**:
-    1. `QuantizedLinearFunction.backward` (`lumen/ops/quantize/linear.py`)
-    2. `FP8StoredLinearFunction.backward` (`lumen/ops/quantize/linear.py`)
-    3. `AttentionTritonFunction.backward` (`lumen/ops/attention/attention.py`)
-    4. `AttentionTritonMXFP8Function.backward` (`lumen/ops/attention/attention.py`)
-    5. `AttentionTritonBlockwise2DFunction.backward` (`lumen/ops/attention/attention.py`)
-    6. `AttentionCsrcFP8BwdFunction.backward` (`lumen/ops/attention/attention.py`)
-  - **Expected impact**: Reduces `aten::clone` from 53ms / 7,236 launches to
-    near zero for these functions.  Each function saves 4-11 tensors;
-    eliminating the clone of each per layer per step removes thousands of
-    kernel launches.
-  - Status: **implemented** — needs profiling confirmation.
-
-- **Optimization 2: Fused quant+transpose+amax backward kernel**
-
-  - **Goal**: Replace the 3-operation backward quant pattern (quant+amax → transpose)
-    with a single Triton kernel that reads the gradient once and writes both
-    row-major FP8 and transposed FP8 outputs while computing amax.
-  - **Kernel**: `static_quant_transpose_amax` in `lumen/ops/quantize/quant_amax_fused.py`.
-    Tiled (BLOCK_M=64, BLOCK_N=64) with `tl.atomic_max` for global amax.
-  - **Wired into**:
-    1. `_quantize_core` when `backward=True` and `_FUSED_QUANT_AMAX=1`
-       (`scaling_manager.py`) — sets `_transpose` on returned FP8Descriptor.
-    2. `quantize_bwd_delayed` when tensor is 2-D and fused kernel available
-       (`scaling_manager.py`) — returns 3-tuple `(fp8, scale, fp8_t)`.
-    3. `FP8StoredLinearFunction.backward` now passes `manager=mgr, backward=True`
-       to `quantize_input` to benefit from the fused path.
-  - **Expected impact**: Saves ~320 kernel launches/step (160 quant + 160 transpose
-    for 80 layers × 2 backward grad quantizations).  Estimated time savings
-    ~30-50ms from eliminating separate `fast_transpose_2d` after quant.
-  - Status: **implemented** — needs profiling confirmation.
-
-- **Optimization 3: fast_transpose_2d already wired (verified)**
-
-  - `FP8Descriptor.transpose_cached` already uses AITER's `fast_transpose_2d`
-    Triton kernel when `LUMEN_FUSED_CAST_TRANSPOSE_V2=1` (already in config).
-    The 297ms of `aten::copy_` is NOT from weight transpose in dgrad — it
-    comes from other `_t_contiguous` calls in BF16 wgrad paths and
-    `.contiguous()` after non-contiguous ops.
-  - Status: **already done** — no further action needed.
-
-### [2026-04-10 grad-norm-zero-fp8-param-storage]
-- Symptom: `grad_norm: 0.000` for ALL training steps (including post-warmup)
-  when `FP8_PARAM_STORAGE=1`. Loss was constant ~10.8 (no learning). All LoRA
-  parameter gradients were exactly zero.
-- Root cause: `_FusedLayerNormCompat` wrapper in `megatron_patches.py` has a
-  `@property` for `weight` that delegates to `self._norm.weight`. However,
-  PyTorch's `Module.__setattr__` bypasses `@property` descriptors when
-  assigning `nn.Parameter` objects (pytorch/pytorch#52664). During the model
-  setup chain (meta-device materialization → Float16Module wrapping → DDP →
-  checkpoint loading), a spurious `_parameters["weight"]` entry is created
-  directly on the wrapper module, while the actual `_norm.weight` (used in
-  forward) remains uninitialized (all zeros from meta-device materialization).
-  This caused RMSNorm to multiply hidden states by zero, producing zero input
-  to all LoRA adapters, and therefore zero gradients.
-- Evidence:
-  1. `patch_grad_debug.py` v8 showed `input_max=0.000000e+00` for all LoRA
-     adapter inputs, even post-warmup.
-  2. NORM_WEIGHT inspection revealed:
-     `input_layernorm.weight` (spurious): max=4.296875e-01 (correct checkpoint values)
-     `input_layernorm._norm.weight` (actual): max=0.000000e+00 (all zeros)
-  3. `register_load_state_dict_post_hook` confirmed that at load_state_dict
-     time, `_norm.weight` was correct (max=2.4) and no spurious weight existed.
-     The spurious weight was created AFTER load_state_dict by a later step
-     in the setup chain (likely `_apply` during meta→device materialization
-     or DDP registration).
-  4. Minimal standalone test (`test_lora_grad_minimal.py`) confirmed LoRA
-     gradients work correctly with FP8 base weights under autocast.
-  5. A `__setattr__` override on the wrapper was NOT sufficient because the
-     spurious parameter is inserted directly into `_parameters` dict,
-     bypassing `__setattr__`.
-- Fix: Added `_repair_fused_layernorm_weights()` in `megatron.py` that runs
-  after the full setup chain (model build + checkpoint load + FP8 conversion).
-  It detects modules with a `_norm` child where a spurious `_parameters["weight"]`
-  exists, copies the data to `_norm.weight`, and deletes the spurious entry.
-  Confirmed: 160 modules repaired (80 layers × 2 norms). Training results:
-  - iter 6: lm_loss=3.992320, grad_norm=19.237
-  - iter 7: lm_loss=3.797219, grad_norm=15.473
-  - val_loss=3.526561
-- Status: **resolved**
-
-### [2026-04-10 v47-step-time-investigation]
-- Symptom: 15-step and 50-step tests with FP8_PARAM_STORAGE=1 and all optimizations
-  show ~7,400 ms/step. README claims 5,570 ms from v45 full 1024-step run.
-- Investigation findings:
-  1. FP8StoredLinearFunction IS being used correctly (confirmed via logging).
-  2. All fusions active: lumen_fused_mlp=True, lumen_fused_rope=True, fused SwiGLU,
-     fused quant+amax, fused norm+quant, fused cast+transpose, @once_differentiable.
-  3. hipBLASLt active for hybrid FP8 backward.
-  4. Memory: 79.4% (vs README's 97.6%). This 18% gap is significant.
-  5. With hybrid FP8, backward uses gemm_per_tensor_mixed (no transpose needed).
-  6. Precomputing all 322 weight transposes = 64 GiB, causes OOM.
-  7. Without FP8_PARAM_STORAGE: OOM (185 GiB, can't fit BF16 weights).
-  8. LUMEN_PREFER_HIPBLASLT=1 made things WORSE (8,150 ms vs 7,400 ms) - CK is faster.
-  9. 50-step run showed no improvement over 15-step run (same ~7,400 ms steady state).
-  10. v41 code (stash) fails with assertion error when lumen_fused_mlp/rope are enabled,
-      so can't compare directly against v41 baseline.
-  11. The 5,570 ms from README was measured during v45 full 1024-step run. The v45 code
-      is not preserved (script deleted, code changes integrated into v41).
-- Conclusion: The 7,400 ms is the actual current performance with FP8_PARAM_STORAGE.
-  The 5,570 ms in README may have been measured under different conditions or code state.
-  The FP8StoredLinearFunction backward path (mixed-dtype dgrad via hipBLASLt, no wgrad)
-  is inherently slower than the QuantizedLinearFunction path used without FP8_PARAM_STORAGE,
-  but FP8_PARAM_STORAGE is required to avoid OOM.
-- Status: resolved (understanding achieved, no regression found)
-
-### [2026-04-10 v51-grad-zero-refined-root-cause]
-- Symptom: `grad_norm: 0.000` for ALL training steps with `FP8_PARAM_STORAGE=1`.
-  Loss constant at `ln(32000) ≈ 10.37` (uniform random predictions).
-- Root cause refinement: The `[2026-04-10 grad-norm-zero-fp8-param-storage]` entry's
-  root cause was PARTIALLY correct but incomplete. The full chain:
-  1. `_FusedLayerNormCompat.__init__` does `self.weight = self._norm.weight`, creating
-     `_parameters["weight"]` sharing the same Parameter as `_norm._parameters["weight"]`.
-  2. `_fp8_aware_to_empty` (meta-device materializer) creates NEW Parameter objects
-     for EACH `_parameters` entry it encounters during recursive `_custom_apply`.
-     For `_FusedLayerNormCompat`, it replaces both `_parameters["weight"]` (top-level)
-     and `_norm._parameters["weight"]` (child) with DIFFERENT new Parameters,
-     breaking the sharing. Both get `torch.empty_like(...)` data (uninitialized).
-  3. `load_state_dict` → `_load_from_state_dict` loads checkpoint data into
-     `_FusedLayerNormCompat._parameters["weight"]` (the top-level one).
-  4. Recursion into `_norm` looks for key `input_layernorm._norm.weight` which
-     DOESN'T exist in the checkpoint → `_norm._parameters["weight"]` keeps
-     uninitialized (zero/garbage) data.
-  5. `_FusedLayerNormCompat.forward` calls `self._norm(x)` which uses
-     `_norm._parameters["weight"]` — the uninitialized one.
-  6. With zeros in `_norm.weight`, RMSNorm outputs zeros. All downstream
-     layers receive zero input. Logits are constant → loss = ln(vocab_size).
-     LoRA gradients are zero (zero input = zero gradient).
-- Evidence:
-  1. `[DIAG] All 322 frozen 2D weights have full data.` — confirmed linear weights
-     were correctly loaded via `_fp8_load_from_state_dict` hook.
-  2. `[FP8 HOOK VERIFY]` prints confirmed correct FP8 conversion with matching
-     `incoming` and `dequant` values for all 322 weights.
-  3. No `_do_gemm` data_ptr MISMATCH triggered — `_fp8_desc.data` matched `weight.data`.
-  4. Checkpoint inspection: all BF16 tensors (0 FP8), 483 BF16, 804 total keys.
-  5. After calling `_repair_fused_layernorm_weights`: 161 modules repaired,
-     `grad_norm` became non-zero (33.276 at step 6), loss started at 4.11 and
-     decreased to ~1.4 by step 24.
-- Fix: `_repair_fused_layernorm_weights()` called in `_setup_with_fp8_storage`
-  after model build + checkpoint load. Copies `_parameters["weight"]` data
-  to `_norm.weight.data` and deletes the spurious top-level parameter.
-- Status: **resolved** (grad_norm=0 fixed; see next entry for divergence)
-
-### [2026-04-10 v51-grad-norm-spikes-divergence]
-- Symptom: After fixing grad_norm=0 with `_repair_fused_layernorm_weights`,
-  training converges initially (loss: 4.1 → 1.4 by step 24) but then diverges
-  (loss spikes to 8.0+ by step 72). grad_norm has large spikes: 33 at step 6,
-  464 at step 31, 411 at step 62, 295 at step 74.
-- Reference comparison at step 30: v45 has loss=1.56, grad_norm=0.592.
-  Our run has loss=1.52, grad_norm=8.04 (comparable loss, 14x higher grad_norm).
-- Possible bugs:
-  1. FP8 scale convention: `_fp8_load_from_state_dict` stores quant_scale
-     (`fp8_max/amax`) in descriptor. `_quantize_core` stores dequant_scale
-     (`amax/fp8_max`). The `_do_gemm` inverts (`1/scale`) before passing to
-     kernel, which compensates for quant_scale. Forward pass is numerically
-     correct. Backward pass also appears correct (dequant_scale from
-     `weight_scale` saved in forward, dequant_scale from `grad_desc.scale`).
-  2. Training numerical precision: FP8 quantization of frozen weights may
-     introduce more noise than TE's approach, causing gradient instability.
-  3. Missing code from v45: v45 may have had additional stabilization
-     (e.g., different activation checkpointing, norm fusion, or FP8 scale
-     management) not present in current v41 code.
-- Next check:
-  1. Compare activation statistics (hidden state norms) at each layer between
-     v45 and current run at the same training step.
-  2. Check if v45's `@once_differentiable` and other stashed optimizations
-     affect numerical behavior.
-  3. Try running with `--clip-grad 1.0` to see if gradient clipping is too
-     aggressive with the higher grad_norm.
-- Status: **open**
-
-### [2026-04-11 v54-aiter-revert-test]
-- Symptom: v53 divergence persists even after reverting AITER submodule to v41 commit (1f3491e2).
-- Hypothesis tested: AITER submodule change (2d3d8f1b6 -> 1f3491e2) was causing grad_norm explosion.
-- Evidence:
-  1. AITER reverted to v41 commit, JIT build cache cleared, confirmed old source used.
-  2. v54 run: grad_norm=34 at step 6 (same as v53), initial convergence to loss ~1.5 by step 20.
-  3. By step 45+, grad_norm spikes to 100-800, loss explodes to 5-6. Training diverges by step 60.
-  4. This is nearly identical behavior to v53 (which used newer AITER).
-- Conclusion: **AITER submodule is NOT the root cause**. The divergence is caused by
-  Lumen Python code changes between v41 commit (70efcb5) and current working directory.
-  Key suspects: `_repair_fused_layernorm_weights`, `_FusedLayerNormCompat` changes in
-  `megatron_patches.py`, `FP8_PARAM_STORAGE` interaction with current code, `_swiglu_fp8_fuse.py`
-  changes, `layernorm_linear.py` amax changes, or `parallel_linear.py` diagnostic additions.
-- Next step: Revert ALL unstaged changes to return to exact v41 commit state, then reproduce
-  v41 results (5,335 ms/step, 99.68% mem, val_loss 0.9194). Then incrementally add optimizations.
-- Status: **resolved** — AITER ruled out. Reverting to v41 code.
-
-### [2026-04-11 v41-v45-reproduction]
-- Symptom: Previous v51-v54 runs diverged with grad_norm explosion (34-884x at step 60).
-- Root cause: v51-v54 used incomplete launch configs — missing Megatron patches
-  (patch_gpt_layer_specs.py, patch_checkpointing.py, patch_requires_grad.py,
-  patch_lora_scaling.py, patch_sft_loss_norm.py) and missing env vars (LUMEN_SKIP_BACKEND_SYNC,
-  LUMEN_FUSED_NORM_QUANT, LUMEN_FUSED_QUANT_SCALE, LUMEN_EVAL_RECOMPUTE, etc.).
-  The reduced config also used RECOMPUTE_NUM_LAYERS=21 with FP8_PARAM_STORAGE=1 but
-  without the full fusion/eval chain, leading to 79% memory (vs 97-99%) and different
-  numerical behavior.
-- v41 reproduction: Used original `run_v41_phase3.sh` script unchanged.
-  Results (60 steps): 5,740-5,760 ms/step, 99.68% mem, grad_norm 0.1-1.4, loss → 1.34.
-  **Matches original v41** (5,335 ms ± system load).
-- v45 reproduction: Used original `run_v45_te_parity.sh` script unchanged.
-  Results (210 steps): pre-eval ~5,985 ms/step, post-eval ~6,650 ms/step, 97.53% mem.
-  grad_norm 0.1-1.5, loss → 1.28. val_loss @192 = 0.9492 (original v45: 0.9461).
-  Post-eval regression: +11.1% (matches original v45: +11.3%).
-  **Matches original v45** (5,570 ms ± system load).
-- Conclusion: Both v41 and v45 reproduce correctly when using the original launch scripts
-  with full Megatron patches and complete env var sets. The v51-v54 divergence was caused
-  by incomplete launch configuration, not code bugs.
-- Status: **resolved** — v41 and v45 reproduced successfully.
-
-### [2026-04-11 v45-best-perf-reproduction]
-- Symptom: v45 reproduction step time ~5,970ms vs original 5,570ms (~400ms / 7% gap).
-- Investigation:
-  1. Deleted stale tunableop_results*.csv (Apr 2, had 4 "Default" GEMMs on rank 0).
-     Result: new files created but empty (0 bytes) — FP8 GEMMs use AITER hipb_mm
-     directly, not PyTorch TunableOp. TunableOp only covers BF16 torch.mm path.
-  2. Cold-start test: stopped training, waited 3min for GPUs to cool to 49-56C,
-     relaunched. Step times were still ~5,962ms from step 20 — identical to warm start.
-     Conclusion: thermal equilibrium is reached within seconds of training.
-  3. GPU state: all 8 GPUs at 744-752W (max TDP 750W), junction temps 88-98C,
-     sclk throttled to ~1100-1200 MHz. Power throttling is the binding constraint.
-  4. AITER GEMM dispatch uses solution_index=-1 (hipBLASLt default heuristic) in all
-     hipb_mm calls — same as original v45. Not a tuning regression.
-- Conclusion: 400ms gap is hardware thermal/power throttling, not a software issue.
-  All 8 optimizations from README lines 37-48 are confirmed active. Code, config, and
-  env vars are identical to the original v45 run.
-- Run results (ongoing): val_loss@192=0.9477 (original v45: 0.9461), pre-eval ~5,975ms,
-  post-eval ~6,633ms (+10.8%), memory 97.51%, grad_norm stable 0.1-1.5.
-- Actions taken:
-  - Updated run_tp1_dp8.sh to be the definitive launch script with all env vars + patches
-  - Copied patch_lora_scaling.py and patch_sft_loss_norm.py into examples/llama2/scripts/
-  - Updated examples/llama2/README.md with correct run method, params, and expected results
-- Status: **resolved** — performance gap is thermal/power, scripts and docs updated.
-
-### [2026-04-11 aiter-lumen-triton-kernels-update]
-- Symptom: v45 reproduction step time ~5,975ms vs original 5,570ms (~400ms / 7% gap),
-  previously attributed to thermal/power throttling.
-- Action: Updated AITER submodule from old v41-era commit (1f3491e2f) to
-  `lumen/triton_kernels` branch (cfaeaad3b) from ZhangDanyang-AMD/aiter.git.
-  Branch has 3 commits ahead of old HEAD:
-  1. `1007c83ba` — mixed-dtype hipBLASLt GEMM (E5M2 grad x E4M3 weight support)
-  2. `eec00850a` — Triton fast_transpose_2d + fused SwiGLU fwd/bwd kernels
-  3. `cfaeaad3b` — contiguity checks in quant kernels
-- Key code changes in AITER:
-  - `hipb_mm`: removed `mat1.dtype() == mat2.dtype()` assertion, supports separate
-    `intype_a` and `intype_b` in hipBLASLt matmul wrapper. Adds E5M2/E5M2FNUZ dtype map.
-  - `fast_transpose_2d`: Triton tiled 2D transpose kernel replacing `tensor.t().contiguous()`
-    (which dispatches `aten::copy_`, measured at 891ms / 5.42% of GPU time in profile).
-  - `swiglu_fwd/bwd`: single Triton kernels for SwiGLU forward (silu(y1)*y2) and backward,
-    replacing 3-8 separate kernel launches each.
-  - `gemm_a8w8_mixed`: Triton mixed-dtype FP8 GEMM (alternative to hipBLASLt for dgrad).
-  - Contiguity assertions in `static_per_tensor_quant` and `dynamic_per_tensor_quant`.
-- Lumen compatibility: All new AITER APIs already wired in Lumen code:
-  - `lumen/ops/quantize/fast_transpose.py` → `fast_transpose_2d`
-  - `lumen/ops/fused_swiglu.py` → `swiglu_fwd/bwd`
-  - `lumen/ops/quantize/linear.py` → `hipb_mm` (backward-compatible signature)
-  - Dispatch probes in `lumen/ops/dispatch.py` verify availability at runtime.
-  - Env vars `LUMEN_FUSED_SWIGLU=1`, `LUMEN_FUSED_CAST_TRANSPOSE_V2=1` already in launch script.
-- Results (full 1024-step run):
-  - Pre-eval step time: **5,608ms** (was 5,975ms with old AITER → **-367ms / -6.1%**)
-  - Post-eval step time: **6,191ms** (was 6,633ms → **-442ms / -6.7%**)
-  - Effective avg step time: **6,087ms** (was ~6,500ms)
-  - Post-eval overhead: +10.4% (was +10.8%)
-  - Memory: 97.50% pre-eval, 98.30% post-eval
-  - val_loss: 0.9470 @192, 0.9365 @384, **0.9227 @576** (passes), 0.9247 @768, **0.9202 @960**
-  - Best val_loss: **0.9202** at step 960 (vs 0.9477 with old AITER)
-  - grad_norm: stable 0.09-1.23 throughout, 0 NaN, 0 skipped
-  - Total training time: 7,638s (06:08:39 → 08:15:57)
-- Conclusion: AITER `lumen/triton_kernels` branch provides ~6% step time improvement
-  through mixed-dtype GEMM, fast transpose, and fused SwiGLU kernels. Convergence
-  is unaffected (same val_loss trajectory, actually slightly better best val_loss).
-  The remaining gap to the original v45 target (5,570ms) is ~38ms (0.7%), consistent
-  with thermal/power throttling variance.
-- Actions taken:
-  - Updated run_tp1_dp8.sh header with AITER branch info and new expected results
-  - Updated examples/llama2/README.md with new results, AITER prereq, speed optimizations
-  - Updated profiling summary header in lumen_latest_profile_summary.txt
-- Status: **resolved** — AITER updated, training validated, scripts and docs updated.
-
-### [2026-04-11 csrc-hip-fused-quant-transpose]
-- Symptom: Investigated whether the HIP C++ fused quant+transpose+amax kernel
-  in `lumen/csrc/fused_quant_transpose.cu` could replace the Triton kernel and
-  provide performance improvement.
-- Changes made:
-  - Updated `setup.py` to compile `lumen/csrc/fused_quant_transpose.cu` as a
-    CppExtension via `torch.utils.cpp_extension`.
-  - Fixed `__half`/`__hip_bfloat16` → `float` conversion (use `__half2float`/
-    `__bfloat162float` instead of `static_cast` to work with
-    `__HIP_NO_HALF_CONVERSIONS__`).
-  - Fixed FP8 type selection: use `USE_ROCM` (always defined by PyTorch hipcc
-    builds) instead of `__gfx942__` (device-only macro) to select
-    `__hip_fp8_e4m3_fnuz` consistently on both host and device sides.
-  - Upgraded kernel to v2: 64×64 tiles (from 32×32), bank-conflict-free shared
-    memory (+1 column padding), `#pragma unroll`, tighter warp reduction.
-  - Created `lumen/ops/quantize/cast_transpose_hip.py` Python dispatch wrapper.
-  - Wired into `_quantize_core()` in `scaling_manager.py` with
-    `LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1` env var (priority above Triton path).
-- Microbenchmark results (single GPU, 100 iterations):
-  - (4096, 8192): Triton=0.095ms  HIP=0.094ms  **1.01x** (parity)
-  - (8192, 4096): Triton=0.088ms  HIP=0.096ms  **0.91x** (HIP slightly slower)
-  - (1024, 8192): Triton=0.038ms  HIP=0.031ms  **1.23x** (HIP wins on smaller shapes)
-- End-to-end training results (LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1, 8x MI300X):
-  - Pre-eval step time: ~5,629ms (baseline with Triton: ~5,608ms)
-  - Memory: 97.63%
-  - grad_norm: stable 0.11–1.22
-  - Loss converging normally
-  - **No measurable improvement** over the existing Triton cast+transpose+amax
-    kernel — the Triton path is already well-optimized for AMD GPU.
-- Conclusion: The HIP C++ kernel is functionally correct (100% bitwise match
-  with Triton on all shapes and all 8 GPUs), but provides no performance
-  benefit. The existing Triton fused cast+transpose+amax path is optimal.
-  Keeping `LUMEN_FUSED_QUANT_TRANSPOSE_CPP=0` (default) is recommended.
-  The code remains available as a reference or fallback.
-- Build note: Must set `PYTORCH_ROCM_ARCH=gfx942` when running
-  `python setup.py build_ext --inplace` to target MI300X only.
-  Without it, hipcc attempts gfx942+gfx950 and may fail on gfx950.
-- Status: **resolved** — kernel works but no perf gain; Triton path remains default.
+### [2026-04-06 kernel-fusion-plan-implementation]
+- Symptom: ~1,673 ms speed gap (5,484 ms vs MLPerf 3,811 ms), 19,200 kernel launches/step vs TE ~5,000
+- Goal: Implement kernel fusion plan to reduce gap
+
+#### P1: Eliminate duplicate abs/amax — IMPLEMENTED
+- **Change**: `scaling_manager.py` `get_scale()` now accepts `return_amax=True` and returns the
+  pre-computed amax alongside the scale. `_quantize_core()` uses this to call `update_amax_value()`
+  instead of `update_amax()`, avoiding the second `tensor.abs().amax()` pass.
+- **Files**: `lumen/quantize/scaling_manager.py`, `lumen/modules/layernorm_linear.py`
+- **Also**: `quantize_bwd_delayed` now reuses amax from first-call path.
+- **Expected savings**: ~120-160 ms/step (eliminates ~3,000+ redundant abs/amax launches)
+
+#### P3a: @once_differentiable on autograd Functions — IMPLEMENTED
+- **Change**: Added `@once_differentiable` decorator to backward methods of 4 autograd Functions:
+  `QuantizedLinearFunction`, `FP8StoredLinearFunction`, `_PatchedSwiGLUFunction`, `_FusedRMSNormFP8Quant`
+- **Files**: `lumen/ops/quantize/linear.py`, `lumen/models/megatron_patches.py`, `lumen/modules/layernorm_linear.py`
+- **Expected savings**: ~30-50 ms/step (eliminates ~5K+ defensive clone operations)
+
+#### P3b: fused_add_rmsnorm_pad — CANCELLED
+- Residual add is in Megatron TransformerLayer, not adjacent to our norm module.
+  Would require patching TransformerLayer.forward. Too invasive / risky.
+
+#### P3c: aten::cat reduction — CANCELLED
+- 1,941 cat calls/step mostly from Megatron internals (QKV concat, LoRA).
+  Not addressable at Lumen level without major Megatron architecture changes.
+
+#### P2: Eliminate weight transpose for dgrad — IMPLEMENTED
+- **Change**: FP8 dgrad backward in both `QuantizedLinearFunction` and `FP8StoredLinearFunction`
+  now uses `gemm_per_tensor_mixed` (hipBLASLt NN layout) for all FP8 dtype combinations,
+  not just mixed-dtype. This avoids `weight_desc.transpose_cached` → `.t().contiguous()`.
+- **Files**: `lumen/ops/quantize/linear.py`
+- **Expected savings**: ~150-237 ms/step (eliminates weight transpose copy in ~960 dgrad GEMMs)
+
+#### P5: GEMM + bias add epilogue fusion — IMPLEMENTED
+- **Change**: `_gemm_per_tensor_hipblas` now accepts `bias` parameter and passes it to `hipb_mm`.
+  `dispatch_gemm` fuses bias into GEMM epilogue when `LUMEN_PREFER_HIPBLASLT=1` and
+  scaling is per-tensor (delayed/dynamic).
+- **Files**: `lumen/ops/quantize/linear.py`
+- **Expected savings**: ~20-30 ms/step (eliminates ~400+ separate bias add kernels)
+
+#### P4: Memory reduction — NO CODE CHANGES
+- `FP8_ACT_STORE=1` already enabled. `FP8StoredLinearFunction` saves FP8 inputs.
+  Further memory reduction is config-level (ACL depth tuning), not code changes.
+
+- **Total expected savings**: ~320-477 ms/step → estimated step time ~5,007-5,164 ms
+- Status: **implemented, awaiting training validation**
+- Next check: Run training with all optimizations, profile to verify savings.
+
+### [2026-04-15 kernel-fusion-validation-run]
+- Symptom: Memory utilization unchanged at 97.63% (185,084 MiB reserved, max allocated 175,949 MiB) despite kernel fusion changes. Previous analysis estimated ~5-10 GiB savings.
+- Explanation: **Previous estimate was wrong.** All four fusion changes (P1/P2/P3a/P5) eliminate *transient* temporaries that are created-and-freed within a single layer's fwd/bwd pass. They are sequential, not concurrent at peak. PyTorch's caching allocator high-water mark is determined by what's alive simultaneously (activations + weights + optimizer + gradients), which is unchanged.
+- Step time: ~5,590-5,600 ms pre-eval (vs baseline ~5,570 ms). Slightly slower, likely within noise or due to `_PREFER_HIPBLASLT` not being set (bug found: megatron.py didn't propagate env var to `linear.py` module-level cache). Fixed in this session.
+- Convergence: val_loss = 0.9488 at step 192 (on track, target < 0.925).
+- Bug found: `LUMEN_PREFER_HIPBLASLT` env var not passed in `run_tp1_dp8.sh`, and `megatron.py` didn't set the env var or update the module-level `_PREFER_HIPBLASLT` flag in `linear.py`. Fixed both: added `-e LUMEN_PREFER_HIPBLASLT=1` to launch script and added `os.environ["LUMEN_PREFER_HIPBLASLT"] = "1"` + `_qlinear._PREFER_HIPBLASLT = True` in megatron.py.
+- Impact of missing PREFER_HIPBLASLT: bias epilogue fusion (P5) was disabled; forward GEMMs used CK before hipBLASLt. dgrad NN-layout (P2) was active (uses `_probe_aiter_hipblas()` directly).
+- Next check: Rerun with LUMEN_PREFER_HIPBLASLT=1 to validate full speed benefit.
+- Status: open — speed improvement not yet validated, memory estimate corrected (no reduction expected)
+
+### [2026-04-06 offline-fp8-transpose-and-fused-dispatch]
+- Symptom: ~37,536 aten::copy_ (891 ms), ~1,212 aten::reciprocal (7 ms) per step from lazy transpose recomputation and per-forward scale inversion on frozen FP8 weights. Blockscale GEMM path does separate bias add (~480 extra launches).
+- Changes implemented:
+  - **Part A — Offline FP8 transpose**: `_shrink_frozen_weights_to_fp8`, `_wrap_load_from_state_dict`, and "already FP8 no desc" recovery in `megatron.py` now pre-compute `_transpose` on `FP8Descriptor` at checkpoint load time using `_precompute_fp8_transpose()` helper. Also store `_fp8_scale_reciprocal` for frozen weights.
+  - **Part A — Reciprocal reuse**: `parallel_linear._do_gemm` now uses pre-computed `weight._fp8_scale_reciprocal` instead of computing `1.0 / scale` every forward.
+  - **Part C — Eager transpose in `_quantize_core`**: Added `_eager_transpose()` static method to `ScalingManager`. Applied to forward-path descriptors from `static_quant_with_amax` and fallback quant paths. Also stopped discarding `fp8_data_t` in HIP and Triton `cast_transpose_amax` paths — now passed through as `_transpose` on descriptor.
+  - **Part B1 — Fused blockscale GEMM + bias**: Added `_probe_aiter_fused_gemm_blockscale_mul_add()` to `dispatch.py`. Added `gemm_blockscale_with_bias()` using AITER's `fused_gemm_a8w8_blockscale_mul_add` to `linear.py`. `dispatch_gemm` now routes blockscale GEMM with bias through fused path, falling back to separate add.
+- Expected savings: ~3,480 fewer launches/step (~67-107 ms GPU time)
+- Files: `lumen/models/megatron.py`, `lumen/modules/parallel_linear.py`, `lumen/quantize/scaling_manager.py`, `lumen/ops/quantize/linear.py`, `lumen/ops/dispatch.py`
+- Next check: Run training to validate speed improvement and correctness (no convergence change expected — these are dispatch/layout optimizations only).
+- Status: **implemented, awaiting validation**
+
+### [2026-04-06 aiter-fused-norm-and-zeros-reduction]
+- Symptom: ~480 `aten::add_` + ~480 `_rms_norm_kernel` per step from unfused residual+norm paths. ~2,900 `torch.zeros(1)` allocations per step from amax scratch buffers in quant kernels. ~480 `torch.zeros_like(weight)` per step from missing bias in layernorm.
+- Changes implemented:
+  - **Probes**: Added `_probe_aiter_fused_add_rms_norm()` and `_probe_aiter_fused_add_rmsnorm_pad()` to `dispatch.py`.
+  - **`fused_add_rmsnorm()`**: New function in `rmsnorm.py` dispatching CK `fused_add_rms_norm_cu` → Triton `fused_add_rmsnorm_pad` → unfused `add_ + rmsnorm`. Fuses `residual = x + residual; y = RMSNorm(residual)` into 1 kernel (was 2).
+  - **`rmsnorm_add_delayed_per_tensor()`**: New function in `rmsnorm.py` that fuses residual-add + RMSNorm + FP8 quant via `fused_rms_fp8_per_tensor_static_quant(res1=...)`. Fuses 3 ops into 1 kernel.
+  - **Persistent amax scratch buffer**: Added `_get_amax_scratch()` pool in `quant_amax_fused.py`. Replaced `torch.zeros(1, ...)` with `scratch.zero_()` + `.clone()` in `static_quant_with_amax`, `fused_amax_abs`, `cast_transpose_amax_fp8`, `cast_transpose_amax_fp8_hip`. Eliminates ~2,900 alloc/free cycles per step.
+  - **Cached zero bias**: Added `_get_zero_bias()` cache in `layernorm.py`. Replaced 3 `torch.zeros_like(weight)` call sites with cached lookup. Eliminates ~480 allocations per step.
+- Not wired (with reasons):
+  - **`fused_allreduce_rmsnorm`**: Requires custom allreduce communicator handle (`_fa`). Only useful at TP>1; Lumen's MLPerf config uses TP=1. No backward allreduce in current decoder layer flow.
+  - **`ff_a16w16_fused_gated`**: Operates on A16W16 (BF16/FP16) GEMM. Lumen's MLPerf path uses FP8 GEMMs. No `ff_a8w8_fused_gated` equivalent exists in AITER.
+  - **`fused_rms_fp8_per_tensor_static_quant`**: Already wired via `_FusedRMSNormFP8Quant` in `layernorm_linear.py`. New `rmsnorm_add_delayed_per_tensor` extends it with residual support.
+- Expected savings:
+  - `fused_add_rmsnorm`: ~480 launches eliminated (80 layers × 2 norm sites × 3 passes → 1 launch each), ~15-25 ms GPU time
+  - Persistent amax scratch: ~2,900 `torch.zeros` allocations → 0 new allocations (still ~2,900 `zero_()` memsets but no alloc/free overhead)
+  - Cached zero bias: ~480 `torch.zeros_like` allocations → 0
+  - **Total: ~3,860 fewer allocation events + ~480 fewer kernel launches**
+- Files: `lumen/ops/dispatch.py`, `lumen/ops/normalization/rmsnorm.py`, `lumen/ops/normalization/layernorm.py`, `lumen/ops/quantize/quant_amax_fused.py`, `lumen/ops/quantize/cast_transpose.py`, `lumen/ops/quantize/cast_transpose_hip.py`
+- Next check: Wire `fused_add_rmsnorm` into decoder layer's residual+norm path (requires Megatron's transformer_block changes). Run training to validate.
+- Status: **implemented, not yet called from decoder forward** (new functions available but decoder layer must be updated to call `fused_add_rmsnorm` instead of separate add + norm)
+
+### [2026-04-15 test-blocked-by-vram]
+- Symptom: OOM during model construction (`torch.OutOfMemoryError: Tried to allocate 896.00 MiB. GPU 5 has ... 302.00 MiB free`).
+- Root cause: Three other containers are running and consuming ~106 GiB/GPU of VRAM:
+  - `umbp_server` (DeepSeek-V3 sglang server, `--tp-size 8 --dp-size 8 --mem-fraction-static 0.85`) — main culprit
+  - `rocm-atom-qwen3` — smaller but still consuming VRAM
+  - `yutong-umbp` — another user's workload
+- Evidence: `rocm-smi --showmeminfo vram` shows 112-113 GiB used per GPU with no Lumen process running. 192 GiB total - 106 GiB used = ~86 GiB free, insufficient for Llama2-70B (needs ~180 GiB).
+- Next check: Free GPUs by stopping other containers, then rerun `run_tp1_dp8.sh`.
+- Status: **blocked — waiting for GPU availability**
 
 ## Entry Template
 

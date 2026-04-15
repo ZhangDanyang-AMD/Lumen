@@ -20,10 +20,26 @@ Enabled via ``LUMEN_FUSED_QUANT_AMAX=1`` (checked in scaling_manager.py).
 from __future__ import annotations
 
 import functools
+from typing import Dict
 
 import torch
 import triton
 import triton.language as tl
+
+_amax_scratch: Dict[torch.device, torch.Tensor] = {}
+
+
+def _get_amax_scratch(device: torch.device) -> torch.Tensor:
+    """Return a reusable 1-element float32 scratch tensor for amax accumulation.
+
+    Avoids allocating a new ``torch.zeros(1)`` on every quant/amax kernel call
+    (~2,900 times per training step). The caller MUST zero the tensor before use.
+    """
+    buf = _amax_scratch.get(device)
+    if buf is None:
+        buf = torch.zeros(1, dtype=torch.float32, device=device)
+        _amax_scratch[device] = buf
+    return buf
 
 
 @triton.jit
@@ -81,7 +97,8 @@ def static_quant_with_amax(
     rows, cols = x.shape
 
     qx = torch.empty_like(x, dtype=fp8_dtype)
-    amax_out = torch.zeros(1, dtype=torch.float32, device=x.device)
+    amax_out = _get_amax_scratch(x.device)
+    amax_out.zero_()
     scale_in = scale.float().reshape(1).contiguous()
     if scale_in.device != x.device:
         scale_in = scale_in.to(device=x.device)
@@ -98,7 +115,7 @@ def static_quant_with_amax(
         NUM_COL_POW2=NUM_COL_POW2,
     )
 
-    return qx, amax_out
+    return qx, amax_out.clone()
 
 
 @functools.lru_cache(maxsize=1)
@@ -116,3 +133,55 @@ def _probe_fused_quant_amax() -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Lightweight amax(abs(x)) kernel — single launch replaces abs() + amax()
+# ---------------------------------------------------------------------------
+
+
+@triton.jit
+def _amax_abs_kernel(
+    x_ptr,
+    amax_out_ptr,
+    cols: int,
+    x_stride_r: int,
+    NUM_COL_POW2: tl.constexpr,
+):
+    """Compute row-local max(abs(x)) and atomically reduce into a global scalar."""
+    pid = tl.program_id(axis=0)
+    tl.assume(pid >= 0)
+    tl.assume(x_stride_r > 0)
+
+    offs = pid * x_stride_r + tl.arange(0, NUM_COL_POW2)
+    mask = tl.arange(0, NUM_COL_POW2) < cols
+    x = tl.load(x_ptr + offs, mask=mask, other=0.0, cache_modifier=".cg")
+
+    row_amax = tl.max(tl.abs(x))
+    tl.atomic_max(amax_out_ptr, row_amax, sem="relaxed")
+
+
+def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
+    """Compute ``amax(abs(x))`` in a single kernel launch.
+
+    Handles arbitrary-dim tensors by flattening to 2-D internally.
+
+    Args:
+        x: Input tensor on GPU, any float dtype.
+
+    Returns:
+        Scalar float32 tensor on the same device.
+    """
+    if x.dim() <= 1:
+        return x.detach().abs().amax()
+
+    if x.dim() != 2:
+        x = x.reshape(-1, x.shape[-1])
+    x = x.contiguous()
+    rows, cols = x.shape
+
+    amax_out = _get_amax_scratch(x.device)
+    amax_out.zero_()
+    NUM_COL_POW2 = triton.next_power_of_2(cols)
+    _amax_abs_kernel[(rows,)](x, amax_out, cols, x.stride(0), NUM_COL_POW2=NUM_COL_POW2)
+    return amax_out.squeeze(0).clone()

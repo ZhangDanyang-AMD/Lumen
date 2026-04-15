@@ -21,6 +21,8 @@ from typing import Optional, Tuple
 
 import torch
 
+from lumen.ops.quantize.quant_amax_fused import _get_amax_scratch
+
 logger = logging.getLogger(__name__)
 
 _module = None
@@ -74,7 +76,8 @@ def cast_transpose_amax_fp8_hip(
     M, N = x.shape
     out_row = torch.empty((M, N), dtype=fp8_dtype, device=x.device)
     out_col = torch.empty((N, M), dtype=fp8_dtype, device=x.device)
-    amax_out = torch.zeros(1, dtype=torch.float32, device=x.device)
+    amax_out = _get_amax_scratch(x.device)
+    amax_out.zero_()
 
     scale_1 = scale.float().reshape(-1).contiguous()
     if scale_1.device != x.device:
@@ -83,4 +86,4 @@ def cast_transpose_amax_fp8_hip(
     x_2d = x.contiguous()
     mod.static_quant_transpose_amax(out_row, out_col, amax_out, x_2d, scale_1)
 
-    return out_row, out_col, amax_out
+    return out_row, out_col, amax_out.clone()

@@ -417,6 +417,41 @@ def _probe_aiter_fast_transpose():
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_add_rms_norm():
+    """Check if AITER CK fused add+RMSNorm (residual + norm in one kernel) is available."""
+    try:
+        from aiter.ops.rmsnorm import fused_add_rms_norm_cu as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_add_rmsnorm_pad():
+    """Check if AITER Triton fused add+RMSNorm+pad kernel is available."""
+    try:
+        from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import fused_add_rmsnorm_pad as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_gemm_blockscale_mul_add():
+    """Check if AITER fused blockscale GEMM + mul/add epilogue is available."""
+    try:
+        from aiter.ops.triton.gemm.fused.fused_gemm_a8w8_blockscale_mul_add import (  # noqa: F401
+            fused_gemm_a8w8_blockscale_mul_add as _,
+        )
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Core fallback dispatcher
 # ---------------------------------------------------------------------------

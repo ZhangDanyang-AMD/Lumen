@@ -19,6 +19,8 @@ import torch
 import triton
 import triton.language as tl
 
+from lumen.ops.quantize.quant_amax_fused import _get_amax_scratch
+
 __all__ = ["cast_transpose_fp8", "cast_transpose_amax_fp8"]
 
 _TORCH_TO_TL_FP8: Dict[torch.dtype, tl.dtype] = {
@@ -179,7 +181,8 @@ def cast_transpose_amax_fp8(
     M, N = x.shape
     out = torch.empty((M, N), dtype=fp8_dtype, device=x.device)
     out_t = torch.empty((N, M), dtype=fp8_dtype, device=x.device)
-    amax_out = torch.zeros(1, dtype=torch.float32, device=x.device)
+    amax_out = _get_amax_scratch(x.device)
+    amax_out.zero_()
 
     if clamp_max is None:
         clamp_max = float(torch.finfo(fp8_dtype).max)
@@ -213,7 +216,7 @@ def cast_transpose_amax_fp8(
         FP8_TY=fp8_tl,
     )
 
-    return out, out_t, amax_out
+    return out, out_t, amax_out.clone()
 
 
 def cast_transpose_fp8(

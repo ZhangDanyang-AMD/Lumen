@@ -42,6 +42,22 @@ from lumen.ops.dispatch import (
 
 logger = logging.getLogger(__name__)
 
+_zero_bias_cache: dict = {}
+
+
+def _get_zero_bias(weight: torch.Tensor) -> torch.Tensor:
+    """Return a cached all-zeros tensor matching *weight* (shape, dtype, device).
+
+    Avoids allocating ``torch.zeros_like(weight)`` on every forward call
+    when ``bias is None`` (~480 calls/step).
+    """
+    key = (weight.shape, weight.dtype, weight.device)
+    buf = _zero_bias_cache.get(key)
+    if buf is None:
+        buf = torch.zeros_like(weight)
+        _zero_bias_cache[key] = buf
+    return buf
+
 
 # ---------------------------------------------------------------------------
 # Lazy imports
@@ -177,7 +193,7 @@ def layernorm(
         Normalised tensor with same shape as *x*.
     """
     if bias is None:
-        bias = torch.zeros_like(weight)
+        bias = _get_zero_bias(weight)
 
     if grad_quant_type is not None:
         return _LayerNormGradQuant.apply(x, weight, bias, eps, grad_quant_type)
@@ -239,7 +255,7 @@ def layernorm_current_per_tensor(
         ``(x_fp8, tensor_scale)``
     """
     if bias is None:
-        bias = torch.zeros_like(weight)
+        bias = _get_zero_bias(weight)
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1]).contiguous()
@@ -282,7 +298,7 @@ def layernorm_per_token(
         ``(x_fp8, yscale)`` where yscale is ``[M, 1]``.
     """
     if bias is None:
-        bias = torch.zeros_like(weight)
+        bias = _get_zero_bias(weight)
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1]).contiguous()
