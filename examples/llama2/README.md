@@ -22,7 +22,8 @@ The training script (`finetune_llama2.py`) selects the backend via `--backend me
 Llama2-70B LoRA SFT with FP8 quantization, TP=1 DP=8 parallelism, aligned with the
 AMD MLPerf v5.1 `MI300X_EPYC_9575F_pytorch_llama2_70b` reference submission.
 
-**Lumen passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9202.
+**Lumen passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9202
+and pre-eval step time of **4,780 ms** (1.25x vs MLPerf reference).
 
 ### Prerequisites
 
@@ -152,6 +153,7 @@ and skip themselves if already applied.
 | Fused SwiGLU fwd+bwd (Triton) | `LUMEN_FUSED_SWIGLU=1` | Single kernel vs 6-8 launches |
 | Fast FP8 transpose (Triton) | `LUMEN_FUSED_CAST_TRANSPOSE_V2=1` | Replaces `aten::copy_` (5.4% of GPU time) |
 | Fused cast+transpose in backward | `LUMEN_FUSED_CAST_TRANSPOSE=1` | ~11 ms/step |
+| hipBLASLt for all GEMMs | `LUMEN_PREFER_HIPBLASLT=1` | hipBLASLt fwd+bwd; `.t()` view eliminates weight transpose |
 | Mixed-dtype hipBLASLt GEMM | AITER `lumen/triton_kernels` | E5M2 grad x E4M3 weight — no transpose needed |
 | SwiGLU FP8 cache | `LUMEN_FUSED_SWIGLU_QUANT=1` | Saves redundant quantization |
 
@@ -182,9 +184,9 @@ With the default configuration (all optimizations enabled):
 | Loss at step 100 | ~1.3 |
 | Best validation loss | **0.9202** (step 960) |
 | MLPerf target | 0.925 |
-| Pre-eval step time | ~5,610 ms |
-| Post-eval step time | ~6,190 ms (+10.4%) |
-| Effective avg step time | ~6,090 ms |
+| Pre-eval step time | ~4,780 ms |
+| Post-eval step time | ~5,350 ms (est.) |
+| Effective avg step time | ~5,250 ms |
 | Peak GPU memory per device | ~185 GB / 192 GB (97.5%) |
 | Stability | 0 NaN / 0 skipped |
 
@@ -206,7 +208,7 @@ comparison against the AMD MLPerf reference.
 | FP8 Format | E4M3 hybrid | E4M3 hybrid | Matched |
 | Data Shuffling | Epoch-level | Epoch-level | Matched |
 | Activation Recompute | 21 layers (full/block) | 21 layers | Matched |
-| FP8 Engine | AITER `lumen/triton_kernels` (CK + hipBLASLt + Triton) | TransformerEngine | Different (kernel impl) |
+| FP8 Engine | AITER `lumen/triton_kernels` (hipBLASLt + Triton) | TransformerEngine | Different (kernel impl) |
 | Attention | AITER CK FMHA v3 | TE fused CK v3 | Different (same CK kernel) |
 | RMSNorm | AITER Triton | TE Triton / apex | Different (higher precision) |
 

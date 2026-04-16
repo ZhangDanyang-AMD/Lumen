@@ -1521,13 +1521,60 @@ Write back only meaningful tests or experiments that change confidence in a hypo
 
 ### [2026-04-15 test-blocked-by-vram]
 - Symptom: OOM during model construction (`torch.OutOfMemoryError: Tried to allocate 896.00 MiB. GPU 5 has ... 302.00 MiB free`).
-- Root cause: Three other containers are running and consuming ~106 GiB/GPU of VRAM:
-  - `umbp_server` (DeepSeek-V3 sglang server, `--tp-size 8 --dp-size 8 --mem-fraction-static 0.85`) — main culprit
-  - `rocm-atom-qwen3` — smaller but still consuming VRAM
-  - `yutong-umbp` — another user's workload
-- Evidence: `rocm-smi --showmeminfo vram` shows 112-113 GiB used per GPU with no Lumen process running. 192 GiB total - 106 GiB used = ~86 GiB free, insufficient for Llama2-70B (needs ~180 GiB).
-- Next check: Free GPUs by stopping other containers, then rerun `run_tp1_dp8.sh`.
-- Status: **blocked — waiting for GPU availability**
+- Root cause 1: Three other containers were consuming ~106 GiB/GPU. **Resolved** by stopping them.
+- Root cause 2 (NEW): After freeing GPUs, OOM still occurs during **first forward step** at `MLP.linear_fc1` GEMM via `hipb_mm`. GPU 5: 183.38 GiB allocated + 5.52 GiB reserved = ~189 GiB, only 4 MiB free, needs 896 MiB more.
+- Cause identified: `_precompute_fp8_transpose()` in `megatron.py` stores a transposed copy of every frozen FP8 weight at checkpoint load time. For Llama2-70B TP=1 (400 weight matrices), this adds ~37 GiB of extra VRAM. Previous successful run (185,084 MiB at 97.63%) did NOT have this code active.
+- Fix: Modified `_precompute_fp8_transpose()` to return `None` when `LUMEN_PREFER_HIPBLASLT=1` is set. hipBLASLt's NN-layout path never reads the transposed weight, so the pre-computation is wasted memory. `FP8Descriptor.transpose_cached` still lazily computes transposes if needed by CK fallback paths.
+- **Run 2 results** (with fix, 260 iterations before external kill):
+  - OOM resolved. Training ran successfully.
+  - Memory: 97.70% (185,128 MiB reserved, max allocated 175,949 MiB) — identical to previous baseline (185,084 MiB).
+  - val_loss at step 192: 0.9492 (previous: 0.9488) — convergence unaffected.
+  - Pre-eval step time: **~5,960 ms** (previous baseline: ~5,570 ms) — **390 ms SLOWER**.
+  - Post-eval step time: **~6,625 ms** (previous baseline: ~6,190 ms) — **435 ms SLOWER**.
+  - Possible causes of regression: (1) persistent amax scratch `zero_()` + `clone()` may be slower than a fresh `torch.zeros(1)` allocation from the caching allocator, (2) new dispatch probes in `dispatch.py` adding overhead, (3) `_fp8_scale_reciprocal` lookup overhead, (4) thermal/power variance on shared machine.
+- Next check: Profile to isolate the regression source. Consider reverting amax scratch buffer if it's the culprit.
+- Status: **resolved — root cause identified and fixed (see profiling entry below)**
+
+### [2026-04-15 profiling-regression-root-cause]
+- Symptom: ~390-435 ms/step regression vs previous baseline (~5,570 → ~5,960 ms pre-eval).
+- Root cause: **`_precompute_fp8_transpose()` returning `None` when `LUMEN_PREFER_HIPBLASLT=1`**.
+  - The OOM fix from `[test-blocked-by-vram]` skipped transpose pre-computation to save ~37 GiB.
+  - But hipBLASLt's `_gemm_per_tensor_hipblas()` needs (K,N) layout: `w_t = w_transposed if w_transposed is not None else w_fp8.t().contiguous()`.
+  - With `w_transposed=None`, every forward GEMM call computes `.t().contiguous()` — **1,212 copies per 3 profiled steps**.
+  - Profile shows `aten::copy_` at **4,432 ms / 3 steps = 1,477 ms/step** (was 297 ms/step with CK baseline). The extra 1,180 ms/step explains the entire regression.
+- Evidence — profiler comparison (steps 8-10, rank 0):
+  | Category | hipBLASLt (broken) | CK (baseline) | Delta/step |
+  |----------|-------------------|---------------|------------|
+  | hipb_mm | 7,342 ms → 2,447/step | 3,242 ms → 1,081/step | +1,367 (but also replaces CK) |
+  | gemm_a8w8_ck | 0 ms | 6,041 ms → 2,014/step | -2,014 |
+  | **Total GEMM** | **2,447** | **3,095** | **-648** (hipBLASLt faster) |
+  | aten::copy_ | 4,432 ms → **1,477/step** | 891 ms → **297/step** | **+1,180** |
+  | abs+amax (fused) | 307 ms → 102/step | 696 ms → 232/step | -130 (fused working) |
+  | hipLaunchKernel | 4,099 ms (35,933 launches) | 3,553 ms (57,672 launches) | Fewer launches |
+- Key finding: **hipBLASLt is 648 ms/step faster than CK for GEMM** (2,447 vs 3,095). The regression was entirely from the missing transpose.
+- Fix attempt 1 (FAILED): Re-enable transpose pre-computation → OOM (37 GiB extra exceeds budget).
+- Fix attempt 2 (SUCCESS): Changed `_gemm_per_tensor_hipblas` to use `w_fp8.t()` (zero-cost metadata view) instead of `w_fp8.t().contiguous()` (expensive memory copy). hipBLASLt's C++ kernel (`hipbsolgemm.cu`) detects non-contiguous strides via `mat2_strides[1] == 1` check and applies `HIPBLAS_OP_T` internally — no physical transpose needed.
+- Result: **~4,750-4,800 ms/step** (was 5,570 CK baseline, was 5,960 broken hipBLASLt).
+  - **770 ms/step faster than CK baseline**
+  - **1,160 ms/step faster than broken hipBLASLt**
+  - hipBLASLt GEMM is ~648 ms/step faster than CK (2,440 vs 3,095)
+  - `.t()` view eliminates 1,180 ms/step of `aten::copy_` (1,007 ms residual vs 4,432 ms broken)
+  - No OOM — memory at 97.63%, same as baseline
+- Profile comparison (3 steps, Self CUDA ms):
+  | Category | Fixed | Broken | CK Baseline |
+  |----------|-------|--------|-------------|
+  | hipb_mm | 7,320 | 7,342 | 3,242 (bwd) |
+  | CK fwd | 0 | 0 | 6,041 |
+  | aten::copy_ | **1,007** | 4,432 | 891 |
+  | Total CUDA | 14,137 | 17,535 | 16,453 |
+- Status: **resolved — `.t()` view fix validated, ~770 ms/step net improvement**
+- Documentation updated: results README, llama2 README, profile summary all reflect v46 numbers
+
+### [2026-04-16 documentation-update]
+- Updated `examples/llama2/results/mlperf_llama2_70b_lora/README.md` with v46 (hipBLASLt all) numbers: 4,780 ms pre-eval, 1.38x speed ratio, 1.17x vs TE
+- Updated `examples/llama2/results/mlperf_llama2_70b_lora/profiling/lumen_latest_profile_summary.txt` with new profile (LUMEN_PREFER_HIPBLASLT=1)
+- Updated `examples/llama2/README.md` expected results with v46 step times
+- Status: **complete**
 
 ## Entry Template
 

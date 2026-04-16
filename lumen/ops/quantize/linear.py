@@ -261,9 +261,13 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, 
     """hipBLASLt per-tensor GEMM via AITER hipb_mm.
 
     hipb_mm computes mat1 @ mat2 (NN layout).  Lumen's dispatch convention
-    passes w as (N, K), so we must transpose to (K, N) before calling hipb_mm.
-    If ``w_transposed`` is already provided (e.g. from FP8Descriptor._transpose),
-    it is used directly to avoid the expensive .t().contiguous() copy.
+    passes w as (N, K), so we need (K, N).  hipBLASLt's C++ kernel
+    (``hipbsolgemm.cu``) detects non-contiguous strides and applies
+    ``HIPBLAS_OP_T`` internally, so a metadata-only ``.t()`` view suffices
+    — no expensive ``.t().contiguous()`` copy needed.
+
+    If ``w_transposed`` is already a contiguous (K, N) tensor it is used
+    directly.
 
     When *bias* is provided, it is fused into the GEMM epilogue (avoiding a
     separate ``aten::add`` kernel launch).
@@ -281,7 +285,7 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, 
         if isinstance(scale_w, torch.Tensor)
         else torch.tensor([[scale_w]], dtype=torch.float32, device=w_fp8.device)
     )
-    w_t = w_transposed if w_transposed is not None else w_fp8.t().contiguous()
+    w_t = w_transposed if w_transposed is not None else w_fp8.t()
     return hipb_mm(a_fp8, w_t, -1, bias=bias, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 

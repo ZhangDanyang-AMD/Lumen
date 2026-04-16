@@ -1302,13 +1302,24 @@ def _patch_float16_module() -> None:
     Float16Module.__init__ = _fp8_safe_init
 
 
-def _precompute_fp8_transpose(fp8_data: "torch.Tensor") -> "torch.Tensor":
+def _precompute_fp8_transpose(fp8_data: "torch.Tensor") -> "Optional[torch.Tensor]":
     """Pre-compute the transposed layout for an FP8 weight tensor.
 
     Uses the fast Triton transpose when available, otherwise falls back
     to ``t().contiguous()``.  Called once at checkpoint load time so that
     ``FP8Descriptor.transpose_cached`` never needs to compute it lazily.
+
+    When ``LUMEN_PREFER_HIPBLASLT=1`` we skip the allocation entirely.
+    hipBLASLt's C++ kernel (``hipbsolgemm.cu``) detects non-contiguous
+    strides from a metadata-only ``.t()`` view and applies ``HIPBLAS_OP_T``
+    internally.  ``_gemm_per_tensor_hipblas`` passes ``w.t()`` (zero-cost
+    view, no memory copy) directly to ``hipb_mm``.  Storing both NxK and
+    KxN would add ~37 GiB on Llama2-70B, causing OOM.
     """
+    import os
+
+    if os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1":
+        return None
     if fp8_data.dim() == 2 and fp8_data.is_cuda:
         try:
             from lumen.ops.quantize.fast_transpose import fast_transpose_fp8

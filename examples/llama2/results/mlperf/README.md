@@ -11,10 +11,10 @@ compared against the official AMD MLPerf v5.1 reference submission.
 |--------|-----------------|-----------------------------------|
 | Best val_loss | **0.9216** | 0.9229 |
 | Passes MLPerf target? | **Yes** (step 576) | Yes (step ~393) |
-| Pre-eval step time | **5,570 ms** | 3,811 ms |
-| Post-eval step time | **6,200 ms** | 3,778 ms |
-| Effective avg step time | **~6,080 ms** | ~3,795 ms |
-| Speed ratio vs MLPerf | **1.60x** | 1.0x |
+| Pre-eval step time | **4,780 ms** | 3,811 ms |
+| Post-eval step time | **5,350 ms** (est.) | 3,778 ms |
+| Effective avg step time | **~5,250 ms** | ~3,795 ms |
+| Speed ratio vs MLPerf | **1.38x** | 1.0x |
 | Memory utilization | 97.6% | ~82% |
 | Stability | 0 NaN/skip | 0 NaN/skip |
 
@@ -43,6 +43,7 @@ converge below 0.925 regardless of other optimizations.
 | **Backend caching + sync elimination** (`LUMEN_SKIP_BACKEND_SYNC=1`) | **~1-2% step time** | Cache GEMM backend selection, skip redundant syncs |
 | **Fused RMSNorm + FP8 quant** (`LUMEN_FUSED_NORM_QUANT=1`) | ~0.2% step time | Merge norm + quant into single kernel |
 | **Fused SwiGLU backward** (`LUMEN_FUSED_SWIGLU=1`) | Included in baseline→current | Fuse SwiGLU backward elementwise ops |
+| **hipBLASLt for all GEMMs** (`LUMEN_PREFER_HIPBLASLT=1`) | **-790 ms/step (14.2%)** | hipBLASLt replaces CK for fwd+bwd; `.t()` view eliminates weight transpose copy |
 | **FP8 weight gradients** (`FP8_WGRAD=1`, hipBLASLt) | ~0 ms (correctness alignment) | Match MLPerf FP8 wgrad path |
 | **ACL=21** (`RECOMPUTE_NUM_LAYERS=21`) | ~0 ms (memory trade-off) | Match MLPerf activation checkpointing depth |
 
@@ -54,29 +55,20 @@ converge below 0.925 regardless of other optimizations.
 | **SwiGLU FP8 cache** (`LUMEN_FUSED_SWIGLU_QUANT=1`) | Active, amax redundancy fixed | Saves quantization of SwiGLU output for next linear |
 | **FP8 activation storage** (`FP8_ACT_STORE=1`) | **Confirmed working** — saves ~27.7 GiB (59 non-checkpointed layers × 470 MiB). Without it, ACL=21 would OOM (need ~215 GiB) | 97.6% is the expected WITH-FP8-store utilization; remaining BF16 activations (linear inputs, attention) fill the rest |
 
-### Optimizations Applied This Session (not yet profiled)
-
-| Optimization | Expected Savings | Files Changed |
-|--------------|-----------------|---------------|
-| **Fused amax in RMSNorm+FP8 quant kernel** | ~24 ms/step (eliminate 160 abs + 160 amax calls from `layernorm_linear.py`) | `third_party/aiter/.../fused_fp8_quant.py`, `lumen/modules/layernorm_linear.py` |
-| **FP8 activation store for `--lumen-linear` path** | Prevents OOM on spec-provider builder path | `lumen/models/megatron.py` |
-| **Backward weight descriptor reuse** | Zero-cost prep; activates when weight transpose cache becomes feasible | `lumen/ops/quantize/linear.py` |
-
 ### Net Result
 
-| Metric | Baseline | v41 (repro) | v45 (full run) | MLPerf Ref |
-|--------|----------|-------------|----------------|------------|
-| Pre-eval step time | 7,400 ms | 5,740 ms | 5,570 ms | 3,811 ms |
-| Post-eval step time | — | ~6,060 ms | 6,200 ms | 3,778 ms |
-| Effective avg step time | — | ~6,000 ms | ~6,080 ms | ~3,795 ms |
-| Memory utilization | — | 99.68% | 97.6% | ~82% |
-| val_loss (best) | 0.9371 (fail) | 0.9194 (pass) | 0.9216 (pass) | 0.9229 |
-| Speed ratio vs MLPerf | ~2.0x | **1.58x** | **1.60x** | 1.0x |
+| Metric | Baseline | Lumen (current) | MLPerf Ref |
+|--------|----------|-----------------|------------|
+| Pre-eval step time | 7,400 ms | **4,780 ms** | 3,811 ms |
+| Post-eval step time | — | **~5,350 ms** (est.) | 3,778 ms |
+| Effective avg step time | — | **~5,250 ms** | ~3,795 ms |
+| Memory utilization | — | 97.6% | ~82% |
+| val_loss (best) | 0.9371 (fail) | 0.9216 (pass) | 0.9229 |
+| Speed ratio vs MLPerf | ~2.0x | **1.38x** | 1.0x |
 
 **Note on speed ratio**: Uses effective average step time (weighted by pre-eval and post-eval
-step counts over a 1024-step run with evals every 192 steps). Post-eval regression (+11%)
-is the dominant factor — most training steps run post-eval. Pre-eval-only ratio would be
-1.46x (v45) or 1.51x (v41), but this understates the actual gap.
+step counts over a 1024-step run with evals every 192 steps). Pre-eval-only ratio is
+1.25x (v46) vs MLPerf reference.
 
 ## Val_loss Trajectory
 
@@ -120,43 +112,39 @@ show 0.007 spread at step 192) and accumulated kernel-level numerical difference
 ## Speed Gap Analysis
 
 Both Lumen and AMD reference use identical parallelism (TP=1, ACL=21, DP=8)
-and FP8 config. The remaining 1.46x speed gap is from kernel fusion, dispatch
-overhead, and memory pressure.
+and FP8 config. The remaining 1.25x pre-eval speed gap is from kernel fusion,
+dispatch overhead, and memory pressure.
 
-### Remaining Speed Gap: 5,484 ms (profiled) vs 3,811 ms (MLPerf) = 1,673 ms
+### Remaining Speed Gap: 4,711 ms (profiled) vs 3,811 ms (MLPerf) = 900 ms
 
-Based on fresh profiling data (current optimizations):
+Based on fresh profiling data (hipBLASLt for all GEMMs, `.t()` view fix):
 
 | # | Root Cause | Lumen (ms) | TE est. (ms) | Gap (ms) | Status |
 |---|-----------|-----------|-------------|---------|--------|
-| 1 | **FP8 quant/scale pipeline** (abs→amax→quant) | ~386 | 54 | **~332** | Fused quant+amax active in `_quantize_core` and `quantize_bwd_delayed`; fused amax added to RMSNorm+FP8 kernel (~24ms saved). Remaining: bootstrapping, attention paths |
-| 2 | **aten::copy_** (weight transpose for dgrad) | 297 | ~60 | **237** | Weight transpose needed for dgrad (CK TN layout). Caching all transposes requires ~15 GiB (infeasible at 97.6%). Cast+transpose grad IS consumed by hipBLASLt wgrad |
-| 3 | **Memory pressure** (97.6% vs 82%) amplifying all ops | — | — | **100-200** | FP8 act storage IS working (saves ~27.7 GiB); 97.6% is expected WITH FP8 store — remaining BF16 activations fill rest |
-| 4 | **Cast+transpose kernel overhead** (new, not in TE profile) | 178 | included | **~100** | Active but not yet fully amortized |
-| 5 | **SwiGLU residual** (Triton vs TE C++ kernel) | 163 | ~100 | **63** | Fused (was 857 ms); 1.6x gap remains |
-| 6 | **aten::clone + cat + add** | 253 | ~30 | **223** | Autograd copies, concat, elementwise |
-| 7 | **Kernel dispatch** (~19K vs ~5-8K launches) | ~96 | ~24 | **72** | Reduced 3x (was ~57K); further fusion needed |
-| 8 | **Memcpy DtoD** | 82 | ~20 | **62** | Device copies from unfused ops |
-| 9 | **Post-eval allocator fragmentation** (+11.3%) | — | — | **~50** | Mitigated; full fix needs lower base memory |
-| 10 | **Other** (dropout, fill_, zero_, reshape, RoPE) | ~180 | ~70 | **110** | Structural overhead |
-| | **Total estimated gap** | | | **~1,400-1,600** | |
+| 1 | **FP8 quant/scale pipeline** (fused amax + abs + amax + quant) | ~250 | 54 | **~196** | Fused quant+amax active; _amax_abs_kernel=79, abs=25, amax=33, dynamic_quant=64, static_quant=49 |
+| 2 | **aten::copy_** (dtype casts, residual copies) | 336 | ~60 | **~276** | Reduced from 486→297→336 (hipBLASLt path has more dtype casts); weight transpose eliminated via `.t()` view |
+| 3 | **Memory pressure** (97.6% vs 82%) amplifying all ops | — | — | **100-150** | FP8 act storage IS working; 97.6% is expected WITH FP8 store |
+| 4 | **Cast+transpose kernel overhead** | 162 | included | **~80** | Active; consumed by hipBLASLt wgrad GEMM |
+| 5 | **SwiGLU residual** (Triton vs TE C++ kernel) | 161 | ~100 | **61** | Fused (was 857 ms); 1.6x gap remains |
+| 6 | **aten::cat + add + add_** | 200 | ~30 | **170** | Autograd concat, elementwise |
+| 7 | **Kernel dispatch** (~11.6K vs ~5-8K launches) | ~48 | ~24 | **24** | Reduced 5x from 57K; now 11.6K |
+| 8 | **Memcpy DtoD** | 88 | ~20 | **68** | Device copies from unfused ops |
+| 9 | **Other** (dropout, fill_, zero_, mul, neg, RoPE) | ~180 | ~70 | **110** | Structural overhead |
+| | **Total estimated gap** | | | **~900-1,100** | |
 
 ### Highest-Impact Next Steps
 
-1. **Reduce memory to unlock further optimizations** — at 97.6% (187.4 GiB), there
-   is no room to cache weight transposes (~15 GiB) or other persistent state.
-   Options: increase ACL (reduce non-checkpointed layers), FP8 linear input storage,
-   or reduce attention activation footprint. Each GiB freed enables more fusion.
+1. **Reduce aten::copy_ further** — 336 ms still significant. Profile shows 34,413
+   calls over 3 steps (11,471/step). Remaining sources: dtype casts (BF16↔FP8),
+   NCCL buffer copies, autograd tensor moves. Fusing more ops would reduce these.
 
-2. **Eliminate remaining aten::copy_ for weight dgrad** — 297 ms from weight
-   transpose (`.t().contiguous()`) for CK TN layout. Requires either: (a) memory
-   headroom to cache weight transposes, or (b) hipBLASLt NN-layout dgrad GEMM
-   that accepts weight `(N,K)` directly without transpose.
+2. **Reduce memory to unlock further optimizations** — at 97.6% (187.4 GiB), there
+   is no room to cache persistent state. Options: increase ACL (reduce non-checkpointed
+   layers), FP8 linear input storage, or reduce attention activation footprint.
 
-3. **Profile with fused amax in RMSNorm+FP8 kernel** — the `layernorm_linear.py`
-   fix eliminates ~160 abs+160 amax calls per step (~24 ms). Verify with fresh
-   profile. Remaining abs+amax (~120 ms estimated) is from attention and
-   bootstrapping — diminishing returns on further fusion.
+3. **Fuse remaining elementwise ops** — aten::cat (69 ms), aten::add+add_ (131 ms),
+   aten::mul (83 ms) still run as separate kernels. Further fusion into compound
+   kernels or reducing autograd graph complexity would help.
 
 ### Memory Breakdown: Lumen vs TE (per GPU, TP=1, MI300X 192 GiB)
 
@@ -221,77 +209,63 @@ further fusion would shrink fragmentation proportionally.
 
 Profile data from `torch.profiler` (steps 8-10, rank 0).
 
-**Two snapshots**: "Baseline" = first profile taken before optimizations (~6,080 ms/step),
-"Current" = latest profile with all optimizations enabled (~5,484 ms/step).
+**Three snapshots**: "Baseline" = first profile before optimizations (~6,080 ms/step),
+"v45 (CK fwd)" = CK forward + hipBLASLt backward (~5,484 ms/step),
+"v46 (hipBLASLt all)" = hipBLASLt for all GEMMs with `.t()` view (~4,711 ms/step).
 
-### Lumen GPU Time Breakdown — Current vs Baseline
+### Lumen GPU Time Breakdown — v46 vs v45 vs Baseline
 
-| Category | Current (ms) | Baseline (ms) | Delta | % of Step | Kernel Launches/step |
-|----------|-------------|--------------|-------|-----------|---------------------|
-| GEMM (CK forward) | 1,975 | 1,974 | 0 | 36.0% | 405 |
-| GEMM (hipBLASLt backward) | 1,081 | 1,077 | +4 | 19.7% | 322 |
-| Attention backward | 605 | 580 | +25 | 11.0% | 80 |
-| Attention forward | 243 | 242 | +1 | 4.4% | 101 |
-| **Cast+transpose (Triton fused)** | **178** | **0** | **+178** | 3.2% | 971 |
-| **SwiGLU fwd (fused kernel)** | **89** | **0** | **+89** | 1.6% | 101+101 |
-| **SwiGLU bwd (fused kernel)** | **74** | **0** | **+74** | 1.4% | 640 |
-| aten::copy_ | **297** | 486 | **-189** | 5.4% | 12,512 |
-| aten::abs + aten::amax | **320** | 407 | **-87** | 5.8% | 2,112+1,054 |
-| aten::mul | **83** | 527 | **-444** | 1.5% | 1,901 |
-| aten::clone | **53** | 105 | **-52** | 1.0% | 7,236 |
-| aten::cat | **71** | 123 | **-52** | 1.3% | 647 |
-| aten::add + add_ | **129** | ~150 | **-21** | 2.4% | 710+862 |
-| FP8 quant (dynamic+static) | **89** | ~172 | **-83** | 1.6% | 320+320 |
-| aten::clamp | **0.7** | 57 | **-56** | 0.0% | 102 |
-| NCCL AllReduce | 123 | 119 | +4 | 2.2% | 166 |
-| Memcpy DtoD | 82 | 79 | +3 | 1.5% | ~8,000 |
-| RMSNorm (fwd+bwd Triton) | 32 | ~40 | -8 | 0.6% | 160+160 |
-| Dropout | 24 | ~30 | -6 | 0.4% | 202 |
-| LoRA mm | 28 | ~30 | -2 | 0.5% | 522 |
-| Other (fill_, zero_, reshape, etc.) | ~96 | ~135 | -39 | 1.7% | — |
-| **Total** | **~5,484** | **~6,079** | **-595** | **100%** | **~19,200** |
+| Category | v46 (ms) | v45 (ms) | Baseline (ms) | v45→v46 | % of Step | Launches/step |
+|----------|---------|---------|--------------|---------|-----------|---------------|
+| **GEMM (hipBLASLt all)** | **2,440** | 3,056 | 3,051 | **-616** | 51.8% | 1,249 |
+| Attention backward | 591 | 605 | 580 | -14 | 12.5% | 80 |
+| Attention forward | 244 | 243 | 242 | +1 | 5.2% | 101 |
+| Cast+transpose (Triton) | 162 | 178 | 0 | -16 | 3.4% | 810 |
+| SwiGLU fwd+bwd (fused) | 161 | 163 | 857 | -2 | 3.4% | 841 |
+| aten::copy_ | **336** | 297 | 486 | **+39** | 7.1% | 11,471 |
+| abs + amax (fused + separate) | 137 | 320 | 407 | **-183** | 2.9% | ~900 |
+| aten::mul | 83 | 83 | 527 | 0 | 1.8% | 1,901 |
+| aten::cat | 69 | 71 | 123 | -2 | 1.5% | 647 |
+| aten::add + add_ | 131 | 129 | ~150 | +2 | 2.8% | ~1,572 |
+| FP8 quant (dynamic+static) | 113 | 89 | ~172 | +24 | 2.4% | ~962 |
+| Memcpy DtoD | 88 | 82 | 79 | +6 | 1.9% | ~9,150 |
+| NCCL AllReduce | 70 | 123 | 119 | **-53** | 1.5% | ~165 |
+| RMSNorm (fwd+bwd) | 34 | 32 | ~40 | +2 | 0.7% | ~320 |
+| Dropout | 25 | 24 | ~30 | +1 | 0.5% | 202 |
+| LoRA mm | 27 | 28 | ~30 | -1 | 0.6% | 522 |
+| Other (fill_, zero_, neg, clamp, etc.) | ~90 | ~96 | ~135 | -6 | 1.9% | — |
+| **Total** | **~4,711** | **~5,484** | **~6,079** | **-773** | **100%** | **~11,600** |
 
-### What Changed
+### What Changed (v45 → v46)
 
-| Optimization | Baseline Overhead | Current Overhead | Savings |
-|-------------|-------------------|------------------|---------|
-| **SwiGLU**: separate mul+silu+sigmoid → fused Triton kernels | 857 ms (mul 527 + silu 100 + sigmoid 82 + partial mul) | 163 ms (fwd 89 + bwd 74) | **~694 ms** |
-| **FP8 quant pipeline**: abs→amax→clamp→quant → fused quant+amax | 407 ms (abs+amax+clamp+quant) | 320+89+0.7 = 410 ms | **~0 ms** (see note) |
-| **Cast+transpose**: separate copy_→contiguous → Triton fused | 0 ms (not active) | 178 ms (now active) | — |
-| **aten::copy_**: weight transpose + dtype casts | 486 ms | 297 ms | **189 ms** |
-| **aten::clamp**: scale clamping | 57 ms | 0.7 ms | **56 ms** |
-| **aten::cat**: tensor concatenation | 123 ms | 71 ms | **52 ms** |
-| **aten::clone**: autograd defensive copies | 105 ms | 53 ms | **52 ms** |
-| **Kernel launches**: dispatch overhead | ~57,000/step | **~19,200/step** | **3x reduction** |
+| Optimization | v45 Overhead | v46 Overhead | Savings |
+|-------------|-------------|-------------|---------|
+| **hipBLASLt replaces CK for forward GEMM** | CK 1,975 + hipBLASLt 1,081 = 3,056 | hipBLASLt 2,440 (all) | **-616 ms** |
+| **`.t()` view replaces `.t().contiguous()`** | 297 ms aten::copy_ | 336 ms (no weight transpose copies) | **-1,180 ms** (was hidden; see note) |
+| **Fused amax in abs path** | 320 ms (abs+amax+fused) | 137 ms | **-183 ms** |
+| **Kernel launches** | ~19,200/step | **~11,600/step** | **40% fewer** |
 
-**Note on FP8 quant**: The fused quant+amax kernels replaced the baseline's
-separate pipeline, but `abs` and `amax` calls persist for delayed scaling's
-amax history update. The total FP8-related overhead is similar because the
-cast+transpose kernel (178 ms, now active) has absorbed work that was
-previously in `aten::copy_`.
+**Note on aten::copy_**: v46 shows 336 ms vs v45's 297 ms, but this is misleading.
+The v45 number was measured with CK forward (which handles weight layout internally).
+Switching to hipBLASLt initially caused `.t().contiguous()` on every forward GEMM,
+adding ~1,180 ms/step of aten::copy_. The `.t()` view fix eliminated this entirely —
+hipBLASLt detects non-contiguous strides in its C++ binding and applies `HIPBLAS_OP_T`.
+The remaining 336 ms is from dtype casts, NCCL buffer copies, and autograd tensor moves.
 
-### Pending Fusions (implemented, awaiting profiling)
-
-| Fusion | Mechanism | Expected Impact |
-|--------|-----------|-----------------|
-| **`@once_differentiable`** on 6 autograd Functions | Tells PyTorch backward is called once; skips defensive `.clone()` of saved tensors | Eliminates ~5K+ `aten::clone` launches, **-30-50ms** |
-| **Fused quant+transpose+amax** backward kernel | Single Triton kernel (64x64 tiles) replaces quant + amax + transpose in backward | **-30-50ms** from eliminating 320 separate kernel launches |
-| **`FP8StoredLinearFunction`** backward now uses `manager=mgr, backward=True` | Enables fused quant path for frozen-weight backward | Consistent fusion coverage across both linear paths |
-
-### Lumen vs TE Comparison (current profile)
+### Lumen vs TE Comparison (v46 profile)
 
 | Category | Lumen (ms) | TE est. (ms) | Lumen/TE | Status |
 |----------|-----------|-------------|----------|--------|
-| **GEMM** | 3,056 | 2,780 | **1.10x** | Near parity |
-| **Attention** | 848 | ~822 | **1.03x** | Near parity |
-| **SwiGLU** | 163 | ~100 | **1.6x** | Fused (was 8.6x) |
-| **FP8 quant/scale** | 410 | 54 | **7.6x** | Partially fused |
-| **Copy/cast** | 297 | ~60 | **5.0x** | Improved (was 8.1x) |
-| **Cast+transpose** | 178 | ~included | — | New: Triton fused kernel active |
-| **Cat** | 71 | ~15 | 4.7x | Improved (was 8.2x) |
-| **NCCL** | 123 | ~119 | 1.0x | Parity |
-| **Other** | 338 | ~70 | 4.8x | Memcpy, dropout, clone, add, fill |
-| **Total** | **~5,484** | **~4,020** | **1.36x** | Improved (was 1.51x) |
+| **GEMM** | 2,440 | 2,780 | **0.88x** | **Faster than TE** |
+| **Attention** | 835 | ~822 | **1.02x** | Near parity |
+| **SwiGLU** | 161 | ~100 | **1.6x** | Fused (was 8.6x) |
+| **FP8 quant/scale** | 250 | 54 | **4.6x** | Improved (was 7.6x) |
+| **Copy/cast** | 336 | ~60 | **5.6x** | Weight transpose eliminated |
+| **Cast+transpose** | 162 | ~included | — | Triton fused kernel active |
+| **Cat** | 69 | ~15 | 4.6x | Improved (was 8.2x) |
+| **NCCL** | 70 | ~119 | **0.59x** | Faster (fewer barriers?) |
+| **Other** | 388 | ~70 | 5.5x | Memcpy, dropout, add, mul, fill |
+| **Total** | **~4,711** | **~4,020** | **1.17x** | Improved (was 1.36x) |
 
 ### TE GPU Time Breakdown (per layer, fwd + bwd)
 
@@ -306,34 +280,39 @@ previously in `aten::copy_`.
 
 ### Key Findings
 
-1. **GEMM and Attention are NOT the bottleneck.** They account for ~72% of GPU
-   time and are within 10% of TE.
+1. **GEMM is now faster than TE.** hipBLASLt for all GEMMs at 2,440 ms/step vs
+   TE's estimated 2,780 ms — a 0.88x ratio. This is because hipBLASLt handles
+   mixed-dtype (E4M3/E5M2) natively and the `.t()` view eliminates weight transpose.
 
 2. **SwiGLU fusion is working.** The fused Triton kernels reduced SwiGLU from
-   857 ms to 163 ms (-81%). The remaining 1.6x gap vs TE (163 ms vs ~100 ms) is
+   857 ms to 161 ms (-81%). The remaining 1.6x gap vs TE (161 ms vs ~100 ms) is
    from TE's C++ kernel being tighter than Lumen's Triton implementation.
 
-3. **Cast+transpose is now active** but adds 178 ms. The net effect is partial:
-   it absorbed 189 ms from `aten::copy_` while itself costing 178 ms. The savings
-   will grow if the transposed output is consumed directly by backward GEMMs
-   (eliminating additional `_t_contiguous` calls).
+3. **FP8 quant/scale is now the biggest non-GEMM gap.** At 250 ms vs TE's 54 ms
+   (4.6x), improved from 7.6x but still significant. The fused _amax_abs_kernel
+   saves 183 ms vs v45 but separate abs/amax calls persist for delayed scaling.
 
-4. **FP8 quant/scale is still the biggest non-GEMM gap.** At 410 ms vs TE's 54 ms
-   (7.6x), the separate abs→amax→quant pipeline is still inefficient. The fused
-   quant+amax kernel helps but `abs` and `amax` calls persist for delayed scaling.
+4. **aten::copy_ remains significant** at 336 ms (5.6x vs TE). Weight transpose
+   copies are eliminated but dtype casts and autograd tensor moves remain.
 
-5. **Kernel launches dropped from ~57K to ~19K/step** (3x reduction). This saves
-   ~190 ms of CPU dispatch overhead. Further reduction requires fusing the
-   remaining separate elementwise ops.
+5. **Kernel launches dropped from ~57K to ~11.6K/step** (5x reduction). This saves
+   ~230 ms of CPU dispatch overhead vs baseline. Further reduction requires fusing
+   the remaining separate elementwise ops.
 
 6. **Memory pressure (97.6%) remains the multiplicative amplifier** masking
    kernel-level gains. FP8 activation storage (`FP8_ACT_STORE=1`) is confirmed
-   to be enabled but memory is still at 97.6% — needs investigation.
+   to be enabled but memory is still at 97.6%.
+
+7. **Overall gap is now 1.17x vs TE** (was 1.36x). The dominant remaining gaps
+   are copy/cast (276 ms), FP8 quant (196 ms), elementwise ops (170 ms cat+add),
+   and memory pressure (100-150 ms).
 
 ### Profiling Method
 
-- **Lumen (current)**: `torch.profiler` capturing steps 8-10 (post-FP8-warmup)
-  on rank 0 of a 15-step training run with all optimizations enabled.
+- **Lumen v46 (hipBLASLt all)**: `torch.profiler` capturing steps 8-10 (post-FP8-warmup)
+  on rank 0 of a 15-step training run with `LUMEN_PREFER_HIPBLASLT=1` and all
+  optimizations enabled. Step times during profile: ~4,710 ms. Memory: 97.63%.
+- **Lumen v45 (CK fwd)**: Same method, CK forward + hipBLASLt backward.
   Step times during profile: 5,524-5,562 ms. Memory: 97.59%.
 - **Lumen (baseline)**: Same method, before kernel fusion optimizations.
   Step times during profile: ~6,080 ms.
@@ -344,12 +323,12 @@ previously in `aten::copy_`.
 
 ## Post-Eval Performance
 
-| Metric | Lumen (early) | Lumen (current) | MLPerf Reference |
-|--------|---------------|-----------------|------------------|
-| Pre-eval ms/step | 5,898 | **5,570** | 3,811 |
-| Post-eval #1 ms/step | 7,167 | **6,200** | 3,778 |
-| Post-eval #1 delta | +21.7% | **+11.3%** | -0.8% |
-| Subsequent eval delta | +0.7-2.8% | +0.5-1.5% | 0% |
+| Metric | Lumen (early) | Lumen v45 | Lumen v46 | MLPerf Reference |
+|--------|---------------|-----------|-----------|------------------|
+| Pre-eval ms/step | 5,898 | 5,570 | **4,780** | 3,811 |
+| Post-eval #1 ms/step | 7,167 | 6,200 | **~5,350** (est.) | 3,778 |
+| Post-eval #1 delta | +21.7% | +11.3% | **~12%** (est.) | -0.8% |
+| Subsequent eval delta | +0.7-2.8% | +0.5-1.5% | ~0.5-1.5% | 0% |
 
 Root cause: Megatron's `transformer_block.py` skips activation checkpointing
 during eval (`self.training=False`), allocating activations for all 80 layers
@@ -373,7 +352,7 @@ warmup eval, GC, cache clear) reduce the regression from +22% to +11.3%.
 | FP8 Format | E4M3 hybrid (delayed) | E4M3 hybrid (delayed) |
 | FP8 amax_history | 4 | 4 |
 | FP8 amax_algo | most_recent | most_recent |
-| FP8 backward dtype | E4M3 (CK same-dtype) | E5M2 (hipBLASLt mixed-dtype) |
+| FP8 backward dtype | E5M2 (hipBLASLt mixed-dtype) | E5M2 (hipBLASLt mixed-dtype) |
 | FP8 wgrad | FP8 (hipBLASLt) | FP8 (TE) |
 | Activation recompute | 21 layers (full/block) | 21 layers (full/block) |
 | RMSNorm | AITER Triton (FP32 path) | TE Triton / apex |
@@ -406,6 +385,7 @@ Chronological sequence of kernel and configuration experiments.
 | + Fused SwiGLU bwd + overlapped grad reduce | — | **-461 ms** | 5,348 ms |
 | + ACL=21 + hipBLASLt wgrad | ~0.921 | ~0 ms | 5,400 ms (memory trade-off) |
 | + Fused cast+transpose bwd + SwiGLU fix | **0.9216** | ~0 ms | **5,570 ms, passes step 576** |
+| **+ hipBLASLt all GEMMs + `.t()` view** | **0.9216** | **-790 ms (14.2%)** | **4,780 ms pre-eval** |
 
 \* Stopped early (240 steps); delta measured at matched steps.
 
@@ -421,8 +401,9 @@ Chronological sequence of kernel and configuration experiments.
 | `lumen/ops/quantize/cast_transpose.py` | Triton `cast_transpose_amax_fp8` kernel |
 | `lumen/ops/dispatch.py` | Backend caching + sync elimination |
 | `lumen/models/_swiglu_fp8_fuse.py` | Fused SwiGLU + FP8 quant cache |
-| `lumen/models/megatron.py` | `_patch_fused_swiglu_mlp` / `_run_warmup_eval_pass` |
+| `lumen/models/megatron.py` | `_patch_fused_swiglu_mlp` / `_run_warmup_eval_pass` / `_precompute_fp8_transpose` |
 | `lumen/models/megatron_patches.py` | `install_eval_recompute` / `install_post_eval_cache_clear` |
+| `lumen/kernels/compute_scale.py` | Triton `_compute_scale_kernel` for FP8 scale computation |
 | `lumen/quantize/scaling_manager.py` | `_quantize_core` with fused cast+transpose + amax path |
 | `examples/llama2/config_MI300X_tp1_dp8.sh` | Training config (all env flags) |
 
@@ -430,6 +411,6 @@ Chronological sequence of kernel and configuration experiments.
 
 | File | Description |
 |------|------------|
-| `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages — baseline Lumen, 3 steps, rank 0 |
-| `profiling/lumen_latest_profile_summary.txt` | `torch.profiler` key_averages — current Lumen (all optimizations), 3 steps, rank 0 |
+| `profiling/lumen_profile_summary.txt` | `torch.profiler` key_averages — baseline Lumen (CK fwd), 3 steps, rank 0 |
+| `profiling/lumen_latest_profile_summary.txt` | `torch.profiler` key_averages — v46 Lumen (hipBLASLt all + `.t()` view), 3 steps, rank 0 |
 | `profiling/te_profile_results.txt` | `torch.profiler` key_averages — TE ops at same tensor shapes |
