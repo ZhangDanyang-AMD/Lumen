@@ -393,12 +393,15 @@ def _gemm_wgrad_hipblas(grad_fp8, input_fp8, scale_grad, scale_input):
     Computes ``hipb_mm(grad^T, input)`` where grad is ``(M, N_out)`` and
     input is ``(M, K_in)``, producing ``(N_out, K_in)`` = weight shape.
 
+    hipBLASLt's C++ kernel detects non-contiguous strides from ``.t()``
+    and applies ``HIPBLAS_OP_T`` internally — no ``.contiguous()`` needed.
+
     Supports mixed-dtype: grad can be E5M2, input can be E4M3 (matching TE).
     """
     from aiter.ops.gradlib import hipb_mm
 
     ensure_hipblaslt_ready()
-    g_t = grad_fp8.t().contiguous()
+    g_t = grad_fp8.t()
     sg = (
         scale_grad.float().reshape(1, 1)
         if isinstance(scale_grad, torch.Tensor)

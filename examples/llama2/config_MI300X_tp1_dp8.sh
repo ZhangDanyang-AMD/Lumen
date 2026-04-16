@@ -1,7 +1,9 @@
 #!/bin/bash
-# TP=1 DP=8 config — fully aligned with MLPerf MI300X reference.
+# TP=1 DP=8 config (v47) — fully aligned with MLPerf MI300X reference.
 # NousResearch/Llama-2-70b-hf, FP8 HYBRID + LoRA (attention-only), seed=1234.
 # Self-contained (does NOT source base config).
+#
+# v47 results: 4,730 ms/step pre-eval, val_loss 0.9223, 1.19x vs local MLPerf ref (3,967 ms).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

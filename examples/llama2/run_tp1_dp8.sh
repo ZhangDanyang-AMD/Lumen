@@ -1,10 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# MLPerf-aligned Llama2-70B LoRA SFT — 8x MI300X
+# MLPerf-aligned Llama2-70B LoRA SFT — 8x MI300X (v47)
 #
 # All speed and convergence optimizations enabled:
-#   - Fused quant+amax, quant+scale, norm+quant, SwiGLU, cast+transpose
+#   - hipBLASLt for all GEMMs (fwd+bwd) with .t() view (no weight transpose copy)
+#   - Wgrad .t() view (eliminates grad_fp8.t().contiguous())
+#   - Fused quant+amax, quant+scale, norm+quant, cast+transpose
+#   - Fused SwiGLU fwd/bwd with fused amax (fused_amax_abs in FP8 path)
 #   - Post-eval allocator fixes (recompute, warmup, GC, cache clear)
 #   - Backend caching + sync elimination
 #   - FP8 weight gradients (hipBLASLt)
@@ -13,16 +16,19 @@ set -euo pipefail
 #
 # AITER: lumen/triton_kernels branch (cfaeaad3b) from ZhangDanyang-AMD/aiter.git
 #   - Mixed-dtype hipBLASLt GEMM (E5M2 grad x E4M3 weight)
-#   - Triton fast_transpose_2d (replaces aten::copy_ transpose)
 #   - Triton fused SwiGLU fwd/bwd kernels
-#   - Contiguity checks in quant kernels
+#   - Triton fused cast+transpose+amax kernel
+#   - CK FMHA v3 attention (fwd+bwd)
 #
-# Expected results:
-#   Pre-eval step time:  ~5,610 ms  (power/thermal dependent)
-#   Post-eval step time: ~6,190 ms  (+10.4% allocator fragmentation)
-#   Memory utilization:  97.5%
-#   Best val_loss:       ~0.920     (passes MLPerf target 0.925)
+# Expected results (v47):
+#   Pre-eval step time:  ~4,730 ms  (power/thermal dependent)
+#   Post-eval step time: ~5,550 ms  (+17% allocator fragmentation)
+#   Memory utilization:  98.7%
+#   Best val_loss:       ~0.922     (passes MLPerf target 0.925)
 #   Convergence step:    ~576
+#
+# Local MLPerf reference (same machine, SEED=1234):
+#   Step time: 3,967 ms | Speed ratio: 1.19x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -33,11 +33,12 @@ def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) 
 
     from aiter.ops.triton.quant.fused_fp8_quant import fused_silu_mul_fp8_per_tensor_static_quant
 
+    from lumen.ops.quantize.quant_amax_fused import fused_amax_abs
     from lumen.quantize.config import _get_float8_e4m3
 
     fp8_dtype = _get_float8_e4m3()
     fp8_max = torch.finfo(fp8_dtype).max
-    amax = bf16_output.detach().abs().amax().clamp(min=1e-12)
+    amax = fused_amax_abs(bf16_output.detach()).clamp(min=1e-12)
     scale = (amax / fp8_max).to(dtype=torch.float32, device=swiglu_input.device).reshape(1)
 
     inp_2d = swiglu_input.reshape(-1, swiglu_input.shape[-1]).contiguous()

@@ -22,8 +22,8 @@ The training script (`finetune_llama2.py`) selects the backend via `--backend me
 Llama2-70B LoRA SFT with FP8 quantization, TP=1 DP=8 parallelism, aligned with the
 AMD MLPerf v5.1 `MI300X_EPYC_9575F_pytorch_llama2_70b` reference submission.
 
-**Lumen passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9202
-and pre-eval step time of **4,780 ms** (1.25x vs MLPerf reference).
+**Lumen passes the MLPerf target (val_loss < 0.925)** with best val_loss = 0.9223
+and pre-eval step time of **4,730 ms** (1.19x vs local MLPerf reference at 3,967 ms).
 
 ### Prerequisites
 
@@ -64,10 +64,12 @@ bash examples/llama2/run_tp1_dp8.sh
 The script applies system tunables (`runtime_tunables.sh`), launches a Docker container
 with all required environment variables, applies Megatron patches, and starts training.
 
-All speed and convergence optimizations are enabled by default:
+All speed and convergence optimizations are enabled by default (v47):
+- hipBLASLt for all GEMMs with `.t()` view (`LUMEN_PREFER_HIPBLASLT=1`)
+- Fused quant+amax, quant+scale, norm+quant, cast+transpose kernels
+- Fused SwiGLU fwd/bwd with fused amax (`LUMEN_FUSED_SWIGLU=1`)
 - Epoch-level data shuffling (`LUMEN_SHUFFLE_TRAIN=1`)
 - Aligned eval schedule every 192 steps (`LUMEN_EVAL_ALIGNED=1`)
-- Fused quant+amax, quant+scale, norm+quant, SwiGLU, cast+transpose kernels
 - Post-eval allocator fixes (eval recompute, warmup GC, cache clear)
 - Backend caching + sync elimination (`LUMEN_SKIP_BACKEND_SYNC=1`)
 - FP8 weight gradients via hipBLASLt (`FP8_WGRAD=1`)
@@ -145,16 +147,15 @@ and skip themselves if already applied.
 
 | Optimization | Env Var | Measured Savings |
 |--------------|---------|-----------------|
+| hipBLASLt for all GEMMs | `LUMEN_PREFER_HIPBLASLT=1` | **-790 ms/step (14.2%)** — fwd+bwd; `.t()` view eliminates weight transpose |
 | Fused quant+amax | `LUMEN_FUSED_QUANT_AMAX=1` | -377 ms/step (6.1%) |
 | Fused quant+scale | `LUMEN_FUSED_QUANT_SCALE=1` | -206 ms/step (2.8%) |
 | Post-eval allocator fixes | `LUMEN_EVAL_RECOMPUTE=1`, `LUMEN_POST_EVAL_CACHE_CLEAR=1`, etc. | -11.1% total training time |
 | Backend caching + sync elimination | `LUMEN_SKIP_BACKEND_SYNC=1` | ~1-2% step time |
+| Fused SwiGLU fwd+bwd + fused amax | `LUMEN_FUSED_SWIGLU=1` | -696 ms/step from baseline; fused amax saves ~30-80 ms (v47) |
 | Fused RMSNorm + FP8 quant | `LUMEN_FUSED_NORM_QUANT=1` | ~0.2% step time |
-| Fused SwiGLU fwd+bwd (Triton) | `LUMEN_FUSED_SWIGLU=1` | Single kernel vs 6-8 launches |
-| Fast FP8 transpose (Triton) | `LUMEN_FUSED_CAST_TRANSPOSE_V2=1` | Replaces `aten::copy_` (5.4% of GPU time) |
-| Fused cast+transpose in backward | `LUMEN_FUSED_CAST_TRANSPOSE=1` | ~11 ms/step |
-| hipBLASLt for all GEMMs | `LUMEN_PREFER_HIPBLASLT=1` | hipBLASLt fwd+bwd; `.t()` view eliminates weight transpose |
-| Mixed-dtype hipBLASLt GEMM | AITER `lumen/triton_kernels` | E5M2 grad x E4M3 weight — no transpose needed |
+| Fused cast+transpose in backward | `LUMEN_FUSED_CAST_TRANSPOSE=1` | ~11 ms/step (consumed by hipBLASLt wgrad) |
+| Wgrad `.t()` view (v47) | Code-level | ~50 ms/step — eliminates grad transpose copy |
 | SwiGLU FP8 cache | `LUMEN_FUSED_SWIGLU_QUANT=1` | Saves redundant quantization |
 
 ### Data shuffling
@@ -169,26 +170,29 @@ contain adjacent packed sequences that are highly correlated, degrading early co
 | Setting | Best val\_loss | Passes MLPerf? |
 |---------|---------------|----------------|
 | `LUMEN_SHUFFLE_TRAIN=0` | 0.9371 | No |
-| `LUMEN_SHUFFLE_TRAIN=1` | **0.9216** | **Yes** |
+| `LUMEN_SHUFFLE_TRAIN=1` | **0.9223** | **Yes** |
 
 Implementation: `lumen/models/llama2/dataset.py` — `LLaMA2SFTDataset._build_samples_mapping()`
 creates a permuted index array and remaps `__getitem__` through it.
 
 ### Expected results
 
-With the default configuration (all optimizations enabled):
+With the default configuration (all v47 optimizations enabled):
 
-| Metric | Value |
-|--------|-------|
-| Initial loss (step 6, after warmup) | ~4.1 |
-| Loss at step 100 | ~1.3 |
-| Best validation loss | **0.9202** (step 960) |
-| MLPerf target | 0.925 |
-| Pre-eval step time | ~4,780 ms |
-| Post-eval step time | ~5,350 ms (est.) |
-| Effective avg step time | ~5,250 ms |
-| Peak GPU memory per device | ~185 GB / 192 GB (97.5%) |
-| Stability | 0 NaN / 0 skipped |
+| Metric | Lumen v47 | MLPerf Ref (local) |
+|--------|-----------|-------------------|
+| Initial loss (step 6, after warmup) | ~4.1 | — |
+| Loss at step 100 | ~1.3 | — |
+| Best validation loss | **0.9223** (step 576) | 0.9243 (step 384) |
+| MLPerf target | 0.925 | 0.925 |
+| Pre-eval step time | **4,730 ms** | **3,967 ms** |
+| Post-eval step time | ~5,550 ms | ~4,000 ms |
+| Speed ratio (Lumen / MLPerf) | **1.19x** | 1.0x |
+| Peak GPU memory per device | ~189 GB / 192 GB (98.7%) | ~157 GB (~82%) |
+| Stability | 0 NaN / 0 skipped | 0 NaN / 0 skipped |
+
+**Local MLPerf reference**: `rocm/amd-mlperf:llama2_70b_training_5.1` Docker, `SEED=1234`,
+same MI300X machine.
 
 Step times are sensitive to GPU thermal state and power throttling. On MI300X at
 750W TDP, sustained training reaches thermal equilibrium at 88-98C junction temperature,
@@ -199,18 +203,20 @@ comparison against the AMD MLPerf reference.
 
 ### MLPerf alignment status
 
-| Parameter | Lumen | MLPerf Reference | Status |
-|-----------|-------|-----------------|--------|
+| Parameter | Lumen v47 | MLPerf Reference (local) | Status |
+|-----------|----------|--------------------------|--------|
 | Learning Rate | 4e-4 | 4e-4 | Matched |
 | LR Warmup | 0 | 0 | Matched |
 | LR Schedule | Cosine, 1024 steps | Cosine, 1024 steps | Matched |
 | LoRA rank/alpha | 16/32 | 16/32 | Matched |
-| FP8 Format | E4M3 hybrid | E4M3 hybrid | Matched |
+| FP8 Format | E4M3 hybrid (delayed) | E4M3 hybrid (delayed) | Matched |
 | Data Shuffling | Epoch-level | Epoch-level | Matched |
 | Activation Recompute | 21 layers (full/block) | 21 layers | Matched |
-| FP8 Engine | AITER `lumen/triton_kernels` (hipBLASLt + Triton) | TransformerEngine | Different (kernel impl) |
-| Attention | AITER CK FMHA v3 | TE fused CK v3 | Different (same CK kernel) |
-| RMSNorm | AITER Triton | TE Triton / apex | Different (higher precision) |
+| Seed | 1234 | 1234 | Matched |
+| FP8 Engine | AITER (hipBLASLt + Triton) | TransformerEngine | Different (kernel impl) |
+| Attention | AITER CK FMHA v3 | TE CK fused attn v3 | Different (same CK kernel) |
+| RMSNorm | AITER Triton | TE Triton / apex | Different |
+| Step time | **4,730 ms** | **3,967 ms** | 1.19x gap |
 
 ### Troubleshooting
 
