@@ -10,3 +10,4 @@ build/
 outputs/2026-*/
 tunableop_results*.csv
 data/
+*.parquet
