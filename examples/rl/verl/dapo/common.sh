@@ -6,9 +6,9 @@ set -euo pipefail
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 MODEL_PATH="${MODEL_PATH:?MODEL_PATH must be set}"
-TRAIN_FILE="${TRAIN_FILE:-/workspace/data/dapo-math-17k.parquet}"
-TEST_FILE="${TEST_FILE:-/workspace/data/aime-2024.parquet}"
-CKPTS_DIR="${CKPTS_DIR:-/workspace/ckpts/${PROJECT_NAME}/${EXP_NAME}}"
+TRAIN_FILE="${TRAIN_FILE:-/dev/shm/data/dapo-math-17k.parquet}"
+TEST_FILE="${TEST_FILE:-/dev/shm/data/aime-2024.parquet}"
+CKPTS_DIR="${CKPTS_DIR:-/root/ckpts/${PROJECT_NAME}/${EXP_NAME}}"
 
 # ─── Hardware ─────────────────────────────────────────────────────────────────
 NUM_GPUS="${NUM_GPUS:-8}"
@@ -43,14 +43,36 @@ ROLLOUT_QUANTIZATION="${ROLLOUT_QUANTIZATION:-null}"
 # ─── Lumen FP8 training ──────────────────────────────────────────────────────
 export FP8_PARAM_MANAGER="${FP8_PARAM_MANAGER:-0}"
 export LUMEN_FP8="${LUMEN_FP8:-0}"
+export LUMEN_NORM="${LUMEN_NORM:-0}"
+export LUMEN_FP8_ACTIVATION_STORE="${LUMEN_FP8_ACTIVATION_STORE:-0}"
+export LUMEN_FP8_PARAM_GATHER="${LUMEN_FP8_PARAM_GATHER:-0}"
+
+# ─── Lumen fused kernel optimizations ────────────────────────────────────────
+# Auto-enable when LUMEN_FP8=1 unless explicitly overridden.
+if [ "${LUMEN_FP8}" = "1" ]; then
+    export LUMEN_FUSED_QUANT_AMAX="${LUMEN_FUSED_QUANT_AMAX:-1}"
+    export LUMEN_FUSED_CAST_TRANSPOSE="${LUMEN_FUSED_CAST_TRANSPOSE:-1}"
+    export LUMEN_FUSED_QUANT_SCALE="${LUMEN_FUSED_QUANT_SCALE:-1}"
+    export LUMEN_TRANSPOSE_CACHE="${LUMEN_TRANSPOSE_CACHE:-1}"
+else
+    export LUMEN_FUSED_QUANT_AMAX="${LUMEN_FUSED_QUANT_AMAX:-0}"
+    export LUMEN_FUSED_CAST_TRANSPOSE="${LUMEN_FUSED_CAST_TRANSPOSE:-0}"
+    export LUMEN_FUSED_QUANT_SCALE="${LUMEN_FUSED_QUANT_SCALE:-0}"
+fi
 
 # ─── Performance ──────────────────────────────────────────────────────────────
 OFFLOAD="${OFFLOAD:-true}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.5}"
 SP_SIZE="${SP_SIZE:-1}"
-TOTAL_STEPS="${TOTAL_STEPS:-500}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-256}"
+TOTAL_STEPS="${TOTAL_STEPS:-275}"
 TEST_FREQ="${TEST_FREQ:-5}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
+PPO_MICRO_BSZ="${PPO_MICRO_BSZ:-1}"
+LOG_PROB_MICRO_BSZ="${LOG_PROB_MICRO_BSZ:-1}"
+USE_DYNAMIC_BSZ="${USE_DYNAMIC_BSZ:-True}"
+PPO_MAX_TOKEN_LEN="${PPO_MAX_TOKEN_LEN:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}"
+LOG_PROB_MAX_TOKEN_LEN="${LOG_PROB_MAX_TOKEN_LEN:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}"
 
 # ─── Environment ──────────────────────────────────────────────────────────────
 export RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
@@ -60,7 +82,9 @@ export VLLM_USE_V1=1
 
 # ─── Entry point selection ────────────────────────────────────────────────────
 VERL_ENTRY="verl.trainer.main_ppo"
-if [ "${FP8_PARAM_MANAGER}" = "1" ] || [ "${LUMEN_FP8}" = "1" ]; then
+if [ "${FP8_PARAM_MANAGER}" = "1" ] || [ "${LUMEN_FP8}" = "1" ] \
+   || [ "${LUMEN_NORM}" = "1" ] || [ "${LUMEN_FP8_ACTIVATION_STORE}" = "1" ] \
+   || [ "${LUMEN_FP8_PARAM_GATHER}" = "1" ]; then
     VERL_ENTRY="lumen.rl.verl.verl_entry"
 fi
 
@@ -74,6 +98,11 @@ echo "║  Train BSZ:       ${TRAIN_BSZ} × n=${N_RESP}"
 echo "║  Rollout quant:   ${ROLLOUT_QUANTIZATION}"
 echo "║  Rollout IS:      ${ROLLOUT_IS} (threshold=${ROLLOUT_IS_THRESHOLD})"
 echo "║  FP8 PM:          ${FP8_PARAM_MANAGER}"
+echo "║  LUMEN FP8:       ${LUMEN_FP8}"
+echo "║  LUMEN Norm:      ${LUMEN_NORM}"
+echo "║  FP8 Act Store:   ${LUMEN_FP8_ACTIVATION_STORE}"
+echo "║  Fused QA:        ${LUMEN_FUSED_QUANT_AMAX:-0}"
+echo "║  Fused CT:        ${LUMEN_FUSED_CAST_TRANSPOSE:-0}"
 echo "║  Entry:           ${VERL_ENTRY}"
 echo "║  Steps:           ${TOTAL_STEPS}"
 echo "╚══════════════════════════════════════════════════════════════╝"
@@ -83,7 +112,7 @@ echo ""
 launch_training() {
     local QUANT_OVERRIDE=""
     if [ "${ROLLOUT_QUANTIZATION}" != "null" ]; then
-        QUANT_OVERRIDE="+actor_rollout_ref.rollout.quantization=${ROLLOUT_QUANTIZATION}"
+        QUANT_OVERRIDE="actor_rollout_ref.rollout.quantization=${ROLLOUT_QUANTIZATION}"
     fi
 
     python3 -m ${VERL_ENTRY} \
@@ -96,7 +125,7 @@ launch_training() {
         data.max_prompt_length=${MAX_PROMPT_LENGTH} \
         data.max_response_length=${MAX_RESPONSE_LENGTH} \
         data.train_batch_size=${TRAIN_BSZ} \
-        data.gen_batch_size=${GEN_BSZ} \
+        +data.gen_batch_size=${GEN_BSZ} \
         \
         algorithm.adv_estimator=${ADV_ESTIMATOR} \
         algorithm.use_kl_in_reward=False \
@@ -111,7 +140,9 @@ launch_training() {
         actor_rollout_ref.actor.clip_ratio_low=${CLIP_RATIO_LOW} \
         actor_rollout_ref.actor.clip_ratio_high=${CLIP_RATIO_HIGH} \
         actor_rollout_ref.actor.clip_ratio_c=10.0 \
-        actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
+        actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=${PPO_MICRO_BSZ} \
+        actor_rollout_ref.actor.use_dynamic_bsz=${USE_DYNAMIC_BSZ} \
+        actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN} \
         actor_rollout_ref.actor.ppo_mini_batch_size=${MINI_BSZ} \
         actor_rollout_ref.actor.loss_agg_mode=${LOSS_AGG_MODE} \
         actor_rollout_ref.actor.entropy_coeff=0 \
@@ -134,7 +165,7 @@ launch_training() {
         actor_rollout_ref.rollout.tensor_model_parallel_size=${ROLLOUT_TP} \
         actor_rollout_ref.rollout.enable_chunked_prefill=True \
         actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
-        actor_rollout_ref.rollout.max_num_seqs=256 \
+        actor_rollout_ref.rollout.max_num_seqs=${MAX_NUM_SEQS} \
         actor_rollout_ref.rollout.temperature=1.0 \
         actor_rollout_ref.rollout.top_p=1.0 \
         actor_rollout_ref.rollout.top_k=-1 \
@@ -145,11 +176,16 @@ launch_training() {
         actor_rollout_ref.rollout.val_kwargs.do_sample=True \
         actor_rollout_ref.rollout.val_kwargs.n=1 \
         actor_rollout_ref.rollout.enforce_eager=True \
+        actor_rollout_ref.rollout.free_cache_engine=${FREE_CACHE_ENGINE:-True} \
         \
-        actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
+        actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BSZ} \
+        actor_rollout_ref.ref.log_prob_use_dynamic_bsz=${USE_DYNAMIC_BSZ} \
+        actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${LOG_PROB_MAX_TOKEN_LEN} \
         actor_rollout_ref.ref.fsdp_config.param_offload=${OFFLOAD} \
         actor_rollout_ref.ref.ulysses_sequence_parallel_size=${SP_SIZE} \
-        actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
+        actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BSZ} \
+        actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=${USE_DYNAMIC_BSZ} \
+        actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${LOG_PROB_MAX_TOKEN_LEN} \
         \
         reward_model.reward_manager=dapo \
         +reward_model.reward_kwargs.overlong_buffer_cfg.enable=${OVERLONG_BUFFER_ENABLE} \
@@ -171,7 +207,7 @@ launch_training() {
         trainer.default_local_dir="${CKPTS_DIR}" \
         trainer.resume_mode=auto \
         trainer.log_val_generations=1 \
-        trainer.max_actor_ckpt_to_keep=3 \
+        trainer.max_actor_ckpt_to_keep=2 \
         ${QUANT_OVERRIDE} \
         ${EXTRA_OVERRIDES:-}
 }
