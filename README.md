@@ -1,6 +1,6 @@
 # Lumen
 
-A lightweight, AMD-native quantized training framework for large language models.
+A lightweight, AMD-native quantized training engine for large language models.
 
 Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication.
 
