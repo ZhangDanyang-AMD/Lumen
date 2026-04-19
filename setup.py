@@ -24,7 +24,7 @@ except ImportError:
 setup(
     name="lumen",
     version="0.3.0",
-    description="Lightweight AMD-native quantized training framework (FP8/MXFP8/FP4) with integrated attention kernels",
+    description="Lightweight AMD-native quantized training engine (FP8/MXFP8/FP4) with integrated attention kernels",
     long_description=open(os.path.join(this_dir, "README.md")).read(),
     long_description_content_type="text/markdown",
     packages=find_packages(exclude=["tests*"]),
