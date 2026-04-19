@@ -1,6 +1,6 @@
 # Transformer Light
 
-A lightweight, AMD-native quantized training framework for large language models.
+A lightweight, AMD-native quantized training engine for large language models.
 
 Transformer Light manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication. It supports **FP8 (E4M3/E5M2)**, **MXFP8**, and **FP4** formats with a unified `QuantConfig` interface. It also integrates high-performance **FP8/MXFP8 attention kernels** (Triton + CK backends) directly, eliminating the dependency on Transformer Engine for end-to-end finetuning.
 
@@ -66,8 +66,8 @@ quant.enable(model, config=config)
 quant.enable(model, format="fp8_e4m3", scaling="delayed")
 
 # Training loop is unchanged
-output = model(input)       # framework handles quantized dispatch
-loss.backward()             # framework handles quantized gradients
+output = model(input)       # engine handles quantized dispatch
+loss.backward()             # engine handles quantized gradients
 optimizer.step()            # stays FP32 (or quantized with opt-in)
 
 # Communication is automatic
