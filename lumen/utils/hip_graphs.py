@@ -278,6 +278,8 @@ class LumenGraphedLayer:
                     out = out[0]
                 grad = torch.ones_like(out)
                 out.backward(grad)
+                for p in layer.parameters():
+                    p.grad = None
                 self._static_input.grad = None
         torch.cuda.current_stream(device).wait_stream(s)
 
@@ -299,6 +301,9 @@ class LumenGraphedLayer:
             if self._static_input.grad is not None
             else torch.zeros_like(self._static_input)
         )
+        for p in layer.parameters():
+            p.grad = None
+        self._static_input.grad = None
 
     def __call__(self, hidden_states, **kwargs):
         if not self._enabled:
@@ -363,19 +368,33 @@ def capture_lumen_graphs(
 
     torch.cuda.synchronize()
 
+    sample_attn_mask = torch.ones(
+        (1, 1, seq_len, seq_len),
+        dtype=torch.bool,
+        device=device,
+    ).tril()
+
     captured = 0
     for l_no, layer in enumerate(layers):
-        sample_input = torch.ones(
+        sample_input = torch.randn(
             (seq_len, micro_batch_size, hidden_size),
             dtype=torch.bfloat16,
             requires_grad=True,
             device=device,
         )
 
+        sample_kwargs = {
+            "attention_mask": sample_attn_mask,
+        }
+
+        if hasattr(layer, "self_attention") and hasattr(layer.self_attention, "config"):
+            layer.self_attention.config.test_mode = False
+
         try:
             graphed = LumenGraphedLayer(
                 layer,
                 sample_input,
+                sample_kwargs=sample_kwargs,
                 num_warmup=num_warmup,
             )
             layer._original_forward = layer.forward

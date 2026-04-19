@@ -524,6 +524,213 @@ def _post_eval_rewarm():
     torch.cuda.synchronize()
 
 
+# ── 10. Fused residual-add + RMSNorm + optional Norm+Quant bypass ───────────
+
+_FUSED_RESIDUAL_NORM = os.environ.get("LUMEN_FUSED_RESIDUAL_NORM", "0") == "1"
+_FUSED_NQG = os.environ.get("LUMEN_FUSED_NORM_QUANT_GEMM", "0") == "1"
+
+
+def install_fused_residual_norm():
+    """Replace ``TransformerLayer._forward_attention`` and ``_forward_mlp``
+    with Lumen-optimised versions that:
+
+    1. **Deferred BDA** (``LUMEN_FUSED_RESIDUAL_NORM=1``): When
+       ``hidden_dropout=0`` and cross-attention is ``IdentityOp``, defers the
+       self-attention BDA add to ``_forward_mlp`` and fuses it with RMSNorm
+       using ``lumen.ops.fused_residual_norm``.
+
+    2. **Norm+Quant bypass** (``LUMEN_FUSED_NORM_QUANT_GEMM=1``): Before each
+       layernorm call, attempts to fuse RMSNorm + FP8 quantization via
+       ``lumen.ops.fused_norm_quant.fused_norm_quant_for_linear``, passing the
+       pre-quantized FP8 activation to the downstream linear via thread-local
+       to skip ``quantize_input()``.
+
+    Both optimisations are independent and can be enabled separately.
+    """
+    if not _FUSED_RESIDUAL_NORM and not _FUSED_NQG:
+        return
+
+    try:
+        from megatron.core.transformer import transformer_layer as _tl_mod
+    except ImportError:
+        return
+
+    if getattr(_tl_mod, "_lumen_fused_residual_norm_patched", False):
+        return
+
+    from megatron.core.transformer.identity_op import IdentityFuncOp, IdentityOp
+
+    _OrigTL = _tl_mod.TransformerLayer
+    _orig_init = _OrigTL.__init__
+    _orig_fwd_attn = _OrigTL._forward_attention
+
+    def _try_nqg(hidden_states, norm_module, linear_module):
+        """Try fused norm+quant. Returns (norm_out, True) or (None, False)."""
+        if not _FUSED_NQG:
+            return None, False
+        from lumen.ops.fused_norm_quant import fused_norm_quant_for_linear
+
+        return fused_norm_quant_for_linear(hidden_states, norm_module, linear_module)
+
+    def _patched_init(self, *args, **kwargs):
+        _orig_init(self, *args, **kwargs)
+        self._lumen_can_fuse_bda_norm = (
+            _FUSED_RESIDUAL_NORM
+            and self.hidden_dropout == 0.0
+            and isinstance(self.cross_attention, IdentityOp)
+            and isinstance(self.cross_attn_bda, IdentityFuncOp)
+        )
+        self._lumen_deferred_bda = None
+
+    def _do_input_layernorm(self, hidden_states):
+        """input_layernorm with optional NQG fusion."""
+        if not self.recompute_input_layernorm:
+            _nqg_linear = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
+            if _nqg_linear is not None:
+                _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.input_layernorm, _nqg_linear)
+                if _nqg_ok:
+                    return _nqg_out
+
+        if self.recompute_input_layernorm:
+            from megatron.core import tensor_parallel
+
+            self.input_layernorm_checkpoint = tensor_parallel.CheckpointWithoutOutput()
+            return self.input_layernorm_checkpoint.checkpoint(self.input_layernorm, hidden_states)
+        return self.input_layernorm(hidden_states)
+
+    def _do_pre_mlp_layernorm(self, hidden_states):
+        """pre_mlp_layernorm with optional NQG fusion."""
+        if not self.recompute_pre_mlp_layernorm:
+            _nqg_fc1 = getattr(getattr(self, "mlp", None), "linear_fc1", None)
+            if _nqg_fc1 is not None:
+                _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.pre_mlp_layernorm, _nqg_fc1)
+                if _nqg_ok:
+                    return _nqg_out
+
+        if self.recompute_pre_mlp_layernorm:
+            from megatron.core import tensor_parallel
+
+            self.pre_mlp_norm_checkpoint = tensor_parallel.CheckpointWithoutOutput()
+            return self.pre_mlp_norm_checkpoint.checkpoint(self.pre_mlp_layernorm, hidden_states)
+        return self.pre_mlp_layernorm(hidden_states)
+
+    def _patched_fwd_attn(self, hidden_states, *args, **kwargs):
+        _sa_kwargs = {k: v for k, v in kwargs.items() if k not in ("context", "context_mask")}
+
+        if self._lumen_can_fuse_bda_norm and not self.recompute_pre_mlp_layernorm:
+            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
+
+            residual = hidden_states
+            input_layernorm_output = _do_input_layernorm(self, hidden_states)
+
+            nvtx_range_push(suffix="self_attention")
+            attention_output_with_bias = self.self_attention(
+                input_layernorm_output,
+                *args,
+                **_sa_kwargs,
+            )
+            nvtx_range_pop(suffix="self_attention")
+
+            if self.recompute_input_layernorm:
+                self.input_layernorm_checkpoint.discard_output_and_register_recompute(attention_output_with_bias[0])
+
+            nvtx_range_push(suffix="self_attn_bda")
+            self._lumen_deferred_bda = (attention_output_with_bias, residual)
+            x, bias = attention_output_with_bias
+            hidden_states = (x + bias) if bias is not None else x
+            nvtx_range_pop(suffix="self_attn_bda")
+
+            residual = hidden_states
+            pre_cross_attn_layernorm_output = self.pre_cross_attn_layernorm(hidden_states)
+            attention_output_with_bias = self.cross_attention(
+                pre_cross_attn_layernorm_output,
+                attention_mask=kwargs.get("context_mask"),
+                key_value_states=kwargs.get("context"),
+                inference_context=kwargs.get("inference_context"),
+            )
+            context = None
+            if isinstance(attention_output_with_bias, dict) and "context" in attention_output_with_bias:
+                context = attention_output_with_bias["context"]
+            with self.bias_dropout_add_exec_handler():
+                hidden_states = self.cross_attn_bda(self.training, self.config.bias_dropout_fusion)(
+                    attention_output_with_bias, residual, self.hidden_dropout
+                )
+            return hidden_states, context
+
+        self._lumen_deferred_bda = None
+        if _FUSED_NQG and not self.recompute_input_layernorm:
+            _nqg_linear = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
+            if _nqg_linear is not None:
+                _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.input_layernorm, _nqg_linear)
+                if _nqg_ok:
+                    _saved_fwd = self.input_layernorm.forward
+                    self.input_layernorm.forward = lambda x, _r=_nqg_out: _r
+                    try:
+                        return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
+                    finally:
+                        self.input_layernorm.forward = _saved_fwd
+        return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
+
+    def _patched_fwd_mlp(self, hidden_states, inference_context=None):
+        from megatron.core.utils import make_viewless_tensor, nvtx_range_pop, nvtx_range_push
+
+        _deferred = self._lumen_deferred_bda
+        _fused_ok = False
+
+        if _deferred is not None:
+            self._lumen_deferred_bda = None
+            from lumen.ops.fused_residual_norm import deferred_bda_add, rmsnorm_from_module
+
+            _x_with_bias, _orig_residual = _deferred
+            hidden_states = deferred_bda_add(_x_with_bias, _orig_residual)
+            residual = hidden_states
+            pre_mlp_layernorm_output = rmsnorm_from_module(hidden_states, self.pre_mlp_layernorm)
+            _fused_ok = True
+
+        if not _fused_ok:
+            residual = hidden_states
+            pre_mlp_layernorm_output = _do_pre_mlp_layernorm(self, hidden_states)
+
+        nvtx_range_push(suffix="mlp")
+        if self.recompute_mlp:
+            if self.config.fp8:
+                from megatron.core import tensor_parallel
+                from megatron.core.extensions.transformer_engine import te_checkpoint
+
+                mlp_output_with_bias = te_checkpoint(
+                    self.mlp,
+                    False,
+                    tensor_parallel.random.get_cuda_rng_tracker,
+                    self.pg_collection.tp,
+                    pre_mlp_layernorm_output,
+                )
+            else:
+                from megatron.core import tensor_parallel
+
+                mlp_output_with_bias = tensor_parallel.checkpoint(self.mlp, False, pre_mlp_layernorm_output)
+        else:
+            mlp_output_with_bias = self.mlp(pre_mlp_layernorm_output)
+
+        if self.recompute_pre_mlp_layernorm:
+            self.pre_mlp_norm_checkpoint.discard_output_and_register_recompute(mlp_output_with_bias[0])
+        nvtx_range_pop(suffix="mlp")
+
+        nvtx_range_push(suffix="mlp_bda")
+        with self.bias_dropout_add_exec_handler():
+            hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
+                mlp_output_with_bias, residual, self.hidden_dropout
+            )
+        nvtx_range_pop(suffix="mlp_bda")
+
+        output = make_viewless_tensor(inp=hidden_states, requires_grad=hidden_states.requires_grad, keep_graph=True)
+        return output
+
+    _OrigTL.__init__ = _patched_init
+    _OrigTL._forward_attention = _patched_fwd_attn
+    _OrigTL._forward_mlp = _patched_fwd_mlp
+    _tl_mod._lumen_fused_residual_norm_patched = True
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
@@ -543,3 +750,4 @@ def install_all():
     install_fused_rope()
     install_eval_recompute()
     install_post_eval_cache_clear()
+    install_fused_residual_norm()

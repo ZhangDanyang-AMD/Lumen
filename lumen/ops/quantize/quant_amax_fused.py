@@ -4,7 +4,7 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""Fused static FP8 quantization + amax computation in a single Triton kernel.
+"""Fused FP8 quantization kernels — single-pass static quant + amax.
 
 For delayed scaling, the normal flow is:
   1. quantize: fp8 = (x * (1/scale)).to(fp8_dtype)   -- uses OLD scale
@@ -13,6 +13,9 @@ For delayed scaling, the normal flow is:
 Steps 1 and 2 both read the full tensor, meaning two full memory passes.
 This module fuses them into a single Triton kernel that reads x once,
 computes both the FP8 output and the amax simultaneously.
+
+Also provides :func:`fused_amax_abs` — a lightweight single-launch
+``amax(abs(x))`` reduction.
 
 Enabled via ``LUMEN_FUSED_QUANT_AMAX=1`` (checked in scaling_manager.py).
 """
@@ -185,3 +188,101 @@ def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
     NUM_COL_POW2 = triton.next_power_of_2(cols)
     _amax_abs_kernel[(rows,)](x, amax_out, cols, x.stride(0), NUM_COL_POW2=NUM_COL_POW2)
     return amax_out.squeeze(0).clone()
+
+
+# ---------------------------------------------------------------------------
+# Fused FP8 dequant: fp8.bfloat16() * scale  in one kernel (no aten::copy_)
+# ---------------------------------------------------------------------------
+
+
+@triton.jit
+def _dequant_fp8_bf16_kernel(
+    FP8_ptr,
+    SCALE_ptr,
+    OUT_ptr,
+    rows: int,
+    cols: int,
+    fp8_stride_r: int,
+    out_stride_r: int,
+    SCALE_IS_SCALAR: tl.constexpr,
+    NUM_COL_POW2: tl.constexpr,
+):
+    """Fused FP8→BF16 dequant: out = fp8.to(f32) * scale.
+
+    Replaces ``fp8_tensor.bfloat16() * scale.bfloat16()`` which generates
+    a separate ``aten::copy_`` + ``aten::mul``.
+    """
+    pid = tl.program_id(axis=0)
+    tl.assume(pid >= 0)
+    tl.assume(fp8_stride_r > 0)
+    tl.assume(out_stride_r > 0)
+
+    offs = tl.arange(0, NUM_COL_POW2)
+    mask = offs < cols
+
+    fp8_vals = tl.load(FP8_ptr + pid * fp8_stride_r + offs, mask=mask, other=0.0)
+    x_f32 = fp8_vals.to(tl.float32)
+
+    if SCALE_IS_SCALAR:
+        s = tl.load(SCALE_ptr).to(tl.float32)
+    else:
+        s = tl.load(SCALE_ptr).to(tl.float32)
+
+    out = (x_f32 * s).to(tl.bfloat16)
+    tl.store(OUT_ptr + pid * out_stride_r + offs, out, mask=mask)
+
+
+def dequant_fp8_to_bf16(
+    fp8_tensor: torch.Tensor,
+    scale: torch.Tensor,
+) -> torch.Tensor:
+    """Fused FP8 → BF16 dequantization in a single Triton kernel.
+
+    Replaces ``fp8_tensor.bfloat16() * scale.bfloat16()`` (2 ops, 2 kernels)
+    with a single kernel that reads FP8, multiplies by scale, and writes BF16.
+
+    Args:
+        fp8_tensor: FP8 tensor (M, N).
+        scale: Per-tensor scale, shape (1,) or scalar, float32.
+
+    Returns:
+        BF16 tensor (M, N).
+    """
+    if fp8_tensor.dim() == 1:
+        fp8_tensor = fp8_tensor.unsqueeze(0)
+        squeeze = True
+    else:
+        squeeze = False
+
+    if fp8_tensor.dim() != 2:
+        orig_shape = fp8_tensor.shape
+        fp8_tensor = fp8_tensor.reshape(-1, fp8_tensor.shape[-1])
+    else:
+        orig_shape = None
+
+    fp8_tensor = fp8_tensor.contiguous()
+    rows, cols = fp8_tensor.shape
+    out = torch.empty((rows, cols), dtype=torch.bfloat16, device=fp8_tensor.device)
+
+    scale_1 = scale.float().reshape(-1).contiguous()
+    if scale_1.device != fp8_tensor.device:
+        scale_1 = scale_1.to(device=fp8_tensor.device)
+
+    NUM_COL_POW2 = triton.next_power_of_2(cols)
+    _dequant_fp8_bf16_kernel[(rows,)](
+        fp8_tensor,
+        scale_1,
+        out,
+        rows,
+        cols,
+        fp8_tensor.stride(0),
+        out.stride(0),
+        SCALE_IS_SCALAR=True,
+        NUM_COL_POW2=NUM_COL_POW2,
+    )
+
+    if orig_shape is not None:
+        out = out.view(orig_shape)
+    if squeeze:
+        out = out.squeeze(0)
+    return out

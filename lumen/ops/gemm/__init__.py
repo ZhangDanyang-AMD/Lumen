@@ -1,9 +1,4 @@
-###############################################################################
-# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0
-###############################################################################
+from lumen.ops.gemm.epilogue import GemmEpilogue, gemm_with_epilogue, is_fp8_output_enabled
+from lumen.ops.gemm.fp8_output import gemm_fp8_output, gemm_scaled_mm
 
-from .grouped_gemm import grouped_gemm, grouped_gemm_wgrad
-
-__all__ = ["grouped_gemm", "grouped_gemm_wgrad"]
+__all__ = ["GemmEpilogue", "gemm_with_epilogue", "gemm_fp8_output", "gemm_scaled_mm", "is_fp8_output_enabled"]

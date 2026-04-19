@@ -44,6 +44,13 @@ from lumen.ops.dispatch import (
     try_backends,
 )
 
+
+def _to_2d(x: torch.Tensor) -> torch.Tensor:
+    """Reshape to 2D, only calling .contiguous() when necessary."""
+    x_2d = x.reshape(-1, x.shape[-1])
+    return x_2d if x_2d.is_contiguous() else x_2d.contiguous()
+
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -250,15 +257,13 @@ def fused_add_rmsnorm(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Fused residual add + RMSNorm: ``residual = x + residual; y = RMSNorm(residual)``.
 
-    Dispatches to AITER CK ``fused_add_rms_norm_cu`` (in-place, preferred)
-    or Triton ``fused_add_rmsnorm_pad`` (allocates output), falling back
-    to unfused ``add_ + rmsnorm`` if neither is available.
+    Dispatches to AITER CK ``fused_add_rms_norm_cu`` (in-place) or Triton
+    ``fused_add_rmsnorm_pad`` (allocates output) when probes succeed, then
+    falls back to unfused ``add`` + :func:`rmsnorm`.
 
     Args:
         x: Input tensor ``(*, hidden_size)``.
-        residual: Residual tensor (same shape as *x*), **updated in-place**
-            on the CK and unfused paths; cloned first on the Triton path
-            so the caller should use the returned residual.
+        residual: Residual tensor (same shape as *x*).
         weight: RMSNorm scale ``(hidden_size,)``.
         eps: Epsilon for numerical stability.
 
@@ -267,9 +272,8 @@ def fused_add_rmsnorm(
         updated residual stream.
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-    res_2d = residual.reshape(-1, residual.shape[-1]).contiguous()
-
+    x_2d = _to_2d(x)
+    res_2d = _to_2d(residual)
     _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
 
     if _probe_aiter_fused_add_rms_norm():
@@ -288,9 +292,9 @@ def fused_add_rmsnorm(
         except _catchable as e:
             logger.warning("fused_add_rmsnorm: Triton pad failed (%s), falling back", e)
 
-    res_2d.add_(x_2d)
-    normed = rmsnorm(res_2d.reshape(orig_shape), weight, eps)
-    return normed, res_2d.reshape(orig_shape)
+    res_out = x + residual
+    normed = rmsnorm(res_out, weight, eps)
+    return normed, res_out
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +318,7 @@ def rmsnorm_delayed_per_tensor(
         ``(x_fp8, scale)`` — quantized output and the scale used.
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    x_2d = _to_2d(x)
 
     if _probe_aiter_fused_quant():
         fn = _get_fused_rms_fp8_per_tensor_static_quant()
@@ -326,9 +330,8 @@ def rmsnorm_delayed_per_tensor(
             dtype_quant=fp8_dtype,
         )
         return out_fp8.reshape(orig_shape), scale
-    # Unfused: AITER norm then AITER per-tensor quant
     normed = rmsnorm(x, weight, eps)
-    normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+    normed_2d = _to_2d(normed)
     fn = _get_triton_per_tensor_quant()
     out_fp8, _ = fn(normed_2d, scale=scale, quant_dtype=fp8_dtype)
     return out_fp8.reshape(orig_shape), scale
@@ -355,8 +358,8 @@ def rmsnorm_add_delayed_per_tensor(
         ``(x_fp8, scale, residual_out)``
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-    res_2d = residual.reshape(-1, residual.shape[-1]).contiguous()
+    x_2d = _to_2d(x)
+    res_2d = _to_2d(residual)
 
     if _probe_aiter_fused_quant():
         try:
@@ -379,7 +382,7 @@ def rmsnorm_add_delayed_per_tensor(
         weight,
         eps,
     )
-    normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+    normed_2d = _to_2d(normed)
     fn = _get_triton_per_tensor_quant()
     out_fp8, _ = fn(normed_2d, scale=scale, quant_dtype=fp8_dtype)
     return out_fp8.reshape(orig_shape), scale, res_out
@@ -400,7 +403,7 @@ def rmsnorm_current_per_tensor(
         ``(x_fp8, tensor_scale)``
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    x_2d = _to_2d(x)
     M, N = x_2d.shape
 
     out_fp8 = torch.empty_like(x_2d, dtype=fp8_dtype)
@@ -426,9 +429,8 @@ def rmsnorm_current_per_tensor(
         tensor_scale = yscale.max()
         return out_fp8.reshape(orig_shape), tensor_scale.reshape(1)
 
-    # Unfused: AITER norm then AITER per-tensor quant
     normed = rmsnorm(x, weight, eps)
-    normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+    normed_2d = _to_2d(normed)
     fn = _get_triton_per_tensor_quant()
     out_fp8, scale = fn(normed_2d, quant_dtype=fp8_dtype)
     return out_fp8.reshape(orig_shape), scale
@@ -446,7 +448,7 @@ def rmsnorm_per_token(
         ``(x_fp8, yscale)`` where yscale is ``[M, 1]``.
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    x_2d = _to_2d(x)
     M, N = x_2d.shape
 
     out_fp8 = torch.empty_like(x_2d, dtype=fp8_dtype)
@@ -471,8 +473,7 @@ def rmsnorm_per_token(
         backends.append((Backend.TRITON, lambda: _tri(out_fp8, x_2d, yscale, weight, eps)))
 
     if not backends:
-        # Unfused: AITER norm then AITER per-token quant
-        normed = rmsnorm(x, weight, eps).reshape(-1, x.shape[-1]).contiguous()
+        normed = _to_2d(rmsnorm(x, weight, eps))
         fn = _get_triton_per_token_quant()
         _out, _scale = fn(normed, quant_dtype=fp8_dtype)
         return _out.reshape(orig_shape), _scale
@@ -494,7 +495,7 @@ def rmsnorm_blockwise(
         ``(x_fp8, block_scales)``
     """
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+    x_2d = _to_2d(x)
 
     if _probe_aiter_fused_quant():
         try:
@@ -510,11 +511,10 @@ def rmsnorm_blockwise(
         except (RuntimeError, NotImplementedError):
             pass
 
-    # Unfused: AITER norm then AITER Triton blockwise quant
     normed = rmsnorm(x, weight, eps)
     from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
 
-    normed_2d = normed.reshape(-1, normed.shape[-1]).contiguous()
+    normed_2d = _to_2d(normed)
     out_fp8, out_scales = quant_fp8_blockwise_impl(normed_2d, dtype=fp8_dtype, axis=1, block_size=block_size)
     return out_fp8.reshape(orig_shape), out_scales
 

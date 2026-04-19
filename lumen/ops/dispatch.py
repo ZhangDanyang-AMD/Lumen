@@ -178,6 +178,20 @@ def _probe_aiter_hipblas():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_hipblas_fp8_output() -> bool:
+    """Check if ``torch._scaled_mm`` supports FP8 output dtype.
+
+    Uses ``torch._scaled_mm`` (not ``hipb_mm``) for FP8 output because
+    hipb_mm's ``out_dtype=FP8`` corrupts the hipBLASLt tuning cache.
+    This probe verifies the API exists without running a real GEMM.
+    """
+    try:
+        return hasattr(torch, "_scaled_mm")
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_fused_quant():
     try:
         from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_per_tensor_static_quant as _  # noqa: F401

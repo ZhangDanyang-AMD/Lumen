@@ -587,7 +587,7 @@ class LumenColumnParallelLinear(nn.Module):
         sdma_stream = self._sdma_stream
         compute_stream = torch.cuda.current_stream(input_.device)
 
-        input_parallel = input_.contiguous()
+        input_parallel = input_ if input_.is_contiguous() else input_.contiguous()
         local_dim0 = input_parallel.shape[0]
         comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
 
@@ -643,7 +643,7 @@ class LumenColumnParallelLinear(nn.Module):
 
         bias = self.bias if not self.skip_bias_add else None
         output = fused_column_parallel_forward(
-            input_.contiguous(),
+            input_ if input_.is_contiguous() else input_.contiguous(),
             weight,
             bias,
             self._pipeline_ag,

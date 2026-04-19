@@ -49,6 +49,8 @@ _FUSED_QUANT_SCALE = os.environ.get("LUMEN_FUSED_QUANT_SCALE", "0") == "1"
 _FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
 _FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
 _FUSED_QUANT_TRANSPOSE_CPP = os.environ.get("LUMEN_FUSED_QUANT_TRANSPOSE_CPP", "0") == "1"
+_PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
+_CAST_AMAX_AVAILABLE: Optional[bool] = None
 _AITER_STATIC_QUANT_AVAILABLE: Optional[bool] = None
 _CAST_TRANSPOSE_AVAILABLE: Optional[bool] = None
 _FUSED_QUANT_AMAX_AVAILABLE: Optional[bool] = None
@@ -460,8 +462,7 @@ class ScalingManager:
         if not amaxes:
             return
 
-        device = amaxes[0].device
-        packed = torch.stack([a.to(device) for a in amaxes]).contiguous()
+        packed = torch.stack(amaxes)
 
         if self._sdma_allgather is None:
             self._sdma_allgather = SdmaAllgather()
@@ -479,8 +480,7 @@ class ScalingManager:
         if not amaxes:
             return
 
-        device = amaxes[0].device
-        packed = torch.stack([a.to(device) for a in amaxes]).contiguous()
+        packed = torch.stack(amaxes)
         torch.distributed.all_reduce(packed, op=torch.distributed.ReduceOp.MAX, group=self._dp_group)
         self._scatter_amaxes(packed, tensor_ids)
 
@@ -701,6 +701,35 @@ class ScalingManager:
                 fp8_dtype=dtype,
                 _transpose=fp8_data_t,
             )
+
+        if (
+            _PREFER_HIPBLASLT
+            and _FUSED_CAST_TRANSPOSE
+            and _FUSED_QUANT_AMAX
+            and _probe_cast_transpose()
+            and _probe_fused_quant_amax()
+            and tensor.is_cuda
+            and tensor.dim() == 2
+        ):
+            from lumen.ops.quantize.cast_transpose import (
+                _TORCH_TO_TL_FP8,
+                cast_amax_fp8,
+            )
+
+            if dtype in _TORCH_TO_TL_FP8:
+                tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
+                fp8_data, amax = cast_amax_fp8(
+                    tensor_2d,
+                    scale,
+                    dtype,
+                    clamp_max=float(fp8_max),
+                )
+                self.amax_history[tensor_id].append(amax)
+                return FP8Descriptor(
+                    data=fp8_data.view(tensor.shape),
+                    scale=scale,
+                    fp8_dtype=dtype,
+                )
 
         if (
             _FUSED_CAST_TRANSPOSE

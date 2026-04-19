@@ -16,6 +16,7 @@ the GEMM.
 
 import logging
 import os
+import threading
 import warnings
 from typing import Callable, Optional
 
@@ -45,11 +46,214 @@ from lumen.modules.parallel_linear import (
 
 _logger = logging.getLogger(__name__)
 
+
+def _to_2d(x: torch.Tensor) -> torch.Tensor:
+    """Reshape to 2D, only calling .contiguous() when necessary."""
+    x_2d = x.reshape(-1, x.shape[-1])
+    return x_2d if x_2d.is_contiguous() else x_2d.contiguous()
+
+
 _FUSED_NORM_QUANT = os.environ.get("LUMEN_FUSED_NORM_QUANT", "0") == "1"
+_FUSED_NORM_QUANT_V2 = os.environ.get("LUMEN_FUSED_NORM_QUANT_V2", "1") == "1"
+# Thread-local storage for passing residual from TransformerLayer into
+# LumenLayerNormLinear without changing Megatron's MLP interface.
+_tls = threading.local()
+
+
+def _set_pending_residual(residual: torch.Tensor) -> None:
+    """Store a residual tensor for the next LumenLayerNormLinear.forward() call."""
+    _tls.pending_residual = residual
+
+
+def _pop_pending_residual():
+    """Pop the pending residual (returns None if not set)."""
+    res = getattr(_tls, "pending_residual", None)
+    _tls.pending_residual = None
+    return res
+
+
+def _pop_residual_out():
+    """Pop the fused residual_out computed by the fused norm+quant path."""
+    res = getattr(_tls, "residual_out", None)
+    _tls.residual_out = None
+    return res
+
+
+def _set_residual_out(residual_out: torch.Tensor) -> None:
+    _tls.residual_out = residual_out
+
+
+_NORM_QUANT_V2_AVAILABLE: bool | None = None
+
+
+def _probe_norm_quant_v2() -> bool:
+    """Check if the v2 fused norm+quant+amax Triton kernel is functional."""
+    global _NORM_QUANT_V2_AVAILABLE
+    if _NORM_QUANT_V2_AVAILABLE is not None:
+        return _NORM_QUANT_V2_AVAILABLE
+    try:
+        from lumen.ops.quantize.cast_transpose import (
+            _TORCH_TO_TL_FP8,
+            rmsnorm_quant_amax_fp8,
+        )
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dt = _get_float8_e4m3()
+        if fp8_dt not in _TORCH_TO_TL_FP8:
+            _NORM_QUANT_V2_AVAILABLE = False
+            return False
+        x = torch.randn(2, 64, device="cuda", dtype=torch.bfloat16)
+        w = torch.ones(64, device="cuda", dtype=torch.bfloat16)
+        s = torch.tensor([1.0], dtype=torch.float32, device="cuda")
+        fp8_out, bf16_out, amax = rmsnorm_quant_amax_fp8(x, w, 1e-5, s, fp8_dt)
+        assert fp8_out.shape == x.shape
+        assert bf16_out.shape == x.shape
+        assert amax.numel() == 1
+        _NORM_QUANT_V2_AVAILABLE = True
+    except Exception:
+        _NORM_QUANT_V2_AVAILABLE = False
+    return _NORM_QUANT_V2_AVAILABLE
+
+
+class _FusedResidualRMSNormFP8Quant(torch.autograd.Function):
+    """Fused residual-add + RMSNorm + FP8 quant via a single Triton kernel.
+
+    Computes ``residual_out = x + residual``, then ``norm_out = RMSNorm(residual_out)``,
+    then ``fp8_out = quant(norm_out, scale)`` in ONE kernel launch.
+
+    Returns ``(norm_out_bf16, fp8_out, scale, residual_out)`` where
+    ``norm_out_bf16`` participates in autograd. Backward recomputes
+    RMSNorm backward via nested autograd on ``residual_out``.
+    """
+
+    @staticmethod
+    def forward(ctx, x, residual, weight, eps, scale, fp8_dtype):
+        from aiter.ops.triton.quant.fused_fp8_quant import (
+            fused_rms_fp8_per_tensor_static_quant,
+        )
+
+        x_2d = _to_2d(x)
+        res_2d = _to_2d(residual)
+        out_fp8, out_bf16, _, res_out = fused_rms_fp8_per_tensor_static_quant(
+            x_2d,
+            weight,
+            eps,
+            scale,
+            dtype_quant=fp8_dtype,
+            res1=res_2d,
+            output_unquantized_inp1=True,
+        )
+
+        ctx.save_for_backward(res_out, weight)
+        ctx.eps = eps
+        ctx.x_shape = x.shape
+
+        return out_bf16.reshape(x.shape), out_fp8, scale, res_out.reshape(x.shape)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_bf16, _grad_fp8, _grad_scale, grad_res_out):
+        res_out, weight = ctx.saved_tensors
+
+        with torch.enable_grad():
+            res_d = res_out.detach().requires_grad_(True)
+            w_d = weight.detach().requires_grad_(True)
+            x_2d = res_d.reshape(-1, res_d.shape[-1])
+
+            from lumen.ops.normalization.rmsnorm import (
+                _probe_aiter_triton_rmsnorm,
+                _rmsnorm_triton,
+            )
+
+            if _probe_aiter_triton_rmsnorm():
+                y = _rmsnorm_triton(x_2d, w_d, ctx.eps)
+            else:
+                from lumen.ops.dispatch import try_backends
+                from lumen.ops.normalization.rmsnorm import _get_rmsnorm_chain
+
+                y = try_backends(
+                    _get_rmsnorm_chain(),
+                    x_2d,
+                    w_d,
+                    ctx.eps,
+                    op_name="rmsnorm",
+                )
+            y = y.reshape(res_d.shape)
+            torch.autograd.backward(y, grad_bf16)
+
+        grad_residual_out = res_d.grad
+        if grad_res_out is not None:
+            grad_residual_out = grad_residual_out + grad_res_out
+        return grad_residual_out, grad_residual_out, w_d.grad, None, None, None
+
+
+class _FusedRMSNormFP8QuantV2(torch.autograd.Function):
+    """Fused RMSNorm + FP8 quant + amax via a single Triton kernel.
+
+    Reads input once, produces BF16 norm output (for backward) and FP8
+    quantized output + amax (for scaling manager).  Eliminates:
+      - separate RMSNorm kernel
+      - separate cast_amax_fp8 / quant+amax kernel
+      - separate amax(abs(x)) kernel
+
+    Backward recomputes RMSNorm backward via nested autograd.
+    """
+
+    @staticmethod
+    def forward(ctx, x, weight, eps, scale, fp8_dtype):
+        from lumen.ops.quantize.cast_transpose import rmsnorm_quant_amax_fp8
+
+        x_2d = _to_2d(x)
+        out_fp8, out_bf16, amax = rmsnorm_quant_amax_fp8(
+            x_2d,
+            weight,
+            eps,
+            scale,
+            fp8_dtype,
+            output_bf16=True,
+        )
+
+        ctx.save_for_backward(x, weight)
+        ctx.eps = eps
+
+        return out_bf16.reshape(x.shape), out_fp8, scale, amax
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_bf16, _grad_fp8, _grad_scale, _grad_amax):
+        x, weight = ctx.saved_tensors
+
+        with torch.enable_grad():
+            x_d = x.detach().requires_grad_(True)
+            w_d = weight.detach().requires_grad_(True)
+            x_2d = x_d.reshape(-1, x_d.shape[-1])
+
+            from lumen.ops.normalization.rmsnorm import (
+                _probe_aiter_triton_rmsnorm,
+                _rmsnorm_triton,
+            )
+
+            if _probe_aiter_triton_rmsnorm():
+                y = _rmsnorm_triton(x_2d, w_d, ctx.eps)
+            else:
+                from lumen.ops.dispatch import try_backends
+                from lumen.ops.normalization.rmsnorm import _get_rmsnorm_chain
+
+                y = try_backends(
+                    _get_rmsnorm_chain(),
+                    x_2d,
+                    w_d,
+                    ctx.eps,
+                    op_name="rmsnorm",
+                )
+            y = y.reshape(x_d.shape)
+            torch.autograd.backward(y, grad_bf16)
+
+        return x_d.grad, w_d.grad, None, None, None
 
 
 class _FusedRMSNormFP8Quant(torch.autograd.Function):
-    """Fused RMSNorm + per-tensor FP8 quant with correct autograd.
+    """Fused RMSNorm + per-tensor FP8 quant with correct autograd (AITER path).
 
     Forward calls the fused Triton kernel which produces both the BF16
     norm output (for autograd) and the FP8 quantized output.
@@ -67,7 +271,7 @@ class _FusedRMSNormFP8Quant(torch.autograd.Function):
             fused_rms_fp8_per_tensor_static_quant,
         )
 
-        x_2d = x.reshape(-1, x.shape[-1]).contiguous()
+        x_2d = _to_2d(x)
         out_fp8, out_bf16, _, _ = fused_rms_fp8_per_tensor_static_quant(
             x_2d,
             weight,
@@ -289,10 +493,17 @@ class LumenLayerNormLinear(nn.Module):
         passed downstream as ``pre_quantized_input`` to skip the
         standalone FP8 quant kernel.
 
-        Currently supports ``"delayed"`` scaling (the most common
-        training mode) via ``fused_rms_fp8_per_tensor_static_quant``
-        which produces both FP8 and BF16 outputs in a single Triton
-        kernel launch (one HBM read of *x*, two writes).
+        Two implementations are available:
+
+        **V2** (``LUMEN_FUSED_NORM_QUANT_V2=1``, default): A custom
+        Triton kernel that fuses RMSNorm + FP8 cast + amax into a
+        single launch (one read, two writes: FP8 + BF16).  The amax
+        is computed on the *normalized* output inside the kernel,
+        eliminating the separate ``update_amax`` call.
+
+        **V1** (fallback): AITER ``fused_rms_fp8_per_tensor_static_quant``
+        which also produces FP8 + BF16 but doesn't compute amax —
+        requires a separate ``update_amax`` call.
         """
         if not (
             _FUSED_NORM_QUANT
@@ -303,23 +514,37 @@ class LumenLayerNormLinear(nn.Module):
         ):
             return None
 
+        w = self.ln_weight
+        if self.zero_centered_gamma:
+            w = w + 1.0
+
+        x_2d = _to_2d(x)
+        scale, precomputed_amax = self.scaling_manager.get_scale(
+            "activation",
+            x_2d,
+            return_amax=True,
+        )
+        if scale is None:
+            return None
+
+        if _FUSED_NORM_QUANT_V2 and _probe_norm_quant_v2():
+            try:
+                ln_out_bf16, out_fp8, out_scale, amax = _FusedRMSNormFP8QuantV2.apply(
+                    x,
+                    w,
+                    self.ln_eps,
+                    scale,
+                    self.fp8_dtype,
+                )
+                self.scaling_manager.update_amax_value("activation", amax)
+                return (ln_out_bf16, out_fp8, out_scale)
+            except Exception as e:
+                _logger.debug("Fused norm+quant v2 failed: %s, trying v1", e)
+
         try:
             from lumen.ops.dispatch import _probe_aiter_fused_quant
 
             if not _probe_aiter_fused_quant():
-                return None
-
-            w = self.ln_weight
-            if self.zero_centered_gamma:
-                w = w + 1.0
-
-            x_2d = x.reshape(-1, x.shape[-1]).contiguous()
-            scale, precomputed_amax = self.scaling_manager.get_scale(
-                "activation",
-                x_2d,
-                return_amax=True,
-            )
-            if scale is None:
                 return None
 
             ln_out_bf16, out_fp8, out_scale = _FusedRMSNormFP8Quant.apply(
@@ -337,7 +562,66 @@ class LumenLayerNormLinear(nn.Module):
 
             return (ln_out_bf16, out_fp8, out_scale)
         except Exception as e:
-            _logger.debug("Fused norm+quant failed: %s, falling back", e)
+            _logger.debug("Fused norm+quant v1 failed: %s, falling back", e)
+            return None
+
+    def _try_fused_norm_quant_with_residual(self, x, residual):
+        """Fused residual_add + RMSNorm + FP8 quant in a single AITER kernel.
+
+        Uses ``_FusedResidualRMSNormFP8Quant`` autograd Function which calls
+        ``fused_rms_fp8_per_tensor_static_quant(res1=residual,
+        output_unquantized_inp1=True)`` computing in ONE kernel:
+          1. ``residual_out = x + residual``
+          2. ``norm_out = RMSNorm(residual_out)``
+          3. ``fp8_out = quant(norm_out, scale)``
+
+        Returns ``(ln_out_bf16, fp8_data, scale, residual_out)`` on success,
+        or ``None`` if the fused path is not applicable.
+        """
+        if not (
+            _FUSED_NORM_QUANT
+            and self.use_rmsnorm
+            and self.scaling_type == "delayed"
+            and self.scaling_manager is not None
+            and not self.sequence_parallel
+        ):
+            return None
+
+        w = self.ln_weight
+        if self.zero_centered_gamma:
+            w = w + 1.0
+
+        x_2d = _to_2d(x)
+        scale, precomputed_amax = self.scaling_manager.get_scale(
+            "activation",
+            x_2d,
+            return_amax=True,
+        )
+        if scale is None:
+            return None
+
+        from lumen.ops.dispatch import _probe_aiter_fused_quant
+
+        if not _probe_aiter_fused_quant():
+            return None
+
+        try:
+            ln_out_bf16, out_fp8, out_scale, residual_out = _FusedResidualRMSNormFP8Quant.apply(
+                x,
+                residual,
+                w,
+                self.ln_eps,
+                scale,
+                self.fp8_dtype,
+            )
+            if precomputed_amax is not None:
+                self.scaling_manager.update_amax_value("activation", precomputed_amax)
+            else:
+                self.scaling_manager.update_amax("activation", x_2d)
+
+            return (ln_out_bf16, out_fp8, out_scale, residual_out)
+        except Exception as e:
+            _logger.debug("Fused residual+norm+quant failed: %s, falling back", e)
             return None
 
     def forward(self, x: torch.Tensor):
@@ -352,13 +636,32 @@ class LumenLayerNormLinear(nn.Module):
             (output, bias) where bias is ``None`` unless ``skip_bias_add``.
         """
         pre_quantized_input = None
-        fused_result = self._try_fused_norm_quant(x)
 
-        if fused_result is not None:
-            ln_out, out_fp8, out_scale = fused_result
-            pre_quantized_input = (out_fp8, out_scale)
+        pending_residual = _pop_pending_residual()
+
+        if pending_residual is not None:
+            fused_result = self._try_fused_norm_quant_with_residual(x, pending_residual)
+            if fused_result is not None:
+                ln_out, out_fp8, out_scale, residual_out = fused_result
+                pre_quantized_input = (out_fp8, out_scale)
+                _set_residual_out(residual_out)
+            else:
+                x = x + pending_residual
+                fused_result = self._try_fused_norm_quant(x)
+                if fused_result is not None:
+                    ln_out, out_fp8, out_scale = fused_result
+                    pre_quantized_input = (out_fp8, out_scale)
+                    _set_residual_out(x)
+                else:
+                    ln_out = self._norm(x)
+                    _set_residual_out(x)
         else:
-            ln_out = self._norm(x)
+            fused_result = self._try_fused_norm_quant(x)
+            if fused_result is not None:
+                ln_out, out_fp8, out_scale = fused_result
+                pre_quantized_input = (out_fp8, out_scale)
+            else:
+                ln_out = self._norm(x)
 
         if self.sequence_parallel:
             if self.use_sdma and self.tp_size > 1:

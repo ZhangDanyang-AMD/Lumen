@@ -31,6 +31,7 @@ Usage::
 import functools
 import logging
 import re
+import threading
 from typing import Optional, Set
 
 import torch
@@ -340,6 +341,28 @@ def _patch_linear_layers(
     )
 
 
+# ---------------------------------------------------------------------------
+# Thread-local pre-quantized activation bypass for fused norm+quant
+# ---------------------------------------------------------------------------
+# When lumen.ops.fused_norm_quant produces an FP8 activation *before* the
+# linear's quant_forward() runs, the FP8 tensor + scale are stored here so
+# quant_forward() can skip its own quantize_input() call.
+
+_nqg_tls = threading.local()
+
+
+def _set_pre_quantized_activation(fp8_data, scale):
+    """Store pre-quantized FP8 activation for the next quant_forward() call."""
+    _nqg_tls.pre_quant = (fp8_data, scale)
+
+
+def _pop_pre_quantized_activation():
+    """Pop pre-quantized FP8 activation (returns None if not set)."""
+    result = getattr(_nqg_tls, "pre_quant", None)
+    _nqg_tls.pre_quant = None
+    return result
+
+
 def _replace_forward(
     module,
     manager,
@@ -359,6 +382,11 @@ def _replace_forward(
     70B-class models under FSDP.
     """
     original_forward = module.forward
+
+    module._lumen_scaling_manager = manager
+    module._lumen_scaling_type = scaling_type
+    module._lumen_fp8_dtype = fp8_dtype
+    module._lumen_act_tensor_id = tensor_id.replace(".weight", ".activation")
 
     _delay_wgrad = getattr(module, "delay_wgrad", False)
     _deferred_wgrad = getattr(module, "_deferred_wgrad", None) if _delay_wgrad else None
@@ -421,6 +449,8 @@ def _replace_forward(
             seq_parallel = getattr(module, "sequence_parallel", False)
             tp_group = getattr(module, "tp_group", None)
 
+            pre_quant = _pop_pre_quantized_activation()
+
             if seq_parallel and not is_row_parallel:
                 from megatron.core.tensor_parallel.mappings import (
                     gather_from_sequence_parallel_region,
@@ -450,6 +480,7 @@ def _replace_forward(
                 fp8_activation_store=_fp8_act_store,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
+                pre_quantized_input=pre_quant,
             )
 
             if is_row_parallel and seq_parallel:
