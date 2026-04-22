@@ -35,7 +35,9 @@ def compute_scale(amax: torch.Tensor, fp8_max: float, margin: int = 0) -> torch.
         margin: Power-of-two head-room exponent.
 
     Returns:
-        Scalar fp32 tensor on the same device as *amax*.
+        ``(1,)`` float32 tensor on the same device as *amax*.  Returning
+        a 1-D tensor avoids the downstream ``float().reshape(1).contiguous()``
+        copies in cast_transpose and GEMM scale preparation.
     """
     effective_max = fp8_max / (2**margin)
     effective_max_recip = 1.0 / effective_max
@@ -43,4 +45,4 @@ def compute_scale(amax: torch.Tensor, fp8_max: float, margin: int = 0) -> torch.
     amax_f32 = amax.float().reshape(1).contiguous()
     out = torch.empty(1, dtype=torch.float32, device=amax.device)
     _compute_scale_kernel[(1,)](amax_f32, out, effective_max_recip=effective_max_recip)
-    return out.squeeze(0)
+    return out

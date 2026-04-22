@@ -28,7 +28,7 @@ export GBS=8
 export SEQ_LEN=8192
 export LR=4e-4                  # MLPerf: LR=0.0004
 export MIN_LR=0                 # MLPerf: min_lr=0.0
-export TRAIN_STEPS=1024         # MLPerf: MAX_STEPS=1024
+export TRAIN_STEPS=${TRAIN_STEPS:-1024}  # MLPerf: MAX_STEPS=1024
 export WARMUP_STEPS=5           # Synthetic warmup with zero loss_mask
 export LR_WARMUP_STEPS=0        # MLPerf: warmup_ratio=0.0 → 0 warmup iters
 export LOG_INTERVAL=1
@@ -56,7 +56,7 @@ export LORA_TARGET_MODULES="attention"  # MLPerf: target_modules=['attention']
 #   - FP8 GEMM for mixed-dtype backward (no BF16 weight dequant copies)
 export RECOMPUTE_GRANULARITY="full"
 export RECOMPUTE_METHOD="block"
-export RECOMPUTE_NUM_LAYERS=21
+export RECOMPUTE_NUM_LAYERS=${RECOMPUTE_NUM_LAYERS:-21}
 
 # ---- FP8 training (matching MLPerf) -----------------------------------------
 export FP8_TRAINING=1
@@ -79,6 +79,7 @@ export LUMEN_ATTN_KERNEL_BACKEND="triton"
 export LUMEN_FP8_QUANT="blockwise"
 export LUMEN_RMSNORM=0
 export LUMEN_NORM=0
+export LUMEN_LINEAR=1
 
 # ---- Evaluation --------------------------------------------------------------
 # LUMEN_EVAL_ALIGNED=1: eval every 192 steps (1536 samples), matching MLPerf

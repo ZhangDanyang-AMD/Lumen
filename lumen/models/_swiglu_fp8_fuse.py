@@ -7,14 +7,13 @@
 """Fused SwiGLU + FP8 quantization bridge.
 
 When enabled via ``LUMEN_FUSED_SWIGLU_QUANT=1``, the SwiGLU activation
-stores an FP8-quantized MLP hidden state from AITER's fused kernel. The
-next :func:`~lumen.modules.parallel_linear._do_gemm` that quantizes
+stores an FP8-quantized MLP hidden state. The next
+:func:`~lumen.modules.parallel_linear._do_gemm` that quantizes
 activations for FP8 picks it up via :func:`pop_swiglu_fp8_cache` and skips
 a separate SiLU + mul + quant pass.
 
-Uses AITER ``fused_silu_mul_fp8_per_tensor_static_quant`` with scale from
-:func:`~lumen.ops.quantize.quant_amax_fused.fused_amax_abs` on the BF16
-SwiGLU output (same-step amax).
+Uses AITER ``dynamic_per_tensor_quant_fp8_i8`` on the BF16 SwiGLU output,
+fusing amax computation and quantization in a single pass.
 """
 
 from __future__ import annotations
@@ -27,38 +26,35 @@ _cache = threading.local()
 
 
 def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) -> None:
-    """Run fused SiLU*mul + FP8 quant and cache ``(fp8, scale)`` for the next FP8 GEMM."""
+    """Run fused SiLU*mul + FP8 quant and cache ``(fp8, scale)`` for the next FP8 GEMM.
+
+    Uses AITER dynamic per-tensor quantization on the already-computed bf16_output,
+    fusing amax computation and quantization in one pass (replaces separate
+    fused_amax_abs + fused_silu_mul_fp8 two-kernel pattern).
+    """
     if not swiglu_input.is_cuda:
         return
 
-    from lumen.ops.dispatch import _probe_aiter_fused_silu_mul_fp8
-
-    if not _probe_aiter_fused_silu_mul_fp8():
-        return
-
-    from aiter.ops.triton.quant.fused_fp8_quant import fused_silu_mul_fp8_per_tensor_static_quant
-
-    from lumen.ops.quantize.quant_amax_fused import fused_amax_abs
     from lumen.quantize.config import _get_float8_e4m3
 
     fp8_dtype = _get_float8_e4m3()
-    fp8_max = torch.finfo(fp8_dtype).max
-    inp_2d = swiglu_input.reshape(-1, swiglu_input.shape[-1])
-    if not inp_2d.is_contiguous():
-        inp_2d = inp_2d.contiguous()
 
-    amax = fused_amax_abs(bf16_output.detach()).clamp(min=1e-12)
-    scale = (amax / fp8_max).to(dtype=torch.float32, device=swiglu_input.device).reshape(1)
-    out_fp8 = fused_silu_mul_fp8_per_tensor_static_quant(
-        inp_2d,
-        scale,
-        dtype_quant=fp8_dtype,
-        silu_convert_to_inp_type=True,
-    )
+    out_2d = bf16_output.detach().reshape(-1, bf16_output.shape[-1])
+    if not out_2d.is_contiguous():
+        out_2d = out_2d.contiguous()
 
-    _cache.fp8_data = out_fp8
-    _cache.scale = scale
-    _cache.valid = True
+    try:
+        from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
+
+        qx = torch.empty_like(out_2d, dtype=fp8_dtype)
+        scale_out = torch.empty(1, dtype=torch.float32, device=out_2d.device)
+        dynamic_per_tensor_quant_fp8_i8(qx, out_2d, scale_out)
+
+        _cache.fp8_data = qx
+        _cache.scale = scale_out
+        _cache.valid = True
+    except (ImportError, RuntimeError):
+        return
 
 
 def discard_swiglu_fp8_cache() -> None:

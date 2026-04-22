@@ -155,22 +155,31 @@ def _quant_blockwise(x, dtype, block_size=128):
     return x_fp8.view(orig_shape), x_scales
 
 
+_IN_GRAPH_CAPTURE = False
+
+
+def set_graph_capture_mode(active: bool):
+    """Toggle graph-capture flag for FP8 linear and dispatch safety."""
+    global _IN_GRAPH_CAPTURE
+    _IN_GRAPH_CAPTURE = active
+    from lumen.ops.dispatch import set_graph_capture_mode as _set_dispatch
+
+    _set_dispatch(active)
+
+
+def set_warmup_mode(active: bool):
+    """No-op.  Kept for backward compatibility with megatron.py."""
+    pass
+
+
 def _safe_fp8_desc(x_fp8, x_scale, fp8_dtype):
-    """Return an FP8Descriptor, sanitizing zero-scale quantization artifacts.
+    """Return an FP8Descriptor.
 
-    AITER quantization kernels compute ``scale = amax / DTYPE_MAX`` and
-    ``quantized = input / scale``.  When input is all-zero (e.g. during
-    warmup steps with zero loss_mask), ``scale = 0`` and the division
-    produces ``NaN`` in the FP8 tensor.  We detect this and return clean
-    zeros so that NaN does not propagate through the backward graph.
-
-    The scale check uses ``item()`` (GPU→CPU sync) but this is only
-    relevant for per-tensor scales and the zero case is extremely rare
-    (warmup steps only).
+    Zero-scale handling (which previously required a CPU-GPU sync via
+    ``.item()``) is now done inside the Triton quantization kernels
+    themselves via ``tl.where(scale > 0, scale, 1.0)`` — no Python-side
+    fixup needed.
     """
-    if x_scale.numel() == 1 and x_scale.item() == 0.0:
-        x_fp8 = torch.zeros_like(x_fp8)
-        x_scale = torch.ones(1, dtype=torch.float32, device=x_fp8.device)
     return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
 
@@ -313,6 +322,8 @@ def _scale_to_f32_1x1(scale, device):
     if isinstance(scale, torch.Tensor):
         if scale.dtype == torch.float32 and scale.shape == (1, 1):
             return scale
+        if scale.dtype == torch.float32 and scale.numel() == 1:
+            return scale.view(1, 1)
         return scale.float().reshape(1, 1)
     return torch.tensor([[scale]], dtype=torch.float32, device=device)
 
@@ -347,6 +358,8 @@ def _expand_per_tensor_scale(scale, size):
     AITER's gemm_a8w8 kernels (CK and Triton) index into scales with
     per-row offsets.  A (1,)-shaped tensor causes out-of-bounds reads.
     """
+    if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1:
+        return scale.expand(size).contiguous()
     return scale.float().reshape(1).expand(size).contiguous()
 
 
@@ -595,10 +608,10 @@ def dispatch_gemm(a, w, scale_a=None, scale_w=None, scaling_type="none", bias=No
     """
     w_transposed = None
     if isinstance(a, FP8Descriptor):
-        scale_a = _scale_to_f32_1x1(a.scale, a.data.device) if _PREFER_HIPBLASLT else a.scale
+        scale_a = a.scale_f32_1x1 if _PREFER_HIPBLASLT else a.scale
         a = a.data
     if isinstance(w, FP8Descriptor):
-        scale_w = _scale_to_f32_1x1(w.scale, w.data.device) if _PREFER_HIPBLASLT else w.scale
+        scale_w = w.scale_f32_1x1 if _PREFER_HIPBLASLT else w.scale
         if w._transpose is not None:
             w_transposed = w._transpose
         w = w.data
@@ -781,10 +794,18 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
 
         # Forward: Y = input @ weight^T  (TN layout, weight is [N, K])
-        output = dispatch_gemm(input_desc, weight_desc, scaling_type=scaling_type)
+        _fuse_bias = (
+            bias is not None and scaling_type in ("delayed", "dynamic") and _PREFER_HIPBLASLT and _probe_aiter_hipblas()
+        )
+        output = dispatch_gemm(
+            input_desc,
+            weight_desc,
+            scaling_type=scaling_type,
+            bias=bias if _fuse_bias else None,
+        )
         output = output.view(*input.shape[:-1], weight.shape[0])
 
-        if bias is not None:
+        if bias is not None and not _fuse_bias:
             output = output + bias
 
         ctx.save_for_backward(
@@ -1217,34 +1238,34 @@ class FP8StoredLinearFunction(torch.autograd.Function):
             input_fp8, input_scale = input_desc.data, input_desc.scale
 
         N = weight_fp8.shape[0]
+        _fuse_bias = (
+            bias is not None and scaling_type in ("delayed", "dynamic") and _PREFER_HIPBLASLT and _probe_aiter_hipblas()
+        )
         output = dispatch_gemm(
             input_fp8,
             weight_fp8,
             input_scale,
             weight_scale,
             scaling_type,
+            bias=bias if _fuse_bias else None,
         )
         output = output.view(*input.shape[:-1], N)
 
-        if bias is not None:
+        if bias is not None and not _fuse_bias:
             output = output + bias
 
-        ctx.save_for_backward(input_fp8, weight_fp8, input_scale, weight_scale)
+        ctx.save_for_backward(weight_fp8, weight_scale)
         ctx.scaling_manager = scaling_manager
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
         ctx.block_size = block_size
         ctx.has_bias = bias is not None
-        ctx.input_shape = input.shape
-        ctx.gradient_accumulation_fusion = gradient_accumulation_fusion
-        ctx.delay_wgrad = delay_wgrad
-        ctx.deferred_wgrad = deferred_wgrad
         return output
 
     @staticmethod
     @once_differentiable
     def backward(ctx, grad_output: torch.Tensor):
-        input_fp8, weight_fp8, input_scale, weight_scale = ctx.saved_tensors
+        weight_fp8, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
         block_size = ctx.block_size
         scaling_type = ctx.scaling_type

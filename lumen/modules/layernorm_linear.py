@@ -330,6 +330,8 @@ class LumenLayerNormLinear(nn.Module):
     ``"RMSNorm"``).
     """
 
+    _lora_tp_mode = "column"
+
     def __init__(
         self,
         input_size: int,
@@ -379,13 +381,13 @@ class LumenLayerNormLinear(nn.Module):
         zero_centered = getattr(config, "layernorm_zero_centered_gamma", False)
 
         # Norm parameters
-        self.ln_weight = Parameter(
+        self.layer_norm_weight = Parameter(
             torch.ones(input_size, dtype=config.params_dtype, device=torch.cuda.current_device())
         )
         if self.use_rmsnorm:
-            self.register_parameter("ln_bias", None)
+            self.register_parameter("layer_norm_bias", None)
         else:
-            self.ln_bias = Parameter(
+            self.layer_norm_bias = Parameter(
                 torch.zeros(input_size, dtype=config.params_dtype, device=torch.cuda.current_device())
             )
         self.ln_eps = eps
@@ -394,7 +396,9 @@ class LumenLayerNormLinear(nn.Module):
         # FP8 config
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
@@ -463,7 +467,7 @@ class LumenLayerNormLinear(nn.Module):
 
     def _norm(self, x):
         """Apply normalization."""
-        w = self.ln_weight
+        w = self.layer_norm_weight
         if self.zero_centered_gamma:
             w = w + 1.0
         if self.use_rmsnorm:
@@ -473,7 +477,7 @@ class LumenLayerNormLinear(nn.Module):
         else:
             from lumen.ops.normalization.layernorm import layernorm
 
-            return layernorm(x, w, self.ln_bias, self.ln_eps)
+            return layernorm(x, w, self.layer_norm_bias, self.ln_eps)
 
     def _get_sdma_comm(self):
         if self._sdma_comm is None:
@@ -514,7 +518,7 @@ class LumenLayerNormLinear(nn.Module):
         ):
             return None
 
-        w = self.ln_weight
+        w = self.layer_norm_weight
         if self.zero_centered_gamma:
             w = w + 1.0
 
@@ -587,7 +591,7 @@ class LumenLayerNormLinear(nn.Module):
         ):
             return None
 
-        w = self.ln_weight
+        w = self.layer_norm_weight
         if self.zero_centered_gamma:
             w = w + 1.0
 

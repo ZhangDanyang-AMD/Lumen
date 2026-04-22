@@ -179,231 +179,268 @@ def lumen_make_graphed_callables(
     pool = getattr(torch.cuda, "graph_pool_handle", lambda: None)() if torch.cuda.is_available() else None
     graphed = []
     for fn, args in zip(callables, sample_args):
-        gc = LumenGraphedCallable(fn, args, num_warmup=num_warmup, pool=pool)
-        graphed.append(gc)
+        graphed_callable = LumenGraphedCallable(fn, args, num_warmup=num_warmup, pool=pool)
+        graphed.append(graphed_callable)
     return graphed
 
 
 # ---------------------------------------------------------------------------
-# Per-layer forward+backward graph capture (P5)
+# Per-layer forward+backward graph capture
 # ---------------------------------------------------------------------------
 
 
-class _GraphedLayerFn(torch.autograd.Function):
-    """Custom autograd Function that replays pre-captured forward and backward
-    CUDA/HIP graphs instead of re-executing the layer's ops.
+class _FwdGraphedLayerFn(torch.autograd.Function):
+    """Forward-only graph replay with eager backward.
 
-    Static buffers for inputs/outputs/grads are created during capture and
-    reused across iterations via ``copy_``.
+    Forward: replays the captured CUDA graph (fast, reduced kernel-launch
+    overhead).  Backward: re-runs the layer forward eagerly to build a fresh
+    autograd tape, then calls ``torch.autograd.backward`` on that tape.  This
+    avoids capturing the backward graph (which requires a full extra
+    forward+backward warmup at 98 %+ memory utilization) while still getting
+    the forward kernel-launch savings.
     """
 
     @staticmethod
     def forward(
         ctx,
+        real_input,
         static_fwd_input,
         static_fwd_output,
         fwd_graph,
-        static_bwd_grad_output,
-        static_bwd_grad_input,
-        bwd_graph,
-        real_input,
+        layer_fwd_fn,
+        static_kwargs,
     ):
+        ctx.layer_fwd_fn = layer_fwd_fn
+        ctx.static_kwargs = static_kwargs
+        ctx.save_for_backward(real_input)
+
         static_fwd_input.copy_(real_input)
         fwd_graph.replay()
 
-        ctx.static_bwd_grad_output = static_bwd_grad_output
-        ctx.static_bwd_grad_input = static_bwd_grad_input
-        ctx.bwd_graph = bwd_graph
-
-        return static_fwd_output.detach().clone().requires_grad_()
+        return static_fwd_output.detach().clone()
 
     @staticmethod
     def backward(ctx, grad_output):
-        ctx.static_bwd_grad_output.copy_(grad_output)
-        ctx.bwd_graph.replay()
-        return (
-            None,  # static_fwd_input
-            None,  # static_fwd_output
-            None,  # fwd_graph
-            None,  # static_bwd_grad_output
-            None,  # static_bwd_grad_input
-            None,  # bwd_graph
-            ctx.static_bwd_grad_input.clone(),  # real_input grad
-        )
+        (real_input,) = ctx.saved_tensors
+        inp = real_input.detach().requires_grad_(True)
+
+        with torch.enable_grad():
+            out = ctx.layer_fwd_fn(inp, **ctx.static_kwargs)
+            if isinstance(out, tuple):
+                out = out[0]
+            torch.autograd.backward(out, grad_output)
+
+        return (inp.grad, None, None, None, None, None)
 
 
 class LumenGraphedLayer:
-    """Captures a transformer layer's forward and backward into separate
-    CUDA/HIP graphs and provides a ``__call__`` that replays them.
+    """Per-layer forward+backward graph capture with lazy initialization.
 
-    Usage::
+    Graph capture is deferred until the first real training call so that
+    warmup happens on the *actual* data path (priming Triton/AITER JIT
+    caches) and capture occurs only after the memory pool is established.
 
-        graphed = LumenGraphedLayer(layer, sample_hidden, sample_kwargs)
-        # Replace layer forward:
-        layer._original_forward = layer.forward
-        layer.forward = graphed
+    Uses ``torch.autograd.grad(only_inputs=True)`` for warmup and backward
+    capture to avoid "Cannot set grad twice" errors with
+    ``gradient_accumulation_fusion`` and FP8 parameter storage.
+    Saves and restores ``main_grad`` across warmup.
+
+    Modelled after Megatron-LM's ``_CudaGraphRunner``.
 
     Args:
         layer: The ``nn.Module`` transformer layer.
-        sample_input: Hidden states tensor ``(S, B, H)`` with ``requires_grad=True``.
-        sample_kwargs: Dict of non-grad keyword arguments (attention_mask, etc.).
-        num_warmup: Warmup iterations before capture.
+        num_warmup: Eager forward+backward passes before graph capture.
     """
 
-    def __init__(
-        self,
-        layer: nn.Module,
-        sample_input: torch.Tensor,
-        sample_kwargs: Optional[Dict[str, Any]] = None,
-        num_warmup: int = 3,
-    ):
+    _shared_pool = None
+
+    @classmethod
+    def get_shared_pool(cls):
+        """Return a shared graph pool handle for all graphed layers.
+
+        Sharing a pool allows ROCm to reuse memory between layers since
+        they execute sequentially — one layer's intermediates can overlap
+        with another's in the pool.
+        """
+        if cls._shared_pool is None and torch.cuda.is_available():
+            cls._shared_pool = getattr(torch.cuda, "graph_pool_handle", lambda: None)()
+        return cls._shared_pool
+
+    def __init__(self, layer: nn.Module, num_warmup: int = 3):
         self.layer = layer
-        self._enabled = True
-        device = sample_input.device
-        kwargs = sample_kwargs or {}
+        self._original_forward = layer.forward
+        self._num_warmup = num_warmup
+        self._call_count = 0
+        self._captured = False
 
-        pool = getattr(torch.cuda, "graph_pool_handle", lambda: None)() if torch.cuda.is_available() else None
+        self._fwd_graph: Optional[torch.cuda.CUDAGraph] = None
+        self._static_input: Optional[torch.Tensor] = None
+        self._static_output: Optional[torch.Tensor] = None
+        self._static_kwargs: Optional[Dict[str, Any]] = None
+        self._extra_outputs: tuple = ()
 
-        # --- Static buffers ---
-        self._static_input = sample_input.clone().requires_grad_(True)
+        self._pool = self.get_shared_pool()
+
+    def _do_capture(
+        self,
+        hidden_states: torch.Tensor,
+        kwargs: Dict[str, Any],
+    ) -> Any:
+        """Capture forward-only graph. No warmup (layer already warmed by
+        num_warmup real training steps). Backward runs eagerly via recompute."""
+        device = hidden_states.device
+        fwd = self._original_forward
+
+        self._static_input = hidden_states.clone().detach()
         self._static_kwargs = {k: (v.clone() if isinstance(v, torch.Tensor) else v) for k, v in kwargs.items()}
 
-        # --- Warmup ---
-        s = torch.cuda.Stream(device=device)
-        s.wait_stream(torch.cuda.current_stream(device))
-        with torch.cuda.stream(s):
-            for _ in range(num_warmup):
-                out = layer(self._static_input, **self._static_kwargs)
-                if isinstance(out, tuple):
-                    out = out[0]
-                grad = torch.ones_like(out)
-                out.backward(grad)
-                for p in layer.parameters():
-                    p.grad = None
-                self._static_input.grad = None
-        torch.cuda.current_stream(device).wait_stream(s)
+        from lumen.ops.quantize.linear import set_graph_capture_mode
 
-        # --- Capture forward ---
-        self._fwd_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self._fwd_graph, pool=pool, stream=s):
-            fwd_out = layer(self._static_input, **self._static_kwargs)
-            if isinstance(fwd_out, tuple):
-                fwd_out = fwd_out[0]
-        self._static_output = fwd_out
+        set_graph_capture_mode(True)
 
-        # --- Capture backward ---
-        self._static_grad_output = torch.ones_like(fwd_out)
-        self._bwd_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self._bwd_graph, pool=pool, stream=s):
-            self._static_output.backward(self._static_grad_output, retain_graph=True)
-        self._static_grad_input = (
-            self._static_input.grad.clone()
-            if self._static_input.grad is not None
-            else torch.zeros_like(self._static_input)
-        )
-        for p in layer.parameters():
-            p.grad = None
-        self._static_input.grad = None
+        try:
+            s = torch.cuda.Stream(device=device)
+            s.wait_stream(torch.cuda.current_stream(device))
 
-    def __call__(self, hidden_states, **kwargs):
-        if not self._enabled:
-            return self.layer(hidden_states, **kwargs)
+            self._fwd_graph = torch.cuda.CUDAGraph()
+            torch.cuda.synchronize(device)
+            with torch.no_grad(), torch.cuda.graph(
+                self._fwd_graph,
+                pool=self._pool,
+                stream=s,
+                capture_error_mode="thread_local",
+            ):
+                fwd_out = fwd(self._static_input, **self._static_kwargs)
+            torch.cuda.current_stream(device).wait_stream(s)
+        finally:
+            set_graph_capture_mode(False)
 
+        if isinstance(fwd_out, tuple):
+            self._static_output = fwd_out[0]
+            self._extra_outputs = fwd_out[1:]
+        else:
+            self._static_output = fwd_out
+            self._extra_outputs = ()
+
+        self._captured = True
+        return self._replay(hidden_states, kwargs)
+
+    def _replay(
+        self,
+        hidden_states: torch.Tensor,
+        kwargs: Dict[str, Any],
+    ) -> Any:
+        """Replay captured forward graph; backward is eager via recompute."""
         for k, v in kwargs.items():
             if k in self._static_kwargs and isinstance(v, torch.Tensor):
                 self._static_kwargs[k].copy_(v)
 
-        return _GraphedLayerFn.apply(
+        out = _FwdGraphedLayerFn.apply(
+            hidden_states,
             self._static_input,
             self._static_output,
             self._fwd_graph,
-            self._static_grad_output,
-            self._static_grad_input,
-            self._bwd_graph,
-            hidden_states,
+            self._original_forward,
+            self._static_kwargs,
         )
+        if self._extra_outputs:
+            return (out,) + self._extra_outputs
+        return out
+
+    def __call__(self, hidden_states, **kwargs):
+        if self._captured:
+            return self._replay(hidden_states, kwargs)
+
+        if not torch.is_grad_enabled():
+            return self._original_forward(hidden_states, **kwargs)
+
+        self._call_count += 1
+
+        if self._call_count <= self._num_warmup:
+            return self._original_forward(hidden_states, **kwargs)
+
+        from lumen.ops.dispatch import _backend_cache
+
+        uncached = [k for k in _backend_cache if k.endswith(":prev") and k[:-5] not in _backend_cache]
+        if uncached:
+            logger.debug("Deferring capture: %d ops not yet cached", len(uncached))
+            return self._original_forward(hidden_states, **kwargs)
+
+        try:
+            result = self._do_capture(hidden_states, kwargs)
+            logger.info(
+                "Graph capture succeeded for layer after %d calls",
+                self._call_count,
+            )
+            return result
+        except Exception as e:
+            logger.warning("Graph capture failed: %s — permanent eager fallback", e)
+            self._captured = False
+            if self._fwd_graph is not None:
+                del self._fwd_graph
+                self._fwd_graph = None
+            self._static_input = None
+            self._static_output = None
+            self._static_kwargs = None
+            torch.cuda.empty_cache()
+            self._num_warmup = float("inf")
+            return self._original_forward(hidden_states, **kwargs)
 
     def disable(self):
-        self._enabled = False
+        self._captured = False
+        self._fwd_graph = None
+        self._call_count = 0
 
     def enable(self):
-        self._enabled = True
+        pass
 
 
-def capture_lumen_graphs(
+def install_lazy_graph_capture(
     model: nn.Module,
-    seq_len: int,
-    micro_batch_size: int,
-    hidden_size: int,
     num_warmup: int = 3,
-    device: str = "cuda",
+    skip_recomputed_layers: int = 0,
+    max_graphed_layers: int = 0,
 ) -> int:
-    """Capture HIP/CUDA graphs for each transformer layer in a Megatron model.
+    """Replace non-checkpointed transformer layers' forward with a lazy
+    graph-capture wrapper.
 
-    Iterates ``model.decoder.layers`` and replaces each layer's ``forward``
-    with a :class:`LumenGraphedLayer` wrapper that replays pre-captured
-    forward and backward graphs.
+    Layers using activation checkpointing (recompute) are **skipped**
+    because the checkpoint backward re-runs the forward, which is
+    incompatible with graph replay's inplace static-buffer updates.
 
     Args:
-        model: Megatron GPTModel (or the unwrapped model with ``.decoder.layers``).
-        seq_len: Sequence length (post TP/SP/CP division).
-        micro_batch_size: Per-GPU micro-batch size.
-        hidden_size: Model hidden dimension.
-        num_warmup: Warmup iterations before capture.
-        device: CUDA device.
+        model: Megatron GPTModel with ``.decoder.layers``.
+        num_warmup: Number of eager forward passes before capture.
+        skip_recomputed_layers: Number of leading layers to skip
+            (matches ``recompute_num_layers`` from Megatron config).
+        max_graphed_layers: Maximum number of layers to graph (0 = all eligible).
+            Limits memory usage in the graph pool at high memory utilization.
 
     Returns:
-        Number of layers captured.
+        Number of layers wrapped.
     """
     if not hasattr(model, "decoder") or model.decoder is None:
-        logger.warning("Model has no decoder attribute, skipping graph capture")
+        logger.warning("Model has no decoder attribute, skipping graph wrappers")
         return 0
     if not hasattr(model.decoder, "layers"):
-        logger.warning("Model decoder has no layers attribute, skipping graph capture")
+        logger.warning("Model decoder has no layers, skipping graph wrappers")
         return 0
 
     layers = model.decoder.layers
-    if len(layers) == 0:
-        return 0
-
-    torch.cuda.synchronize()
-
-    sample_attn_mask = torch.ones(
-        (1, 1, seq_len, seq_len),
-        dtype=torch.bool,
-        device=device,
-    ).tril()
-
-    captured = 0
+    wrapped = 0
     for l_no, layer in enumerate(layers):
-        sample_input = torch.randn(
-            (seq_len, micro_batch_size, hidden_size),
-            dtype=torch.bfloat16,
-            requires_grad=True,
-            device=device,
-        )
+        if l_no < skip_recomputed_layers:
+            continue
+        if max_graphed_layers > 0 and wrapped >= max_graphed_layers:
+            break
+        graphed = LumenGraphedLayer(layer, num_warmup=num_warmup)
+        layer.forward = graphed
+        wrapped += 1
 
-        sample_kwargs = {
-            "attention_mask": sample_attn_mask,
-        }
-
-        if hasattr(layer, "self_attention") and hasattr(layer.self_attention, "config"):
-            layer.self_attention.config.test_mode = False
-
-        try:
-            graphed = LumenGraphedLayer(
-                layer,
-                sample_input,
-                sample_kwargs=sample_kwargs,
-                num_warmup=num_warmup,
-            )
-            layer._original_forward = layer.forward
-            layer.forward = graphed
-            captured += 1
-        except Exception as e:
-            logger.warning(
-                f"Failed to capture graph for layer {l_no}: {e}. " "Falling back to eager execution for this layer."
-            )
-
-    logger.info(f"Captured HIP graphs for {captured}/{len(layers)} transformer layers")
-    return captured
+    logger.info(
+        f"Installed lazy graph capture on {wrapped}/{len(layers)} transformer layers "
+        f"(skipped {skip_recomputed_layers} recomputed, "
+        f"max {max_graphed_layers if max_graphed_layers > 0 else 'unlimited'}, "
+        f"capture after {num_warmup} warmup steps)"
+    )
+    return wrapped

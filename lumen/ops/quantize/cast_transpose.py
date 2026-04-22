@@ -21,6 +21,18 @@ import triton.language as tl
 
 from lumen.ops.quantize.quant_amax_fused import _get_amax_scratch
 
+
+def _prepare_scale_1d(scale: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """Convert scale to 1-D float32 contiguous, avoiding copies when already correct."""
+    if scale.dtype == torch.float32 and scale.ndim == 1 and scale.is_contiguous():
+        s = scale
+    else:
+        s = scale.float().reshape(-1).contiguous()
+    if s.device != device:
+        s = s.to(device=device)
+    return s
+
+
 __all__ = [
     "cast_transpose_fp8",
     "cast_transpose_amax_fp8",
@@ -77,6 +89,7 @@ def _cast_transpose_fp8_kernel(
     x = tl.load(x_ptrs, mask=mask, other=0.0).to(tl.float32)
 
     scale = tl.load(scale_ptr).to(tl.float32)
+    scale = tl.where(scale > 0, scale, scale + 1.0)
     inv_scale = 1.0 / scale
 
     x_scaled = x * inv_scale
@@ -139,6 +152,7 @@ def _cast_transpose_amax_fp8_kernel(
     tl.atomic_max(amax_ptr, tile_amax, sem="relaxed")
 
     scale = tl.load(scale_ptr).to(tl.float32)
+    scale = tl.where(scale > 0, scale, scale + 1.0)
     inv_scale = 1.0 / scale
 
     x_scaled = x * inv_scale
@@ -192,9 +206,7 @@ def cast_transpose_amax_fp8(
     if clamp_max is None:
         clamp_max = float(torch.finfo(fp8_dtype).max)
 
-    scale_1 = scale.float().reshape(-1).contiguous()
-    if scale_1.device != x.device:
-        scale_1 = scale_1.to(device=x.device)
+    scale_1 = _prepare_scale_1d(scale, x.device)
 
     BLOCK_M = 64
     BLOCK_N = 64
@@ -256,9 +268,7 @@ def cast_transpose_fp8(
     if clamp_max is None:
         clamp_max = float(torch.finfo(fp8_dtype).max)
 
-    scale_1 = scale.float().reshape(-1).contiguous()
-    if scale_1.device != x.device:
-        scale_1 = scale_1.to(device=x.device)
+    scale_1 = _prepare_scale_1d(scale, x.device)
 
     BLOCK_M = 64
     BLOCK_N = 64
@@ -329,6 +339,7 @@ def _cast_amax_fp8_kernel(
     tl.atomic_max(amax_ptr, tile_amax, sem="relaxed")
 
     scale = tl.load(scale_ptr).to(tl.float32)
+    scale = tl.where(scale > 0, scale, scale + 1.0)
     inv_scale = 1.0 / scale
 
     x_scaled = x * inv_scale
@@ -380,9 +391,7 @@ def cast_amax_fp8(
     if clamp_max is None:
         clamp_max = float(torch.finfo(fp8_dtype).max)
 
-    scale_1 = scale.float().reshape(-1).contiguous()
-    if scale_1.device != x.device:
-        scale_1 = scale_1.to(device=x.device)
+    scale_1 = _prepare_scale_1d(scale, x.device)
 
     BLOCK_M = 64
     BLOCK_N = 64
@@ -455,6 +464,7 @@ def _rmsnorm_quant_amax_fp8_kernel(
     tl.atomic_max(amax_ptr, row_amax, sem="relaxed")
 
     scale = tl.load(scale_ptr).to(tl.float32)
+    scale = tl.where(scale > 0, scale, scale + 1.0)
     inv_scale = 1.0 / scale
     x_scaled = x_norm * inv_scale
     x_clamped = tl.where(
@@ -518,6 +528,7 @@ def _rmsnorm_quant_amax_fp8_bf16_kernel(
 
     # FP8 output
     scale = tl.load(scale_ptr).to(tl.float32)
+    scale = tl.where(scale > 0, scale, scale + 1.0)
     inv_scale = 1.0 / scale
     x_scaled = x_norm * inv_scale
     x_clamped = tl.where(
@@ -571,9 +582,7 @@ def rmsnorm_quant_amax_fp8(
     if clamp_max is None:
         clamp_max = float(torch.finfo(fp8_dtype).max)
 
-    scale_1 = scale.float().reshape(-1).contiguous()
-    if scale_1.device != x.device:
-        scale_1 = scale_1.to(device=x.device)
+    scale_1 = _prepare_scale_1d(scale, x.device)
 
     BLOCK_N = triton.next_power_of_2(N)
     fp8_tl = _TORCH_TO_TL_FP8[fp8_dtype]

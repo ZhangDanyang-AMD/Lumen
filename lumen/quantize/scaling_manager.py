@@ -257,7 +257,7 @@ class ScalingManager:
         """
         if amax.is_cuda:
             return _get_fused_compute_scale()(amax, fp8_max, margin=self._margin)
-        amax = amax.float()
+        amax = amax.float().reshape(1)
         effective_max = fp8_max / (2**self._margin)
         scale = amax / effective_max
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))
@@ -614,20 +614,45 @@ class ScalingManager:
     # Quantize core (shared by both on-the-fly and FP8 param paths)
     # ------------------------------------------------------------------
 
-    def _aiter_static_quant(self, tensor: torch.Tensor, scale: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
-        """Fused per-tensor static quant via AITER Triton (x / scale -> fp8)."""
-        from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8
+    def _aiter_static_quant(
+        self,
+        tensor: torch.Tensor,
+        scale: torch.Tensor,
+        fp8_dtype: torch.dtype,
+        *,
+        compute_amax: bool = False,
+    ) -> "torch.Tensor | tuple[torch.Tensor, torch.Tensor]":
+        """Fused per-tensor static quant via AITER Triton (x / scale -> fp8).
 
+        When *compute_amax* is True, returns ``(fp8_tensor, amax)`` by piggybacking
+        the amax reduction onto the quantization kernel (zero extra memory passes).
+        """
         if tensor.dim() == 2:
             tensor_2d = tensor.contiguous()
         else:
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
         qx = torch.empty_like(tensor_2d, dtype=fp8_dtype)
-        scale_in = scale.float().reshape(1).contiguous()
+        if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1 and scale.is_contiguous():
+            scale_in = scale
+        else:
+            scale_in = scale.float().reshape(1).contiguous()
         if scale_in.device != tensor.device:
             scale_in = scale_in.to(device=tensor.device)
-        static_per_tensor_quant_fp8_i8(qx, tensor_2d, scale_in)
-        return qx.view(tensor.shape)
+
+        if compute_amax:
+            from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8_with_amax
+
+            from lumen.ops.quantize.quant_amax_fused import _get_amax_scratch
+
+            amax_buf = _get_amax_scratch(tensor.device)
+            amax_buf.zero_()
+            static_per_tensor_quant_fp8_i8_with_amax(qx, tensor_2d, scale_in, amax_buf)
+            return qx.view(tensor.shape), amax_buf.clone()
+        else:
+            from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8
+
+            static_per_tensor_quant_fp8_i8(qx, tensor_2d, scale_in)
+            return qx.view(tensor.shape)
 
     @staticmethod
     def _eager_transpose(desc: "FP8Descriptor") -> "FP8Descriptor":
@@ -793,13 +818,20 @@ class ScalingManager:
             return self._eager_transpose(desc) if not backward else desc
 
         if tensor.is_cuda and _probe_aiter_static_quant():
-            fp8_tensor = self._aiter_static_quant(tensor, scale, dtype)
+            needs_amax = _precomputed_amax is None
+            result = self._aiter_static_quant(tensor, scale, dtype, compute_amax=needs_amax)
+            if needs_amax:
+                fp8_tensor, kernel_amax = result
+                self.update_amax_value(tensor_id, kernel_amax)
+            else:
+                fp8_tensor = result
+                self.update_amax_value(tensor_id, _precomputed_amax)
         else:
             fp8_tensor = (tensor * (1.0 / scale)).clamp(-fp8_max, fp8_max).to(dtype)
-        if _precomputed_amax is not None:
-            self.update_amax_value(tensor_id, _precomputed_amax)
-        else:
-            self.update_amax(tensor_id, tensor)
+            if _precomputed_amax is not None:
+                self.update_amax_value(tensor_id, _precomputed_amax)
+            else:
+                self.update_amax(tensor_id, tensor)
         desc = FP8Descriptor(data=fp8_tensor, scale=scale, fp8_dtype=dtype)
         return self._eager_transpose(desc) if not backward else desc
 
@@ -863,13 +895,20 @@ class ScalingManager:
             return fp8_2d.view(tensor.shape), scale
 
         if tensor.is_cuda and _probe_aiter_static_quant():
-            fp8_tensor = self._aiter_static_quant(tensor, scale, dtype)
+            needs_amax = precomputed_amax is None
+            result = self._aiter_static_quant(tensor, scale, dtype, compute_amax=needs_amax)
+            if needs_amax:
+                fp8_tensor, kernel_amax = result
+                self.update_amax_value(tensor_id, kernel_amax)
+            else:
+                fp8_tensor = result
+                self.update_amax_value(tensor_id, precomputed_amax)
         else:
             fp8_tensor = (tensor / scale).clamp(-fp8_max, fp8_max).to(dtype)
-        if precomputed_amax is not None:
-            self.update_amax_value(tensor_id, precomputed_amax)
-        else:
-            self.update_amax(tensor_id, tensor)
+            if precomputed_amax is not None:
+                self.update_amax_value(tensor_id, precomputed_amax)
+            else:
+                self.update_amax(tensor_id, tensor)
         return fp8_tensor, scale
 
     # ------------------------------------------------------------------

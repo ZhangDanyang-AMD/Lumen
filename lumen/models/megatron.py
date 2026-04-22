@@ -523,7 +523,19 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         if _orig_te_spec is not None:
             _gls.TESpecProvider = _orig_te_spec
 
+    _subs = transformer_layer_spec.submodules
+    _existing_map = getattr(_subs, "sharded_state_dict_keys_map", None) or {}
+    _existing_map.update(
+        {
+            "input_layernorm.": "self_attention.linear_qkv.layer_norm_",
+            "pre_mlp_layernorm.": "mlp.linear_fc1.layer_norm_",
+        }
+    )
+    _subs.sharded_state_dict_keys_map = _existing_map
+
     # Patch MLA attention if needed
+    # (note: checkpoint key remapping for legacy checkpoints is handled
+    # via _install_layernorm_linear_ckpt_hook below)
     if getattr(args, "multi_latent_attention", False):
         _patch_mla_attention(transformer_layer_spec)
 
@@ -548,6 +560,74 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         _patch_fused_swiglu_mlp(model)
 
     return model
+
+
+_LN_KEY_REMAP_CANDIDATES = [
+    (
+        "input_layernorm.",
+        [
+            "self_attention.linear_qkv.layer_norm_",
+            "self_attention.linear_qkv.base_layer.layer_norm_",
+        ],
+    ),
+    (
+        "pre_mlp_layernorm.",
+        [
+            "mlp.linear_fc1.layer_norm_",
+            "mlp.linear_fc1.base_layer.layer_norm_",
+        ],
+    ),
+]
+
+
+def _install_layernorm_linear_ckpt_hook(model):
+    """Remap legacy checkpoint keys for fused LayerNormLinear modules.
+
+    Legacy Megatron checkpoints store norm weights under
+    ``decoder.layers.N.input_layernorm.weight`` etc., but the fused
+    ``LumenLayerNormLinear`` (used in the TE-style spec) expects them at
+    ``decoder.layers.N.self_attention.linear_qkv.layer_norm_weight``.
+
+    When LoRA is applied, the target has an extra ``base_layer.`` segment
+    (e.g. ``linear_qkv.base_layer.layer_norm_weight``).
+    """
+
+    from megatron.core.transformer.transformer_layer import TransformerLayer
+
+    model_keys = {n for n, _ in model.named_parameters()}
+    model_keys |= {n for n, _ in model.named_buffers()}
+
+    first_tl_prefix = None
+    for mod_name, mod in model.named_modules():
+        if isinstance(mod, TransformerLayer):
+            first_tl_prefix = f"{mod_name}." if mod_name else ""
+            break
+
+    if first_tl_prefix is None:
+        return
+
+    _resolved_map: dict = {}
+    for old_pfx, candidates in _LN_KEY_REMAP_CANDIDATES:
+        for cand in candidates:
+            probe = f"{first_tl_prefix}{cand}weight"
+            if probe in model_keys:
+                _resolved_map[old_pfx] = cand
+                break
+
+    if not _resolved_map:
+        return
+
+    def _remap_hook(state_dict, prefix, *_args, **_kwargs):
+        for old_pfx, new_pfx in _resolved_map.items():
+            for suffix in ("weight", "bias"):
+                old_key = f"{prefix}{old_pfx}{suffix}"
+                new_key = f"{prefix}{new_pfx}{suffix}"
+                if old_key in state_dict and new_key not in state_dict:
+                    state_dict[new_key] = state_dict.pop(old_key)
+
+    for module in model.modules():
+        if isinstance(module, TransformerLayer):
+            module._register_load_state_dict_pre_hook(_remap_hook)
 
 
 def _patch_fused_swiglu_mlp(model):
@@ -654,6 +734,7 @@ def enable_fp8_for_parallel_linear(
     fp8_mha=False,
     gradient_accumulation_fusion=False,
     delay_wgrad=False,
+    quant_config=None,
 ):
     """Enable FP8 GEMM on all Lumen parallel linear modules in the model.
 
@@ -667,6 +748,9 @@ def enable_fp8_for_parallel_linear(
 
     When *gradient_accumulation_fusion* is True, weight gradients
     accumulate directly into ``param.main_grad``.
+
+    When *quant_config* is provided, per-module ScalingManagers are created
+    with this config (ensuring correct amax_algo, history_len, etc.).
     """
     from lumen.modules.attention_megatron import LumenDotProductAttention
     from lumen.modules.attention_mla import LumenDotProductAttentionMLA
@@ -674,13 +758,23 @@ def enable_fp8_for_parallel_linear(
     from lumen.modules.layernorm_linear import LumenLayerNormLinear
     from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
 
+    if fp8_dtype is None:
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+
     count = 0
     for module in model.modules():
         if isinstance(
             module, (LumenColumnParallelLinear, LumenRowParallelLinear, LumenLayerNormLinear, LumenGroupedLinear)
         ):
+            _mgr = scaling_manager
+            if _mgr is None and quant_config is not None:
+                from lumen.quantize import ScalingManager
+
+                _mgr = ScalingManager(quant_config)
             module.enable_fp8(
-                scaling_manager=scaling_manager,
+                scaling_manager=_mgr,
                 scaling_type=scaling_type,
                 fp8_dtype=fp8_dtype,
                 block_size=block_size,
@@ -711,6 +805,59 @@ def enable_fp8_for_parallel_linear(
 # ---------------------------------------------------------------------------
 
 
+def _patch_lora_for_layernorm_linear(model):
+    """Fix LoRA input for LumenLayerNormLinear base layers.
+
+    When a LumenLayerNormLinear is wrapped by LoRA, the LoRA adapter's
+    forward passes the *raw* (pre-norm) input to lora_a. But lora_a
+    expects the *normalized* input — matching what a standalone
+    ColumnParallelLinear would receive after a separate layernorm.
+
+    This patch replaces the LoRA adapter forward to normalize the input
+    before feeding it to lora_a, ensuring consistent LoRA behavior
+    regardless of whether the norm is fused into the linear or not.
+    """
+    from megatron.core.transformer.lora_adapter import LoraAdapter
+
+    from lumen.modules.layernorm_linear import LumenLayerNormLinear
+
+    patched = 0
+    for module in model.modules():
+        if not isinstance(module, LoraAdapter):
+            continue
+        base = module.base_layer
+        if not isinstance(base, LumenLayerNormLinear):
+            continue
+        if module.lora_a is None:
+            continue
+
+        def _make_patched_forward(adapter, base_layer):
+            def _patched_forward(input_tensor, *args, **kwargs):
+                output = base_layer(input_tensor, *args, **kwargs)
+                if adapter.lora_a is None:
+                    return output
+
+                normed_input = base_layer._norm(input_tensor)
+                lora_a_out, _ = adapter.lora_a(normed_input)
+                lora_b_out, _ = adapter.lora_b(lora_a_out)
+                lora_drop_out = adapter.lora_dropout(lora_b_out)
+                lora_out = adapter.lora_alpha * lora_drop_out
+
+                if type(output) is torch.Tensor:
+                    return output + lora_out
+
+                out_tensor, bias = output
+                return out_tensor + lora_out, bias
+
+            return _patched_forward
+
+        module.forward = _make_patched_forward(module, base)
+        patched += 1
+
+    if patched > 0:
+        print_rank_0(f"> Patched {patched} LoRA adapters for LumenLayerNormLinear " f"(normalized input for lora_a)")
+
+
 def apply_lora(model: GPTModel, args) -> None:
     """Wrap linear layers with LoRA adapters for parameter-efficient fine-tuning.
 
@@ -720,7 +867,22 @@ def apply_lora(model: GPTModel, args) -> None:
     * ``"attention_mlp"`` — attention + MLP (gate/up + down).
     * ``"all"`` (default) — attention + MLP + embedding + output layer.
     """
-    from megatron.core.transformer.lora_adapter import LoraAdapter
+    from megatron.core.transformer.lora_adapter import (
+        COLUMN_PARALLEL_LAYERS,
+        LORA_LAYERS_MAPPING,
+        ROW_PARALLEL_LAYERS,
+        LoraAdapter,
+    )
+
+    from lumen.modules.layernorm_linear import LumenLayerNormLinear
+    from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+
+    if LumenLayerNormLinear not in LORA_LAYERS_MAPPING:
+        LORA_LAYERS_MAPPING[LumenLayerNormLinear] = COLUMN_PARALLEL_LAYERS
+    if LumenColumnParallelLinear not in LORA_LAYERS_MAPPING:
+        LORA_LAYERS_MAPPING[LumenColumnParallelLinear] = COLUMN_PARALLEL_LAYERS
+    if LumenRowParallelLinear not in LORA_LAYERS_MAPPING:
+        LORA_LAYERS_MAPPING[LumenRowParallelLinear] = ROW_PARALLEL_LAYERS
 
     common = {
         "config": model.config,
@@ -748,6 +910,8 @@ def apply_lora(model: GPTModel, args) -> None:
                 model.embedding.word_embeddings = LoraAdapter(model.embedding.word_embeddings, **common)
         if hasattr(model, "output_layer") and model.output_layer is not None:
             model.output_layer = LoraAdapter(model.output_layer, **common)
+
+    _patch_lora_for_layernorm_linear(model)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
@@ -909,6 +1073,10 @@ def make_lumen_model_provider(
                 os.environ["LORA_A2A"] = "1"
                 print_rank_0("> LoRA A2A communication optimisation enabled")
 
+        # 1b. Install checkpoint key remapping for fused LayerNormLinear
+        if getattr(args, "lumen_linear", False):
+            _install_layernorm_linear_ckpt_hook(model)
+
         # 2. Unified LumenConfig.enable() — skip PEFT LoRA (handled above)
         cfg = LumenConfig.from_args(args)
         cfg = _replace(cfg, lora_rank=0)
@@ -939,6 +1107,7 @@ def make_lumen_model_provider(
                 fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
                 gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
                 delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
+                quant_config=cfg.quant_config,
             )
 
         if getattr(args, "fp8_param_storage", False):
@@ -1109,7 +1278,17 @@ def install_hip_graphs_hook() -> None:
         if not model:
             return model, optimizer, scheduler
 
-        from lumen.utils.hip_graphs import capture_lumen_graphs
+        from lumen.utils.hip_graphs import install_lazy_graph_capture
+
+        warmup_steps = getattr(train_args, "warmup_steps", 5)
+        num_warmup = max(warmup_steps, 3)
+
+        recompute_num = 0
+        if (
+            getattr(train_args, "recompute_granularity", None) == "full"
+            and getattr(train_args, "recompute_method", None) == "block"
+        ):
+            recompute_num = getattr(train_args, "recompute_num_layers", 0)
 
         targets = model if isinstance(model, list) else [model]
         for m in targets:
@@ -1117,29 +1296,18 @@ def install_hip_graphs_hook() -> None:
             while hasattr(unwrapped, "module"):
                 unwrapped = unwrapped.module
 
-            seq_len = train_args.seq_length
-            tp = getattr(train_args, "tensor_model_parallel_size", 1)
-            sp = getattr(train_args, "sequence_parallel", False)
-            cp = getattr(train_args, "context_parallel_size", 1)
-
-            if sp:
-                seq_len = seq_len // tp
-            seq_len = seq_len // cp
-
-            micro_bs = train_args.micro_batch_size
-            hidden_size = train_args.hidden_size
-
-            count = capture_lumen_graphs(
+            max_graphed = int(os.environ.get("LUMEN_HIP_GRAPHS_MAX_LAYERS", "10"))
+            count = install_lazy_graph_capture(
                 unwrapped,
-                seq_len=seq_len,
-                micro_batch_size=micro_bs,
-                hidden_size=hidden_size,
-                num_warmup=3,
+                num_warmup=num_warmup,
+                skip_recomputed_layers=recompute_num,
+                max_graphed_layers=max_graphed,
             )
             if count > 0:
                 print_rank_0(
-                    f"> HIP graphs: captured {count} transformer layers "
-                    f"(seq={seq_len}, mbs={micro_bs}, hidden={hidden_size})"
+                    f"> HIP graphs: installed lazy capture on {count} "
+                    f"transformer layers (skipped {recompute_num} recomputed, "
+                    f"capture after step {num_warmup})"
                 )
 
         return model, optimizer, scheduler
@@ -1697,7 +1865,7 @@ def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
     args = get_args()
     val_target = getattr(args, "val_loss_target", None)
     if val_target is not None and not _early_stop_logged:
-        avg_loss = (loss.clone().detach() / max(num_tokens.item(), 1)).item()
+        avg_loss = (loss.clone().detach() / num_tokens.clamp(min=1)).item()
         if _val_loss_ema is None:
             _val_loss_ema = avg_loss
         else:
@@ -1735,6 +1903,11 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
 
         timers("batch-generator", log_level=2).start()
         with stimer(bdata=True):
+            if warmup_steps <= 0 and not _warmup_completed:
+                _warmup_completed = True
+                from lumen.ops.quantize.linear import set_warmup_mode
+
+                set_warmup_mode(False)
             if warmup_steps > 0 and not _warmup_completed:
                 _warmup_step_counter += 1
                 if _warmup_step_counter <= warmup_steps:
@@ -1755,6 +1928,9 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()
                     _warmup_completed = True
+                    from lumen.ops.quantize.linear import set_warmup_mode
+
+                    set_warmup_mode(False)
                     print_rank_0(f"> Synthetic warmup complete ({warmup_steps} steps). " f"Resuming with real data.")
                     vp_stage = get_attr_wrapped_model(model, "vp_stage")
                     tokens, labels, loss_mask, attention_mask, position_ids = get_batch_fn(data_iterator, vp_stage)

@@ -60,6 +60,8 @@ docker run --rm --init \
     -e TORCHDYNAMO_DISABLE=1 \
     -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512,garbage_collection_threshold:0.8 \
     -e CUDA_DEVICE_MAX_CONNECTIONS=1 \
+    -e LUMEN_DEBUG_FORWARD=0 \
+    -e TORCH_SHOW_CPP_STACKTRACES=1 \
     -e CUBLAS_FORCE_XMMA_KERNEL_INIT=DEVICE \
     -e OMP_NUM_THREADS=1 \
     -e USE_HIPBLASLT=1 \
@@ -88,12 +90,16 @@ docker run --rm --init \
     -e LUMEN_POST_EVAL_REWARM=1 \
     -e LUMEN_POST_EVAL_STRATEGY=gc_only \
     -e LUMEN_FUSED_SWIGLU=1 \
+    -e LUMEN_MLP_FP8_STORE=1 \
     -e LUMEN_FUSED_RESIDUAL_NORM=1 \
     -e LUMEN_FUSED_NORM_QUANT_GEMM=1 \
     -e LUMEN_FP8_ATTN_BWD=0 \
-    -e LUMEN_HIP_GRAPHS=0 \
+    -e LUMEN_HIP_GRAPHS=${LUMEN_HIP_GRAPHS:-0} \
+    -e LUMEN_HIP_GRAPHS_MAX_LAYERS=${LUMEN_HIP_GRAPHS_MAX_LAYERS:-3} \
+    -e RECOMPUTE_NUM_LAYERS=${RECOMPUTE_NUM_LAYERS:-21} \
     -e LUMEN_LOG_INTERVAL=10 \
     -e LUMEN_MLP_RECOMPUTE=0 \
+    -e TRAIN_STEPS=${TRAIN_STEPS:-1024} \
     lumen_unit_test:latest \
     bash -c '
 set -euo pipefail

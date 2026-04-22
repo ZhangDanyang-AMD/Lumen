@@ -79,6 +79,27 @@ REPLACEMENT = r'''    def load_model_state_dict(module, state_dict, strict: bool
                         new_sd[norm_key] = cv
 
             state_dict = new_sd
+
+            # Remap fused LayerNormLinear norm weights (--lumen-linear)
+            _ln_rules = [
+                ("input_layernorm.", "self_attention.linear_qkv.base_layer.layer_norm_"),
+                ("input_layernorm.", "self_attention.linear_qkv.layer_norm_"),
+                ("pre_mlp_layernorm.", "mlp.linear_fc1.base_layer.layer_norm_"),
+                ("pre_mlp_layernorm.", "mlp.linear_fc1.layer_norm_"),
+            ]
+            ln_mapped = 0
+            for ck in list(state_dict.keys()):
+                for old_frag, new_frag in _ln_rules:
+                    if old_frag not in ck:
+                        continue
+                    tgt = ck.replace(old_frag, new_frag, 1)
+                    if tgt in inner_keys and tgt not in state_dict:
+                        state_dict[tgt] = state_dict.pop(ck)
+                        ln_mapped += 1
+                        break
+            if ln_mapped:
+                print(f"[CKPT FIX] Remapped {ln_mapped} fused LayerNormLinear norm keys")
+
             loaded = set(state_dict.keys()).intersection(inner_keys)
             not_loaded = inner_keys - set(state_dict.keys())
             important_missing = [k for k in sorted(not_loaded)

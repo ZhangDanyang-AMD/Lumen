@@ -341,6 +341,8 @@ class LumenColumnParallelLinear(nn.Module):
     Can be used directly in Megatron layer specs.
     """
 
+    _lora_tp_mode = "column"
+
     def __init__(
         self,
         input_size: int,
@@ -387,7 +389,9 @@ class LumenColumnParallelLinear(nn.Module):
         # FP8 config (disabled by default; enabled via enable_fp8())
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
@@ -720,6 +724,8 @@ class LumenRowParallelLinear(nn.Module):
     Row-parallel linear using Lumen GEMM.
     """
 
+    _lora_tp_mode = "row"
+
     def __init__(
         self,
         input_size: int,
@@ -762,7 +768,9 @@ class LumenRowParallelLinear(nn.Module):
         # FP8 config
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False

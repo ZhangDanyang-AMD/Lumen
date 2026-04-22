@@ -79,7 +79,10 @@ def cast_transpose_amax_fp8_hip(
     amax_out = _get_amax_scratch(x.device)
     amax_out.zero_()
 
-    scale_1 = scale.float().reshape(-1).contiguous()
+    if scale.dtype == torch.float32 and scale.ndim == 1 and scale.is_contiguous():
+        scale_1 = scale
+    else:
+        scale_1 = scale.float().reshape(-1).contiguous()
     if scale_1.device != x.device:
         scale_1 = scale_1.to(device=x.device)
 

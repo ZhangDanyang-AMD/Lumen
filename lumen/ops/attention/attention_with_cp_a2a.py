@@ -78,7 +78,14 @@ class AttentionCPA2AHelper:
             x.view(b, s // n, n, h // n, d).movedim(-3, 0).contiguous().view(n, -1)
             for x, (n, b, s, h, d) in zip((q, k, v), self.qkv_shape_traits)
         )
-        return torch.cat((q, k, v), dim=1).contiguous()
+        total = q.shape[1] + k.shape[1] + v.shape[1]
+        out = torch.empty((q.shape[0], total), dtype=q.dtype, device=q.device)
+        c0 = q.shape[1]
+        c1 = c0 + k.shape[1]
+        out[:, :c0] = q
+        out[:, c0:c1] = k
+        out[:, c1:] = v
+        return out
 
     def splits_qkv_after_a2a(self, qkv):
         q, k, v = torch.split(qkv, self.combine_splits, dim=1)
@@ -109,7 +116,14 @@ class AttentionCPA2AHelper:
             x.view(b, n, s // n, h // n, d).movedim(1, 0).contiguous().view(n, -1)
             for x, (n, b, s, h, d) in zip((dq, dk, dv), self.qkv_shape_traits)
         )
-        return torch.cat((dq, dk, dv), dim=1).contiguous()
+        total = dq.shape[1] + dk.shape[1] + dv.shape[1]
+        out = torch.empty((dq.shape[0], total), dtype=dq.dtype, device=dq.device)
+        c0 = dq.shape[1]
+        c1 = c0 + dk.shape[1]
+        out[:, :c0] = dq
+        out[:, c0:c1] = dk
+        out[:, c1:] = dv
+        return out
 
     def split_dqkv_after_a2a(self, dqkv):
         dq, dk, dv = torch.split(dqkv, self.combine_splits, dim=1)

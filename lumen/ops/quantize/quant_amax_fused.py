@@ -102,7 +102,10 @@ def static_quant_with_amax(
     qx = torch.empty_like(x, dtype=fp8_dtype)
     amax_out = _get_amax_scratch(x.device)
     amax_out.zero_()
-    scale_in = scale.float().reshape(1).contiguous()
+    if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1 and scale.is_contiguous():
+        scale_in = scale
+    else:
+        scale_in = scale.float().reshape(1).contiguous()
     if scale_in.device != x.device:
         scale_in = scale_in.to(device=x.device)
 
@@ -264,7 +267,10 @@ def dequant_fp8_to_bf16(
     rows, cols = fp8_tensor.shape
     out = torch.empty((rows, cols), dtype=torch.bfloat16, device=fp8_tensor.device)
 
-    scale_1 = scale.float().reshape(-1).contiguous()
+    if scale.dtype == torch.float32 and scale.ndim == 1 and scale.is_contiguous():
+        scale_1 = scale
+    else:
+        scale_1 = scale.float().reshape(-1).contiguous()
     if scale_1.device != fp8_tensor.device:
         scale_1 = scale_1.to(device=fp8_tensor.device)
 

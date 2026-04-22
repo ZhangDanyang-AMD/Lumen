@@ -25,6 +25,15 @@ _SKIP_BACKEND_SYNC = os.environ.get("LUMEN_SKIP_BACKEND_SYNC", "0") == "1"
 _backend_cache: Dict[str, int] = {}
 _BACKEND_WARMUP_CALLS = 3
 
+_IN_GRAPH_CAPTURE = False
+
+
+def set_graph_capture_mode(active: bool):
+    """Toggle graph-capture flag for dispatch safety."""
+    global _IN_GRAPH_CAPTURE
+    _IN_GRAPH_CAPTURE = active
+
+
 try:
     from triton.compiler.errors import CompilationError as _TritonCompilationError
 except ImportError:
@@ -505,11 +514,16 @@ def try_backends(
         _, fn = backends[cached_idx]
         return fn(*args, **kwargs)
 
+    if _IN_GRAPH_CAPTURE:
+        raise RuntimeError(
+            f"{op_name}: no cached backend during CUDA graph capture. " "Run warmup before graph capture."
+        )
+
     last_exc = None
     for i, (backend, fn) in enumerate(backends):
         try:
             result = fn(*args, **kwargs)
-            if torch.cuda.is_available() and not _SKIP_BACKEND_SYNC:
+            if torch.cuda.is_available() and not _SKIP_BACKEND_SYNC and not _IN_GRAPH_CAPTURE:
                 torch.cuda.synchronize()
 
             hit_count = _backend_cache.get(op_name + ":hits", 0) + 1

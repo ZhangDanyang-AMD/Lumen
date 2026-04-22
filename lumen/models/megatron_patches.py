@@ -264,6 +264,153 @@ def install_fused_swiglu_triton():
     _swiglu_mod._lumen_triton_swiglu_patched = True
 
 
+# ── 5c. MLP FP8 activation storage for SwiGLU ─────────────────────────────
+
+_MLP_FP8_STORE = os.environ.get("LUMEN_MLP_FP8_STORE", "0") == "1"
+
+
+def install_mlp_fp8_store():
+    """Replace the decomposed SwiGLU in ``MLP.forward`` with a custom autograd
+    function that stores the fc1 output in FP8 (1 byte/element) instead of BF16
+    (2 bytes/element), recomputing the SwiGLU during backward.
+
+    Memory savings per non-recomputed layer (Llama2-70B, seq=8192, MBS=1):
+      Before: ~1.3 GB for SwiGLU intermediates in BF16
+      After:  ~0.06 GB for fc1 input in FP8 + ~0.22 GB for fc2 input in FP8
+      Saving: ~1.0 GB/layer → ~59 GB for 59 non-recomputed layers (ACL=21)
+
+    Controlled by ``LUMEN_MLP_FP8_STORE=1``.
+
+    Only affects the non-fused GLU path (``bias_swiglu_fusion=False``, which is
+    what Lumen uses).  The fused bias_swiglu path already has its own FP8 store
+    via ``activation_func_fp8_input_store``.
+    """
+    if not _MLP_FP8_STORE:
+        return
+
+    try:
+        from megatron.core.transformer import mlp as _mlp_mod
+    except ImportError:
+        return
+
+    if getattr(_mlp_mod, "_lumen_mlp_fp8_store_patched", False):
+        return
+
+    from lumen.quantize.config import _get_float8_e4m3
+
+    _fp8_e4m3 = _get_float8_e4m3()
+    _MLP = _mlp_mod.MLP
+    _orig_forward = _MLP.forward
+
+    from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8 as _dynamic_quant
+    from torch.nn.functional import sigmoid as _F_sigmoid
+    from torch.nn.functional import silu as _F_silu
+
+    class _SwiGLU_FP8Store(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, fc1_output, activation_func, clamp_value, glu_linear_offset):
+            x_gate, x_linear = torch.chunk(fc1_output, 2, dim=-1)
+            if clamp_value is not None:
+                x_gate = x_gate.clamp(min=None, max=clamp_value)
+                x_linear = x_linear.clamp(min=-clamp_value, max=clamp_value)
+            activated = activation_func(x_gate) * (x_linear + glu_linear_offset)
+
+            fc1_flat = fc1_output.reshape(-1, fc1_output.shape[-1]).contiguous()
+            qx = torch.empty_like(fc1_flat, dtype=_fp8_e4m3)
+            scale_out = torch.empty(1, dtype=torch.float32, device=fc1_flat.device)
+            _dynamic_quant(qx, fc1_flat, scale_out)
+            fc1_fp8 = qx.view(torch.uint8)
+            inv_scale = scale_out
+
+            ctx.save_for_backward(fc1_fp8, inv_scale)
+            ctx._orig_shape = fc1_output.shape
+            ctx._clamp_value = clamp_value
+            ctx._glu_linear_offset = glu_linear_offset
+            ctx._activation_func = activation_func
+            ctx._is_silu = activation_func is _F_silu or activation_func is torch.nn.functional.silu
+            return activated
+
+        @staticmethod
+        @once_differentiable
+        def backward(ctx, grad_output):
+            fc1_fp8, inv_scale = ctx.saved_tensors
+            clamp_value = ctx._clamp_value
+            activation_func = ctx._activation_func
+            glu_linear_offset = ctx._glu_linear_offset
+            orig_shape = ctx._orig_shape
+
+            fc1_recon = (fc1_fp8.view(_fp8_e4m3).to(torch.float32) * inv_scale).to(grad_output.dtype)
+            fc1_recon = fc1_recon.reshape(orig_shape)
+            x_gate, x_linear = torch.chunk(fc1_recon, 2, dim=-1)
+            if clamp_value is not None:
+                x_gate = x_gate.clamp(min=None, max=clamp_value)
+                x_linear = x_linear.clamp(min=-clamp_value, max=clamp_value)
+
+            if ctx._is_silu:
+                sig = _F_sigmoid(x_gate)
+                gate_activated = x_gate * sig
+                act_grad = sig * (1.0 + x_gate * (1.0 - sig))
+            else:
+                with torch.enable_grad():
+                    x_gate_g = x_gate.detach().requires_grad_(True)
+                    act_val = activation_func(x_gate_g)
+                    act_grad = torch.autograd.grad(
+                        act_val,
+                        x_gate_g,
+                        torch.ones_like(act_val),
+                        retain_graph=False,
+                    )[0]
+                gate_activated = activation_func(x_gate)
+
+            up_val = x_linear + glu_linear_offset
+
+            grad_fc1 = torch.empty_like(fc1_recon)
+            N = grad_fc1.shape[-1] // 2
+            grad_fc1[..., :N] = grad_output * up_val * act_grad
+            grad_fc1[..., N:] = grad_output * gate_activated
+            return grad_fc1, None, None, None
+
+    def _mlp_forward_with_fp8_store(self, hidden_states, per_token_scale=None):
+        if (
+            not self.training
+            or self.config.bias_activation_fusion
+            or self.config.use_te_activation_func
+            or not self.config.gated_linear_unit
+        ):
+            return _orig_forward(self, hidden_states, per_token_scale)
+
+        from megatron.core.utils import nvtx_range_pop, nvtx_range_push
+
+        nvtx_range_push(suffix="linear_fc1")
+        intermediate_parallel, bias_parallel = self.linear_fc1(hidden_states)
+        nvtx_range_pop(suffix="linear_fc1")
+
+        nvtx_range_push(suffix="activation")
+        if bias_parallel is not None:
+            intermediate_parallel = intermediate_parallel + bias_parallel
+
+        intermediate_parallel = _SwiGLU_FP8Store.apply(
+            intermediate_parallel,
+            self.config.activation_func,
+            self.config.activation_func_clamp_value,
+            self.config.glu_linear_offset,
+        )
+
+        if per_token_scale is not None:
+            original_dtype = intermediate_parallel.dtype
+            intermediate_parallel = intermediate_parallel * per_token_scale.unsqueeze(-1)
+            intermediate_parallel = intermediate_parallel.to(original_dtype)
+        nvtx_range_pop(suffix="activation")
+
+        nvtx_range_push(suffix="linear_fc2")
+        output, output_bias = self.linear_fc2(intermediate_parallel)
+        nvtx_range_pop(suffix="linear_fc2")
+        return output, output_bias
+
+    _MLP.forward = _mlp_forward_with_fp8_store
+    _mlp_mod._lumen_mlp_fp8_store_patched = True
+
+
 # ── 6. MLP-only recompute ──────────────────────────────────────────────────
 
 
@@ -579,6 +726,7 @@ def install_fused_residual_norm():
             and self.hidden_dropout == 0.0
             and isinstance(self.cross_attention, IdentityOp)
             and isinstance(self.cross_attn_bda, IdentityFuncOp)
+            and not isinstance(self.pre_mlp_layernorm, IdentityOp)
         )
         self._lumen_deferred_bda = None
 
@@ -746,6 +894,7 @@ def install_all():
     install_requires_grad_fix()
     install_swiglu_fp8()
     install_fused_swiglu_triton()
+    install_mlp_fp8_store()
     install_mlp_recompute()
     install_fused_rope()
     install_eval_recompute()
