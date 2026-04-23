@@ -19,6 +19,7 @@ To enable FP8, call :func:`enable_fp8` on the module or set
 ``scaling_type`` to one of the supported quantization modes.
 """
 
+import threading
 import warnings
 from typing import Callable, Optional
 
@@ -169,6 +170,16 @@ def _pg_rank(group):
     return torch.distributed.get_rank(group=group)
 
 
+_swiglu_amax_tls = threading.local()
+
+
+def _pop_swiglu_amax():
+    """Pop the pre-computed amax from the last SwiGLU FP8 quantization."""
+    amax = getattr(_swiglu_amax_tls, "amax", None)
+    _swiglu_amax_tls.amax = None
+    return amax
+
+
 def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_fp8_activation: bool):
     """Attach fused SwiGLU FP8 cache when this GEMM quantizes activations; else clear it."""
     try:
@@ -186,7 +197,10 @@ def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_
     if consume_fp8_activation:
         cached = pop_swiglu_fp8_cache()
         if cached is not None:
-            return cached
+            fp8_data, scale = cached[0], cached[1]
+            amax = cached[2] if len(cached) > 2 else None
+            _swiglu_amax_tls.amax = amax
+            return (fp8_data, scale)
         return None
 
     discard_swiglu_fp8_cache()

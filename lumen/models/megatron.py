@@ -813,13 +813,14 @@ def _patch_lora_for_layernorm_linear(model):
     expects the *normalized* input — matching what a standalone
     ColumnParallelLinear would receive after a separate layernorm.
 
-    This patch replaces the LoRA adapter forward to normalize the input
-    before feeding it to lora_a, ensuring consistent LoRA behavior
-    regardless of whether the norm is fused into the linear or not.
+    This patch replaces the LoRA adapter forward to retrieve the cached
+    normalized output from the base layer's forward (stored in thread-local
+    by ``LumenLayerNormLinear.forward``), avoiding a redundant RMSNorm.
+    Falls back to recomputing the norm if the cache is empty.
     """
     from megatron.core.transformer.lora_adapter import LoraAdapter
 
-    from lumen.modules.layernorm_linear import LumenLayerNormLinear
+    from lumen.modules.layernorm_linear import LumenLayerNormLinear, _pop_cached_ln_out
 
     patched = 0
     for module in model.modules():
@@ -837,7 +838,10 @@ def _patch_lora_for_layernorm_linear(model):
                 if adapter.lora_a is None:
                     return output
 
-                normed_input = base_layer._norm(input_tensor)
+                normed_input = _pop_cached_ln_out()
+                if normed_input is None:
+                    normed_input = base_layer._norm(input_tensor)
+
                 lora_a_out, _ = adapter.lora_a(normed_input)
                 lora_b_out, _ = adapter.lora_b(lora_a_out)
                 lora_drop_out = adapter.lora_dropout(lora_b_out)
@@ -855,7 +859,9 @@ def _patch_lora_for_layernorm_linear(model):
         patched += 1
 
     if patched > 0:
-        print_rank_0(f"> Patched {patched} LoRA adapters for LumenLayerNormLinear " f"(normalized input for lora_a)")
+        print_rank_0(
+            f"> Patched {patched} LoRA adapters for LumenLayerNormLinear " f"(cached normalized input for lora_a)"
+        )
 
 
 def apply_lora(model: GPTModel, args) -> None:

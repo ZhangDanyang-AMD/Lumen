@@ -83,6 +83,20 @@ def _set_residual_out(residual_out: torch.Tensor) -> None:
     _tls.residual_out = residual_out
 
 
+def _pop_cached_ln_out():
+    """Pop the cached normalized output from the last LumenLayerNormLinear forward.
+
+    Used by the LoRA adapter patch to avoid recomputing RMSNorm for lora_a.
+    """
+    res = getattr(_tls, "cached_ln_out", None)
+    _tls.cached_ln_out = None
+    return res
+
+
+def _set_cached_ln_out(ln_out: torch.Tensor) -> None:
+    _tls.cached_ln_out = ln_out
+
+
 _NORM_QUANT_V2_AVAILABLE: bool | None = None
 
 
@@ -178,10 +192,10 @@ class _FusedResidualRMSNormFP8Quant(torch.autograd.Function):
                     ctx.eps,
                     op_name="rmsnorm",
                 )
-            y = y.reshape(res_d.shape)
+            y = y.reshape(ctx.x_shape)
             torch.autograd.backward(y, grad_bf16)
 
-        grad_residual_out = res_d.grad
+        grad_residual_out = res_d.grad.reshape(ctx.x_shape)
         if grad_res_out is not None:
             grad_residual_out = grad_residual_out + grad_res_out
         return grad_residual_out, grad_residual_out, w_d.grad, None, None, None
@@ -644,21 +658,15 @@ class LumenLayerNormLinear(nn.Module):
         pending_residual = _pop_pending_residual()
 
         if pending_residual is not None:
-            fused_result = self._try_fused_norm_quant_with_residual(x, pending_residual)
+            x = x + pending_residual
+            fused_result = self._try_fused_norm_quant(x)
             if fused_result is not None:
-                ln_out, out_fp8, out_scale, residual_out = fused_result
+                ln_out, out_fp8, out_scale = fused_result
                 pre_quantized_input = (out_fp8, out_scale)
-                _set_residual_out(residual_out)
+                _set_residual_out(x)
             else:
-                x = x + pending_residual
-                fused_result = self._try_fused_norm_quant(x)
-                if fused_result is not None:
-                    ln_out, out_fp8, out_scale = fused_result
-                    pre_quantized_input = (out_fp8, out_scale)
-                    _set_residual_out(x)
-                else:
-                    ln_out = self._norm(x)
-                    _set_residual_out(x)
+                ln_out = self._norm(x)
+                _set_residual_out(x)
         else:
             fused_result = self._try_fused_norm_quant(x)
             if fused_result is not None:
@@ -681,6 +689,8 @@ class LumenLayerNormLinear(nn.Module):
                     tensor_parallel_output_grad=True,
                     group=self.tp_group,
                 )
+
+        _set_cached_ln_out(ln_out)
 
         gemm_bias = self.bias if not self.skip_bias_add else None
         output = _do_gemm(

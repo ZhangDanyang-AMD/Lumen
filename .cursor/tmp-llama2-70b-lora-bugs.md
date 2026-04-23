@@ -2439,6 +2439,175 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   - Memory: 97.8% (higher than before due to norm recompute in LoRA path)
   - 0 NaN, 0 skipped, stable grad norms (0.1-0.5 — much smaller than before due to normalized LoRA input)
   - **Status: RESOLVED — passes MLPerf target at step 576 with val_loss = 0.9233**
+- Speed optimization: LoRA norm cache + SwiGLU amax tracking (2026-04-22):
+  - **LoRA norm cache**: Cache `ln_out` from `_FusedRMSNormFP8QuantV2` in thread-local;
+    LoRA adapter pops cached value instead of calling `base_layer._norm()` (redundant RMSNorm).
+    Eliminates 80 `_RMSNorm` + 80 `_RMSNormBackward` per step (720→480 each in 3-step profile).
+  - **SwiGLU amax tracking**: `try_fused_swiglu_fp8` now uses `dynamic_per_tensor_quant_fp8_i8_with_amax`
+    and feeds the pre-computed amax to `update_amax_value` via `_pop_swiglu_amax()`, fixing missing
+    amax recording when SwiGLU FP8 cache is consumed.
+  - Files changed:
+    - `lumen/modules/layernorm_linear.py` — added `_pop_cached_ln_out` / `_set_cached_ln_out`, set cache in forward
+    - `lumen/models/megatron.py` — LoRA patch uses `_pop_cached_ln_out()` instead of `base_layer._norm()`
+    - `lumen/models/_swiglu_fp8_fuse.py` — use `with_amax` variant, return 3-tuple
+    - `lumen/modules/parallel_linear.py` — `_pop_swiglu_amax()`, handle 3-tuple from SwiGLU cache
+    - `lumen/ops/quantize/linear.py` — feed SwiGLU amax to scaling manager via `update_amax_value`
+  - Profile comparison (3-step, steps 8-10):
+    | Metric | Before | After | Delta |
+    |--------|--------|-------|-------|
+    | `_RMSNorm` calls | 720 | 480 | -240 (-33%) |
+    | `_RMSNorm` CUDA | 56 ms | 36 ms | -20 ms |
+    | `_RMSNormBackward` calls | 720 | 480 | -240 (-33%) |
+    | `_RMSNormBackward` CUDA | 96 ms | 68 ms | -28 ms |
+    | Total CUDA (3-step) | 12,848 ms | 12,733 ms | -115 ms |
+    | Per-step CUDA | 4,283 ms | 4,244 ms | **-38 ms** |
+  - 1024-step validation:
+    - val_loss trajectory:
+      | Step | val_loss | Passes? | vs Previous |
+      |------|----------|---------|-------------|
+      | 192 | 0.9460 | No | -0.0024 (better) |
+      | 384 | 0.9368 | No | -0.0047 (better) |
+      | 576 | **0.9231** | **Yes** | -0.0002 (better) |
+      | 768 | 0.9241 | Yes | +0.0005 |
+      | 960 | **0.9197** | **Yes** | -0.0002 (better) |
+    - Pre-eval: **4,380 ms/step** (vs 4,348 ms, +0.7% within noise)
+    - Post-eval: ~4,745 ms/step (vs 4,656 ms)
+    - Memory: **96.7%** (vs 97.8%, improved by -1.1pp from eliminating RMSNorm autograd nodes)
+    - 0 NaN, 0 skipped, stable grad norms
+  - Wall-clock impact: within run-to-run noise (+0.7%). CUDA profile shows 38 ms/step savings
+    but masked by NCCL jitter and allocator behavior at high memory utilization.
+  - **Status: merged — correct, convergence preserved, memory improved**
+
+### [2026-04-22 speed-gap-analysis]
+- Remaining speed gap: 4,380 ms (Lumen) vs 3,967 ms (MLPerf) = **413 ms (10.4%)**
+- Fresh profile breakdown (top non-GEMM items, per step):
+  | Item | ms/step | % of step | Actionable? |
+  |------|---------|-----------|-------------|
+  | `aten::add + add_` | 140 | 3.3% | Fuse residual into norm (needs transformer block changes) |
+  | `hipThreadExchangeStreamCaptureMode` | 101 | 2.4% | ROCm runtime overhead; HIP graphs or ROCm upgrade |
+  | `aten::mul` | 81 | 1.9% | Autograd backward; hard to eliminate |
+  | `_dynamic_per_tensor_quant` | 81 | 1.9% | Already fused where possible |
+  | `_static_per_tensor_quant` | 70 | 1.6% | Part of delayed scaling |
+  | `aten::cat` | 70 | 1.6% | QKV backward concat; needs buffer pre-allocation |
+  | `aten::copy_` | 50 | 1.2% | Down from 289 ms; most copies fused |
+  | `dropout + bwd` | 41 | 1.0% | Fuse into preceding op |
+  | `_amax_abs_kernel` | 35 | 0.8% | History tracking for delayed scaling |
+  | `Memcpy DtoD` | 25 | 0.6% | From unfused ops |
+- The gap is dominated by many small overheads rather than a single large bottleneck.
+  Closing it further requires either:
+  1. **HIP graphs** to eliminate runtime dispatch overhead (~101 ms)
+  2. **Transformer block modifications** to fuse residual add into norm (~50-70 ms)
+  3. **QKV buffer pre-allocation** to eliminate `aten::cat` in backward (~30-40 ms)
+  4. Deeper kernel fusion (quant into GEMM epilogue, dropout into norm, etc.)
+- Status: open — no single optimization yields >50 ms; incremental improvements needed
+
+### [2026-04-22 gap-closure-investigation]
+- Investigated all 5 proposed optimizations from the speed-gap-analysis:
+  1. **Fuse residual add into LumenLayerNormLinear**: BLOCKED by OOM.
+     - Implementation: Extended `install_fused_residual_norm` to detect `--lumen-linear` mode where
+       `pre_mlp_layernorm` is IdentityOp but `mlp.linear_fc1` is `LumenLayerNormLinear`.
+       Used `_set_pending_residual(residual)` TLS to pass deferred BDA residual into
+       `LumenLayerNormLinear.forward()`, which calls `_FusedResidualRMSNormFP8Quant.apply()`.
+     - Problem: `_FusedResidualRMSNormFP8Quant` saves `res_out` in `ctx.save_for_backward`.
+       Autograd also keeps `x` and `residual` alive (inputs to `.apply()`).
+       Result: 3 tensors alive (x, residual, res_out) per layer vs 1 (hidden_states) in unfused path.
+       Extra ~128 MiB × 59 non-recomputed layers = ~7.5 GiB → OOM at 96.7% baseline.
+     - **Fix needed**: Either (a) reduce memory utilization first (~82% like TE), or
+       (b) implement a fused kernel that does `x + residual → norm → quant` without keeping
+       `x` and `residual` separately in autograd (single-input autograd Function with internal add).
+     - Reverted. Filed backward shape fix for `_FusedResidualRMSNormFP8Quant.backward()`:
+       `y.reshape(ctx.x_shape)` and `res_d.grad.reshape(ctx.x_shape)` to handle 3D inputs.
+
+  2. **Eliminate aten::cat (QKV backward)**: NOT FEASIBLE with current architecture.
+     - Root cause confirmed: TE's `_SplitAlongDim.backward()` has a noop path that checks
+       if grad_Q/K/V are already contiguous views of one buffer (lines 3740-3766).
+       In practice, attention backward produces separate gradient tensors, so the noop check
+       FAILS and `torch.cat` is called (line 3768).
+     - Fixing this would require modifying the attention backward to pre-allocate the gradient
+       buffer and write Q/K/V grads as views — very invasive change to CK attention kernels.
+     - Also: only ~80/647 cat calls per step are from QKV split. Rest from other sources
+       (column parallel overlap, LoRA, etc.).
+
+  3. **Fuse dropout into preceding op**: NOT APPLICABLE.
+     - `hidden_dropout=0.0` and `attention_dropout=0.0` already set.
+     - The 606 `aten::native_dropout` calls/3-steps = 202/step are from **LoRA dropout (0.1)**,
+       which is part of the MLPerf spec and cannot be removed.
+
+  4. **Reduce FP8 quant overhead**: Already heavily optimized.
+     - 582 dynamic_quant + 582 static_quant = 1164 calls/step minus 202 fused V2 = 962 unfused.
+     - Each call is ~60-80 µs (bandwidth bound for [8192, 8192] BF16→FP8).
+     - Further fusion would require GEMM epilogue integration (hardware-specific).
+
+  5. **hipThreadExchangeStreamCaptureMode (101 ms/step)**: ROCm runtime overhead.
+     - Requires HIP graph capture for the training step to eliminate.
+     - HIP graphs need careful handling of: dynamic shapes (eval vs train),
+       NCCL collective integration, FP8 scaling state updates, dropout RNG.
+     - Significant infrastructure project — not a simple patch.
+
+- Bug fix: `_FusedResidualRMSNormFP8Quant.backward()` shape mismatch for 3D inputs.
+  - Old: `y.reshape(res_d.shape)` → 2D, but `grad_bf16` is 3D → crash.
+  - New: `y.reshape(ctx.x_shape)` and `grad_residual_out = res_d.grad.reshape(ctx.x_shape)`.
+  - This is a latent bug — `_FusedResidualRMSNormFP8Quant` was never invoked in production
+    because the deferred BDA path was disabled for `--lumen-linear` mode.
+
+- Conclusion: The remaining **413 ms (10.4%) gap** is **structural**, not a single optimization target.
+  It's composed of:
+  | Category | ms/step | % of gap | Feasibility |
+  |----------|---------|----------|-------------|
+  | ROCm dispatch overhead | ~101 | 24% | HIP graphs (major project) |
+  | `aten::add/add_` residual | ~136 | 33% | Needs memory headroom first |
+  | `aten::cat` backward | ~70 | 17% | Needs attention kernel changes |
+  | `aten::mul` chain rule | ~81 | 20% | Fundamental (cannot eliminate) |
+  | FP8 quant pipeline | ~150 | 36% | GEMM epilogue fusion |
+  | `aten::copy_` | ~53 | 13% | Already 83% reduced from v47 |
+  | LoRA dropout | ~41 | 10% | MLPerf spec (cannot remove) |
+  (percentages exceed 100% because GPU overlap masks ~239 ms of these)
+
+- **Next feasible step**: Reduce memory utilization (currently 96.7%) toward ~90% to enable:
+  - Fused residual+norm+quant (saves ~50-70 ms but needs memory headroom)
+  - Better allocator performance (less fragmentation pressure)
+  - Options: FP8 activation storage for attention inputs, gradient compression
+- Status: **analyzed — gap is structural, no single-patch fix available**
+
+### [2026-04-22 deferred-bda-to-lnlinear]
+- Optimization: Memory-safe deferred BDA for `--lumen-linear` mode.
+  - Instead of the OOM-prone `_FusedResidualRMSNormFP8Quant` (which keeps 3 tensors alive),
+    the deferred BDA now passes the residual to `LumenLayerNormLinear` via TLS
+    (`_set_pending_residual`). Inside `LumenLayerNormLinear.forward()`, it does
+    `x = x + pending_residual` then feeds into the existing V2 fused norm+quant path.
+  - This avoids the extra autograd tensor retention (same 1 tensor as unfused path).
+  - Changes: `megatron_patches.py` (`_patched_init`, `_patched_fwd_attn`, `_patched_fwd_mlp`)
+    and `layernorm_linear.py` (simplified `forward()` to skip `_try_fused_norm_quant_with_residual`).
+- Results (1024-step full run):
+  - **Pre-eval step time**: ~4,310 ms (was 4,380 ms → **-70 ms / -1.6%**)
+  - **Post-eval step time**: ~4,590 ms (was 4,745 ms → **-155 ms / -3.3%**)
+  - **val_loss @ 576**: 0.9222 (< 0.925 target, PASS; was 0.9231)
+  - **Best val_loss**: 0.9195 (step 960; was 0.9197)
+  - **Memory**: 0.9873→0.9899, same as baseline
+  - No OOM, no accuracy degradation.
+- Speed ratio: post-eval ~4,590 / 4,000 (MLPerf) = **1.15x** (was 1.19x)
+  - Pre-eval: ~4,310 / 3,967 = **1.09x** (was 1.10x)
+- Status: **resolved — applied and validated**
+
+### [2026-04-22 fused-rope-enable]
+- Optimization: Enable Apex fused RoPE kernel via `LUMEN_FUSED_ROPE=1`.
+  - Infrastructure already existed: `install_fused_rope()` patches Megatron's `rope_utils`
+    to use Apex's native fused RoPE kernel (not AITER backend, `USE_ROCM_AITER_ROPE_BACKEND=0`).
+  - RoPE runs 160 times per forward (2 per layer × 80 layers). The unfused path uses
+    multiple PyTorch ops (`cos`, `sin`, `_rotate_half`, multiply, add).
+  - Change: Added `-e LUMEN_FUSED_ROPE=1` to `run_tp1_dp8.sh`.
+- Results (1024-step full run):
+  - **Pre-eval step time**: ~4,175 ms (was 4,310 ms → **-135 ms / -3.1%**)
+  - **Post-eval step time**: ~4,460 ms (was 4,590 ms → **-130 ms / -2.8%**)
+  - **val_loss @ 576**: 0.9218 (< 0.925 target, PASS; was 0.9222)
+  - **Best val_loss**: 0.9183 (step 960; was 0.9195)
+  - **Memory**: 0.9898→0.9925
+  - No accuracy degradation; val_loss slightly improved.
+- Speed ratio: pre-eval ~4,175 / 3,967 = **1.05x** (was 1.09x)
+  - Post-eval: ~4,460 / 4,000 = **1.12x** (was 1.15x)
+- Remaining gap: ~208 ms pre-eval (5.2%), ~460 ms post-eval (11.5%)
+  - Still structural: ROCm dispatch overhead, FP8 quant pipeline, aten::mul/cat/copy
+- Status: **resolved — applied and validated**
 
 ## Entry Template
 

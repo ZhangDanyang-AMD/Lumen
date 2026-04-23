@@ -26,11 +26,12 @@ _cache = threading.local()
 
 
 def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) -> None:
-    """Run fused SiLU*mul + FP8 quant and cache ``(fp8, scale)`` for the next FP8 GEMM.
+    """Run fused SiLU*mul + FP8 quant and cache ``(fp8, scale, amax)`` for the next FP8 GEMM.
 
-    Uses AITER dynamic per-tensor quantization on the already-computed bf16_output,
-    fusing amax computation and quantization in one pass (replaces separate
-    fused_amax_abs + fused_silu_mul_fp8 two-kernel pattern).
+    Uses AITER dynamic per-tensor quantization with amax output on the
+    already-computed bf16_output, fusing amax computation and quantization
+    in one pass.  The amax is passed through to the scaling manager so it
+    can skip its own ``fused_amax_abs`` call.
     """
     if not swiglu_input.is_cuda:
         return
@@ -44,14 +45,16 @@ def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) 
         out_2d = out_2d.contiguous()
 
     try:
-        from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
+        from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8_with_amax
 
         qx = torch.empty_like(out_2d, dtype=fp8_dtype)
         scale_out = torch.empty(1, dtype=torch.float32, device=out_2d.device)
-        dynamic_per_tensor_quant_fp8_i8(qx, out_2d, scale_out)
+        amax_out = torch.zeros(1, dtype=torch.float32, device=out_2d.device)
+        dynamic_per_tensor_quant_fp8_i8_with_amax(qx, out_2d, scale_out, amax_out)
 
         _cache.fp8_data = qx
         _cache.scale = scale_out
+        _cache.amax = amax_out
         _cache.valid = True
     except (ImportError, RuntimeError):
         return
@@ -62,14 +65,19 @@ def discard_swiglu_fp8_cache() -> None:
     _cache.valid = False
     _cache.fp8_data = None
     _cache.scale = None
+    _cache.amax = None
 
 
 def pop_swiglu_fp8_cache():
-    """Pop cached ``(fp8_data, scale)`` if set; otherwise return ``None``."""
+    """Pop cached ``(fp8_data, scale)`` if set; otherwise return ``None``.
+
+    Also returns ``amax`` as the third element when available.
+    """
     if getattr(_cache, "valid", False):
-        result = (_cache.fp8_data, _cache.scale)
+        result = (_cache.fp8_data, _cache.scale, getattr(_cache, "amax", None))
         _cache.valid = False
         _cache.fp8_data = None
         _cache.scale = None
+        _cache.amax = None
         return result
     return None

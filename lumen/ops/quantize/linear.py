@@ -760,6 +760,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 scale=input_scale,
                 fp8_dtype=fp8_dtype,
             )
+            if scaling_manager is not None and activation_tensor_id:
+                try:
+                    from lumen.modules.parallel_linear import _pop_swiglu_amax
+
+                    _sw_amax = _pop_swiglu_amax()
+                    if _sw_amax is not None:
+                        scaling_manager.update_amax_value(activation_tensor_id, _sw_amax)
+                except ImportError:
+                    pass
         else:
             _act_mgr = scaling_manager if activation_tensor_id else None
             _act_tid = activation_tensor_id or "activation"
@@ -1224,6 +1233,15 @@ class FP8StoredLinearFunction(torch.autograd.Function):
 
         if pre_quantized_input is not None:
             input_fp8, input_scale = pre_quantized_input
+            if scaling_manager is not None and activation_tensor_id:
+                try:
+                    from lumen.modules.parallel_linear import _pop_swiglu_amax
+
+                    _sw_amax = _pop_swiglu_amax()
+                    if _sw_amax is not None:
+                        scaling_manager.update_amax_value(activation_tensor_id, _sw_amax)
+                except ImportError:
+                    pass
         else:
             _act_mgr = scaling_manager if activation_tensor_id else None
             _act_tid = activation_tensor_id or "activation"

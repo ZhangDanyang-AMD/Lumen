@@ -721,13 +721,25 @@ def install_fused_residual_norm():
 
     def _patched_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
-        self._lumen_can_fuse_bda_norm = (
+
+        _can_defer = (
             _FUSED_RESIDUAL_NORM
             and self.hidden_dropout == 0.0
             and isinstance(self.cross_attention, IdentityOp)
             and isinstance(self.cross_attn_bda, IdentityFuncOp)
-            and not isinstance(self.pre_mlp_layernorm, IdentityOp)
         )
+        self._lumen_can_fuse_bda_norm = _can_defer and not isinstance(self.pre_mlp_layernorm, IdentityOp)
+
+        from lumen.modules.layernorm_linear import LumenLayerNormLinear
+
+        _fc1 = getattr(getattr(self, "mlp", None), "linear_fc1", None)
+        _fc1_base = getattr(_fc1, "base_layer", _fc1)
+        self._lumen_can_defer_bda_to_lnlinear = (
+            _can_defer
+            and isinstance(self.pre_mlp_layernorm, IdentityOp)
+            and isinstance(_fc1_base, LumenLayerNormLinear)
+        )
+
         self._lumen_deferred_bda = None
 
     def _do_input_layernorm(self, hidden_states):
@@ -805,6 +817,46 @@ def install_fused_residual_norm():
                 )
             return hidden_states, context
 
+        if self._lumen_can_defer_bda_to_lnlinear:
+            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
+
+            residual = hidden_states
+            input_layernorm_output = _do_input_layernorm(self, hidden_states)
+
+            nvtx_range_push(suffix="self_attention")
+            attention_output_with_bias = self.self_attention(
+                input_layernorm_output,
+                *args,
+                **_sa_kwargs,
+            )
+            nvtx_range_pop(suffix="self_attention")
+
+            if self.recompute_input_layernorm:
+                self.input_layernorm_checkpoint.discard_output_and_register_recompute(attention_output_with_bias[0])
+
+            nvtx_range_push(suffix="self_attn_bda")
+            self._lumen_deferred_bda = (attention_output_with_bias, residual)
+            x, bias = attention_output_with_bias
+            hidden_states = (x + bias) if bias is not None else x
+            nvtx_range_pop(suffix="self_attn_bda")
+
+            residual = hidden_states
+            pre_cross_attn_layernorm_output = self.pre_cross_attn_layernorm(hidden_states)
+            attention_output_with_bias = self.cross_attention(
+                pre_cross_attn_layernorm_output,
+                attention_mask=kwargs.get("context_mask"),
+                key_value_states=kwargs.get("context"),
+                inference_context=kwargs.get("inference_context"),
+            )
+            context = None
+            if isinstance(attention_output_with_bias, dict) and "context" in attention_output_with_bias:
+                context = attention_output_with_bias["context"]
+            with self.bias_dropout_add_exec_handler():
+                hidden_states = self.cross_attn_bda(self.training, self.config.bias_dropout_fusion)(
+                    attention_output_with_bias, residual, self.hidden_dropout
+                )
+            return hidden_states, context
+
         self._lumen_deferred_bda = None
         if _FUSED_NQG and not self.recompute_input_layernorm:
             _nqg_linear = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
@@ -824,23 +876,39 @@ def install_fused_residual_norm():
 
         _deferred = self._lumen_deferred_bda
         _fused_ok = False
+        _defer_to_lnlinear = False
 
         if _deferred is not None:
             self._lumen_deferred_bda = None
-            from lumen.ops.fused_residual_norm import deferred_bda_add, rmsnorm_from_module
 
-            _x_with_bias, _orig_residual = _deferred
-            hidden_states = deferred_bda_add(_x_with_bias, _orig_residual)
-            residual = hidden_states
-            pre_mlp_layernorm_output = rmsnorm_from_module(hidden_states, self.pre_mlp_layernorm)
-            _fused_ok = True
+            if self._lumen_can_defer_bda_to_lnlinear:
+                from lumen.modules.layernorm_linear import _set_pending_residual
 
-        if not _fused_ok:
+                _x_with_bias, _orig_residual = _deferred
+                x, bias = _x_with_bias
+                hidden_states = (x + bias) if bias is not None else x
+                _set_pending_residual(_orig_residual)
+                _defer_to_lnlinear = True
+            else:
+                from lumen.ops.fused_residual_norm import deferred_bda_add, rmsnorm_from_module
+
+                _x_with_bias, _orig_residual = _deferred
+                hidden_states = deferred_bda_add(_x_with_bias, _orig_residual)
+                residual = hidden_states
+                pre_mlp_layernorm_output = rmsnorm_from_module(hidden_states, self.pre_mlp_layernorm)
+                _fused_ok = True
+
+        if not _fused_ok and not _defer_to_lnlinear:
             residual = hidden_states
             pre_mlp_layernorm_output = _do_pre_mlp_layernorm(self, hidden_states)
 
         nvtx_range_push(suffix="mlp")
-        if self.recompute_mlp:
+        if _defer_to_lnlinear:
+            mlp_output_with_bias = self.mlp(hidden_states)
+            from lumen.modules.layernorm_linear import _pop_residual_out
+
+            residual = _pop_residual_out()
+        elif self.recompute_mlp:
             if self.config.fp8:
                 from megatron.core import tensor_parallel
                 from megatron.core.extensions.transformer_engine import te_checkpoint
