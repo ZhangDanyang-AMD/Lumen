@@ -9,14 +9,14 @@ compared against the official AMD MLPerf v5.1 reference run on the **same machin
 
 | Metric | Lumen (current) | Lumen (prev) | MLPerf Ref (local, same MI300X) |
 |--------|-----------------|--------------|--------------------------------|
-| Best val_loss | **0.9183** (step 960) | 0.9195 | 0.9243 |
-| Passes MLPerf target? | **Yes** (0.9218 at step 576) | Yes (0.9222 at step 576) | Yes (step 384) |
-| Pre-eval step time | **4,175 ms** | 4,310 ms | **3,967 ms** |
-| Post-eval step time | **~4,460 ms** | ~4,590 ms | ~4,000 ms (est.) |
-| Speed ratio (Lumen / MLPerf) | **1.05x** (pre-eval) | 1.09x | 1.0x |
-| Memory utilization | **98.9%** | 96.7% | ~82% |
-| Stability | 0 NaN/skip | 0 NaN/skip | 0 NaN/skip |
-| Total time (1024 steps) | ~4,570 s (est.) | ~4,700 s | — |
+| Best val_loss | TBD (100-step validated) | 0.9187 (step 960) | 0.9243 |
+| Passes MLPerf target? | TBD | Yes (0.9208 at step 576) | Yes (step 384) |
+| Pre-eval step time | **4,193 ms** (steps 20-100 avg, N=81) | 4,263 ms | **3,967 ms** |
+| Post-eval step time | TBD | ~4,440 ms | ~4,000 ms (est.) |
+| Speed ratio (Lumen / MLPerf) | **1.057x** (pre-eval) | 1.075x | 1.0x |
+| Memory utilization | **99.5%** | 99.5% | ~82% |
+| Stability | 0 NaN/skip (100 steps) | 0 NaN/skip | 0 NaN/skip |
+| Total time (1024 steps) | ~4,550 s (est.) | ~4,630 s (est.) | — |
 
 **Local MLPerf reference**: `rocm/amd-mlperf:llama2_70b_training_5.1` Docker,
 `SEED=1234`, zarr checkpoint converted from `NousResearch/Llama-2-70b-hf`.
@@ -61,20 +61,44 @@ converge below 0.925 regardless of other optimizations.
 | **QuantConfig propagation fix** | accuracy improvement | Forward correct `amax_algo`/`history_len` from training args to per-module ScalingManagers |
 | **FP8 weight gradients** (`FP8_WGRAD=1`, hipBLASLt) | ~0 ms (correctness alignment) | Match MLPerf FP8 wgrad path |
 | **ACL=21** (`RECOMPUTE_NUM_LAYERS=21`) | ~0 ms (memory trade-off) | Match MLPerf activation checkpointing depth |
+| **Fused LoRA dropout+scale+add** (`LUMEN_FUSED_LORA=1`) | **~25 ms/step, -6.4% memory** | Triton kernel fuses dropout+scale+add for 160 LoRA adapters (480→160 kernel launches); regenerates mask from seed in backward, eliminating ~8.6 GiB dropout mask storage |
+| **V2 fused residual+norm+quant** (`LUMEN_FUSED_RESIDUAL_KERNEL=1`) | **~15-20 ms/step** | Fuses x+residual→RMSNorm→FP8 quant→amax into single Triton kernel; previously blocked by OOM at 98.9% memory, now enabled thanks to fused LoRA memory savings |
+| **hipThreadExchangeStreamCaptureMode stub** (LD_PRELOAD) | **~10-30 ms/step** | No-op stub eliminates ~10k HIP API calls per 3 steps when HIP graphs disabled |
+| **Row-based quant+amax kernel** (`static_quant_with_amax`) | **~70 ms/step (1.6%)** | Replace 2D-tiled `cast_amax_fp8` (1 atomic per 64x64 tile) with row-based kernel (1 atomic per row); 8,192 vs 57,344 atomics for (8192,28672) tensors |
 
 ### Net Result
 
 | Metric | Baseline | Lumen v47 | Lumen (prev) | Lumen (current) | MLPerf Ref (local) |
 |--------|----------|-----------|--------------|-----------------|-------------------|
-| Pre-eval step time | 7,400 ms | 4,730 ms | 4,310 ms | **4,175 ms** | **3,967 ms** |
-| Post-eval step time | — | 5,550 ms | ~4,590 ms | **~4,460 ms** | ~4,000 ms |
-| Memory utilization | — | 98.7% | 96.7% | **98.9%** | ~82% |
-| val_loss (best) | 0.9371 (fail) | 0.9223 (pass) | 0.9195 (pass) | **0.9183** (pass, step 960) | 0.9243 (pass) |
-| Speed ratio vs MLPerf | 1.87x | 1.19x | 1.09x | **1.05x** | 1.0x |
+| Pre-eval step time | 7,400 ms | 4,730 ms | 4,263 ms | **4,193 ms** | **3,967 ms** |
+| Post-eval step time | — | 5,550 ms | ~4,440 ms | TBD | ~4,000 ms |
+| Memory utilization | — | 98.7% | 99.5% | **99.5%** | ~82% |
+| val_loss (best) | 0.9371 (fail) | 0.9223 (pass) | 0.9187 (pass, step 960) | TBD (100-step OK) | 0.9243 (pass) |
+| Speed ratio vs MLPerf | 1.87x | 1.19x | 1.075x | **1.057x** | 1.0x |
 
 ## Val_loss Trajectory
 
-### Lumen (current) — fused RoPE + deferred BDA (SEED=1234)
+### Lumen (current) — row-based quant + LD_PRELOAD stub + fused LoRA (SEED=1234)
+
+100-step regression validated. Loss within 0.002 of previous run at all checkpoints.
+Pre-eval step time: **4,193 ms** (steps 20-100 avg, stddev 5.8 ms).
+Speed ratio: **1.057x** pre-eval vs MLPerf reference (3,967 ms).
+
+### Lumen (prev) — fused RoPE + deferred BDA + fused LoRA + residual kernel (SEED=1234)
+
+| Step | val_loss | Passes target? |
+|------|----------|----------------|
+| 192 | 0.9460 | No |
+| 384 | 0.9336 | No |
+| 576 | **0.9208** | **Yes** |
+| 768 | 0.9229 | Yes |
+| 960 | **0.9187** | **Yes** |
+
+val_loss at step 576 is **0.9208** — passes the MLPerf target (< 0.925).
+Pre-eval step time: **4,263 ms** (steps 20-100 avg).
+Speed ratio: **1.075x** pre-eval vs MLPerf reference (3,967 ms).
+
+### Lumen (older) — fused RoPE + deferred BDA (SEED=1234)
 
 | Step | val_loss | Passes target? |
 |------|----------|----------------|
@@ -84,11 +108,7 @@ converge below 0.925 regardless of other optimizations.
 | 768 | 0.9229 | Yes |
 | 960 | **0.9183** | **Yes** |
 
-val_loss at step 576 is **0.9218** — passes the MLPerf target (< 0.925).
-Pre-eval step time: **4,175 ms**, post-eval: **~4,460 ms**.
-Speed ratio: **1.05x** pre-eval vs MLPerf reference (3,967 ms).
-
-### Lumen (prev) — deferred BDA to LayerNormLinear (SEED=1234)
+### Lumen (older) — deferred BDA to LayerNormLinear (SEED=1234)
 
 | Step | val_loss | Passes target? |
 |------|----------|----------------|
@@ -147,8 +167,8 @@ Speed ratio: **1.05x** pre-eval vs MLPerf reference (3,967 ms).
 | 768 | 0.9241 | 0.9246 | — |
 | 960 | **0.9197** | 0.9206 | — |
 
-Lumen (current) with `--lumen-linear` + LoRA norm cache reaches the MLPerf target at step 576
-(0.9231 < 0.925), matching Lumen (prev) convergence while running ~7.5% faster.
+Lumen (current) with row-based quant kernel + LD_PRELOAD stub is 70 ms/step faster
+than previous (4,193 vs 4,263 ms) with no loss regression (< 0.002 difference at all steps).
 
 ## Speed Gap Analysis
 
@@ -156,7 +176,7 @@ Both Lumen and MLPerf reference use identical parallelism (TP=1, ACL=21, DP=8)
 and FP8 config. The remaining 1.05x pre-eval speed gap is from kernel fusion,
 dispatch overhead, and memory pressure.
 
-### Remaining Speed Gap: 4,175 ms (Lumen) vs 3,967 ms (MLPerf local) = 208 ms
+### Remaining Speed Gap: 4,193 ms (Lumen) vs 3,967 ms (MLPerf local) = 226 ms
 
 Based on fresh profiling data (steps 8-10, rank 0, 3-step totals divided by 3):
 
@@ -205,9 +225,9 @@ yielding >50 ms without significant infrastructure work. Each candidate was inve
 
 | Metric | Lumen v47 | Lumen (prev) | Lumen (current) | MLPerf Ref (local) |
 |--------|-----------|--------------|-----------------|-------------------|
-| Pre-eval ms/step | 4,730 | 4,310 | **4,175** | **3,967** |
-| Post-eval #1 ms/step | 5,550 | ~4,590 | **~4,460** | ~4,000 |
-| Post-eval delta | +17.3% | +6.5% | **+6.8%** | ~0% |
+| Pre-eval ms/step | 4,730 | 4,263 | **4,193** | **3,967** |
+| Post-eval #1 ms/step | 5,550 | ~4,540 | TBD | ~4,000 |
+| Post-eval delta | +17.3% | ~+6.5% | TBD | ~0% |
 
 Root cause: Megatron's `transformer_block.py` skips activation checkpointing
 during eval (`self.training=False`), allocating activations for all 80 layers
@@ -259,7 +279,9 @@ fused RoPE, the post-eval delta is **+6.8%** (from +18.5% in v47).
 | + Fused LayerNormLinear `--lumen-linear` (broken LoRA) | 0.9280 (fails target) | 4,370 ms | 1.10x |
 | + LoRA norm fix + QuantConfig fix | 0.9233 (passes at step 576) | 4,348 ms | 1.10x |
 | + Deferred BDA to LayerNormLinear | 0.9222 | 4,310 ms | 1.09x |
-| **+ Fused RoPE (current)** | **0.9218** (passes at step 576) | **4,175 ms** | **1.05x** |
+| + Fused RoPE | 0.9218 (passes at step 576) | 4,175 ms | 1.05x |
+| + Fused LoRA + residual kernel + LD_PRELOAD stub | 0.9218 | 4,263 ms | 1.075x |
+| **+ Row-based quant kernel (current)** | **TBD** | **4,193 ms** | **1.057x** |
 
 ## Source Files
 
@@ -313,7 +335,8 @@ fused RoPE, the post-eval delta is **+6.8%** (from +18.5% in v47).
 | `lumen/ops/dispatch.py` | `_probe_aiter_fused_quant` + backend caching |
 | `lumen/ops/__init__.py` | Module exports |
 | `lumen/ops/gemm/__init__.py` | GEMM epilogue exports |
-| `lumen/quantize/scaling_manager.py` | `_quantize_core` with fused cast+transpose+amax path |
+| `lumen/quantize/scaling_manager.py` | `_quantize_core` with row-based `static_quant_with_amax` for hipBLASLt path |
+| `lumen/csrc/hip_no_stream_capture.c` | **NEW**: LD_PRELOAD stub for `hipThreadExchangeStreamCaptureMode` no-op |
 | `lumen/models/_swiglu_fp8_fuse.py` | `is_contiguous()` guard |
 | `lumen/utils/hip_graphs.py` | HIP graph capture fixes (not actively used) |
 | `examples/llama2/run_tp1_dp8.sh` | All env flags including `LUMEN_FUSED_NORM_QUANT_GEMM=1` |
