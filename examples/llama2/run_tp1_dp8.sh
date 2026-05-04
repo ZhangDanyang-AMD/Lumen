@@ -106,6 +106,7 @@ docker run --rm --init \
     -e RECOMPUTE_NUM_LAYERS=${RECOMPUTE_NUM_LAYERS:-21} \
     -e LUMEN_LOG_INTERVAL=${LUMEN_LOG_INTERVAL:-10} \
     -e LUMEN_MLP_RECOMPUTE=0 \
+    -e LUMEN_BATCH_PRECOMPUTE_SCALES=${LUMEN_BATCH_PRECOMPUTE_SCALES:-0} \
     -e TRAIN_STEPS=${TRAIN_STEPS:-1024} \
     -e LUMEN_PROF_START=${LUMEN_PROF_START:-} \
     -e LUMEN_PROF_END=${LUMEN_PROF_END:-} \
@@ -114,8 +115,10 @@ docker run --rm --init \
     -e LUMEN_PROF_OUTPUT=${LUMEN_PROF_OUTPUT:-/home/danyzhan/profile_summary_current.txt} \
     -e LUMEN_PROF_TRACE=${LUMEN_PROF_TRACE:-} \
     -e LUMEN_COPY_TRACE=${LUMEN_COPY_TRACE:-0} \
+    -e LUMEN_TRACE_AMAX=${LUMEN_TRACE_AMAX:-0} \
+    -e LUMEN_CPP_QUANT_DISPATCH=${LUMEN_CPP_QUANT_DISPATCH:-0} \
     -e LUMEN_LOG_PATH=${LUMEN_LOG_PATH:-/home/danyzhan/mlperf_llama2_70b.log} \
-    -e LD_PRELOAD=/workspace/Lumen/lumen/csrc/hip_no_stream_capture.so \
+    -e LD_PRELOAD=${LUMEN_LD_PRELOAD:-/workspace/Lumen/lumen/csrc/hip_no_stream_capture.so} \
     lumen_unit_test:latest \
     bash -c '
 set -euo pipefail

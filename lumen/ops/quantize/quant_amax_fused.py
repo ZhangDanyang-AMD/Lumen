@@ -112,12 +112,7 @@ def static_quant_with_amax(
     NUM_COL_POW2 = triton.next_power_of_2(cols)
     grid = (rows,)
     _static_quant_amax_kernel[grid](
-        qx,
-        x,
-        scale_in,
-        amax_out,
-        cols,
-        x.stride(0),
+        qx, x, scale_in, amax_out, cols, x.stride(0),
         NUM_COL_POW2=NUM_COL_POW2,
     )
 
@@ -131,7 +126,6 @@ def _probe_fused_quant_amax() -> bool:
         x = torch.randn(2, 4, device="cuda", dtype=torch.bfloat16)
         s = torch.tensor([1.0], dtype=torch.float32, device="cuda")
         from lumen.quantize.config import _get_float8_e4m3
-
         fp8_dt = _get_float8_e4m3()
         qx, am = static_quant_with_amax(x, s, fp8_dt)
         assert qx.shape == x.shape
@@ -144,7 +138,6 @@ def _probe_fused_quant_amax() -> bool:
 # ---------------------------------------------------------------------------
 # Lightweight amax(abs(x)) kernel — single launch replaces abs() + amax()
 # ---------------------------------------------------------------------------
-
 
 @triton.jit
 def _amax_abs_kernel(
@@ -167,6 +160,38 @@ def _amax_abs_kernel(
     tl.atomic_max(amax_out_ptr, row_amax, sem="relaxed")
 
 
+import os as _os
+import traceback as _traceback
+from collections import Counter as _Counter
+
+_TRACE_AMAX = _os.environ.get("LUMEN_TRACE_AMAX", "0") == "1"
+_amax_traces: _Counter = _Counter()
+_amax_total = [0]
+
+
+def _short_amax_stack(skip: int = 2) -> str:
+    """Compact stack key: last 3 lumen/megatron frames."""
+    frames = _traceback.extract_stack()
+    relevant = []
+    for f in frames[:-skip]:
+        fn = f.filename
+        if any(k in fn for k in ("lumen/", "megatron/", "examples/")):
+            short = fn.replace("/workspace/Lumen/", "").replace("/workspace/megatron_lm/", "meg:")
+            relevant.append(f"{short}:{f.lineno} {f.name}")
+    return " <- ".join(relevant[-3:]) if relevant else "unknown"
+
+
+def dump_amax_traces(label: str = "") -> None:
+    """Print amax call-site summary. Call from training loop."""
+    if not _TRACE_AMAX or not _amax_traces:
+        return
+    print(f"\n[AMAX TRACE] {label} — {_amax_total[0]} total calls", flush=True)
+    for key, count in _amax_traces.most_common(20):
+        print(f"  {count:>6}  {key}", flush=True)
+    _amax_traces.clear()
+    _amax_total[0] = 0
+
+
 def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
     """Compute ``amax(abs(x))`` in a single kernel launch.
 
@@ -178,6 +203,11 @@ def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
     Returns:
         Scalar float32 tensor on the same device.
     """
+    if _TRACE_AMAX:
+        key = _short_amax_stack()
+        _amax_traces[key] += 1
+        _amax_total[0] += 1
+
     if x.dim() <= 1:
         return x.detach().abs().amax()
 
@@ -196,7 +226,6 @@ def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 # Fused FP8 dequant: fp8.bfloat16() * scale  in one kernel (no aten::copy_)
 # ---------------------------------------------------------------------------
-
 
 @triton.jit
 def _dequant_fp8_bf16_kernel(

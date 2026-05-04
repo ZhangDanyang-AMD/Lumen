@@ -1,206 +1,208 @@
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
-                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
-                                FP8StoredLinearFunction         0.84%     152.743ms        12.03%        2.199s       1.814ms       0.000us         0.00%        7.546s       6.226ms          1212
-                                    aiter::gemm_a8w8_ck         0.24%      43.696ms         0.34%      62.657ms      34.408us        6.030s        33.05%        6.030s       3.311ms          1821
-void ck::kernel_gemm_xdl_cshuffle_v3_multi_d<ck::Gri...         0.00%       0.000us         0.00%       0.000us       0.000us        5.921s        32.45%        5.921s       4.873ms          1215
-autograd::engine::evaluate_function: CheckpointFunct...         0.01%       1.501ms        23.41%        4.278s      67.910ms       0.000us         0.00%        4.194s      66.568ms            63
-                             CheckpointFunctionBackward         0.65%     119.342ms        23.40%        4.277s      67.886ms       0.000us         0.00%        4.194s      66.568ms            63
-autograd::engine::evaluate_function: FP8StoredLinear...         0.07%      11.934ms        26.02%        4.755s       4.953ms       0.000us         0.00%        3.535s       3.682ms           960
-                        FP8StoredLinearFunctionBackward         0.81%     147.766ms        25.92%        4.738s       4.935ms     264.673ms         1.45%        3.488s       3.634ms           960
-                                         aiter::hipb_mm         0.60%     108.860ms         0.73%     133.831ms      69.486us        3.277s        17.96%        3.277s       1.701ms          1926
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us        2.373s        13.00%        2.373s       3.282ms           723
-                                     CheckpointFunction         0.43%      79.126ms         5.95%        1.088s      17.269ms       0.000us         0.00%        2.081s      33.033ms            63
-autograd::engine::evaluate_function: FlashAttnFuncBa...         0.02%       3.579ms         0.32%      57.977ms     241.570us       0.000us         0.00%        1.824s       7.600ms           240
-                                  FlashAttnFuncBackward         0.06%      10.447ms         0.30%      54.398ms     226.657us       0.000us         0.00%        1.824s       7.600ms           240
-                            aiter::_flash_attn_backward         0.04%       8.079ms         0.20%      36.985ms     154.104us       0.000us         0.00%        1.823s       7.594ms           240
-                                     aiter::fmha_v3_bwd         0.05%       9.898ms         0.15%      26.554ms     110.640us        1.778s         9.75%        1.815s       7.563ms           240
-aiter::fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskdd...         0.00%       0.000us         0.00%       0.000us       0.000us        1.673s         9.17%        1.673s       6.972ms           240
-autograd::engine::evaluate_function: _PatchedSwiGLUF...         0.01%       1.660ms         1.61%     293.920ms       1.225ms       0.000us         0.00%        1.632s       6.801ms           240
-                         _PatchedSwiGLUFunctionBackward         0.36%      65.799ms         1.60%     292.260ms       1.218ms       0.000us         0.00%        1.632s       6.801ms           240
-                                              aten::mul         0.47%      85.774ms         1.77%     322.632ms      15.764us        1.579s         8.65%        1.579s      77.154us         20466
-                                            aten::copy_         0.45%      82.593ms         4.99%     911.524ms      23.780us        1.143s         6.27%        1.144s      29.837us         38331
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us     859.073ms         4.71%     859.073ms       3.535ms           243
-                                          FlashAttnFunc         0.08%      14.020ms         0.17%      30.586ms     100.944us       0.000us         0.00%     727.038ms       2.399ms           303
-                                     aiter::fmha_v3_fwd         0.06%      10.104ms         0.09%      16.016ms      52.859us     727.038ms         3.98%     727.038ms       2.399ms           303
-                 aiter::fmha_fwd_hd128_bf16_causal_rtna         0.00%       0.000us         0.00%       0.000us       0.000us     727.038ms         3.98%     727.038ms       2.399ms           303
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     715.193ms         3.92%     715.193ms     294.318us          2430
-                                               aten::to         0.09%      16.180ms         2.51%     459.091ms      23.064us       0.000us         0.00%     706.869ms      35.512us         19905
-                                         aten::_to_copy         0.16%      29.909ms         2.42%     442.910ms      42.086us       0.000us         0.00%     706.869ms      67.167us         10524
-                                              aten::abs         0.19%      33.894ms         0.69%     125.389ms      13.021us     337.129ms         1.85%     674.558ms      70.048us          9630
-                                             aten::amax         0.26%      47.774ms        12.02%        2.197s     456.600us     549.031ms         3.01%     549.031ms     114.096us          4812
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     522.759ms         2.87%     522.759ms     108.636us          4812
-                                QuantizedLinearFunction         0.55%     100.285ms        11.61%        2.123s       3.486ms       0.000us         0.00%     520.957ms     855.429us           609
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     478.901ms         2.62%     478.901ms      75.836us          6315
-                                 _PatchedSwiGLUFunction         0.03%       5.689ms         0.12%      22.296ms      73.584us       0.000us         0.00%     444.959ms       1.469ms           303
-autograd::engine::evaluate_function: SyncedLinearAut...         0.04%       6.890ms         0.72%     131.107ms     273.139us       0.000us         0.00%     400.308ms     833.976us           480
-                           SyncedLinearAutogradBackward         0.17%      30.545ms         0.68%     124.216ms     258.784us       0.000us         0.00%     400.308ms     833.976us           480
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     383.499ms         2.10%     383.499ms     199.739us          1920
-                                              aten::cat         0.12%      22.470ms         6.50%        1.188s     307.638us     368.050ms         2.02%     368.050ms      95.325us          3861
-                                     record_param_comms         0.12%      22.610ms         0.18%      33.624ms      64.045us     358.387ms         1.96%     358.403ms     682.671us           525
-void rcclGenericKernel<2, false>(ncclDevKernelArgsSt...         0.00%       0.000us         0.00%       0.000us       0.000us     358.387ms         1.96%     358.387ms     719.653us           498
-                                       c10d::allreduce_         0.06%      10.100ms         0.21%      39.029ms      76.981us       0.000us         0.00%     354.590ms     699.388us           507
-                                        nccl:all_reduce         0.00%       0.000us         0.00%       0.000us       0.000us     354.590ms         1.94%     354.590ms     729.608us           486
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     337.119ms         1.85%     337.119ms      70.058us          4812
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     330.806ms         1.81%     330.806ms      88.498us          3738
-                                            aten::clone         0.25%      45.356ms         3.33%     609.100ms      24.915us       0.000us         0.00%     314.389ms      12.860us         24447
-                                             aten::silu         0.04%       8.113ms         0.10%      17.666ms       7.947us     298.625ms         1.64%     298.625ms     134.334us          2223
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     298.625ms         1.64%     298.625ms     134.334us          2223
-autograd::engine::evaluate_function: QuantizedLinear...         0.05%       8.964ms        31.74%        5.800s      12.009ms       0.000us         0.00%     286.801ms     593.790us           483
-                        QuantizedLinearFunctionBackward         0.53%      97.441ms        31.69%        5.791s      11.990ms      66.952ms         0.37%     286.801ms     593.790us           483
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     277.995ms         1.52%     277.995ms     101.718us          2733
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     269.834ms         1.48%     269.834ms      46.846us          5760
-                                              aten::add         0.12%      22.268ms         0.22%      40.372ms       9.968us     265.547ms         1.46%     265.547ms      65.567us          4050
-                                          aten::sigmoid         0.07%      12.170ms         0.15%      28.028ms       7.299us     246.692ms         1.35%     246.692ms      64.243us          3840
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     246.692ms         1.35%     246.692ms      64.243us          3840
-                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     238.255ms         1.31%     238.255ms      10.274us         23190
-                _dynamic_per_tensor_quant_fp8_i8_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     186.624ms         1.02%     186.624ms     129.330us          1443
-                                             aten::add_         0.07%      13.468ms         0.14%      26.393ms      10.206us     183.849ms         1.01%     183.849ms      71.094us          2586
-                                       aten::contiguous         0.03%       4.610ms         0.97%     176.928ms      39.957us       0.000us         0.00%     171.630ms      38.760us          4428
-                                            aten::clamp         0.08%      14.606ms         1.98%     361.802ms     148.706us     170.518ms         0.93%     170.518ms      70.086us          2433
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     170.500ms         0.93%     170.500ms      70.165us          2430
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     158.330ms         0.87%     158.330ms      82.463us          1920
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     145.729ms         0.80%     145.729ms     301.716us           483
-                 _static_per_tensor_quant_fp8_i8_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     145.002ms         0.79%     145.002ms     100.486us          1443
-      autograd::engine::evaluate_function: MulBackward0         0.03%       6.054ms         0.15%      27.683ms      19.145us       0.000us         0.00%     135.860ms      93.956us          1446
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     134.959ms         0.74%     134.959ms     124.271us          1086
-                                           MulBackward0         0.01%       2.467ms         0.09%      17.305ms      11.967us       0.000us         0.00%     105.177ms      72.736us          1446
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      93.378ms         0.51%      93.378ms      40.634us          2298
-                                           aten::matmul         0.04%       6.483ms         0.61%     110.819ms      70.766us       0.000us         0.00%      82.823ms      52.888us          1566
-                                               aten::mm         0.46%      84.558ms         0.55%      99.979ms      63.844us      82.823ms         0.45%      82.823ms      52.888us          1566
-void ck::kernel_gemm_xdl_cshuffle_v3_multi_d<ck::Gri...         0.00%       0.000us         0.00%       0.000us       0.000us      81.182ms         0.44%      81.182ms     267.928us           303
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      74.684ms         0.41%      74.684ms      88.279us           846
-                                          aten::dropout         0.01%       1.861ms         1.32%     241.027ms     198.377us       0.000us         0.00%      72.488ms      59.661us          1215
-                                   aten::native_dropout         0.05%       9.496ms         1.31%     239.167ms     394.665us      72.488ms         0.40%      72.488ms     119.617us           606
-void at::native::(anonymous namespace)::fused_dropou...         0.00%       0.000us         0.00%       0.000us       0.000us      72.488ms         0.40%      72.488ms     119.617us           606
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      66.515ms         0.36%      66.515ms      34.643us          1920
-             aiter::fmha_bwd_hd128_dq_convert_bf16_rtna         0.00%       0.000us         0.00%       0.000us       0.000us      65.788ms         0.36%      65.788ms     274.118us           240
-                                              aten::sub         0.04%       7.665ms         0.08%      15.423ms       7.996us      64.632ms         0.35%      64.632ms      33.505us          1929
-                                             aten::rsub         0.02%       4.110ms         0.11%      19.455ms      10.117us       0.000us         0.00%      64.599ms      33.593us          1923
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      64.584ms         0.35%      64.584ms      33.638us          1920
-    autograd::engine::evaluate_function: SplitBackward0         0.01%       1.481ms         0.05%       9.343ms      19.465us       0.000us         0.00%      62.782ms     130.796us           480
-                                         SplitBackward0         0.01%       1.118ms         0.04%       7.862ms      16.380us       0.000us         0.00%      62.782ms     130.796us           480
-autograd::engine::evaluate_function: _RMSNormBackwar...         0.03%       4.661ms         0.40%      72.897ms     151.869us       0.000us         0.00%      59.247ms     123.432us           480
-                                       _RMSNormBackward         0.30%      55.564ms         0.37%      68.236ms     142.159us      59.247ms         0.32%      59.247ms     123.432us           480
-                                    _rmsnorm_bwd_triton         0.00%       0.000us         0.00%       0.000us       0.000us      55.431ms         0.30%      55.431ms     115.481us           480
-                                            aten::fill_         0.08%      14.843ms         1.19%     217.017ms      42.477us      54.821ms         0.30%      54.821ms      10.730us          5109
-autograd::engine::evaluate_function: torch::autograd...         0.11%      19.945ms         0.26%      47.351ms      46.151us       0.000us         0.00%      52.047ms      50.728us          1026
-void at::native::vectorized_templated_elementwise_ke...         0.00%       0.000us         0.00%       0.000us       0.000us      52.047ms         0.29%      52.047ms      54.216us           960
-     autograd::engine::evaluate_function: ViewBackward0         0.04%       7.511ms         0.11%      19.996ms      10.398us       0.000us         0.00%      49.528ms      25.755us          1923
-autograd::engine::evaluate_function: NativeDropoutBa...         0.01%       2.083ms         0.06%      10.135ms      21.114us       0.000us         0.00%      46.536ms      96.951us           480
-                                 NativeDropoutBackward0         0.01%     998.208us         0.04%       8.051ms      16.773us       0.000us         0.00%      46.536ms      96.951us           480
-                          aten::native_dropout_backward         0.02%       3.110ms         0.04%       7.053ms      14.694us      46.536ms         0.26%      46.536ms      96.951us           480
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      46.536ms         0.26%      46.536ms      96.951us           480
-                                            aten::zero_         0.02%       4.300ms         0.14%      26.471ms       9.914us       0.000us         0.00%      40.988ms      15.351us          2670
-                                               _RMSNorm         0.27%      48.523ms         0.32%      57.798ms     120.413us      40.535ms         0.22%      40.535ms      84.448us           480
-                                       _rms_norm_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      40.535ms         0.22%      40.535ms      84.448us           480
-                                              aten::neg         0.03%       5.938ms         0.06%      11.259ms      10.367us      39.890ms         0.22%      39.890ms      36.731us          1086
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      39.890ms         0.22%      39.890ms      36.731us          1086
-                         aiter::fmha_bwd_hd128_odo_bf16         0.00%       0.000us         0.00%       0.000us       0.000us      39.226ms         0.21%      39.226ms     163.442us           240
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      37.728ms         0.21%      37.728ms      62.258us           606
-                     hipThreadExchangeStreamCaptureMode         0.01%       1.281ms         0.01%       1.281ms       1.082us      35.889ms         0.20%      35.889ms      30.312us          1184
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      35.801ms         0.20%      35.801ms       8.174us          4380
-autograd::engine::evaluate_function: SplitWithSizesB...         0.01%       1.092ms         0.02%       4.066ms      16.940us       0.000us         0.00%      35.735ms     148.897us           240
-                                SplitWithSizesBackward0         0.00%     301.566us         0.02%       2.973ms      12.389us       0.000us         0.00%      35.735ms     148.897us           240
-                                   SyncedLinearAutograd         0.04%       7.788ms         0.37%      67.920ms     112.079us       0.000us         0.00%      34.907ms      57.602us           606
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      33.986ms         0.19%      33.986ms       7.356us          4620
-    autograd::engine::evaluate_function: AliasBackward0         0.01%       1.568ms         0.03%       4.809ms      10.019us       0.000us         0.00%      33.810ms      70.438us           480
-                                            aten::zeros         0.03%       5.575ms         0.19%      34.727ms      14.309us       0.000us         0.00%      33.334ms      13.735us          2427
-                                          aten::reshape         0.13%      22.855ms         0.28%      50.970ms       3.108us       0.000us         0.00%      31.775ms       1.938us         16398
-void ck::kernel_gemm_xdl_cshuffle_v3_multi_d<ck::Gri...         0.00%       0.000us         0.00%       0.000us       0.000us      27.977ms         0.15%      27.977ms      92.335us           303
-                                        hipEventDestroy         0.00%     640.105us         0.00%     640.105us       0.413us      26.988ms         0.15%      26.988ms      17.400us          1551
-                                        Memset (Device)         0.00%       0.000us         0.00%       0.000us       0.000us      26.459ms         0.15%      26.459ms       5.414us          4887
-                                              aten::sum         0.02%       4.522ms         0.04%       7.380ms      15.001us      24.840ms         0.14%      24.840ms      50.487us           492
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      24.434ms         0.13%      24.434ms     101.810us           240
-void at::native::reduce_kernel<128, 4, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      23.930ms         0.13%      23.930ms      49.854us           480
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      21.931ms         0.12%      21.931ms       6.017us          3645
-                                       aten::reciprocal         0.10%      18.448ms         0.64%     117.495ms      32.261us      20.838ms         0.11%      20.911ms       5.742us          3642
-                                              aten::div         0.08%      14.325ms         2.01%     367.624ms     150.358us      20.344ms         0.11%      20.344ms       8.321us          2445
-Cijk_Alik_Bljk_BBS_BH_UserArgs_MT16x32x128_MI16x16x1...         0.00%       0.000us         0.00%       0.000us       0.000us      20.093ms         0.11%      20.093ms      66.315us           303
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      19.926ms         0.11%      19.926ms       5.471us          3642
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      18.990ms         0.10%      18.990ms      26.374us           720
-      autograd::engine::evaluate_function: NegBackward0         0.01%       1.080ms         0.03%       6.189ms      12.894us       0.000us         0.00%      18.487ms      38.515us           480
-                                           NegBackward0         0.00%     553.799us         0.03%       5.109ms      10.645us       0.000us         0.00%      18.487ms      38.515us           480
-Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x80x16_MI16x16x1...         0.00%       0.000us         0.00%       0.000us       0.000us      14.814ms         0.08%      14.814ms      48.890us           303
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.928ms         0.08%      13.928ms       5.711us          2439
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.679ms         0.07%      13.679ms       5.629us          2430
-                                        aten::ones_like         0.03%       5.527ms         1.15%     209.499ms      86.107us       0.000us         0.00%      13.668ms       5.618us          2433
-                                               aten::gt         0.09%      15.897ms         0.15%      27.602ms      10.953us      13.609ms         0.07%      13.609ms       5.400us          2520
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.591ms         0.07%      13.591ms       5.586us          2433
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.530ms         0.07%      13.530ms       6.204us          2181
-                                            aten::where         0.09%      15.900ms         0.20%      35.732ms      14.705us      13.401ms         0.07%      13.401ms       5.515us          2430
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      13.401ms         0.07%      13.401ms       5.515us          2430
-Cijk_Ailk_Bjlk_BBS_BH_UserArgs_MT64x16x128_MI16x16x1...         0.00%       0.000us         0.00%       0.000us       0.000us      13.211ms         0.07%      13.211ms      55.044us           240
-Cijk_Ailk_Bljk_BBS_BH_MT256x128x16_MI32x32x8x1_SN_1L...         0.00%       0.000us         0.00%       0.000us       0.000us      12.086ms         0.07%      12.086ms      50.357us           240
-                             _VocabParallelCrossEntropy         0.00%     594.517us         0.01%       2.191ms     730.225us       0.000us         0.00%      11.566ms       3.855ms             3
-    autograd::engine::evaluate_function: SliceBackward0         0.01%       1.411ms         0.06%      10.926ms      22.762us       0.000us         0.00%      11.426ms      23.803us           480
-                                         SliceBackward0         0.01%       1.103ms         0.05%       9.514ms      19.822us       0.000us         0.00%      11.426ms      23.803us           480
-                                   aten::slice_backward         0.01%       1.599ms         0.05%       8.411ms      17.523us       0.000us         0.00%      11.426ms      23.803us           480
-Cijk_Ailk_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT16x48...         0.00%       0.000us         0.00%       0.000us       0.000us      10.840ms         0.06%      10.840ms      45.168us           240
-Cijk_Ailk_Bjlk_BBS_BH_UserArgs_MT16x128x32_MI16x16x1...         0.00%       0.000us         0.00%       0.000us       0.000us       9.906ms         0.05%       9.906ms      41.276us           240
-                                        aiter::rms_norm         0.01%       2.643ms         0.02%       4.108ms      32.600us       9.822ms         0.05%       9.827ms      77.994us           126
-_ZN7ck_tile6kentryILi1ENS_12Rmsnorm2dFwdINS_27Rmsnor...         0.00%       0.000us         0.00%       0.000us       0.000us       9.822ms         0.05%       9.822ms      77.950us           126
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       7.507ms         0.04%       7.507ms      31.278us           240
-                                             aten::item         0.01%       2.646ms        54.99%       10.050s       6.608ms       0.000us         0.00%       7.234ms       4.756us          1521
-                              aten::_local_scalar_dense         0.14%      26.217ms        54.98%       10.048s       6.606ms       7.234ms         0.04%       7.234ms       4.756us          1521
-                                              aten::sin         0.02%       3.036ms         0.33%      60.995ms     100.652us       6.868ms         0.04%       7.180ms      11.848us           606
-void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       7.160ms         0.04%       7.160ms       5.907us          1212
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       6.868ms         0.04%       6.868ms      11.333us           606
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       6.801ms         0.04%       6.801ms      28.337us           240
-Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       6.628ms         0.04%       6.628ms      27.617us           240
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       6.421ms         0.04%       6.421ms       1.070ms             6
-                                              aten::cos         0.02%       3.530ms         0.04%       6.520ms      10.758us       5.787ms         0.03%       5.787ms       9.549us           606
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       5.787ms         0.03%       5.787ms       9.549us           606
-                          _rmsnorm_bwd_dg_reduce_triton         0.00%       0.000us         0.00%       0.000us       0.000us       3.816ms         0.02%       3.816ms       7.951us           480
-                                        hipLaunchKernel        26.28%        4.802s        26.28%        4.802s      53.585us       3.213ms         0.02%       3.715ms       0.041us         89616
-autograd::engine::evaluate_function: _VocabParallelC...         0.00%     106.195us         0.01%       2.139ms     713.109us       0.000us         0.00%       3.353ms       1.118ms             3
-                             c10d::allreduce_coalesced_         0.00%      81.876us         0.02%       3.582ms       1.194ms       0.000us         0.00%       3.074ms       1.025ms             3
-                               nccl:allreduce_coalesced         0.00%       0.000us         0.00%       0.000us       0.000us       3.074ms         0.02%       3.074ms       1.025ms             3
-                                             aten::div_         0.00%      95.152us         0.00%     167.253us      13.938us       2.524ms         0.01%       2.524ms     210.334us            12
-                                             aten::sub_         0.00%      86.207us         0.00%     137.924us      22.987us       2.508ms         0.01%       2.508ms     418.036us             6
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.494ms         0.01%       2.494ms     831.168us             3
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.478ms         0.01%       2.478ms     826.050us             3
-                                             aten::mul_         0.00%      97.278us         0.00%     140.572us      11.714us       2.467ms         0.01%       2.467ms     205.570us            12
-                     _VocabParallelCrossEntropyBackward         0.00%     730.027us         0.01%       1.895ms     631.612us       0.000us         0.00%       2.331ms     776.958us             3
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.208ms         0.01%       2.208ms     368.061us             6
-                                   Cijk_SB_PostGSU4_VW4         0.00%       0.000us         0.00%       0.000us       0.000us       1.873ms         0.01%       1.873ms       7.804us           240
-autograd::engine::evaluate_function: GeneratedBackwa...         0.00%      28.141us         0.00%     588.295us     196.098us       0.000us         0.00%       1.713ms     571.166us             3
-GeneratedBackwardFor_apex_fused_rms_norm_affine_fwd_...         0.00%     113.876us         0.00%     560.154us     186.718us       0.000us         0.00%       1.713ms     571.166us             3
-                        apex::fused_rms_norm_affine_bwd         0.00%     262.565us         0.00%     381.448us     127.149us       1.696ms         0.01%       1.696ms     565.447us             3
-                                              aten::exp         0.00%      20.983us         0.00%      42.053us      14.018us       1.679ms         0.01%       1.679ms     559.729us             3
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.679ms         0.01%       1.679ms     559.729us             3
-                                            aten::index         0.00%     669.011us         0.04%       6.656ms      85.330us      78.776us         0.00%       1.530ms      19.610us            78
-                          Optimizer.step#FusedAdam.step         0.02%       4.157ms         0.02%       4.408ms       1.469ms       0.000us         0.00%       1.505ms     501.781us             3
-                                          aten::nonzero         0.01%       1.384ms         0.03%       5.440ms      75.557us       1.451ms         0.01%       1.451ms      20.150us            72
-                          Optimizer.step#FusedAdam.step         0.00%       0.000us         0.00%       0.000us       0.000us       1.348ms         0.01%       1.348ms     449.208us             3
-void multi_tensor_apply_kernel<TensorListMetadata<4>...         0.00%       0.000us         0.00%       0.000us       0.000us       1.336ms         0.01%       1.336ms      49.475us            27
-void cuComputePartGradGammaBeta<c10::BFloat16, float...         0.00%       0.000us         0.00%       0.000us       0.000us       1.107ms         0.01%       1.107ms     368.929us             3
-                                              aten::max         0.00%      50.396us         0.00%      75.537us      25.179us       1.080ms         0.01%       1.080ms     360.109us             3
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       1.080ms         0.01%       1.080ms     360.109us             3
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     909.684us         0.00%     909.684us      75.807us            12
-void cuComputeGradInput<c10::BFloat16, float, c10::B...         0.00%       0.000us         0.00%       0.000us       0.000us     572.517us         0.00%     572.517us     190.839us             3
-                                             aten::tril         0.00%      24.293us         0.00%      46.479us      15.493us     564.539us         0.00%     564.539us     188.180us             3
-void at::native::triu_tril_kernel<float, int, false,...         0.00%       0.000us         0.00%       0.000us       0.000us     564.539us         0.00%     564.539us     188.180us             3
-void multi_tensor_apply_kernel<TensorListMetadata<2>...         0.00%       0.000us         0.00%       0.000us       0.000us     480.012us         0.00%     480.012us      32.001us            15
-                           Memcpy HtoD (Host -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     443.795us         0.00%     443.795us      16.437us            27
-                                          c10d::barrier         0.00%      51.761us         0.00%     799.128us     133.188us       0.000us         0.00%     425.529us      70.922us             6
-                                nccl:all_reduce_barrier         0.00%       0.000us         0.00%       0.000us       0.000us     410.380us         0.00%     410.380us      68.397us             6
-void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us     384.811us         0.00%     384.811us       5.345us            72
-                        apex::fused_rms_norm_affine_fwd         0.00%      99.394us         0.00%     495.367us     165.122us       0.000us         0.00%     354.013us     118.004us             3
-GeneratedBackwardFor_apex_fused_rms_norm_affine_fwd_...         0.00%     338.804us         0.00%     395.973us     131.991us     354.013us         0.00%     354.013us     118.004us             3
-void cuApplyRMSNorm<c10::BFloat16, float, c10::BFloa...         0.00%       0.000us         0.00%       0.000us       0.000us     354.013us         0.00%     354.013us     118.004us             3
-void multi_tensor_apply_kernel<TensorListMetadata<1>...         0.00%       0.000us         0.00%       0.000us       0.000us     326.782us         0.00%     326.782us       6.407us            51
-                                 c10d::_allgather_base_         0.00%      70.192us         0.00%     252.920us      84.307us       0.000us         0.00%     312.919us     104.306us             3
-                                  nccl:_all_gather_base         0.00%       0.000us         0.00%       0.000us       0.000us     312.919us         0.00%     312.919us     104.306us             3
-                               aten::linalg_vector_norm         0.02%       4.365ms         0.03%       5.987ms       1.996ms     280.281us         0.00%     280.281us      93.427us             3
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     266.853us         0.00%     266.853us      88.951us             3
-void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     227.621us         0.00%     227.621us       3.161us            72
-                                               aten::lt         0.00%      81.054us         0.00%     120.568us      20.095us     226.397us         0.00%     226.397us      37.733us             6
-void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us     216.949us         0.00%     216.949us       3.013us            72
-void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us     209.647us         0.00%     209.647us       2.912us            72
-                                hipPointerGetAttributes         0.00%      42.885us         0.00%      42.885us       4.765us     168.227us         0.00%     168.227us      18.692us             9
-                                             aten::ones         0.00%      19.896us         0.00%     113.426us      18.904us       0.000us         0.00%     164.452us      27.409us             6
-                                        aten::embedding         0.00%      21.468us         0.00%     330.758us     110.253us       0.000us         0.00%     150.544us      50.181us             3
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------
-Self CPU time total: 18.276s
-Self CUDA time total: 18.245s
+Profile steps 100-102, LUMEN_PREFER_HIPBLASLT=1
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                         aiter::hipb_mm         1.57%     193.550ms         5.32%     657.465ms     175.464us        7.480s        59.76%        7.480s       1.996ms          3747  
+Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us        2.386s        19.07%        2.386s       3.301ms           723  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us        2.173s        17.36%        2.173s       7.170ms           303  
+                                     aiter::fmha_v3_bwd         0.07%       8.543ms         6.23%     770.392ms       3.210ms        1.785s        14.26%        1.823s       7.598ms           240  
+aiter::fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskdd...         0.00%       0.000us         0.00%       0.000us       0.000us        1.674s        13.38%        1.674s       6.977ms           240  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us        1.231s         9.84%        1.231s       4.064ms           303  
+Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us     879.903ms         7.03%     879.903ms       3.666ms           240  
+                                     aiter::fmha_v3_fwd         0.07%       8.341ms         0.11%      13.837ms      45.668us     727.798ms         5.81%     727.798ms       2.402ms           303  
+                 aiter::fmha_fwd_hd128_bf16_causal_rtna         0.00%       0.000us         0.00%       0.000us       0.000us     727.798ms         5.81%     727.798ms       2.402ms           303  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us     398.321ms         3.18%     398.321ms       1.315ms           303  
+                              _static_quant_amax_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     376.507ms         3.01%     376.507ms     141.491us          2661  
+                                 _PatchedSwiGLUFunction         0.35%      42.939ms         0.53%      65.958ms     217.682us     337.930ms         2.70%     343.743ms       1.134ms           303  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us     293.904ms         2.35%     293.904ms     969.979us           303  
+                                     record_param_comms         0.19%      23.363ms        21.18%        2.617s       4.965ms     234.216ms         1.87%     234.222ms     444.444us           527  
+void rcclGenericKernel<2, false>(ncclDevKernelArgsSt...         0.00%       0.000us         0.00%       0.000us       0.000us     233.575ms         1.87%     233.575ms     474.747us           492  
+                                QuantizedLinearFunction         1.55%     191.322ms         4.47%     551.812ms     906.095us     230.751ms         1.84%     312.452ms     513.057us           609  
+                                        nccl:all_reduce         0.00%       0.000us         0.00%       0.000us       0.000us     230.462ms         1.84%     230.462ms     474.202us           486  
+                        FP8StoredLinearFunctionBackward         1.15%     142.480ms         6.64%     820.256ms     854.434us     213.385ms         1.70%        3.487s       3.632ms           960  
+                         _PatchedSwiGLUFunctionBackward         0.10%      11.942ms         0.13%      16.113ms      67.139us     204.233ms         1.63%     204.233ms     850.971us           240  
+                                     _swiglu_bwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     204.233ms         1.63%     204.233ms     850.971us           240  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us     174.155ms         1.39%     174.155ms     111.210us          1566  
+                                            aten::copy_         0.37%      46.260ms         3.00%     370.522ms      18.416us     165.987ms         1.33%     165.987ms       8.250us         20120  
+                                       _amax_abs_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     161.039ms         1.29%     161.039ms      96.373us          1671  
+                                     _swiglu_fwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     141.955ms         1.13%     141.955ms     468.497us           303  
+                                  _FusedDropoutScaleAdd         0.29%      36.167ms         0.47%      58.192ms      96.027us     119.065ms         0.95%     122.997ms     202.965us           606  
+                                 _fused_lora_fwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     119.065ms         0.95%     119.065ms     196.478us           606  
+         _fused_silu_mul_fp8_dynamic_quant_apply_kernel         0.00%       0.000us         0.00%       0.000us       0.000us     114.233ms         0.91%     114.233ms     377.005us           303  
+                        _FusedRMSNormFP8QuantV2Backward         0.63%      78.234ms         6.10%     753.751ms       1.570ms     110.866ms         0.89%     126.490ms     263.520us           480  
+                                             aten::add_         0.09%      10.959ms         0.16%      19.539ms      12.017us     110.206ms         0.88%     110.206ms      67.778us          1626  
+                        QuantizedLinearFunctionBackward         0.83%     103.021ms         1.71%     211.555ms     438.002us     109.054ms         0.87%     199.216ms     412.455us           483  
+                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     103.950ms         0.83%     103.950ms       6.226us         16696  
+                                              aten::add         0.08%       9.313ms         1.80%     222.348ms     242.474us     100.522ms         0.80%     100.522ms     109.620us           917  
+                          _FusedDropoutScaleAddBackward         0.18%      22.356ms         0.22%      27.531ms      57.356us      98.046ms         0.78%      98.046ms     204.263us           480  
+                                 _fused_lora_bwd_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      98.046ms         0.78%      98.046ms     204.263us           480  
+                                _FusedRMSNormFP8QuantV2         0.42%      51.596ms         0.66%      81.422ms     134.359us      86.756ms         0.69%      94.627ms     156.151us           606  
+                    _rmsnorm_quant_amax_fp8_bf16_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      86.756ms         0.69%      86.756ms     143.162us           606  
+                                               aten::mm         0.59%      72.950ms         1.57%     194.614ms     124.274us      85.489ms         0.68%      85.489ms      54.591us          1566  
+          _fused_silu_mul_fp8_dynamic_quant_amax_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      81.743ms         0.65%      81.743ms     269.777us           303  
+                                            aten::fill_         0.19%      23.659ms         2.28%     281.174ms      36.370us      75.333ms         0.60%      75.333ms       9.744us          7731  
+                                    _rmsnorm_bwd_triton         0.00%       0.000us         0.00%       0.000us       0.000us      68.871ms         0.55%      68.871ms     143.482us           480  
+             aiter::fmha_bwd_hd128_dq_convert_bf16_rtna         0.00%       0.000us         0.00%       0.000us       0.000us      67.041ms         0.54%      67.041ms     279.339us           240  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      56.993ms         0.46%      56.993ms       8.136us          7005  
+                        aiter::dynamic_per_tensor_quant         0.03%       3.922ms         0.07%       8.884ms      29.321us      56.461ms         0.45%      56.461ms     186.339us           303  
+                                      FusedRoPEFuncApex         0.05%       5.967ms         0.09%      11.405ms      18.820us      46.732ms         0.37%      46.732ms      77.116us           606  
+void (anonymous namespace)::fused_rope_forward<c10::...         0.00%       0.000us         0.00%       0.000us       0.000us      46.732ms         0.37%      46.732ms      77.116us           606  
+                         aiter::fmha_bwd_hd128_odo_bf16         0.00%       0.000us         0.00%       0.000us       0.000us      43.124ms         0.34%      43.124ms     179.685us           240  
+                              FusedRoPEFuncApexBackward         0.03%       3.312ms         0.06%       7.271ms      15.149us      41.626ms         0.33%      41.626ms      86.720us           480  
+void (anonymous namespace)::fused_rope_backward<c10:...         0.00%       0.000us         0.00%       0.000us       0.000us      41.626ms         0.33%      41.626ms      86.720us           480  
+                                              aten::cat         0.02%       2.731ms        10.04%        1.241s       4.983ms      39.066ms         0.31%      39.066ms     156.893us           249  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      39.001ms         0.31%      39.001ms     162.505us           240  
+                                       _rms_norm_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      37.806ms         0.30%      37.806ms      78.762us           480  
+void at::native::vectorized_templated_elementwise_ke...         0.00%       0.000us         0.00%       0.000us       0.000us      36.549ms         0.29%      36.549ms      38.072us           960  
+    _ZN5aiter20data_to_scale_kernelIDF16bDB8_EEvPfPKT_i         0.00%       0.000us         0.00%       0.000us       0.000us      35.392ms         0.28%      35.392ms     116.804us           303  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      33.253ms         0.27%      33.253ms     109.746us           303  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us      31.924ms         0.26%      31.924ms     105.360us           303  
+Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      27.850ms         0.22%      27.850ms     116.044us           240  
+                                 hipPointerGetAttribute         0.13%      15.979ms         0.13%      15.979ms       0.433us      27.083ms         0.22%      27.083ms       0.733us         36924  
+                                              aten::sum         0.03%       3.713ms         0.06%       6.993ms      14.213us      25.924ms         0.21%      25.924ms      52.691us           492  
+                                        hipEventDestroy         0.01%     621.801us         0.01%     621.801us       0.402us      25.349ms         0.20%      25.349ms      16.386us          1547  
+void at::native::reduce_kernel<128, 4, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      24.964ms         0.20%      24.964ms      52.008us           480  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      22.466ms         0.18%      22.466ms      10.258us          2190  
+                                  _compute_scale_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      19.381ms         0.15%      19.381ms       5.932us          3267  
+_ZN5aiter19scaled_quant_kernelIDF16bDB8_EEvPT0_PKT_P...         0.00%       0.000us         0.00%       0.000us       0.000us      19.126ms         0.15%      19.126ms      63.123us           303  
+Cijk_Alik_Bljk_BBS_BH_UserArgs_MT256x80x16_MI16x16x1...         0.00%       0.000us         0.00%       0.000us       0.000us      18.205ms         0.15%      18.205ms      60.082us           303  
+Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT16x32...         0.00%       0.000us         0.00%       0.000us       0.000us      17.096ms         0.14%      17.096ms      56.423us           303  
+Cijk_Ailk_Bjlk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us      14.921ms         0.12%      14.921ms       4.974ms             3  
+Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT64x16...         0.00%       0.000us         0.00%       0.000us       0.000us      14.102ms         0.11%      14.102ms      58.760us           240  
+Cijk_Ailk_Bljk_BBS_BH_MT256x128x16_MI32x32x8x1_SN_1L...         0.00%       0.000us         0.00%       0.000us       0.000us      13.300ms         0.11%      13.300ms      55.416us           240  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us      12.083ms         0.10%      12.083ms       4.028ms             3  
+Cijk_Ailk_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT16x16...         0.00%       0.000us         0.00%       0.000us       0.000us      12.082ms         0.10%      12.082ms      50.344us           240  
+void at::native::vectorized_elementwise_kernel<16, a...         0.00%       0.000us         0.00%       0.000us       0.000us       9.629ms         0.08%       9.629ms      20.060us           480  
+                                  hipModuleLaunchKernel        12.91%        1.595s        12.91%        1.595s     123.585us       9.549ms         0.08%       9.549ms       0.740us         12903  
+Cijk_Ailk_Bjlk_BBS_BH_MT16x128x32_MI16x16x16x1_SN_1L...         0.00%       0.000us         0.00%       0.000us       0.000us       8.885ms         0.07%       8.885ms      37.022us           240  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us       8.690ms         0.07%       8.690ms      36.208us           240  
+                                        hipLaunchKernel        14.21%        1.756s        14.21%        1.756s     100.741us       8.351ms         0.07%       8.351ms       0.479us         17426  
+Cijk_Ailk_Bjlk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       8.002ms         0.06%       8.002ms      33.344us           240  
+Cijk_Alik_Bljk_F8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs_M...         0.00%       0.000us         0.00%       0.000us       0.000us       7.880ms         0.06%       7.880ms      26.006us           303  
+Cijk_Ailk_Bljk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       7.235ms         0.06%       7.235ms      30.145us           240  
+                                              aten::div         0.00%     528.042us         0.01%     677.079us      45.139us       6.784ms         0.05%       6.784ms     452.292us            15  
+void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       6.741ms         0.05%       6.741ms       1.124ms             6  
+Cijk_Ailk_Bjlk_F8B8NBS_BH_Bias_HA_S_SAB_SAV_UserArgs...         0.00%       0.000us         0.00%       0.000us       0.000us       6.572ms         0.05%       6.572ms      27.384us           240  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       6.155ms         0.05%       6.155ms       6.352us           969  
+                          _rmsnorm_bwd_dg_reduce_triton         0.00%       0.000us         0.00%       0.000us       0.000us       4.189ms         0.03%       4.189ms       8.728us           480  
+                                          aten::random_         0.05%       5.832ms         0.09%      10.884ms      17.961us       3.931ms         0.03%       3.931ms       6.487us           606  
+void at::native::(anonymous namespace)::distribution...         0.00%       0.000us         0.00%       0.000us       0.000us       3.931ms         0.03%       3.931ms       6.487us           606  
+                               nccl:allreduce_coalesced         0.00%       0.000us         0.00%       0.000us       0.000us       3.397ms         0.03%       3.397ms     566.165us             6  
+                                             aten::mul_         0.00%     119.867us         0.00%     186.760us      12.451us       2.740ms         0.02%       2.740ms     182.650us            15  
+                                             aten::div_         0.00%      99.767us         0.00%     191.785us      15.982us       2.734ms         0.02%       2.734ms     227.851us            12  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.685ms         0.02%       2.685ms     894.916us             3  
+                                             aten::sub_         0.00%      79.381us         0.00%     130.683us      21.780us       2.671ms         0.02%       2.671ms     445.192us             6  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.654ms         0.02%       2.654ms     884.719us             3  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us       2.463ms         0.02%       2.463ms     410.419us             6  
+              vllm::initializeScale(float*, int, float)         0.00%       0.000us         0.00%       0.000us       0.000us       1.943ms         0.02%       1.943ms       6.413us           303  
+                                        Cijk_B_PostGSU8         0.00%       0.000us         0.00%       0.000us       0.000us       1.819ms         0.01%       1.819ms       7.577us           240  
+                                              aten::exp         0.00%      21.015us         0.00%      44.240us      14.747us       1.800ms         0.01%       1.800ms     600.036us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.800ms         0.01%       1.800ms     600.036us             3  
+                        apex::fused_rms_norm_affine_bwd         0.00%     341.198us         0.00%     483.063us     161.021us       1.607ms         0.01%       1.607ms     535.619us             3  
+Cijk_SB_BiasS_HAS_ScaleAB_ScaleAlphaVec_PostGSU8_VW4...         0.00%       0.000us         0.00%       0.000us       0.000us       1.387ms         0.01%       1.387ms       5.779us           240  
+                          Optimizer.step#FusedAdam.step         0.00%       0.000us         0.00%       0.000us       0.000us       1.322ms         0.01%       1.322ms     440.628us             3  
+void multi_tensor_apply_kernel<TensorListMetadata<4>...         0.00%       0.000us         0.00%       0.000us       0.000us       1.322ms         0.01%       1.322ms      48.958us            27  
+void cuComputePartGradGammaBeta<c10::BFloat16, float...         0.00%       0.000us         0.00%       0.000us       0.000us       1.045ms         0.01%       1.045ms     348.389us             3  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     959.920us         0.01%     959.920us      79.993us            12  
+                                              aten::max         0.00%      80.082us         0.00%     109.769us      36.590us     946.017us         0.01%     946.017us     315.339us             3  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     946.017us         0.01%     946.017us     315.339us             3  
+                                     CheckpointFunction         0.70%      87.056ms         2.48%     306.321ms       4.862ms     732.878us         0.01%        1.250s      19.835ms            63  
+                             CheckpointFunctionBackward         0.72%      88.639ms        44.75%        5.529s      87.765ms     726.427us         0.01%        2.939s      46.651ms            63  
+mscclKernel_Sum_float_Simple_false(ncclDevComm*, msc...         0.00%       0.000us         0.00%       0.000us       0.000us     640.956us         0.01%     640.956us     213.652us             3  
+                               aten::linalg_vector_norm         0.00%     138.871us         0.00%     289.133us      48.189us     619.818us         0.00%     619.818us     103.303us             6  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     588.632us         0.00%     588.632us      98.105us             6  
+                                             aten::tril         0.00%      32.588us         0.00%      54.828us      18.276us     564.781us         0.00%     564.781us     188.260us             3  
+void at::native::triu_tril_kernel<float, int, false,...         0.00%       0.000us         0.00%       0.000us       0.000us     564.781us         0.00%     564.781us     188.260us             3  
+void cuComputeGradInput<c10::BFloat16, float, c10::B...         0.00%       0.000us         0.00%       0.000us       0.000us     543.611us         0.00%     543.611us     181.204us             3  
+                                          aten::nonzero         0.00%     357.688us         0.01%       1.526ms      63.591us     534.775us         0.00%     534.775us      22.282us            24  
+                           Memcpy HtoD (Host -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     447.328us         0.00%     447.328us      19.449us            23  
+GeneratedBackwardFor_apex_fused_rms_norm_affine_fwd_...         0.00%     355.268us         0.00%     410.954us     136.985us     380.313us         0.00%     380.313us     126.771us             3  
+void cuApplyRMSNorm<c10::BFloat16, float, c10::BFloa...         0.00%       0.000us         0.00%       0.000us       0.000us     380.313us         0.00%     380.313us     126.771us             3  
+void multi_tensor_apply_kernel<TensorListMetadata<1>...         0.00%       0.000us         0.00%       0.000us       0.000us     333.759us         0.00%     333.759us       6.544us            51  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     297.119us         0.00%     297.119us      49.520us             6  
+                                               aten::lt         0.00%      94.889us         0.00%     137.482us      22.914us     227.758us         0.00%     227.758us      37.960us             6  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     210.522us         0.00%     210.522us      70.174us             3  
+                                  nccl:_all_gather_base         0.00%       0.000us         0.00%       0.000us       0.000us     207.237us         0.00%     207.237us     207.237us             1  
+                              aten::_local_scalar_dense         0.01%     650.182us        29.98%        3.705s      46.900ms     161.940us         0.00%     161.940us       2.050us            79  
+                                nccl:all_reduce_barrier         0.00%       0.000us         0.00%       0.000us       0.000us     150.143us         0.00%     150.143us      75.071us             2  
+                                           aten::gather         0.00%      35.384us         0.00%      68.787us      22.929us     144.810us         0.00%     144.810us      48.270us             3  
+void at::native::vectorized_gather_kernel<16, long>(...         0.00%       0.000us         0.00%       0.000us       0.000us     144.810us         0.00%     144.810us      48.270us             3  
+void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us     129.034us         0.00%     129.034us       5.376us            24  
+                                        Memset (Device)         0.00%       0.000us         0.00%       0.000us       0.000us     103.569us         0.00%     103.569us       3.452us            30  
+                                            aten::index         0.00%     358.860us         0.02%       2.039ms      67.968us      84.188us         0.00%     618.963us      20.632us            30  
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      84.188us         0.00%      84.188us      14.031us             6  
+                                              aten::mul         0.00%     428.206us         0.01%     676.394us      32.209us      82.178us         0.00%      82.178us       3.913us            21  
+                                               aten::gt         0.00%     179.865us         0.00%     282.992us       6.738us      80.801us         0.00%      80.801us       1.924us            42  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      80.801us         0.00%      80.801us       3.367us            24  
+void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us      80.044us         0.00%      80.044us       3.335us            24  
+void rocprim::ROCPRIM_400100_NS::detail::init_lookba...         0.00%       0.000us         0.00%       0.000us       0.000us      75.069us         0.00%      75.069us       3.128us            24  
+void rocprim::ROCPRIM_400100_NS::detail::trampoline_...         0.00%       0.000us         0.00%       0.000us       0.000us      74.428us         0.00%      74.428us       3.101us            24  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      62.294us         0.00%      62.294us       5.191us            12  
+                                              aten::sub         0.00%     109.631us         0.00%     191.217us      21.246us      53.956us         0.00%      53.956us       5.995us             9  
+                                           aten::arange         0.00%     127.671us         0.00%     520.079us      28.893us      47.940us         0.00%      95.880us       5.327us            18  
+void (anonymous namespace)::elementwise_kernel_with_...         0.00%       0.000us         0.00%       0.000us       0.000us      47.940us         0.00%      47.940us       5.327us             9  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      47.462us         0.00%      47.462us       5.274us             9  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      41.568us         0.00%      41.568us       5.196us             8  
+                                               aten::ne         0.00%      54.583us         0.00%      98.654us      16.442us      37.962us         0.00%      37.962us       6.327us             6  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      37.962us         0.00%      37.962us       6.327us             6  
+                                 aten::_index_put_impl_         0.00%      88.365us         0.00%     228.570us      25.397us      37.161us         0.00%      71.875us       7.986us             9  
+void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      37.161us         0.00%      37.161us      12.387us             3  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      36.438us         0.00%      36.438us       6.073us             6  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      36.317us         0.00%      36.317us       6.053us             6  
+                                              aten::abs         0.00%      99.098us         0.01%       1.489ms     124.044us      35.555us         0.00%      71.110us       5.926us            12  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      35.555us         0.00%      35.555us       5.926us             6  
+                                     aten::masked_fill_         0.00%      30.448us         0.00%      74.957us      12.493us      34.714us         0.00%      34.714us       5.786us             6  
+                                               aten::eq         0.00%      74.992us         0.00%     113.335us      18.889us      25.654us         0.00%      25.654us       4.276us             6  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      25.654us         0.00%      25.654us       4.276us             6  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      21.525us         0.00%      21.525us       3.587us             6  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      19.481us         0.00%      19.481us       6.494us             3  
+                                               aten::ge         0.00%      22.247us         0.00%      37.845us      12.615us      19.202us         0.00%      19.202us       6.401us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      18.921us         0.00%      18.921us       6.307us             3  
+                                            aten::clamp         0.00%      27.749us         0.00%      54.053us      18.018us      18.399us         0.00%      18.399us       6.133us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      18.399us         0.00%      18.399us       6.133us             3  
+                                       aten::bitwise_or         0.00%      28.887us         0.00%      51.068us      17.023us      18.318us         0.00%      18.318us       6.106us             3  
+void at::native::vectorized_elementwise_kernel<16, a...         0.00%       0.000us         0.00%       0.000us       0.000us      18.318us         0.00%      18.318us       6.106us             3  
+void cuComputeGradGammaBeta<float, c10::BFloat16>(fl...         0.00%       0.000us         0.00%       0.000us       0.000us      18.077us         0.00%      18.077us       6.026us             3  
+                                              aten::log         0.00%      24.088us         0.00%      44.837us      14.946us      17.677us         0.00%      17.677us       5.892us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      17.677us         0.00%      17.677us       5.892us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      17.598us         0.00%      17.598us       5.866us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      17.398us         0.00%      17.398us       5.799us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      17.316us         0.00%      17.316us       5.772us             3  
+                                             aten::mean         0.00%      48.267us         0.00%      76.604us      25.535us      17.237us         0.00%      17.237us       5.746us             3  
+void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      17.237us         0.00%      17.237us       5.746us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      16.875us         0.00%      16.875us       5.625us             3  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      15.793us         0.00%      15.793us       5.264us             3  
+     cleanup(float*, float*, float*, float*, bool, int)         0.00%       0.000us         0.00%       0.000us       0.000us      12.666us         0.00%      12.666us       4.222us             3  
+                           Memcpy DtoH (Device -> Host)         0.00%       0.000us         0.00%       0.000us       0.000us      10.943us         0.00%      10.943us       3.648us             3  
+                                              aten::pow         0.00%      44.443us         0.00%      71.890us      23.963us       9.338us         0.00%       9.338us       3.113us             3  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       9.338us         0.00%       9.338us       3.113us             3  
+void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us       9.058us         0.00%       9.058us       3.019us             3  
+                                     hipStreamWaitEvent         0.07%       8.911ms         0.07%       8.911ms       8.561us       6.494us         0.00%       6.494us       0.006us          1041  
+                                   hipStreamIsCapturing         0.02%       2.427ms         0.02%       2.427ms       1.148us       0.000us         0.00%       0.000us       0.000us          2114  
+                                            aten::zero_         0.09%      11.599ms         2.37%     292.677ms      37.902us       0.000us         0.00%      75.152ms       9.732us          7722  
+                                            aten::zeros         0.03%       3.738ms         0.25%      31.331ms      12.330us       0.000us         0.00%      34.894ms      13.733us          2541  
+                                            aten::empty         0.37%      46.070ms         0.37%      46.070ms       2.722us       0.000us         0.00%       0.000us       0.000us         16927  
+enumerate(DataLoader)#_MultiProcessingDataLoaderIter...         0.00%     370.351us         0.00%     370.351us     123.450us       0.000us         0.00%       0.000us       0.000us             3  
+                                               aten::to         0.04%       5.224ms         0.31%      37.959ms       3.704us       0.000us         0.00%      26.294ms       2.566us         10247  
+                                         aten::_to_copy         0.05%       6.547ms         0.26%      32.734ms      14.712us       0.000us         0.00%      26.294ms      11.817us          2225  
+                                    aten::empty_strided         0.47%      57.524ms         0.47%      57.524ms       2.299us       0.000us         0.00%       0.000us       0.000us         25016  
+                                    hipMemcpyWithStream        29.99%        3.706s        29.99%        3.706s      44.120ms       0.000us         0.00%       0.000us       0.000us            84  
+                                       aten::lift_fresh         0.00%       9.810us         0.00%       9.810us       0.377us       0.000us         0.00%       0.000us       0.000us            26  
+                                          aten::detach_         0.00%      26.694us         0.00%      46.325us       2.014us       0.000us         0.00%       0.000us       0.000us            23  
+                                                detach_         0.00%      19.631us         0.00%      19.631us       0.854us       0.000us         0.00%       0.000us       0.000us            23  
+                                       c10d::broadcast_         0.00%     232.102us         0.00%     471.389us      78.565us       0.000us         0.00%       0.000us       0.000us             6  
+                                         nccl:broadcast         0.00%       0.000us             0     160.214us      26.702us       0.000us         0.00%       0.000us       0.000us             6  
+                                           aten::select         0.00%     121.540us         0.00%     156.721us       1.844us       0.000us         0.00%       0.000us       0.000us            85  
+                                       aten::as_strided         0.06%       6.915ms         0.06%       6.915ms       0.777us       0.000us         0.00%       0.000us       0.000us          8897  
+                                       aten::is_nonzero         0.00%      36.742us        29.98%        3.705s     123.489ms       0.000us         0.00%      39.440us       1.315us            30  
+                                             aten::item         0.00%      90.179us        29.99%        3.705s      46.901ms       0.000us         0.00%     161.940us       2.050us            79  
+                                             aten::view         0.31%      38.164ms         0.31%      38.164ms       1.101us       0.000us         0.00%       0.000us       0.000us         34661  
+                                           aten::narrow         0.00%      55.509us         0.00%     118.178us       6.565us       0.000us         0.00%       0.000us       0.000us            18  
+                                            aten::slice         0.00%     101.212us         0.00%     134.951us       2.109us       0.000us         0.00%       0.000us       0.000us            64  
+                                             aten::ones         0.00%      17.498us         0.00%     113.848us      18.975us       0.000us         0.00%     164.210us      27.368us             6  
+                                          aten::resize_         0.01%     664.116us         0.01%     664.116us      15.812us       0.000us         0.00%       0.000us       0.000us            42  
+                                        aten::unsqueeze         0.00%      65.848us         0.00%      82.476us       5.498us       0.000us         0.00%       0.000us       0.000us            15  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 12.357s
+Self CUDA time total: 12.516s

@@ -8,12 +8,19 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 ext_modules = []
 cmdclass = {}
 try:
-    from torch.utils.cpp_extension import BuildExtension, CppExtension
+    from torch.utils.cpp_extension import CppExtension, BuildExtension
 
     ext_modules.append(
         CppExtension(
             name="lumen.csrc._fused_quant_transpose",
             sources=[os.path.join(this_dir, "lumen", "csrc", "fused_quant_transpose.cu")],
+            extra_compile_args=["-O3"],
+        )
+    )
+    ext_modules.append(
+        CppExtension(
+            name="lumen.csrc._fp8_quant_dispatch",
+            sources=[os.path.join(this_dir, "lumen", "csrc", "fp8_quant_dispatch.cu")],
             extra_compile_args=["-O3"],
         )
     )
@@ -24,7 +31,7 @@ except ImportError:
 setup(
     name="lumen",
     version="0.3.0",
-    description="Lightweight AMD-native quantized training engine (FP8/MXFP8/FP4) with integrated attention kernels",
+    description="Lightweight AMD-native quantized training framework (FP8/MXFP8/FP4) with integrated attention kernels",
     long_description=open(os.path.join(this_dir, "README.md")).read(),
     long_description_content_type="text/markdown",
     packages=find_packages(exclude=["tests*"]),

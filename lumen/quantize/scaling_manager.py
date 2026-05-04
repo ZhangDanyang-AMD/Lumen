@@ -42,6 +42,24 @@ def _get_fused_amax_abs():
         _fused_amax_abs = fused_amax_abs
     return _fused_amax_abs
 
+_TRACE_AMAX_TID = os.environ.get("LUMEN_TRACE_AMAX", "0") == "1"
+_trace_amax_tids: dict = {}
+
+def dump_amax_tids(label: str = "") -> None:
+    """Print tensor_ids hitting len(history)==0. Call from training loop."""
+    if not _TRACE_AMAX_TID or not _trace_amax_tids:
+        return
+    total = sum(_trace_amax_tids.values())
+    unique = len(_trace_amax_tids)
+    print(f"\n[AMAX TID] {label} — {total} total, {unique} unique tensor_ids hitting len(history)==0", flush=True)
+    # Show first 10 unique ids
+    for i, (tid, cnt) in enumerate(sorted(_trace_amax_tids.items(), key=lambda x: -x[1])):
+        if i >= 10:
+            print(f"  ... and {unique - 10} more", flush=True)
+            break
+        print(f"  {cnt:>4}x  {tid}", flush=True)
+    _trace_amax_tids.clear()
+
 _FUSED_QUANT_SCALE = os.environ.get("LUMEN_FUSED_QUANT_SCALE", "0") == "1"
 _FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
 _FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
@@ -232,6 +250,38 @@ class ScalingManager:
         self._fp8_step_counter: int = -1
         self._sdma_allgather = None
 
+        # Batch scale precomputation (delayed + MOST_RECENT only).
+        # Replaces ~1,089 single-element Triton kernel launches per step with
+        # 2 vectorized PyTorch ops.  Zero per-update overhead — all work is
+        # deferred to a single lazy gather in _precompute_batch_scales().
+        self._batch_enabled = bool(int(os.environ.get("LUMEN_BATCH_PRECOMPUTE_SCALES", "0")))
+        self._batch_scale_fwd: Optional[torch.Tensor] = None
+        self._batch_scale_bwd: Optional[torch.Tensor] = None
+        self._batch_amax_buf: Optional[torch.Tensor] = None
+        self._batch_tid_to_idx: Dict[str, int] = {}
+        self._batch_ordered_deques: list = []
+        self._batch_scales_valid = False
+
+        # C++ FP8 quant dispatch (replaces Python get_scale + quant + update_amax)
+        self._cpp_dispatcher = None
+        if (
+            _PREFER_HIPBLASLT
+            and _FUSED_QUANT_AMAX
+            and self.recipe == "delayed"
+            and self.config.amax_algo == AmaxAlgo.MOST_RECENT
+            and os.environ.get("LUMEN_CPP_QUANT_DISPATCH", "0") == "1"
+        ):
+            try:
+                from lumen.ops.quantize.quant_dispatch_cpp import get_cpp_dispatcher
+                self._cpp_dispatcher = get_cpp_dispatcher(
+                    self._fp8_max, self._fp8_max_bwd,
+                    self._margin, self.config.history_len,
+                )
+                if self._cpp_dispatcher is not None:
+                    logger.info("C++ FP8 quant dispatch enabled")
+            except Exception as e:
+                logger.warning("C++ FP8 quant dispatch init failed: %s", e)
+
     @property
     def recipe(self) -> str:
         return self.config.recipe
@@ -259,8 +309,50 @@ class ScalingManager:
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))
         return scale
 
+    def _precompute_batch_scales(self):
+        """Batch-compute all delayed+MOST_RECENT scales via lazy gather.
+
+        Gathers latest amaxes from ``amax_history`` into a pre-allocated
+        contiguous buffer, then computes fwd/bwd scales in 2 vectorized ops.
+        Called once per step on the first ``get_scale()`` after invalidation.
+        """
+        if self._batch_scales_valid:
+            return
+        # Rebuild mapping + ordered deque list when tensor_ids change
+        if len(self._batch_tid_to_idx) != len(self.amax_history):
+            self._batch_tid_to_idx = {
+                tid: i for i, tid in enumerate(self.amax_history)
+            }
+            self._batch_ordered_deques = [
+                self.amax_history[tid] for tid in self._batch_tid_to_idx
+            ]
+            self._batch_amax_buf = None  # force re-alloc on new size
+        N = len(self._batch_tid_to_idx)
+        if N == 0:
+            return
+        # Pre-allocate buffer once, reuse across steps
+        if self._batch_amax_buf is None:
+            device = self._batch_ordered_deques[0][-1].device
+            self._batch_amax_buf = torch.empty(
+                N, dtype=torch.float32, device=device,
+            )
+        # Scatter-copy latest amaxes into contiguous buffer (tight loop,
+        # no per-element dict lookup, no .float()/.reshape() when not needed)
+        buf = self._batch_amax_buf
+        for i, dq in enumerate(self._batch_ordered_deques):
+            buf[i] = dq[-1]
+        fwd_recip = 1.0 / (self._fp8_max / (2**self._margin))
+        bwd_recip = 1.0 / (self._fp8_max_bwd / (2**self._margin))
+        self._batch_scale_fwd = torch.where(
+            buf > 0, buf * fwd_recip, torch.ones_like(buf),
+        )
+        self._batch_scale_bwd = torch.where(
+            buf > 0, buf * bwd_recip, torch.ones_like(buf),
+        )
+        self._batch_scales_valid = True
+
     def get_scale(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False,
-                   return_amax: bool = False):
+                   return_amax: bool = False, skip_amax_precompute: bool = False):
         """Return the scale factor for this tensor (None for block/mxfp8/per_token/none).
 
         When *return_amax* is True, returns ``(scale, current_amax)`` so the
@@ -270,6 +362,13 @@ class ScalingManager:
         only computed for the delayed-first-call and dynamic paths.  For
         delayed with existing history, ``current_amax`` is ``None`` (the
         tensor was not scanned).
+
+        When *skip_amax_precompute* is True AND history is empty, uses
+        ``fp8_max`` as a conservative first-call scale (scale=1.0) instead
+        of scanning the tensor.  The caller is expected to use a fused
+        kernel that computes its own amax and appends it to history.
+        This avoids a redundant ``_amax_abs_kernel`` launch when activation
+        checkpointing causes many first-call hits per step.
         """
         recipe = self.recipe
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
@@ -281,9 +380,30 @@ class ScalingManager:
             history = self.amax_history[tensor_id]
             current_amax = None
             if len(history) == 0:
-                current_amax = _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
-                amax = current_amax
+                if skip_amax_precompute:
+                    # Caller will use a fused kernel (e.g. static_quant_with_amax)
+                    # that computes its own amax. Use fp8_max as placeholder →
+                    # scale = fp8_max / fp8_max = 1.0.
+                    amax = torch.tensor(float(fp8_max), device=tensor.device, dtype=torch.float32)
+                    current_amax = None
+                else:
+                    if _TRACE_AMAX_TID:
+                        _trace_amax_tids[tensor_id] = _trace_amax_tids.get(tensor_id, 0) + 1
+                    current_amax = _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
+                    amax = current_amax
             elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
+                # Batch fast path: return precomputed scale from contiguous buffer
+                if (
+                    self._batch_enabled
+                    and tensor_id in self._batch_tid_to_idx
+                    and not (self.config.reduce_amax and self._dp_group is not None)
+                ):
+                    self._precompute_batch_scales()
+                    if self._batch_scales_valid:
+                        idx = self._batch_tid_to_idx[tensor_id]
+                        buf = self._batch_scale_bwd if backward else self._batch_scale_fwd
+                        scale = buf[idx : idx + 1]
+                        return (scale, None) if return_amax else scale
                 amax = history[-1].to(device=tensor.device)
             else:
                 amax = torch.stack(list(history)).amax().to(device=tensor.device)
@@ -327,10 +447,12 @@ class ScalingManager:
             self.amax_history[tensor_id].append(_get_fused_amax_abs()(t))
         else:
             self.amax_history[tensor_id].append(t.abs().amax())
+        self._batch_scales_valid = False
 
     def update_amax_value(self, tensor_id: str, amax: torch.Tensor):
         """Record a pre-computed amax value, skipping the abs().amax() pass."""
         self.amax_history[tensor_id].append(amax.detach())
+        self._batch_scales_valid = False
 
     def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
         """Quantize tensor. Returns :class:`~lumen.quantize.descriptor.FP8Descriptor` or ``None``.
@@ -663,8 +785,31 @@ class ScalingManager:
         if self.config.scaling == ScalingType.NONE:
             return None
 
-        scale, _precomputed_amax = self.get_scale(tensor_id, tensor, backward=backward,
-                                                   return_amax=True)
+        # C++ fast path: fused scale+quant+amax in a single C++ call
+        if (
+            self._cpp_dispatcher is not None
+            and tensor.is_cuda
+            and not (self.config.reduce_amax and self._dp_group is not None)
+        ):
+            fp8_data, scale = self._cpp_dispatcher.quantize(tensor_id, tensor, backward)
+            dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
+            return FP8Descriptor(data=fp8_data, scale=scale, fp8_dtype=dtype)
+
+        # When Branch 2 (hipBLASLt fused quant+amax) will fire, skip the
+        # standalone amax precompute in get_scale — the fused kernel computes
+        # its own amax, so the precomputed one is wasted.  This eliminates
+        # ~557 _amax_abs_kernel launches/step from activation checkpointing.
+        _will_use_fused_quant_amax = (
+            _PREFER_HIPBLASLT
+            and _FUSED_QUANT_AMAX
+            and _probe_fused_quant_amax()
+            and tensor.is_cuda
+        )
+        scale, _precomputed_amax = self.get_scale(
+            tensor_id, tensor, backward=backward,
+            return_amax=True,
+            skip_amax_precompute=_will_use_fused_quant_amax,
+        )
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
 
@@ -834,6 +979,14 @@ class ScalingManager:
         self._fp8_param_cache.clear()
         self._fp8_param_stale.clear()
         self._fp8_step_counter = -1
+        self._batch_tid_to_idx.clear()
+        self._batch_ordered_deques.clear()
+        self._batch_amax_buf = None
+        self._batch_scale_fwd = None
+        self._batch_scale_bwd = None
+        self._batch_scales_valid = False
+        if self._cpp_dispatcher is not None:
+            self._cpp_dispatcher.reset()
 
     # ------------------------------------------------------------------
     # Backward delayed scaling (blockwise2d cross-iteration reuse)
@@ -857,27 +1010,54 @@ class ScalingManager:
 
         Returns ``(fp8_tensor, per_tensor_scale)``.
         """
+        # C++ fast path
+        if self._cpp_dispatcher is not None and tensor.is_cuda:
+            fp8_data, scale = self._cpp_dispatcher.quantize(tensor_id, tensor, True)
+            return fp8_data, scale
+
         fp8_max = self._fp8_max_bwd
         dtype = self.fp8_dtype_bwd
 
         history = self.amax_history[tensor_id]
         precomputed_amax = None
+        use_batch_scale = False
+        _will_use_fused = (
+            _FUSED_QUANT_AMAX and _probe_fused_quant_amax() and tensor.is_cuda
+        )
         if len(history) == 0:
-            precomputed_amax = _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
-            amax = precomputed_amax
+            if _will_use_fused:
+                # Fused kernel (static_quant_with_amax) computes its own amax.
+                # Use fp8_max → scale=1.0 as a safe first-call placeholder.
+                amax = torch.tensor(float(fp8_max), device=tensor.device, dtype=torch.float32)
+            else:
+                precomputed_amax = _get_fused_amax_abs()(tensor) if tensor.is_cuda and tensor.dim() >= 2 else tensor.abs().amax()
+                amax = precomputed_amax
         elif self.config.amax_algo == AmaxAlgo.MOST_RECENT:
-            amax = history[-1].to(device=tensor.device)
+            # Batch fast path: use precomputed bwd scale from contiguous buffer
+            if (
+                self._batch_enabled
+                and tensor_id in self._batch_tid_to_idx
+            ):
+                self._precompute_batch_scales()
+                if self._batch_scales_valid:
+                    use_batch_scale = True
+            if not use_batch_scale:
+                amax = history[-1].to(device=tensor.device)
         else:
             amax = torch.stack(list(history)).amax().to(device=tensor.device)
 
-        scale = self._compute_scale(amax, fp8_max)
+        if use_batch_scale:
+            idx = self._batch_tid_to_idx[tensor_id]
+            scale = self._batch_scale_bwd[idx : idx + 1]
+        else:
+            scale = self._compute_scale(amax, fp8_max)
 
         if _FUSED_QUANT_AMAX and _probe_fused_quant_amax() and tensor.is_cuda:
             from lumen.ops.quantize.quant_amax_fused import static_quant_with_amax
 
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
             fp8_2d, new_amax = static_quant_with_amax(tensor_2d, scale, dtype)
-            self.amax_history[tensor_id].append(new_amax)
+            self.update_amax_value(tensor_id, new_amax)
             return fp8_2d.view(tensor.shape), scale
 
         if tensor.is_cuda and _probe_aiter_static_quant():

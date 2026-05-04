@@ -2971,3 +2971,24 @@ Write back only meaningful tests or experiments that change confidence in a hypo
   - TunableOp cache differences between runs
 - The README's "projected" 4,140ms was never actually measured — it was calculated from 4,175 - 25ms (LoRA) - 15ms (residual) = 4,135ms. In reality, these features may have added overhead that offset their theoretical savings.
 - Status: **open — 88ms gap between fused-RoPE-era baseline and current baseline not fully explained. Row-based quant kernel recovers 70ms of this gap.**
+
+### [2026-05-03 batch-scale-precompute-no-benefit]
+
+- Symptom: Attempted to batch 1,089 per-step `_compute_scale_kernel` Triton launches (single-element scalar) into 2 vectorized PyTorch ops.
+- Results:
+  - v1 (per-update copy_()): +52ms regression. 1,089 copy_() calls per step slower than 1,089 Triton launches.
+  - v2 (lazy torch.cat gather): +7ms. List comprehension + torch.cat overhead.
+  - v3 (pre-alloc scatter loop): +5ms. Scatter loop still ~1,089 element writes.
+- Root cause: The 1,089 Triton kernel launches are **fully overlapped with GPU compute** — they're effectively free. Any Python-level replacement adds non-overlapped host overhead.
+- Status: **resolved — no benefit. Feature gated by LUMEN_BATCH_PRECOMPUTE_SCALES=0 (default off). Code preserved for future use.**
+
+### [2026-05-03 te-cast-transpose-fusion-not-applicable]
+
+- Symptom: Investigated whether TE's `cast_transpose_fusion_kernel_optimized` could improve Lumen performance.
+- Analysis: TE fuses cast+transpose+amax into one kernel because cuBLAS requires column-major weight input for dgrad. In Lumen's production path:
+  - hipBLASLt `hipb_mm` uses NN layout — weight is passed row-major, **no transpose needed**
+  - `transpose_cached` is NEVER called in the hipBLASLt dgrad path (line 1221-1224 in linear.py)
+  - `_eager_transpose` is also NOT called by Branch 2 (hipBLASLt quant+amax path, line 791-808)
+  - Lumen already has a fused cast+transpose+amax kernel (Branch 3, cast_transpose.py) but correctly skips it because transpose output is unnecessary
+- Conclusion: Adopting TE's fused cast+transpose would **add wasted bandwidth** by writing an unused transpose output to HBM.
+- Status: **resolved — not applicable to hipBLASLt production path**
