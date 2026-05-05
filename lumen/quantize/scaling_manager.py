@@ -65,6 +65,7 @@ _FUSED_CAST_TRANSPOSE = os.environ.get("LUMEN_FUSED_CAST_TRANSPOSE", "0") == "1"
 _FUSED_QUANT_AMAX = os.environ.get("LUMEN_FUSED_QUANT_AMAX", "0") == "1"
 _FUSED_QUANT_TRANSPOSE_CPP = os.environ.get("LUMEN_FUSED_QUANT_TRANSPOSE_CPP", "0") == "1"
 _PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
+_REUSE_QUANT_BUFFER = os.environ.get("LUMEN_REUSE_QUANT_BUFFER", "0") == "1"
 _CAST_AMAX_AVAILABLE: Optional[bool] = None
 _AITER_STATIC_QUANT_AVAILABLE: Optional[bool] = None
 _CAST_TRANSPOSE_AVAILABLE: Optional[bool] = None
@@ -262,6 +263,10 @@ class ScalingManager:
         self._batch_ordered_deques: list = []
         self._batch_scales_valid = False
 
+        # Per-shape FP8 scratch buffers for backward-only quantizations.
+        # Eliminates ~1,089 torch.empty_like allocations per step when enabled.
+        self._fp8_scratch: Dict[tuple, torch.Tensor] = {}
+
         # C++ FP8 quant dispatch (replaces Python get_scale + quant + update_amax)
         self._cpp_dispatcher = None
         if (
@@ -308,6 +313,25 @@ class ScalingManager:
         scale = amax / effective_max
         scale = torch.where(amax > 0.0, scale, torch.ones_like(scale))
         return scale
+
+    def get_bwd_scale_for_epilogue(self, tensor_id: str):
+        """Return the delayed-scaling bwd scale for GEMM FP8 epilogue, or None.
+
+        Returns a pre-computed per-tensor scale when delayed scaling has history
+        for *tensor_id*.  Returns ``None`` when history is empty (first step) or
+        the recipe is not delayed — callers should fall back to the standard
+        BF16 GEMM + quantize path.
+        """
+        if self.recipe != "delayed":
+            return None
+        history = self.amax_history.get(tensor_id)
+        if history is None or len(history) == 0:
+            return None
+        if self.config.amax_algo == AmaxAlgo.MOST_RECENT:
+            amax = history[-1].to(device="cuda")
+        else:
+            amax = torch.stack(list(history)).amax().to(device="cuda")
+        return self._compute_scale(amax, self._fp8_max_bwd)
 
     def _precompute_batch_scales(self):
         """Batch-compute all delayed+MOST_RECENT scales via lazy gather.
@@ -729,9 +753,19 @@ class ScalingManager:
     # Quantize core (shared by both on-the-fly and FP8 param paths)
     # ------------------------------------------------------------------
 
+    def _get_fp8_scratch(self, device, shape, dtype):
+        """Return a reusable FP8 output buffer for backward-only quantizations."""
+        dev_idx = device.index if hasattr(device, 'index') else device
+        key = (dev_idx, shape, dtype)
+        buf = self._fp8_scratch.get(key)
+        if buf is None or buf.shape != shape or buf.dtype != dtype:
+            buf = torch.empty(shape, dtype=dtype, device=device)
+            self._fp8_scratch[key] = buf
+        return buf
+
     def _aiter_static_quant(
         self, tensor: torch.Tensor, scale: torch.Tensor, fp8_dtype: torch.dtype,
-        *, compute_amax: bool = False,
+        *, compute_amax: bool = False, out: torch.Tensor = None,
     ) -> "torch.Tensor | tuple[torch.Tensor, torch.Tensor]":
         """Fused per-tensor static quant via AITER Triton (x / scale -> fp8).
 
@@ -742,7 +776,10 @@ class ScalingManager:
             tensor_2d = tensor.contiguous()
         else:
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
-        qx = torch.empty_like(tensor_2d, dtype=fp8_dtype)
+        if out is not None and out.shape == tensor_2d.shape and out.dtype == fp8_dtype:
+            qx = out
+        else:
+            qx = torch.empty_like(tensor_2d, dtype=fp8_dtype)
         if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1 and scale.is_contiguous():
             scale_in = scale
         else:
@@ -755,9 +792,12 @@ class ScalingManager:
             from lumen.ops.quantize.quant_amax_fused import _get_amax_scratch
 
             amax_buf = _get_amax_scratch(tensor.device)
-            amax_buf.zero_()
+            if not os.environ.get("LUMEN_ZERO_OVERLAP", "1") == "1":
+                amax_buf.zero_()
             static_per_tensor_quant_fp8_i8_with_amax(qx, tensor_2d, scale_in, amax_buf)
-            return qx.view(tensor.shape), amax_buf.clone()
+            result = amax_buf.clone()
+            amax_buf.zero_()  # pre-zero for next call; overlaps with subsequent GPU work
+            return qx.view(tensor.shape), result
         else:
             from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8
 
@@ -876,7 +916,10 @@ class ScalingManager:
             from lumen.ops.quantize.quant_amax_fused import static_quant_with_amax
 
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
-            fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype)
+            _out_buf = None
+            if backward and _REUSE_QUANT_BUFFER:
+                _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
+            fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
             self.amax_history[tensor_id].append(amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
@@ -945,14 +988,21 @@ class ScalingManager:
             from lumen.ops.quantize.quant_amax_fused import static_quant_with_amax
 
             tensor_2d = tensor.reshape(-1, tensor.shape[-1]).contiguous()
-            fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype)
+            _out_buf = None
+            if backward and _REUSE_QUANT_BUFFER:
+                _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
+            fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
             self.amax_history[tensor_id].append(amax)
             desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
             return self._eager_transpose(desc) if not backward else desc
 
         if tensor.is_cuda and _probe_aiter_static_quant():
             needs_amax = _precomputed_amax is None
-            result = self._aiter_static_quant(tensor, scale, dtype, compute_amax=needs_amax)
+            _out_buf = None
+            if backward and _REUSE_QUANT_BUFFER:
+                _t2d = tensor.reshape(-1, tensor.shape[-1])
+                _out_buf = self._get_fp8_scratch(tensor.device, _t2d.shape, dtype)
+            result = self._aiter_static_quant(tensor, scale, dtype, compute_amax=needs_amax, out=_out_buf)
             if needs_amax:
                 fp8_tensor, kernel_amax = result
                 self.update_amax_value(tensor_id, kernel_amax)

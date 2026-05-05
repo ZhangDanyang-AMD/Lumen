@@ -23,11 +23,14 @@ Enabled via ``LUMEN_FUSED_QUANT_AMAX=1`` (checked in scaling_manager.py).
 from __future__ import annotations
 
 import functools
+import os
 from typing import Dict
 
 import torch
 import triton
 import triton.language as tl
+
+_ZERO_OVERLAP = os.environ.get("LUMEN_ZERO_OVERLAP", "1") == "1"  # Opt B
 
 _amax_scratch: Dict[torch.device, torch.Tensor] = {}
 
@@ -36,7 +39,8 @@ def _get_amax_scratch(device: torch.device) -> torch.Tensor:
     """Return a reusable 1-element float32 scratch tensor for amax accumulation.
 
     Avoids allocating a new ``torch.zeros(1)`` on every quant/amax kernel call
-    (~2,900 times per training step). The caller MUST zero the tensor before use.
+    (~2,900 times per training step). The buffer is initialized as zero and
+    callers zero it AFTER clone (post-use), so it's always zero when fetched.
     """
     buf = _amax_scratch.get(device)
     if buf is None:
@@ -83,6 +87,7 @@ def static_quant_with_amax(
     x: torch.Tensor,
     scale: torch.Tensor,
     fp8_dtype: torch.dtype,
+    out: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Quantize ``x`` with ``scale`` and compute ``amax(abs(x))`` in one pass.
 
@@ -90,6 +95,7 @@ def static_quant_with_amax(
         x: Input tensor, must be 2-D ``(M, N)`` and on GPU.
         scale: Per-tensor scale, shape ``(1,)`` or scalar, float32.
         fp8_dtype: Target FP8 dtype (e.g. ``torch.float8_e4m3fnuz``).
+        out: Optional pre-allocated output buffer for buffer reuse.
 
     Returns:
         ``(fp8_tensor, amax)`` where ``fp8_tensor`` has the same shape as
@@ -99,9 +105,13 @@ def static_quant_with_amax(
     x = x.contiguous()
     rows, cols = x.shape
 
-    qx = torch.empty_like(x, dtype=fp8_dtype)
+    if out is not None and out.shape == x.shape and out.dtype == fp8_dtype:
+        qx = out
+    else:
+        qx = torch.empty_like(x, dtype=fp8_dtype)
     amax_out = _get_amax_scratch(x.device)
-    amax_out.zero_()
+    if not _ZERO_OVERLAP:
+        amax_out.zero_()
     if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1 and scale.is_contiguous():
         scale_in = scale
     else:
@@ -116,7 +126,9 @@ def static_quant_with_amax(
         NUM_COL_POW2=NUM_COL_POW2,
     )
 
-    return qx, amax_out.clone()
+    result = amax_out.clone()
+    amax_out.zero_()  # pre-zero for next call; overlaps with subsequent GPU work
+    return qx, result
 
 
 @functools.lru_cache(maxsize=1)
@@ -217,10 +229,13 @@ def fused_amax_abs(x: torch.Tensor) -> torch.Tensor:
     rows, cols = x.shape
 
     amax_out = _get_amax_scratch(x.device)
-    amax_out.zero_()
+    if not _ZERO_OVERLAP:
+        amax_out.zero_()
     NUM_COL_POW2 = triton.next_power_of_2(cols)
     _amax_abs_kernel[(rows,)](x, amax_out, cols, x.stride(0), NUM_COL_POW2=NUM_COL_POW2)
-    return amax_out.squeeze(0).clone()
+    result = amax_out.squeeze(0).clone()
+    amax_out.zero_()  # pre-zero for next call; overlaps with subsequent GPU work
+    return result
 
 
 # ---------------------------------------------------------------------------
