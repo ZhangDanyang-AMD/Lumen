@@ -7,15 +7,16 @@ compared against the official AMD MLPerf v5.1 reference run on the **same machin
 
 ## Result Summary
 
-| Metric | Lumen (mem-opt) | Lumen (C++ dispatch) | Lumen (prev) | MLPerf Ref (local, same MI300X) |
-|--------|----------------|---------------------|--------------|--------------------------------|
-| Best val_loss | **0.9170** (step 1024) | 0.9210 (step 576) | 0.9187 (step 960) | 0.9243 |
-| Passes MLPerf target? | **Yes** (0.9212 at step 576) | Yes (0.9210 at step 576) | Yes (0.9208 at step 576) | Yes (step 384) |
-| Pre-eval step time | **4,152 ms** (steps 20-600 avg) | 4,170 ms | 4,263 ms | **3,967 ms** |
-| Post-eval step time | **~4,145 ms (+0%)** | TBD | ~4,476 ms (+6.8%) | ~4,000 ms (est.) |
-| Speed ratio (Lumen / MLPerf) | **1.047x** (pre-eval) | 1.051x | 1.075x | 1.0x |
-| Memory utilization | **99.5%** | 99.5% | 99.5% | ~82% |
-| Stability | 0 NaN/skip (1024 steps) | 0 NaN/skip (600 steps) | 0 NaN/skip | 0 NaN/skip |
+| Metric | Lumen (speed-opt) | Lumen (mem-opt) | Lumen (C++ dispatch) | Lumen (prev) | MLPerf Ref (local, same MI300X) |
+|--------|-------------------|----------------|---------------------|--------------|--------------------------------|
+| Best val_loss | TBD (103 steps) | **0.9170** (step 1024) | 0.9210 (step 576) | 0.9187 (step 960) | 0.9243 |
+| Passes MLPerf target? | TBD | **Yes** (0.9212 at step 576) | Yes (0.9210 at step 576) | Yes (0.9208 at step 576) | Yes (step 384) |
+| Pre-eval step time | **4,135 ms** (steps 20-100 avg) | 4,152 ms | 4,170 ms | 4,263 ms | **3,967 ms** |
+| Post-eval step time | TBD | **~4,145 ms (+0%)** | TBD | ~4,476 ms (+6.8%) | ~4,000 ms (est.) |
+| Speed ratio (Lumen / MLPerf) | **1.042x** (pre-eval) | 1.047x | 1.051x | 1.075x | 1.0x |
+| Memory utilization | 99.5% | **99.5%** | 99.5% | 99.5% | ~82% |
+| Stability | 0 NaN/skip (103 steps) | 0 NaN/skip (1024 steps) | 0 NaN/skip (600 steps) | 0 NaN/skip | 0 NaN/skip |
+| Total time (1024 steps) | TBD | **5,004 s** | ~4,520 s (est.) | ~4,630 s (est.) | — |
 
 **Local MLPerf reference**: `rocm/amd-mlperf:llama2_70b_training_5.1` Docker,
 `SEED=1234`, zarr checkpoint converted from `NousResearch/Llama-2-70b-hf`.
@@ -66,22 +67,36 @@ converge below 0.925 regardless of other optimizations.
 | **Row-based quant+amax kernel** (`static_quant_with_amax`) | **~70 ms/step (1.6%)** | Replace 2D-tiled `cast_amax_fp8` (1 atomic per 64x64 tile) with row-based kernel (1 atomic per row); 8,192 vs 57,344 atomics for (8192,28672) tensors |
 | **C++ FP8 quant dispatch** (`LUMEN_CPP_QUANT_DISPATCH=1`) | **~30 ms/step (0.7%)** | Replace Python hot path (dict lookups, boolean checks, Triton launch overhead) with single C++ call per tensor; fused scale+quant+amax HIP kernel; C++ amax history |
 | **Forward residual add fusion** (fused add+norm+quant) | **~10-15 ms/step** | Wire existing `_try_fused_norm_quant_with_residual()` into forward; eliminates standalone `aten::add` for `x + pending_residual` |
+| **Deferred MLP BDA** (MLP residual add fusion) | **~17 ms/step** | Defer MLP bias-dropout-add to next layer's LumenLayerNormLinear via TLS `_set_pending_residual`; fuses add+norm+quant in single kernel. Checkpoint-aware: layers 1-21 (recompute region) use standard BDA; layers 22-79 defer |
+| **hipMemsetAsync for AMAX zeroing** | **included above** | Replace `amax_scratch_.zero_()` (`aten::fill_`) with `hipMemsetAsync` in C++ FP8QuantDispatcher; eliminates ~2,693 `fill_` dispatch calls/step |
 | **FP8 dgrad epilogue** (`LUMEN_FP8_DGRAD_OUTPUT=1`) | **~5-10 ms/step** | hipBLASLt GEMM epilogue produces FP8 dgrad; cached via `_fp8_cache_put()` for next layer's backward |
 | **In-place FP8 quant buffer reuse** (`LUMEN_REUSE_QUANT_BUFFER=1`) | **eliminates post-eval degradation** | Per-shape scratch buffer for backward-only FP8 quant; reduces allocator fragmentation from +6.8% to +0% post-eval |
 
 ### Net Result
 
-| Metric | Baseline | Lumen v47 | Lumen (prev) | Lumen (C++ dispatch) | Lumen (mem-opt) | MLPerf Ref (local) |
-|--------|----------|-----------|--------------|---------------------|----------------|-------------------|
-| Pre-eval step time | 7,400 ms | 4,730 ms | 4,263 ms | 4,170 ms | **4,152 ms** | **3,967 ms** |
-| Post-eval step time | — | 5,550 ms | ~4,476 ms | TBD | **~4,145 ms (+0%)** | ~4,000 ms |
-| Memory utilization | — | 98.7% | 99.5% | 99.5% | **99.5%** | ~82% |
-| val_loss (best) | 0.9371 (fail) | 0.9223 (pass) | 0.9187 (pass, step 960) | 0.9210 (pass, step 576) | **0.9170** (pass, step 1024) | 0.9243 (pass) |
-| Speed ratio vs MLPerf | 1.87x | 1.19x | 1.075x | 1.051x | **1.047x** | 1.0x |
+| Metric | Baseline | Lumen v47 | Lumen (prev) | Lumen (C++ dispatch) | Lumen (mem-opt) | Lumen (speed-opt) | MLPerf Ref (local) |
+|--------|----------|-----------|--------------|---------------------|----------------|-------------------|-------------------|
+| Pre-eval step time | 7,400 ms | 4,730 ms | 4,263 ms | 4,170 ms | 4,152 ms | **4,135 ms** | **3,967 ms** |
+| Post-eval step time | — | 5,550 ms | ~4,476 ms | TBD | ~4,145 ms (+0%) | TBD | ~4,000 ms |
+| Memory utilization | — | 98.7% | 99.5% | 99.5% | 99.5% | **99.5%** | ~82% |
+| val_loss (best) | 0.9371 (fail) | 0.9223 (pass) | 0.9187 (pass, step 960) | 0.9210 (pass, step 576) | **0.9170** (pass, step 1024) | TBD (103 steps) | 0.9243 (pass) |
+| Speed ratio vs MLPerf | 1.87x | 1.19x | 1.075x | 1.051x | 1.047x | **1.042x** | 1.0x |
 
 ## Val_loss Trajectory
 
-### Lumen (current) — Memory optimizations: residual fusion + FP8 dgrad epilogue + buffer reuse (SEED=1234)
+### Lumen (current) — Speed optimizations: MLP BDA deferral + hipMemsetAsync fill_ elimination (SEED=1234)
+
+103-step validation run. Full convergence run pending.
+
+| Step | val_loss | Passes target? |
+|------|----------|----------------|
+| — | — | — |
+
+Pre-eval step time: **4,135 ms** (steps 20-100 avg).
+Speed ratio: **1.042x** pre-eval vs MLPerf reference (3,967 ms).
+103 steps completed with zero NaN/skip, memory stable at 99.5%.
+
+### Lumen (prev) — Memory optimizations: residual fusion + FP8 dgrad epilogue + buffer reuse (SEED=1234)
 
 | Step | val_loss | Passes target? |
 |------|----------|----------------|
@@ -211,14 +226,14 @@ Speed ratio: **1.051x** pre-eval vs MLPerf reference (3,967 ms).
 
 ### Convergence Gap at Matched Steps
 
-| Step | Lumen (mem-opt) | Lumen (C++ dispatch) | Lumen (prev) | MLPerf Ref (local) |
-|------|----------------|---------------------|--------------|-------------------|
-| 192 | 0.9455 | 0.9447 | 0.9430 | 0.9398 |
-| 384 | 0.9322 | 0.9296 | 0.9289 | 0.9243 |
-| 576 | **0.9212** | **0.9210** | **0.9203** | — |
+| Step | Lumen (speed-opt) | Lumen (mem-opt) | Lumen (C++ dispatch) | Lumen (prev) | MLPerf Ref (local) |
+|------|-------------------|----------------|---------------------|--------------|-------------------|
+| 192 | — | 0.9455 | 0.9447 | 0.9430 | 0.9398 |
+| 384 | — | 0.9322 | 0.9296 | 0.9289 | 0.9243 |
+| 576 | — | **0.9212** | **0.9210** | **0.9203** | — |
 
-Lumen (mem-opt) adds forward residual fusion, FP8 dgrad epilogue, and buffer reuse.
-Pre-eval: ~18 ms/step faster (4,152 vs 4,170 ms). Post-eval degradation eliminated (+0% vs +6.8%).
+Lumen (speed-opt) adds MLP BDA deferral and hipMemsetAsync fill_ elimination.
+Pre-eval: ~17 ms/step faster (4,135 vs 4,152 ms). Full convergence run pending.
 
 ## Speed Gap Analysis
 
@@ -226,7 +241,7 @@ Both Lumen and MLPerf reference use identical parallelism (TP=1, ACL=21, DP=8)
 and FP8 config. The remaining 1.05x pre-eval speed gap is from kernel fusion,
 dispatch overhead, and memory pressure.
 
-### Remaining Speed Gap: 4,152 ms (Lumen mem-opt) vs 3,967 ms (MLPerf local) = 185 ms
+### Remaining Speed Gap: 4,135 ms (Lumen speed-opt) vs 3,967 ms (MLPerf local) = 168 ms
 
 Based on fresh profiling data (steps 8-10, rank 0, 3-step totals divided by 3):
 
@@ -272,11 +287,11 @@ yielding >50 ms without significant infrastructure work. Each candidate was inve
 
 ## Post-Eval Performance
 
-| Metric | Lumen v47 | Lumen (prev) | Lumen (mem-opt) | MLPerf Ref (local) |
-|--------|-----------|--------------|----------------|-------------------|
-| Pre-eval ms/step | 4,730 | 4,263 | **4,152** | **3,967** |
-| Post-eval #1 ms/step | 5,550 | ~4,476 | **~4,145** | ~4,000 |
-| Post-eval delta | +17.3% | +6.8% | **+0%** | ~0% |
+| Metric | Lumen v47 | Lumen (prev) | Lumen (mem-opt) | Lumen (speed-opt) | MLPerf Ref (local) |
+|--------|-----------|--------------|----------------|-------------------|-------------------|
+| Pre-eval ms/step | 4,730 | 4,263 | 4,152 | **4,135** | **3,967** |
+| Post-eval #1 ms/step | 5,550 | ~4,476 | ~4,145 | TBD | ~4,000 |
+| Post-eval delta | +17.3% | +6.8% | +0% | TBD | ~0% |
 
 Root cause of prior degradation: Megatron's `transformer_block.py` skips activation
 checkpointing during eval (`self.training=False`), allocating activations for all 80
@@ -335,7 +350,8 @@ allocation churn that caused allocator fragmentation. Post-eval delta is now **+
 | + Fused LoRA + residual kernel + LD_PRELOAD stub | 0.9218 | 4,263 ms | 1.075x |
 | + Row-based quant kernel | 0.9203 (passes at step 576) | 4,191 ms | 1.056x |
 | + C++ FP8 quant dispatch | 0.9210 (passes at step 576) | 4,170 ms | 1.051x |
-| **+ Memory opts: residual fusion + FP8 dgrad + buffer reuse (current)** | **0.9212** (passes at step 576) | **4,152 ms** | **1.047x** |
+| + Memory opts: residual fusion + FP8 dgrad + buffer reuse | 0.9212 (passes at step 576) | 4,152 ms | 1.047x |
+| **+ Speed opts: MLP BDA deferral + hipMemsetAsync fill_ elimination (current)** | TBD (103-step validation) | **4,135 ms** | **1.042x** |
 
 ## Source Files
 

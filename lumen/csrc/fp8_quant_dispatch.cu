@@ -288,8 +288,9 @@ struct FP8QuantDispatcher {
         auto fp8_dtype = backward ? at::kFloat8_e5m2fnuz : at::kFloat8_e4m3fnuz;
         auto out = at::empty({M, N}, input_2d.options().dtype(fp8_dtype));
 
-        // 4. Zero amax scratch
-        amax_scratch_.zero_();
+        // 4. Zero amax scratch (hipMemsetAsync avoids aten::fill_ dispatch overhead)
+        hipMemsetAsync(amax_scratch_.data_ptr<float>(), 0, sizeof(float),
+                       at::hip::getCurrentHIPStream());
 
         // 5. Launch fused kernel
         if (backward) {

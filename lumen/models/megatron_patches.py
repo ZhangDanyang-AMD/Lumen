@@ -22,8 +22,8 @@ classes are imported) to apply every patch.  Individual installers can
 also be called selectively.
 """
 
+import math
 import os
-
 import torch
 from torch.autograd.function import once_differentiable
 
@@ -31,7 +31,6 @@ _FUSED_SWIGLU_QUANT = os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1"
 
 
 # ── 1. FusedLayerNorm → Lumen RMSNorm / LayerNorm ──────────────────────────
-
 
 def install_fused_layer_norm():
     """Replace Megatron's ``FusedLayerNorm`` with a Lumen-compatible wrapper.
@@ -65,7 +64,6 @@ def install_fused_layer_norm():
 
 # ── 2. LanguageModule checkpoint save guard ─────────────────────────────────
 
-
 def install_language_module_checkpoint_guard():
     """Guard ``LanguageModule.sharded_state_dict`` against missing
     ``output_layer.weight`` when LoRA wraps that layer."""
@@ -75,7 +73,9 @@ def install_language_module_checkpoint_guard():
         assert not sharded_offsets, "Unexpected sharded offsets"
         from megatron.core.transformer.module import MegatronModule
 
-        sharded_state_dict = MegatronModule.sharded_state_dict(self, prefix, sharded_offsets, metadata)
+        sharded_state_dict = MegatronModule.sharded_state_dict(
+            self, prefix, sharded_offsets, metadata
+        )
         first_stage_word_emb_key = f"{prefix}embedding.word_embeddings.weight"
         output_layer_weight_key = f"{prefix}output_layer.weight"
         output_layer_bias_key = f"{prefix}output_layer.bias"
@@ -97,7 +97,6 @@ def install_language_module_checkpoint_guard():
 
 
 # ── 3. Memory-mapped checkpoint loading ─────────────────────────────────────
-
 
 def install_mmap_checkpoint():
     """Inject ``mmap=True`` into Megatron's ``torch.load`` calls.
@@ -123,7 +122,6 @@ def install_mmap_checkpoint():
 
 # ── 4. requires_grad fix for LoRA + activation checkpointing ───────────────
 
-
 def install_requires_grad_fix():
     """Force ``hidden_states.requires_grad_(True)`` after ``make_viewless_tensor``.
 
@@ -148,7 +146,6 @@ def install_requires_grad_fix():
 
 
 # ── 5. SwiGLU FP8 dtype + chunked backward ─────────────────────────────────
-
 
 def install_swiglu_fp8():
     """Replace Megatron's ``SwiGLUFunction`` with a version that:
@@ -199,15 +196,13 @@ def install_swiglu_fp8():
             input_saved = ctx.saved_tensors[0]
             if not ctx.fp8_input_store:
                 return _swiglu_mod.swiglu_back(grad_output, input_saved), None, None
+
             dtype = ctx.ori_input_dtype
             M = input_saved.shape[0]
             chunk_sz = min(1024, M)
             n_chunks = (M + chunk_sz - 1) // chunk_sz
             result = torch.empty(
-                M,
-                input_saved.shape[1],
-                dtype=dtype,
-                device=input_saved.device,
+                M, input_saved.shape[1], dtype=dtype, device=input_saved.device,
             )
             for i in range(n_chunks):
                 s = i * chunk_sz
@@ -253,8 +248,9 @@ def install_fused_swiglu_triton():
 
     if not _probe_aiter_swiglu():
         import logging
-
-        logging.getLogger(__name__).warning("LUMEN_FUSED_SWIGLU=1 but AITER SwiGLU kernels not available — skipping")
+        logging.getLogger(__name__).warning(
+            "LUMEN_FUSED_SWIGLU=1 but AITER SwiGLU kernels not available — skipping"
+        )
         return
 
     from lumen.ops.fused_swiglu import fused_swiglu, fused_swiglu_backward
@@ -302,9 +298,8 @@ def install_mlp_fp8_store():
     _MLP = _mlp_mod.MLP
     _orig_forward = _MLP.forward
 
-    from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8 as _dynamic_quant
-    from torch.nn.functional import sigmoid as _F_sigmoid
-    from torch.nn.functional import silu as _F_silu
+    from lumen.ops.quantize.linear import _fp8_store_activation
+    from torch.nn.functional import silu as _F_silu, sigmoid as _F_sigmoid
 
     class _SwiGLU_FP8Store(torch.autograd.Function):
         @staticmethod
@@ -316,9 +311,10 @@ def install_mlp_fp8_store():
             activated = activation_func(x_gate) * (x_linear + glu_linear_offset)
 
             fc1_flat = fc1_output.reshape(-1, fc1_output.shape[-1]).contiguous()
-            qx = torch.empty_like(fc1_flat, dtype=_fp8_e4m3)
-            scale_out = torch.empty(1, dtype=torch.float32, device=fc1_flat.device)
-            _dynamic_quant(qx, fc1_flat, scale_out)
+            # Use _fp8_store_activation which dispatches via fast quant path
+            # (CK single kernel for E4M3) instead of the 2-kernel Triton
+            # dynamic_per_tensor_quant_fp8_i8.
+            qx, scale_out = _fp8_store_activation(fc1_flat, _fp8_e4m3)
             fc1_fp8 = qx.view(torch.uint8)
             inv_scale = scale_out
 
@@ -327,7 +323,8 @@ def install_mlp_fp8_store():
             ctx._clamp_value = clamp_value
             ctx._glu_linear_offset = glu_linear_offset
             ctx._activation_func = activation_func
-            ctx._is_silu = activation_func is _F_silu or activation_func is torch.nn.functional.silu
+            ctx._is_silu = (activation_func is _F_silu
+                            or activation_func is torch.nn.functional.silu)
             return activated
 
         @staticmethod
@@ -339,7 +336,9 @@ def install_mlp_fp8_store():
             glu_linear_offset = ctx._glu_linear_offset
             orig_shape = ctx._orig_shape
 
-            fc1_recon = (fc1_fp8.view(_fp8_e4m3).to(torch.float32) * inv_scale).to(grad_output.dtype)
+            fc1_recon = (
+                fc1_fp8.view(_fp8_e4m3).to(torch.float32) * inv_scale
+            ).to(grad_output.dtype)
             fc1_recon = fc1_recon.reshape(orig_shape)
             x_gate, x_linear = torch.chunk(fc1_recon, 2, dim=-1)
             if clamp_value is not None:
@@ -355,9 +354,7 @@ def install_mlp_fp8_store():
                     x_gate_g = x_gate.detach().requires_grad_(True)
                     act_val = activation_func(x_gate_g)
                     act_grad = torch.autograd.grad(
-                        act_val,
-                        x_gate_g,
-                        torch.ones_like(act_val),
+                        act_val, x_gate_g, torch.ones_like(act_val),
                         retain_graph=False,
                     )[0]
                 gate_activated = activation_func(x_gate)
@@ -413,7 +410,6 @@ def install_mlp_fp8_store():
 
 # ── 6. MLP-only recompute ──────────────────────────────────────────────────
 
-
 def install_mlp_recompute():
     """Wrap the MLP sublayer of non-recomputed ``TransformerLayer`` with
     ``tensor_parallel.checkpoint`` when ``LUMEN_MLP_RECOMPUTE=1``.
@@ -448,7 +444,10 @@ def install_mlp_recompute():
     _max_mlp_recompute = int(os.environ.get("LUMEN_MLP_RECOMPUTE_LAYERS", "9999"))
 
     def _patched_forward(self, *args, **kwargs):
-        if os.environ.get("LUMEN_MLP_RECOMPUTE", "0") != "1" or not self.training:
+        if (
+            os.environ.get("LUMEN_MLP_RECOMPUTE", "0") != "1"
+            or not self.training
+        ):
             return _orig_forward(self, *args, **kwargs)
 
         if not hasattr(self, "_lumen_mlp_recompute_installed"):
@@ -465,8 +464,9 @@ def install_mlp_recompute():
 
                 def _recompute_mlp_forward(hidden_states, *a, **kw):
                     from megatron.core import tensor_parallel
-
-                    return tensor_parallel.checkpoint(_orig_mlp_fwd, False, hidden_states, *a, **kw)
+                    return tensor_parallel.checkpoint(
+                        _orig_mlp_fwd, False, hidden_states, *a, **kw
+                    )
 
                 self.mlp.forward = _recompute_mlp_forward
 
@@ -477,7 +477,6 @@ def install_mlp_recompute():
 
 
 # ── 7. LoRA checkpoint key remapping ────────────────────────────────────────
-
 
 def remap_lora_state_dict(module, state_dict):
     """Remap checkpoint keys for LoRA-wrapped layers.
@@ -520,7 +519,6 @@ def remap_lora_state_dict(module, state_dict):
     if mapped > 0:
         try:
             from megatron.training import print_rank_0
-
             print_rank_0(f"> Lumen: remapped {mapped} LoRA base_layer checkpoint keys")
         except ImportError:
             pass
@@ -545,8 +543,8 @@ def install_fused_rope():
     if _FUSED_ROPE_INSTALLED:
         return
     try:
-        import megatron.core.models.common.embeddings.rope_utils as rope_utils
         from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
+        import megatron.core.models.common.embeddings.rope_utils as rope_utils
 
         def _compat_fused_rope(t, freqs, **kwargs):
             return _apex_rope(t, freqs)
@@ -558,7 +556,6 @@ def install_fused_rope():
 
 
 # ── 8. Force activation recompute during eval ───────────────────────────────
-
 
 def install_eval_recompute():
     """Keep activation checkpointing active during ``model.eval()`` so that
@@ -587,7 +584,10 @@ def install_eval_recompute():
     _orig_forward = _OrigTransformerBlock.forward
 
     def _forward_with_eval_recompute(self, *args, **kwargs):
-        if not self.training and self.config.recompute_granularity == "full":
+        if (
+            not self.training
+            and self.config.recompute_granularity == 'full'
+        ):
             self.training = True
             try:
                 return _orig_forward(self, *args, **kwargs)
@@ -600,7 +600,6 @@ def install_eval_recompute():
 
 
 # ── 9. Post-eval memory cache clear ─────────────────────────────────────────
-
 
 def install_post_eval_cache_clear():
     """Call ``torch.cuda.empty_cache()`` after every evaluation run to
@@ -626,12 +625,22 @@ def install_post_eval_cache_clear():
 
     _orig_evaluate = _train_mod.evaluate
     _do_rewarm = os.environ.get("LUMEN_POST_EVAL_REWARM", "0") == "1"
+    _rewarm_mode = os.environ.get(
+        "LUMEN_POST_EVAL_REWARM_MODE",
+        os.environ.get("LUMEN_POST_EVAL_STRATEGY", "gc_only"),
+    )
 
     def _evaluate_with_cache_clear(*args, **kwargs):
+        import gc
+
         result = _orig_evaluate(*args, **kwargs)
-        torch.cuda.empty_cache()
-        if _do_rewarm:
-            _post_eval_rewarm()
+        gc.collect()
+        if _rewarm_mode == "empty_cache":
+            torch.cuda.empty_cache()
+            if _do_rewarm:
+                _post_eval_rewarm()
+        else:
+            torch.cuda.synchronize()
         return result
 
     _train_mod.evaluate = _evaluate_with_cache_clear
@@ -710,13 +719,13 @@ def install_fused_residual_norm():
     _OrigTL = _tl_mod.TransformerLayer
     _orig_init = _OrigTL.__init__
     _orig_fwd_attn = _OrigTL._forward_attention
+    _orig_fwd_mlp = _OrigTL._forward_mlp
 
     def _try_nqg(hidden_states, norm_module, linear_module):
         """Try fused norm+quant. Returns (norm_out, True) or (None, False)."""
         if not _FUSED_NQG:
             return None, False
         from lumen.ops.fused_norm_quant import fused_norm_quant_for_linear
-
         return fused_norm_quant_for_linear(hidden_states, norm_module, linear_module)
 
     def _patched_init(self, *args, **kwargs):
@@ -728,10 +737,11 @@ def install_fused_residual_norm():
             and isinstance(self.cross_attention, IdentityOp)
             and isinstance(self.cross_attn_bda, IdentityFuncOp)
         )
-        self._lumen_can_fuse_bda_norm = _can_defer and not isinstance(self.pre_mlp_layernorm, IdentityOp)
+        self._lumen_can_fuse_bda_norm = (
+            _can_defer and not isinstance(self.pre_mlp_layernorm, IdentityOp)
+        )
 
         from lumen.modules.layernorm_linear import LumenLayerNormLinear
-
         _fc1 = getattr(getattr(self, "mlp", None), "linear_fc1", None)
         _fc1_base = getattr(_fc1, "base_layer", _fc1)
         self._lumen_can_defer_bda_to_lnlinear = (
@@ -740,12 +750,28 @@ def install_fused_residual_norm():
             and isinstance(_fc1_base, LumenLayerNormLinear)
         )
 
+        # Defer MLP BDA to the NEXT layer's linear_qkv (LumenLayerNormLinear)
+        # via TLS _set_pending_residual.
+        # Skip: last layer (no next layer), checkpointed layers (TLS lost
+        # across checkpoint boundaries during activation recomputation).
+        _qkv = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
+        _qkv_base = getattr(_qkv, "base_layer", _qkv)
+        _recompute_n = getattr(self.config, "recompute_num_layers", None) or 0
+        _is_full_recompute = getattr(self.config, "recompute_granularity", None) == "full"
+        _in_ckpt_region = _is_full_recompute and self.layer_number <= _recompute_n
+        self._lumen_defer_mlp_bda = (
+            self._lumen_can_defer_bda_to_lnlinear
+            and isinstance(_qkv_base, LumenLayerNormLinear)
+            and self.layer_number < self.config.num_layers
+            and not _in_ckpt_region
+        )
+
         self._lumen_deferred_bda = None
 
     def _do_input_layernorm(self, hidden_states):
         """input_layernorm with optional NQG fusion."""
         if not self.recompute_input_layernorm:
-            _nqg_linear = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
+            _nqg_linear = getattr(getattr(self, 'self_attention', None), 'linear_qkv', None)
             if _nqg_linear is not None:
                 _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.input_layernorm, _nqg_linear)
                 if _nqg_ok:
@@ -753,15 +779,16 @@ def install_fused_residual_norm():
 
         if self.recompute_input_layernorm:
             from megatron.core import tensor_parallel
-
             self.input_layernorm_checkpoint = tensor_parallel.CheckpointWithoutOutput()
-            return self.input_layernorm_checkpoint.checkpoint(self.input_layernorm, hidden_states)
+            return self.input_layernorm_checkpoint.checkpoint(
+                self.input_layernorm, hidden_states
+            )
         return self.input_layernorm(hidden_states)
 
     def _do_pre_mlp_layernorm(self, hidden_states):
         """pre_mlp_layernorm with optional NQG fusion."""
         if not self.recompute_pre_mlp_layernorm:
-            _nqg_fc1 = getattr(getattr(self, "mlp", None), "linear_fc1", None)
+            _nqg_fc1 = getattr(getattr(self, 'mlp', None), 'linear_fc1', None)
             if _nqg_fc1 is not None:
                 _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.pre_mlp_layernorm, _nqg_fc1)
                 if _nqg_ok:
@@ -769,30 +796,31 @@ def install_fused_residual_norm():
 
         if self.recompute_pre_mlp_layernorm:
             from megatron.core import tensor_parallel
-
             self.pre_mlp_norm_checkpoint = tensor_parallel.CheckpointWithoutOutput()
-            return self.pre_mlp_norm_checkpoint.checkpoint(self.pre_mlp_layernorm, hidden_states)
+            return self.pre_mlp_norm_checkpoint.checkpoint(
+                self.pre_mlp_layernorm, hidden_states
+            )
         return self.pre_mlp_layernorm(hidden_states)
 
     def _patched_fwd_attn(self, hidden_states, *args, **kwargs):
-        _sa_kwargs = {k: v for k, v in kwargs.items() if k not in ("context", "context_mask")}
+        _sa_kwargs = {k: v for k, v in kwargs.items() if k not in ('context', 'context_mask')}
 
         if self._lumen_can_fuse_bda_norm and not self.recompute_pre_mlp_layernorm:
-            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
+            from megatron.core.utils import nvtx_range_push, nvtx_range_pop
 
             residual = hidden_states
             input_layernorm_output = _do_input_layernorm(self, hidden_states)
 
             nvtx_range_push(suffix="self_attention")
             attention_output_with_bias = self.self_attention(
-                input_layernorm_output,
-                *args,
-                **_sa_kwargs,
+                input_layernorm_output, *args, **_sa_kwargs,
             )
             nvtx_range_pop(suffix="self_attention")
 
             if self.recompute_input_layernorm:
-                self.input_layernorm_checkpoint.discard_output_and_register_recompute(attention_output_with_bias[0])
+                self.input_layernorm_checkpoint.discard_output_and_register_recompute(
+                    attention_output_with_bias[0]
+                )
 
             nvtx_range_push(suffix="self_attn_bda")
             self._lumen_deferred_bda = (attention_output_with_bias, residual)
@@ -804,9 +832,9 @@ def install_fused_residual_norm():
             pre_cross_attn_layernorm_output = self.pre_cross_attn_layernorm(hidden_states)
             attention_output_with_bias = self.cross_attention(
                 pre_cross_attn_layernorm_output,
-                attention_mask=kwargs.get("context_mask"),
-                key_value_states=kwargs.get("context"),
-                inference_context=kwargs.get("inference_context"),
+                attention_mask=kwargs.get('context_mask'),
+                key_value_states=kwargs.get('context'),
+                inference_context=kwargs.get('inference_context'),
             )
             context = None
             if isinstance(attention_output_with_bias, dict) and "context" in attention_output_with_bias:
@@ -818,21 +846,29 @@ def install_fused_residual_norm():
             return hidden_states, context
 
         if self._lumen_can_defer_bda_to_lnlinear:
-            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
+            from megatron.core.utils import nvtx_range_push, nvtx_range_pop
 
             residual = hidden_states
             input_layernorm_output = _do_input_layernorm(self, hidden_states)
 
             nvtx_range_push(suffix="self_attention")
             attention_output_with_bias = self.self_attention(
-                input_layernorm_output,
-                *args,
-                **_sa_kwargs,
+                input_layernorm_output, *args, **_sa_kwargs,
             )
             nvtx_range_pop(suffix="self_attention")
 
+            # If previous layer deferred its MLP BDA via _set_pending_residual(),
+            # linear_qkv fused (hidden_states + pending_residual) and stored the
+            # result in residual_out.  Use that as the true residual.
+            from lumen.modules.layernorm_linear import _pop_residual_out
+            _fused_residual = _pop_residual_out()
+            if _fused_residual is not None:
+                residual = _fused_residual
+
             if self.recompute_input_layernorm:
-                self.input_layernorm_checkpoint.discard_output_and_register_recompute(attention_output_with_bias[0])
+                self.input_layernorm_checkpoint.discard_output_and_register_recompute(
+                    attention_output_with_bias[0]
+                )
 
             nvtx_range_push(suffix="self_attn_bda")
             self._lumen_deferred_bda = (attention_output_with_bias, residual)
@@ -844,9 +880,9 @@ def install_fused_residual_norm():
             pre_cross_attn_layernorm_output = self.pre_cross_attn_layernorm(hidden_states)
             attention_output_with_bias = self.cross_attention(
                 pre_cross_attn_layernorm_output,
-                attention_mask=kwargs.get("context_mask"),
-                key_value_states=kwargs.get("context"),
-                inference_context=kwargs.get("inference_context"),
+                attention_mask=kwargs.get('context_mask'),
+                key_value_states=kwargs.get('context'),
+                inference_context=kwargs.get('inference_context'),
             )
             context = None
             if isinstance(attention_output_with_bias, dict) and "context" in attention_output_with_bias:
@@ -859,7 +895,7 @@ def install_fused_residual_norm():
 
         self._lumen_deferred_bda = None
         if _FUSED_NQG and not self.recompute_input_layernorm:
-            _nqg_linear = getattr(getattr(self, "self_attention", None), "linear_qkv", None)
+            _nqg_linear = getattr(getattr(self, 'self_attention', None), 'linear_qkv', None)
             if _nqg_linear is not None:
                 _nqg_out, _nqg_ok = _try_nqg(hidden_states, self.input_layernorm, _nqg_linear)
                 if _nqg_ok:
@@ -872,7 +908,7 @@ def install_fused_residual_norm():
         return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
 
     def _patched_fwd_mlp(self, hidden_states, inference_context=None):
-        from megatron.core.utils import make_viewless_tensor, nvtx_range_pop, nvtx_range_push
+        from megatron.core.utils import make_viewless_tensor, nvtx_range_push, nvtx_range_pop
 
         _deferred = self._lumen_deferred_bda
         _fused_ok = False
@@ -883,7 +919,6 @@ def install_fused_residual_norm():
 
             if self._lumen_can_defer_bda_to_lnlinear:
                 from lumen.modules.layernorm_linear import _set_pending_residual
-
                 _x_with_bias, _orig_residual = _deferred
                 x, bias = _x_with_bias
                 hidden_states = (x + bias) if bias is not None else x
@@ -891,7 +926,6 @@ def install_fused_residual_norm():
                 _defer_to_lnlinear = True
             else:
                 from lumen.ops.fused_residual_norm import deferred_bda_add, rmsnorm_from_module
-
                 _x_with_bias, _orig_residual = _deferred
                 hidden_states = deferred_bda_add(_x_with_bias, _orig_residual)
                 residual = hidden_states
@@ -906,39 +940,49 @@ def install_fused_residual_norm():
         if _defer_to_lnlinear:
             mlp_output_with_bias = self.mlp(hidden_states)
             from lumen.modules.layernorm_linear import _pop_residual_out
-
             residual = _pop_residual_out()
         elif self.recompute_mlp:
             if self.config.fp8:
-                from megatron.core import tensor_parallel
                 from megatron.core.extensions.transformer_engine import te_checkpoint
-
+                from megatron.core import tensor_parallel
                 mlp_output_with_bias = te_checkpoint(
-                    self.mlp,
-                    False,
+                    self.mlp, False,
                     tensor_parallel.random.get_cuda_rng_tracker,
                     self.pg_collection.tp,
                     pre_mlp_layernorm_output,
                 )
             else:
                 from megatron.core import tensor_parallel
-
-                mlp_output_with_bias = tensor_parallel.checkpoint(self.mlp, False, pre_mlp_layernorm_output)
+                mlp_output_with_bias = tensor_parallel.checkpoint(
+                    self.mlp, False, pre_mlp_layernorm_output
+                )
         else:
             mlp_output_with_bias = self.mlp(pre_mlp_layernorm_output)
 
         if self.recompute_pre_mlp_layernorm:
-            self.pre_mlp_norm_checkpoint.discard_output_and_register_recompute(mlp_output_with_bias[0])
+            self.pre_mlp_norm_checkpoint.discard_output_and_register_recompute(
+                mlp_output_with_bias[0]
+            )
         nvtx_range_pop(suffix="mlp")
 
-        nvtx_range_push(suffix="mlp_bda")
-        with self.bias_dropout_add_exec_handler():
-            hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
-                mlp_output_with_bias, residual, self.hidden_dropout
-            )
-        nvtx_range_pop(suffix="mlp_bda")
+        if self._lumen_defer_mlp_bda:
+            # Defer MLP BDA: store residual in TLS for the next layer's
+            # linear_qkv (LumenLayerNormLinear) to fuse add+norm+quant.
+            from lumen.modules.layernorm_linear import _set_pending_residual
+            _set_pending_residual(residual)
+            x, bias = mlp_output_with_bias
+            hidden_states = (x + bias) if bias is not None else x
+        else:
+            nvtx_range_push(suffix="mlp_bda")
+            with self.bias_dropout_add_exec_handler():
+                hidden_states = self.mlp_bda(self.training, self.config.bias_dropout_fusion)(
+                    mlp_output_with_bias, residual, self.hidden_dropout
+                )
+            nvtx_range_pop(suffix="mlp_bda")
 
-        output = make_viewless_tensor(inp=hidden_states, requires_grad=hidden_states.requires_grad, keep_graph=True)
+        output = make_viewless_tensor(
+            inp=hidden_states, requires_grad=hidden_states.requires_grad, keep_graph=True
+        )
         return output
 
     _OrigTL.__init__ = _patched_init
@@ -947,8 +991,73 @@ def install_fused_residual_norm():
     _tl_mod._lumen_fused_residual_norm_patched = True
 
 
-# ── Public API ──────────────────────────────────────────────────────────────
+# ── SplitAlongDim zero-copy backward ───────────────────────────────────────
 
+class _LumenSplitAlongDim(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, mixed_x, split_dim, split_size_or_sections):
+        ctx.split_dim = split_dim
+        ctx.split_size_or_sections = split_size_or_sections
+        return torch.split(mixed_x, split_size_or_sections, dim=split_dim)
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        if not grad_outputs:
+            return None, None, None
+        split_sizes = ctx.split_size_or_sections
+        if isinstance(split_sizes, int):
+            split_sizes = [split_sizes] * len(grad_outputs)
+        dims = len(grad_outputs[0].shape)
+        split_dim = (ctx.split_dim + dims) % dims
+        noop_ok = True
+        strides = grad_outputs[0].stride()
+        data_ptr = grad_outputs[0].untyped_storage().data_ptr()
+        shape = list(grad_outputs[0].shape)
+        for i, tensor in enumerate(grad_outputs):
+            expected_shape = list(shape)
+            expected_shape[split_dim] = split_sizes[i]
+            offset_size = sum(split_sizes[:i]) * math.prod(shape[split_dim + 1:])
+            if (
+                tensor.stride() != strides
+                or list(tensor.shape) != expected_shape
+                or tensor.untyped_storage().data_ptr() != data_ptr
+                or tensor.storage_offset() != offset_size
+            ):
+                noop_ok = False
+                break
+        if noop_ok:
+            ret = torch.Tensor().to(
+                device=grad_outputs[0].device, dtype=grad_outputs[0].dtype
+            )
+            new_shape = list(shape)
+            new_shape[split_dim] = sum(split_sizes)
+            ret.set_(
+                grad_outputs[0].untyped_storage(),
+                grad_outputs[0].storage_offset(),
+                new_shape,
+                strides,
+            )
+            return ret, None, None
+        return torch.cat(grad_outputs, dim=split_dim), None, None
+
+
+def install_split_along_dim():
+    try:
+        import megatron.core.extensions.transformer_engine as _te_mod
+    except ImportError:
+        return
+    if getattr(_te_mod, "_lumen_split_along_dim_patched", False):
+        return
+    _te_mod.SplitAlongDim = _LumenSplitAlongDim.apply
+    _te_mod._lumen_split_along_dim_patched = True
+    try:
+        import megatron.core.transformer.attention as _attn_mod
+        _attn_mod.SplitAlongDim = _LumenSplitAlongDim.apply
+    except ImportError:
+        pass
+
+
+# ── Public API ──────────────────────────────────────────────────────────────
 
 def install_all():
     """Apply every Megatron compatibility patch.
@@ -968,3 +1077,9 @@ def install_all():
     install_eval_recompute()
     install_post_eval_cache_clear()
     install_fused_residual_norm()
+    # install_split_along_dim()  # disabled — adds forward overhead
+
+    # SDMA DP gradient all-reduce (replaces NCCL when --use-sdma is set)
+    from lumen.models.sdma_dp_grad_reduce import install_sdma_dp_grad_reduce
+
+    install_sdma_dp_grad_reduce()
