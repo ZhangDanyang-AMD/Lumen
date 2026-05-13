@@ -25,6 +25,15 @@ _SKIP_BACKEND_SYNC = os.environ.get("LUMEN_SKIP_BACKEND_SYNC", "0") == "1"
 _backend_cache: Dict[str, int] = {}
 _BACKEND_WARMUP_CALLS = 3
 
+_IN_GRAPH_CAPTURE = False
+
+
+def set_graph_capture_mode(active: bool):
+    """Toggle graph-capture flag for dispatch safety."""
+    global _IN_GRAPH_CAPTURE
+    _IN_GRAPH_CAPTURE = active
+
+
 try:
     from triton.compiler.errors import CompilationError as _TritonCompilationError
 except ImportError:
@@ -174,6 +183,20 @@ def _probe_aiter_hipblas():
 
         return True
     except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_hipblas_fp8_output() -> bool:
+    """Check if ``torch._scaled_mm`` supports FP8 output dtype.
+
+    Uses ``torch._scaled_mm`` (not ``hipb_mm``) for FP8 output because
+    hipb_mm's ``out_dtype=FP8`` corrupts the hipBLASLt tuning cache.
+    This probe verifies the API exists without running a real GEMM.
+    """
+    try:
+        return hasattr(torch, "_scaled_mm")
+    except Exception:
         return False
 
 
@@ -417,6 +440,41 @@ def _probe_aiter_fast_transpose():
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_add_rms_norm():
+    """Check if AITER CK fused add+RMSNorm (residual + norm in one kernel) is available."""
+    try:
+        from aiter.ops.rmsnorm import fused_add_rms_norm_cu as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_add_rmsnorm_pad():
+    """Check if AITER Triton fused add+RMSNorm+pad kernel is available."""
+    try:
+        from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import fused_add_rmsnorm_pad as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_fused_gemm_blockscale_mul_add():
+    """Check if AITER fused blockscale GEMM + mul/add epilogue is available."""
+    try:
+        from aiter.ops.triton.gemm.fused.fused_gemm_a8w8_blockscale_mul_add import (  # noqa: F401
+            fused_gemm_a8w8_blockscale_mul_add as _,
+        )
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Core fallback dispatcher
 # ---------------------------------------------------------------------------
@@ -456,11 +514,16 @@ def try_backends(
         _, fn = backends[cached_idx]
         return fn(*args, **kwargs)
 
+    if _IN_GRAPH_CAPTURE:
+        raise RuntimeError(
+            f"{op_name}: no cached backend during CUDA graph capture. " "Run warmup before graph capture."
+        )
+
     last_exc = None
     for i, (backend, fn) in enumerate(backends):
         try:
             result = fn(*args, **kwargs)
-            if torch.cuda.is_available() and not _SKIP_BACKEND_SYNC:
+            if torch.cuda.is_available() and not _SKIP_BACKEND_SYNC and not _IN_GRAPH_CAPTURE:
                 torch.cuda.synchronize()
 
             hit_count = _backend_cache.get(op_name + ":hits", 0) + 1

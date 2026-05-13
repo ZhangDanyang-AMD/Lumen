@@ -42,6 +42,21 @@ class FP8Descriptor:
     scale: torch.Tensor
     fp8_dtype: torch.dtype
     _transpose: Optional[torch.Tensor] = field(default=None, repr=False)
+    _scale_f32_1x1: Optional[torch.Tensor] = field(default=None, repr=False)
+
+    @property
+    def scale_f32_1x1(self) -> torch.Tensor:
+        """Return the scale as a ``(1, 1)`` float32 tensor, cached after first access."""
+        if self._scale_f32_1x1 is not None:
+            return self._scale_f32_1x1
+        s = self.scale
+        if isinstance(s, torch.Tensor) and s.dtype == torch.float32 and s.shape == (1, 1):
+            self._scale_f32_1x1 = s
+        elif isinstance(s, torch.Tensor):
+            self._scale_f32_1x1 = s.float().reshape(1, 1)
+        else:
+            self._scale_f32_1x1 = torch.tensor([[s]], dtype=torch.float32, device=self.data.device)
+        return self._scale_f32_1x1
 
     @property
     def transpose_cached(self) -> torch.Tensor:

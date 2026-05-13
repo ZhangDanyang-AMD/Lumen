@@ -12,6 +12,7 @@ wrapper, see :mod:`lumen.modules.quantize`.
 """
 
 import logging
+import random
 from typing import Optional, Tuple
 
 import torch
@@ -192,9 +193,9 @@ def convert_to_mxfp8(
     BLOCK_N = block_size if BLOCK_N < block_size else BLOCK_N
 
     if philox_seed is None:
-        philox_seed = torch.randint(0, 2**31 - 1, (1,)).item()
+        philox_seed = random.randint(0, 2**31 - 2)
     if philox_offset is None:
-        philox_offset = torch.randint(0, 2**31 - 1, (1,)).item()
+        philox_offset = random.randint(0, 2**31 - 2)
     wrap_triton(_convert_to_mxfp8_kernel)[grid](
         data_hp,
         data_lp,

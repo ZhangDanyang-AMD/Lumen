@@ -57,8 +57,8 @@ def _cross_entropy_forward_sdma(
     assert reduce(mul, list(target.size())) == n_rows
     BLOCK_SIZE = min(MAX_FUSED_SIZE, triton.next_power_of_2(V))
 
-    loss_1d = torch.zeros(n_rows, dtype=torch.float32, device=_input.device)
-    m_d_Xy = torch.zeros(n_rows * 3, dtype=torch.float32, device=_input.device)
+    loss_1d = torch.empty(n_rows, dtype=torch.float32, device=_input.device)
+    m_d_Xy = torch.empty(n_rows * 3, dtype=torch.float32, device=_input.device)
 
     if _input.stride(-1) != 1:
         _input = _input.contiguous()

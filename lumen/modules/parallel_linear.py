@@ -19,6 +19,7 @@ To enable FP8, call :func:`enable_fp8` on the module or set
 ``scaling_type`` to one of the supported quantization modes.
 """
 
+import threading
 import warnings
 from typing import Callable, Optional
 
@@ -169,6 +170,16 @@ def _pg_rank(group):
     return torch.distributed.get_rank(group=group)
 
 
+_swiglu_amax_tls = threading.local()
+
+
+def _pop_swiglu_amax():
+    """Pop the pre-computed amax from the last SwiGLU FP8 quantization."""
+    amax = getattr(_swiglu_amax_tls, "amax", None)
+    _swiglu_amax_tls.amax = None
+    return amax
+
+
 def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_fp8_activation: bool):
     """Attach fused SwiGLU FP8 cache when this GEMM quantizes activations; else clear it."""
     try:
@@ -186,7 +197,10 @@ def _resolve_pre_quantized_input_with_swiglu_cache(pre_quantized_input, consume_
     if consume_fp8_activation:
         cached = pop_swiglu_fp8_cache()
         if cached is not None:
-            return cached
+            fp8_data, scale = cached[0], cached[1]
+            amax = cached[2] if len(cached) > 2 else None
+            _swiglu_amax_tls.amax = amax
+            return (fp8_data, scale)
         return None
 
     discard_swiglu_fp8_cache()
@@ -261,7 +275,9 @@ def _do_gemm(
             _fp8_stored = False
 
     if _fp8_stored and scaling_type != "none":
-        gemm_scale = 1.0 / weight._fp8_desc.scale
+        gemm_scale = getattr(weight, "_fp8_scale_reciprocal", None)
+        if gemm_scale is None:
+            gemm_scale = 1.0 / weight._fp8_desc.scale
         _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
             pre_quantized_input,
             consume_fp8_activation=True,
@@ -339,6 +355,8 @@ class LumenColumnParallelLinear(nn.Module):
     Can be used directly in Megatron layer specs.
     """
 
+    _lora_tp_mode = "column"
+
     def __init__(
         self,
         input_size: int,
@@ -385,7 +403,9 @@ class LumenColumnParallelLinear(nn.Module):
         # FP8 config (disabled by default; enabled via enable_fp8())
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
@@ -585,7 +605,7 @@ class LumenColumnParallelLinear(nn.Module):
         sdma_stream = self._sdma_stream
         compute_stream = torch.cuda.current_stream(input_.device)
 
-        input_parallel = input_.contiguous()
+        input_parallel = input_ if input_.is_contiguous() else input_.contiguous()
         local_dim0 = input_parallel.shape[0]
         comm.allgather_dim0_async(input_parallel, stream=sdma_stream)
 
@@ -641,7 +661,7 @@ class LumenColumnParallelLinear(nn.Module):
 
         bias = self.bias if not self.skip_bias_add else None
         output = fused_column_parallel_forward(
-            input_.contiguous(),
+            input_ if input_.is_contiguous() else input_.contiguous(),
             weight,
             bias,
             self._pipeline_ag,
@@ -718,6 +738,8 @@ class LumenRowParallelLinear(nn.Module):
     Row-parallel linear using Lumen GEMM.
     """
 
+    _lora_tp_mode = "row"
+
     def __init__(
         self,
         input_size: int,
@@ -760,7 +782,9 @@ class LumenRowParallelLinear(nn.Module):
         # FP8 config
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False

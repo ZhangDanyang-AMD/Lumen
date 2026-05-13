@@ -188,6 +188,9 @@ run_megatron() {
     [ "${LUMEN_RMSNORM}" -eq 1 ] && LUMEN_RMSNORM_ARGS="--lumen-rmsnorm"
     [ "${LUMEN_NORM:-0}" -eq 1 ] && LUMEN_RMSNORM_ARGS="${LUMEN_RMSNORM_ARGS} --lumen-norm"
 
+    LUMEN_LINEAR_ARGS=""
+    [ "${LUMEN_LINEAR:-0}" -eq 1 ] && LUMEN_LINEAR_ARGS="--lumen-linear"
+
     RECOMPUTE_ARGS=""
     if [ -n "${RECOMPUTE_GRANULARITY:-}" ]; then
         RECOMPUTE_ARGS="--recompute-granularity ${RECOMPUTE_GRANULARITY} --recompute-method ${RECOMPUTE_METHOD} --recompute-num-layers ${RECOMPUTE_NUM_LAYERS}"
@@ -281,7 +284,7 @@ run_megatron() {
         --ckpt-start-step ${CKPT_START_STEP} \
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
-        ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} \
+        ${LUMEN_ATTN_ARGS} ${LUMEN_RMSNORM_ARGS} ${LUMEN_LINEAR_ARGS} \
         ${RECOMPUTE_ARGS} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} \
         ${DIST_OPT_ARGS} \

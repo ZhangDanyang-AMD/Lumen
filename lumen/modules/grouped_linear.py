@@ -81,7 +81,9 @@ class LumenGroupedLinear(nn.Module):
         # FP8 config
         self.scaling_type = "none"
         self.scaling_manager = None
-        self.fp8_dtype = torch.float8_e4m3fn
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
