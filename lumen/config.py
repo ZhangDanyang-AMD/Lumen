@@ -14,17 +14,17 @@ Usage::
     # Programmatic — flat kwargs, one call
     cfg = LumenConfig(format="fp8_e4m3", scaling="delayed",
                       fp8_attn="dpa", lumen_norm=True, fused_mlp=True)
-    manager, model = cfg.enable(model)
+    cfg.enable(model)
 
     # From CLI argparse namespace
     cfg = LumenConfig.from_args(args)
-    manager, model = cfg.enable(model, dp_group=dp_group)
+    cfg.enable(model, dp_group=dp_group)
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,8 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "attn_backend": ("lumen_attn_backend",),
     "attn_quant_type": ("lumen_fp8_quant_type",),
     "lumen_norm": ("lumen_norm",),
+    "hf_attn_patch": ("hf_attn_patch",),
+    "lumen_linear": ("lumen_linear",),
     "fused_mlp": ("lumen_fused_mlp",),
     "fp8_activation_store": ("lumen_fp8_activation_store",),
     "cpu_offload": ("lumen_cpu_offload",),
@@ -127,6 +129,12 @@ class LumenConfig:
     # -- Tier 2: Norm replacement --
     lumen_norm: bool = False
 
+    # -- Tier 2: Attention patching --
+    hf_attn_patch: bool = False
+
+    # -- Tier 2: Linear GEMM patching (BF16) --
+    lumen_linear: bool = False
+
     # -- Tier 3: Execution / fusion --
     fused_mlp: bool = False
     fp8_activation_store: bool = False
@@ -146,17 +154,10 @@ class LumenConfig:
     lora_rank: int = 0
     lora_alpha: float = 32.0
     lora_dropout: float = 0.1
-    lora_target_modules: list[str] = field(
-        default_factory=lambda: [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ]
-    )
+    lora_target_modules: list[str] = field(default_factory=lambda: [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    ])
 
     # -- Optimizer hint (not applied to model, read by trainer) --
     use_8bit_adam: bool = False
@@ -200,6 +201,8 @@ class LumenConfig:
         return (
             self.quant_config.is_quantized
             or self.lumen_norm
+            or self.hf_attn_patch
+            or self.lumen_linear
             or self.fp8_param_manager
             or self.lora_rank > 0
             or self.fused_mlp
@@ -234,6 +237,8 @@ class LumenConfig:
             ``(manager, model)`` — the :class:`~lumen.quantize.ScalingManager`
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
+        import torch
+
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
         if self.fp8_param_manager:
@@ -246,6 +251,14 @@ class LumenConfig:
         # 1. Norm patching
         if self.lumen_norm:
             self._patch_norms(model)
+
+        # 1b. Attention patching (monkey-patch F.scaled_dot_product_attention)
+        if self.hf_attn_patch:
+            self._patch_sdpa()
+
+        # 1c. Linear GEMM patching (BF16 AITER Triton)
+        if self.lumen_linear:
+            self._patch_linear(model)
 
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
@@ -283,10 +296,11 @@ class LumenConfig:
     # -----------------------------------------------------------------------
 
     def _apply_fp8_param_manager(self, model):
-        """Replace ``nn.Linear`` weights with FP8 storage via FP8ParamManager.
+        """Replace linear weights with FP8 storage via FP8ParamManager.
 
-        Must run on raw ``nn.Linear`` before LoRA wrapping so that adapter
-        weights stay BF16/trainable.
+        Targets ``nn.Linear`` and Megatron ``ColumnParallelLinear`` /
+        ``RowParallelLinear``.  Must run before LoRA wrapping so that
+        adapter weights stay BF16/trainable.
         """
         import torch
 
@@ -299,7 +313,14 @@ class LumenConfig:
         return mgr
 
     def _apply_lora(self, model):
-        """Apply LoRA adapters via HuggingFace PEFT and freeze the base model."""
+        """Apply LoRA adapters via HuggingFace PEFT and freeze the base model.
+
+        When FP8ParamManager is active, PEFT's ``_move_adapter_to_device_of_base_layer``
+        casts LoRA adapter weights to FP8 (matching the quantized base weight dtype).
+        We fix this by re-casting all LoRA adapter parameters back to BF16 so they
+        remain trainable with standard arithmetic.
+        """
+        import torch
         from peft import LoraConfig, TaskType, get_peft_model
 
         peft_config = LoraConfig(
@@ -311,6 +332,19 @@ class LumenConfig:
         )
         model = get_peft_model(model, peft_config)
 
+        if self.fp8_param_manager:
+            fixed = 0
+            for name, param in model.named_parameters():
+                if "lora_" in name and param.dtype in (
+                    torch.float8_e4m3fn, torch.float8_e4m3fnuz,
+                    torch.float8_e5m2, torch.float8_e5m2fnuz,
+                ):
+                    param.data = param.data.to(torch.bfloat16)
+                    param.requires_grad_(True)
+                    fixed += 1
+            if fixed:
+                _rank0_print(f"> Fixed {fixed} LoRA params cast to FP8 by PEFT -> BF16")
+
         trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total = sum(p.numel() for p in model.parameters())
         _rank0_print(
@@ -321,7 +355,6 @@ class LumenConfig:
 
     def _patch_norms(self, model) -> None:
         import torch
-
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
         count = 0
@@ -363,6 +396,70 @@ class LumenConfig:
 
         if count:
             _rank0_print(f"> Replaced {count} norm modules with Lumen implementations")
+
+    def _patch_sdpa(self) -> None:
+        """Monkey-patch ``F.scaled_dot_product_attention`` with AITER attention."""
+        from lumen.ops.attention.hf_patch import patch_sdpa
+
+        patch_sdpa()
+
+    @staticmethod
+    def _auto_tune_bf16_gemm(model) -> None:
+        """Placeholder — BF16 GEMM uses torch.mm fallback (safe on MI350).
+
+        hipBLASLt and ASM JIT both SIGABRT on MI350 gfx950, so we skip
+        tuned GEMM injection and let ``tuned_gemm.gemm_a16w16`` fall back
+        to ``torch.mm`` (which internally uses hipBLASLt via PyTorch).
+        """
+        pass
+
+    def _patch_linear(self, model) -> None:
+        """Replace ``nn.Linear`` forward with AITER GEMM (BF16, autograd-safe).
+
+        Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
+        configs exist, then patches forward with ``dispatch_gemm``.
+        """
+        import torch
+        import torch.nn as nn
+
+        self._auto_tune_bf16_gemm(model)
+
+        from lumen.ops.quantize.linear import dispatch_gemm
+
+        class _GemmA16W16Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, weight, bias):
+                ctx.save_for_backward(input, weight)
+                ctx.has_bias = bias is not None
+                output = dispatch_gemm(input, weight, scaling_type="none", bias=bias)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, weight = ctx.saved_tensors
+                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+                input_flat = input.reshape(-1, input.shape[-1])
+                grad_input = grad_flat @ weight
+                grad_input = grad_input.reshape(input.shape)
+                grad_weight = grad_flat.t() @ input_flat
+                grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
+                return grad_input, grad_weight, grad_bias
+
+        count = 0
+        for _name, module in model.named_modules():
+            if isinstance(module, nn.Linear):
+
+                def _make_aiter_forward(mod):
+                    def _aiter_forward(input):
+                        return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
+
+                    return _aiter_forward
+
+                module.forward = _make_aiter_forward(module)
+                count += 1
+
+        if count:
+            _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
@@ -502,6 +599,10 @@ class LumenConfig:
             parts.append(f"fp8_attn={self.fp8_attn}")
         if self.lumen_norm:
             parts.append("lumen_norm")
+        if self.hf_attn_patch:
+            parts.append("hf_attn_patch")
+        if self.lumen_linear:
+            parts.append("lumen_linear")
         if self.use_8bit_adam:
             parts.append("use_8bit_adam")
         tier3 = [

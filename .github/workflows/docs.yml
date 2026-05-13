@@ -44,6 +44,8 @@ jobs:
         run: |
           mkdir -p _site
           cp lumen-docs/site/index.html _site/index.html
+          cp lumen-docs/site/rl.html _site/rl.html
+          cp -r lumen-docs/site/rl _site/rl
           cp -r lumen-docs/docs/build/html _site/docs
 
       - name: Upload artifact

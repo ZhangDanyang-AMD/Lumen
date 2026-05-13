@@ -145,12 +145,9 @@ class FSDPTrainer:
             if self.rank == 0:
                 logger.info("Gradient checkpointing enabled")
 
-        if args.lora_rank > 0:
-            self.model = apply_lora(self.model, args)
-
-        if args.linear_fp8:
-            dp_group = dist.group.WORLD if dist.is_initialized() else None
-            apply_fp8_training(self.model, args, dp_group=dp_group)
+        from lumen.config import LumenConfig
+        cfg = LumenConfig.from_args(args)
+        _manager, self.model = cfg.enable(self.model)
 
         self.model = self._wrap_fsdp(self.model)
 

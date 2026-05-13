@@ -1,0 +1,10 @@
+{
+  "model": "/dev/shm/model/llama-3.1-8b",
+  "linear_fp8": false,
+  "lora_rank": 0,
+  "max_steps": 20,
+  "elapsed_seconds": 422.32,
+  "peak_memory_gb": 22.0,
+  "free_gpu_gb": 235.8,
+  "total_gpu_gb": 270.57
+}

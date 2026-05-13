@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LumenRL — RL Training Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --amd-red: #ed1c24;
+  --amd-red-dark: #c41922;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f5f6f8;
+  --text-primary: #1a1a2e;
+  --text-secondary: #5c6370;
+  --text-muted: #8b95a5;
+  --accent: #ed1c24;
+  --accent-soft: rgba(237, 28, 36, 0.08);
+  --green: #2da44e;
+  --blue: #0969da;
+  --yellow: #bf8700;
+  --purple: #8250df;
+  --border: #d0d7de;
+  --border-light: #e8ecf0;
+  --radius: 12px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre { font-family: 'JetBrains Mono', monospace; }
+.container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-light);
+  padding: 14px 0;
+}
+nav .container {
+  display: flex; align-items: center; justify-content: space-between;
+}
+nav .logo {
+  font-size: 22px; font-weight: 800; color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+nav .logo span { color: var(--accent); }
+nav .links { display: flex; gap: 28px; }
+nav .links a {
+  color: var(--text-secondary); font-size: 14px; font-weight: 500;
+  transition: color 0.2s;
+}
+nav .links a:hover { color: var(--text-primary); text-decoration: none; }
+nav .links a.active { color: var(--accent); font-weight: 600; }
+
+.hero-mini {
+  padding: 48px 0 32px;
+  text-align: center;
+  background: linear-gradient(180deg, #fff 0%, var(--bg-secondary) 100%);
+}
+.hero-mini h1 {
+  font-size: 36px; font-weight: 800; letter-spacing: -1px;
+  line-height: 1.2; margin-bottom: 12px;
+}
+.hero-mini h1 .highlight { color: var(--accent); }
+.hero-mini .subtitle {
+  font-size: 16px; color: var(--text-secondary);
+  max-width: 600px; margin: 0 auto;
+}
+
+.section-title {
+  font-size: 28px; font-weight: 700; text-align: center;
+  margin-bottom: 10px; letter-spacing: -0.5px;
+}
+.section-sub {
+  font-size: 15px; color: var(--text-secondary); text-align: center;
+  margin-bottom: 40px; max-width: 560px; margin-left: auto; margin-right: auto;
+}
+
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600;
+}
+.tag-green { background: rgba(45,164,78,0.1); color: var(--green); }
+.tag-blue { background: rgba(9,105,218,0.1); color: var(--blue); }
+.tag-purple { background: rgba(130,80,223,0.1); color: var(--purple); }
+.tag-red { background: var(--accent-soft); color: var(--accent); }
+.tag-yellow { background: rgba(191,135,0,0.1); color: var(--yellow); }
+
+/* Experiment cards */
+.experiments { padding: 48px 0; }
+.exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px; }
+.exp-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 28px;
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column;
+}
+.exp-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border);
+  transform: translateY(-2px);
+}
+.exp-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+.exp-card .exp-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; flex: 1; }
+.exp-card .exp-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.exp-card .btn-row { margin-top: auto; }
+.exp-card .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  transition: all 0.2s; cursor: pointer; border: none;
+  background: var(--accent); color: #fff;
+}
+.exp-card .btn:hover { background: var(--amd-red-dark); text-decoration: none; color: #fff; }
+
+/* RL benchmark section */
+.rl-section { padding: 48px 0; background: var(--bg-secondary); }
+.rl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.rl-card {
+  background: var(--bg-card); border: 1px solid var(--border-light);
+  border-radius: var(--radius); padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+.rl-card.full-width { grid-column: 1 / -1; }
+.rl-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 10px; }
+.rl-card h4 { font-size: 15px; font-weight: 600; margin: 18px 0 8px; color: var(--text-primary); }
+.rl-card p { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+.rl-card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rl-card th, .rl-card td { text-align: left; padding: 7px 0; border-bottom: 1px solid var(--border-light); }
+.rl-card th { color: var(--text-secondary); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+.rl-card td { color: var(--text-primary); }
+.rl-card ul { padding-left: 18px; margin: 0 0 14px; }
+.rl-card li { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 4px; }
+.rl-card li strong { color: var(--text-primary); }
+.rl-card .rl-env { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; }
+.rl-card pre {
+  background: #f6f8fa; border: 1px solid var(--border-light); border-radius: 8px;
+  padding: 12px 14px; font-size: 12px; line-height: 1.5; overflow-x: auto;
+  color: #24292f; margin: 8px 0 14px;
+}
+.rl-tables-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+footer {
+  border-top: 1px solid var(--border-light);
+  padding: 36px 0;
+  text-align: center;
+  font-size: 14px; color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+footer a { color: var(--text-secondary); }
+footer a:hover { color: var(--text-primary); }
+
+@media (max-width: 768px) {
+  .hero-mini h1 { font-size: 28px; }
+  .exp-grid { grid-template-columns: 1fr; }
+  .rl-grid { grid-template-columns: 1fr; }
+  .rl-tables-row { grid-template-columns: 1fr; }
+  nav .links { display: none; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container">
+    <a href="index.html" class="logo">Lumen<span>RL</span></a>
+    <div class="links">
+      <a href="index.html">Home</a>
+      <a href="rl.html" class="active">RL Dashboard</a>
+      <a href="docs/index.html">Docs</a>
+      <a href="https://github.com/ZhangDanyang-AMD/Lumen">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<div class="hero-mini">
+  <div class="container">
+    <h1>Lumen<span class="highlight">RL</span> Dashboard</h1>
+    <p class="subtitle">FP8 quantized RL training on AMD Instinct GPUs — experiment tracking, benchmark results, and ROCm integration notes</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- ACTIVE EXPERIMENTS                                                      -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section class="experiments">
+  <div class="container">
+    <h2 class="section-title">Experiment Dashboards</h2>
+    <p class="section-sub">Live metric tracking for FP8 training alignment experiments</p>
+
+    <div class="exp-grid">
+
+      <div class="exp-card">
+        <h3>Exp 1A — Qwen3-8B BF16 Baseline</h3>
+        <p class="exp-desc">
+          DAPO training on Qwen3-8B-Base with 8× MI350X. BF16 training + BF16 rollout,
+          aligned to VERL FP8 docs reference config. Tracks V5b (stable, gpu_mem=0.3)
+          and V5e (fast, gpu_mem=0.6 + dynamic sampling).
+        </p>
+        <div class="exp-meta">
+          <span class="tag tag-green">V5b — 32 steps</span>
+          <span class="tag tag-red">V5e — 60 steps (OOM s61)</span>
+          <span class="tag tag-blue">8× MI350X</span>
+        </div>
+        <div class="btn-row">
+          <a class="btn" href="rl/1a_metrics_dashboard.html">Open Dashboard &rarr;</a>
+        </div>
+      </div>
+
+      <div class="exp-card">
+        <h3>Exp 1B — Qwen3-8B FP8 Rollout</h3>
+        <p class="exp-desc">
+          FP8 quantized rollout with BF16 training. Validates that FP8 inference
+          during generation does not degrade training convergence vs BF16 baseline.
+        </p>
+        <div class="exp-meta">
+          <span class="tag tag-yellow">Planned</span>
+        </div>
+        <div class="btn-row">
+          <span style="font-size:13px; color:var(--text-muted);">Dashboard coming soon</span>
+        </div>
+      </div>
+
+      <div class="exp-card">
+        <h3>Exp 1D — Qwen3-8B Full Lumen FP8</h3>
+        <p class="exp-desc">
+          End-to-end FP8 training with Lumen FP8 param manager, activation storage,
+          and fused kernels. The target configuration for production FP8 RL.
+        </p>
+        <div class="exp-meta">
+          <span class="tag tag-yellow">Planned</span>
+        </div>
+        <div class="btn-row">
+          <span style="font-size:13px; color:var(--text-muted);">Dashboard coming soon</span>
+        </div>
+      </div>
+
+      <div class="exp-card">
+        <h3>Exp 2 — Qwen3-30B-A3B MoE</h3>
+        <p class="exp-desc">
+          Mixture-of-Experts model with 30B total / 3B active parameters.
+          Tests Lumen FP8 with sparse architecture on MI350X.
+        </p>
+        <div class="exp-meta">
+          <span class="tag tag-yellow">Planned</span>
+        </div>
+        <div class="btn-row">
+          <span style="font-size:13px; color:var(--text-muted);">Dashboard coming soon</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- BENCHMARK RESULTS (migrated from index.html #rl)                        -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<section class="rl-section" id="benchmarks">
+  <div class="container">
+    <h2 class="section-title">VERL FSDP2 vs Megatron on MI300X (ROCm 7.0)</h2>
+    <p class="section-sub">FP8 quantized RL training with TRL and VERL — SGLang and vLLM rollout engines validated on AMD Instinct MI300X</p>
+
+    <div class="rl-grid">
+
+      <div class="rl-card full-width">
+        <h3>Test Environment</h3>
+        <p class="rl-env">
+          <strong>Container:</strong> <code>rocm/sgl-dev:v0.5.9-rocm700</code> with VERL 0.8.0.dev &nbsp;|&nbsp;
+          <strong>GPUs:</strong> 4× MI300X (252 GB usable) &nbsp;|&nbsp;
+          <strong>Model:</strong> Qwen2.5-0.5B-Instruct &nbsp;|&nbsp;
+          <strong>Rollout:</strong> SGLang v0.5.9-dev / vLLM v0.9.2rc2-dev &nbsp;|&nbsp;
+          <strong>Training:</strong> GRPO, 2 steps, micro_batch=2, seq_len=512+256
+        </p>
+      </div>
+
+      <div class="rl-card full-width">
+        <h3>Results — SGLang Rollout</h3>
+        <table>
+          <thead><tr><th>Configuration</th><th>Offload</th><th>Batch</th><th>Peak VRAM</th><th>Throughput</th><th>vs BF16 (same offload)</th></tr></thead>
+          <tbody>
+            <tr><td>FSDP2+SGLang BF16</td><td>Yes</td><td>16</td><td><strong>48.06 GB</strong></td><td>797 tok/s</td><td>baseline</td></tr>
+            <tr><td><strong>FSDP2+SGLang FP8PM</strong></td><td><strong>Yes</strong></td><td><strong>16</strong></td><td><strong>45.50 GB</strong></td><td><strong>942 tok/s</strong></td><td><strong>-5% SAVINGS</strong></td></tr>
+            <tr><td>FSDP2+SGLang BF16</td><td>No</td><td>16</td><td>73.49 GB</td><td>~900 tok/s</td><td>baseline</td></tr>
+            <tr><td><strong>FSDP2+SGLang FP8PM</strong></td><td><strong>No</strong></td><td><strong>16</strong></td><td><strong>54.87 GB</strong></td><td><strong>913 tok/s</strong></td><td><strong>-25% SAVINGS</strong></td></tr>
+            <tr><td>Megatron+SGLang BF16</td><td>Yes</td><td>16</td><td>70.52 GB</td><td>704 tok/s</td><td>N/A</td></tr>
+            <tr><td><strong>Megatron+SGLang FP8PM</strong></td><td><strong>Yes</strong></td><td><strong>16</strong></td><td><strong>50.06 GB</strong></td><td><strong>369 tok/s</strong></td><td><strong>-29% vs Megatron BF16</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card full-width">
+        <h3>Results — vLLM Rollout</h3>
+        <table>
+          <thead><tr><th>Configuration</th><th>Offload</th><th>Batch</th><th>gpu_util</th><th>Peak VRAM</th><th>Throughput (step 2)</th><th>Weight Update</th></tr></thead>
+          <tbody>
+            <tr><td>FSDP2+vLLM BF16 (1 GPU)</td><td>Yes</td><td>8</td><td>0.4</td><td>—</td><td>1,537 tok/s</td><td>0.66s</td></tr>
+            <tr><td>FSDP2+vLLM BF16 (4 GPU)</td><td>Yes</td><td>64</td><td>0.4</td><td>125.75 GB</td><td>1,766 tok/s</td><td>0.47–0.58s</td></tr>
+            <tr><td>FSDP2+vLLM FP8PM (4 GPU)</td><td>Yes</td><td>64</td><td>0.4</td><td>125.78 GB</td><td>1,871 tok/s</td><td>0.55–0.70s</td></tr>
+            <tr><td>FSDP2+vLLM FP8PM (4 GPU)</td><td>No</td><td>64</td><td>0.4</td><td>128.51 GB</td><td>1,906 tok/s</td><td>0.46–0.97s</td></tr>
+            <tr><td><strong>FSDP2+vLLM BF16 (4 GPU)</strong></td><td><strong>No</strong></td><td><strong>16</strong></td><td><strong>0.1</strong></td><td><strong>34.26 GB</strong></td><td><strong>445 tok/s</strong></td><td><strong>1.28s</strong></td></tr>
+            <tr><td><strong>FSDP2+vLLM FP8PM (4 GPU)</strong></td><td><strong>No</strong></td><td><strong>16</strong></td><td><strong>0.1</strong></td><td><strong>29.80 GB</strong></td><td><strong>477 tok/s</strong></td><td><strong>1.04s</strong></td></tr>
+            <tr><td>Megatron+vLLM BF16 (4 GPU, TP=2)</td><td>Yes</td><td>16</td><td>0.3</td><td>85.01 GB</td><td>338 tok/s</td><td>2.03s</td></tr>
+            <tr><td><strong>Megatron+vLLM FP8PM (4 GPU, TP=2)</strong></td><td><strong>Yes</strong></td><td><strong>16</strong></td><td><strong>0.3</strong></td><td><strong>86.89 GB</strong></td><td><strong>291 tok/s</strong></td><td><strong>2.57s</strong></td></tr>
+          </tbody>
+        </table>
+        <p><strong>Notes on vLLM gpu_memory_utilization:</strong> With <code>gpu_util=0.4</code>, vLLM reserves ~101 GB per GPU for KV cache, masking actor FP8PM savings in peak VRAM. Throughput gains (+6%) come from reduced memory bandwidth. With <code>gpu_util=0.1</code>, FP8PM savings become visible: <strong>29.80 vs 34.26 GB = -13%</strong> VRAM, <strong>477 vs 445 tok/s = +7%</strong> throughput.</p>
+      </div>
+
+      <div class="rl-card">
+        <h3>GPU-level Detail — SGLang (GPUs 4–7, offload)</h3>
+        <table>
+          <thead><tr><th>Config</th><th>GPU 4</th><th>GPU 5</th><th>GPU 6</th><th>GPU 7</th></tr></thead>
+          <tbody>
+            <tr><td>FSDP2 BF16 (offload)</td><td>48.06 GB</td><td>11.88 GB</td><td>11.32 GB</td><td>48.03 GB</td></tr>
+            <tr><td><strong>FSDP2 FP8PM (offload)</strong></td><td><strong>45.50 GB</strong></td><td><strong>8.52 GB</strong></td><td><strong>8.57 GB</strong></td><td><strong>45.49 GB</strong></td></tr>
+            <tr><td>FSDP2 BF16 (no offload)</td><td>73.49 GB</td><td>18.16 GB</td><td>17.01 GB</td><td>72.75 GB</td></tr>
+            <tr><td>FSDP2 FP8PM (no offload)</td><td>54.87 GB</td><td>17.81 GB</td><td>16.99 GB</td><td>53.78 GB</td></tr>
+            <tr><td>Megatron BF16 (offload)</td><td>70.52 GB</td><td>11.62 GB</td><td>11.58 GB</td><td>70.49 GB</td></tr>
+            <tr><td><strong>Megatron FP8PM (offload)</strong></td><td><strong>50.06 GB</strong></td><td><strong>10.57 GB</strong></td><td><strong>10.58 GB</strong></td><td><strong>50.01 GB</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card">
+        <h3>GPU-level Detail — vLLM (GPUs 0–3, no offload, gpu_util=0.1)</h3>
+        <table>
+          <thead><tr><th>Config</th><th>GPU 0</th><th>GPU 1</th><th>GPU 2</th><th>GPU 3</th></tr></thead>
+          <tbody>
+            <tr><td>FSDP2 BF16</td><td>34.26 GB</td><td>33.92 GB</td><td>33.97 GB</td><td>34.07 GB</td></tr>
+            <tr><td><strong>FSDP2 FP8PM</strong></td><td><strong>29.80 GB</strong></td><td><strong>28.60 GB</strong></td><td><strong>28.91 GB</strong></td><td><strong>28.84 GB</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card full-width">
+        <h3>Key Findings</h3>
+
+        <h4>1. FP8PM saves memory with both offload modes (after clone fix)</h4>
+        <p><code>_FP8LinearFunc.forward</code> previously pinned FSDP2's allgathered weight tensors on GPU, causing +44% memory regression with offloading. <strong>Fix:</strong> <code>ctx.save_for_backward(fp8_weight.clone(), scale)</code> in <code>lumen/quantize/fp8_params.py</code>.</p>
+        <table>
+          <thead><tr><th>Mode</th><th>BF16</th><th>FP8PM (after fix)</th><th>Savings</th></tr></thead>
+          <tbody>
+            <tr><td>With offload</td><td>48.06 GB</td><td><strong>45.50 GB</strong></td><td><strong>-5%</strong></td></tr>
+            <tr><td>Without offload</td><td>73.49 GB</td><td><strong>54.87 GB</strong></td><td><strong>-25%</strong></td></tr>
+          </tbody>
+        </table>
+
+        <h4>2. FSDP2 is more memory-efficient than Megatron for BF16</h4>
+        <p>With offloading, FSDP2 achieves <strong>32% lower peak memory</strong> (48 vs 71 GB) and <strong>13% higher throughput</strong> (797 vs 704 tok/s) compared to Megatron for the same model.</p>
+
+        <h4>3. Megatron FP8PM now works (on-the-fly quantization)</h4>
+        <p><code>FP8ParamManager</code> was extended to target Megatron's <code>ColumnParallelLinear</code>/<code>RowParallelLinear</code>. Unlike FSDP2 (in-place FP8 quantization), Megatron uses <strong>on-the-fly</strong> quantization: parameters stay BF16 for optimizer/DDP compatibility, while <code>_FP8MegatronLinearFunc</code> quantizes to FP8 during forward and saves compact FP8 data in the autograd graph.</p>
+
+        <h4>4. vLLM V1 works on ROCm after <code>get_device_uuid</code> fix</h4>
+        <p>vLLM V1 was previously broken on ROCm — both FSDP2+vLLM and Megatron+vLLM hung indefinitely during weight updates. <strong>Root cause:</strong> missing <code>@with_amdsmi_context</code> decorator on <code>RocmPlatform.get_device_uuid()</code>. <strong>Fix:</strong> one-line decorator addition.</p>
+
+        <h4>5. FSDP2 outperforms Megatron across both rollout engines</h4>
+        <p>FSDP2 consistently achieves <strong>1.3× higher throughput</strong> than Megatron for the same model and comparable batch size.</p>
+
+        <h4>6. vLLM FP8PM: savings visible at low gpu_memory_utilization</h4>
+        <p>With <code>gpu_util=0.1</code>: Peak VRAM <strong>29.80 GB</strong> (FP8PM) vs <strong>34.26 GB</strong> (BF16) = <strong>-13%</strong>. Throughput <strong>477 vs 445 tok/s = +7%</strong>.</p>
+      </div>
+
+      <div class="rl-card">
+        <h3>Recommended Configuration</h3>
+        <p>For VERL GRPO on MI300X (ROCm) with FP8 memory savings:</p>
+        <pre>strategy=fsdp2
+rollout=sglang            # or vllm (with get_device_uuid fix)
+FP8_PARAM_MANAGER=1
+# Offloading now works with FP8PM (after clone fix):
+#   param_offload=true  → -5% VRAM savings vs BF16 offload
+#   param_offload=false → -25% VRAM savings vs BF16 (best)</pre>
+        <p>For vLLM rollout, additionally set:</p>
+        <pre>rollout.tensor_model_parallel_size=1   # TP≥2 may hang on ROCm
+rollout.free_cache_engine=false
+rollout.enforce_eager=true</pre>
+      </div>
+
+      <div class="rl-card">
+        <h3>Supported Algorithms &amp; Rollout Engines</h3>
+        <table>
+          <thead><tr><th>Algorithm</th><th>Framework</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>GRPO</td><td>TRL</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (FSDP2 + SGLang)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (FSDP2 + vLLM)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (Megatron + SGLang)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>GRPO</td><td>VERL (Megatron + vLLM)</td><td><span class="tag tag-green">Validated</span></td></tr>
+            <tr><td>PPO</td><td>TRL / VERL</td><td><span class="tag tag-green">Supported</span></td></tr>
+            <tr><td>DAPO</td><td>TRL</td><td><span class="tag tag-blue">Supported</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card">
+        <h3>Validated Results — LLaMA-2-70B GRPO</h3>
+        <p>8× MI300X, 30 steps, Pearson correlation vs baseline</p>
+        <table>
+          <thead><tr><th>Metric</th><th>Lumen</th><th>Baseline</th><th>Pearson r</th></tr></thead>
+          <tbody>
+            <tr><td>Reward</td><td>0.364</td><td>0.347</td><td>0.776</td></tr>
+            <tr><td>Response length</td><td>162.6</td><td>166.3</td><td>0.835</td></tr>
+            <tr><td>Entropy</td><td>1.935</td><td>1.915</td><td>0.906</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card">
+        <h3>VERL vs TRL Memory Comparison</h3>
+        <p>Peak memory per GPU — VERL + FSDP2 + SGLang vs TRL + FSDP1</p>
+        <table>
+          <thead><tr><th>Model</th><th>TRL + FSDP1</th><th>VERL + FSDP2</th><th>Reduction</th></tr></thead>
+          <tbody>
+            <tr><td>Llama-3.1-8B</td><td>34.57 GB</td><td>11.76 GB</td><td>~66%</td></tr>
+            <tr><td>Qwen2.5-32B</td><td>124.18 GB</td><td>38.43 GB</td><td>~69%</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="rl-card full-width">
+        <h3>ROCm Fixes</h3>
+        <div class="rl-tables-row">
+          <div>
+            <h4>vLLM ROCm Fix</h4>
+            <p>Missing <code>@with_amdsmi_context</code> decorator in <code>vllm/platforms/rocm.py</code> causes weight-transfer deadlock:</p>
+            <pre>@classmethod
+@with_amdsmi_context        # &lt;-- ADD THIS LINE
+def get_device_uuid(cls, device_id: int = 0) -&gt; str:
+    ...</pre>
+          </div>
+          <div>
+            <h4>FP8PM FSDP2 Offload Fix</h4>
+            <p><code>save_for_backward</code> pinned FSDP2's allgathered buffer (+44% regression). Fix in <code>lumen/quantize/fp8_params.py</code>:</p>
+            <pre># Change:
+ctx.save_for_backward(fp8_weight, scale)
+# To:
+ctx.save_for_backward(fp8_weight.clone(), scale)</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="rl-card full-width">
+        <h3>Training Backends &amp; Rollout</h3>
+        <table>
+          <thead><tr><th>Config</th><th>Rollout</th><th>Backend</th><th>Best For</th></tr></thead>
+          <tbody>
+            <tr><td>TRL + FSDP1/2</td><td>Built-in</td><td>quant.enable + Accelerate</td><td>Quick experiments</td></tr>
+            <tr><td>VERL + FSDP2</td><td>SGLang / vLLM</td><td>VERL FSDPWorker</td><td>Large-scale RL (1.3× faster vs Megatron, recommended)</td></tr>
+            <tr><td>VERL + Megatron</td><td>SGLang / vLLM</td><td>VERL MegatronWorker</td><td>MoE / TP+PP+EP</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p><strong>Lumen</strong> — Apache License 2.0 — &copy; 2026 AMD</p>
+    <p style="margin-top:8px">
+      <a href="https://github.com/ZhangDanyang-AMD/Lumen">GitHub</a> &middot;
+      <a href="https://github.com/ROCm/aiter">AITER</a> &middot;
+      <a href="https://github.com/ROCm/mori">MORI</a> &middot;
+      <a href="https://rocm.docs.amd.com/">ROCm Docs</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

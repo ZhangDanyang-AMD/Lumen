@@ -1,0 +1,12 @@
+{
+  "model": "/dev/shm/model",
+  "linear_fp8": false,
+  "fp8_param_manager": true,
+  "use_8bit_adam": true,
+  "lora_rank": 0,
+  "max_steps": 5,
+  "elapsed_seconds": 1849.97,
+  "peak_memory_gb": 210.78,
+  "free_gpu_gb": 51.58,
+  "total_gpu_gb": 270.57
+}

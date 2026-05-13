@@ -1069,6 +1069,10 @@ def make_lumen_model_provider(
 
         from lumen.config import LumenConfig
 
+        from dataclasses import replace as _replace
+
+        from lumen.config import LumenConfig
+
         args = get_args()
         model = model_builder(args, pre_process, post_process, vp_stage)
 
@@ -1320,6 +1324,7 @@ def install_hip_graphs_hook() -> None:
 
     _setup_with_hip_graphs._lumen_hip_graphs_hook = True
     _mt_training.setup_model_and_optimizer = _setup_with_hip_graphs
+
 
 
 def _patch_meta_materializer() -> None:
