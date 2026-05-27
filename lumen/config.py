@@ -76,6 +76,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "fp8_weight_cache": ("lumen_fp8_weight_cache",),
     "fused_rope": ("lumen_fused_rope",),
     "hip_graphs": ("lumen_hip_graphs",),
+    "fused_kl_loss": ("fused_kl_loss",),
     "fp8_checkpoint": ("lumen_fp8_checkpoint",),
     "fp8_param_manager": ("fp8_param_manager",),
     "lora_rank": ("lora_rank",),
@@ -136,6 +137,7 @@ class LumenConfig:
     lumen_linear: bool = False
 
     # -- Tier 3: Execution / fusion --
+    fused_kl_loss: bool = False
     fused_mlp: bool = False
     fp8_activation_store: bool = False
     cpu_offload: bool = False
@@ -215,6 +217,7 @@ class LumenConfig:
             or self.hip_graphs
             or self.delay_wgrad
             or self.gradient_accumulation_fusion
+            or self.fused_kl_loss
         )
 
     def enable(self, model, *, dp_group=None, backend: str = "auto"):
@@ -259,6 +262,10 @@ class LumenConfig:
         # 1c. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
+
+        # 1d. Fused KL loss patching (Eagle3 speculative distillation)
+        if self.fused_kl_loss:
+            self._patch_fused_kl_loss(model)
 
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
@@ -461,6 +468,25 @@ class LumenConfig:
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
 
+    def _patch_fused_kl_loss(self, model) -> None:
+        """Patch Eagle3Model to use fused forward-KL loss instead of chunked Python loop."""
+        from lumen.ops.fused_kl_loss import fused_forward_kl_loss
+
+        try:
+            from lumenrl.models.eagle3 import Eagle3Model as _Eagle3
+        except ImportError:
+            _rank0_print("> WARNING: fused_kl_loss enabled but Eagle3Model not found")
+            return
+
+        count = 0
+        for _name, module in model.named_modules():
+            if isinstance(module, _Eagle3):
+                module._fused_kl_loss_fn = fused_forward_kl_loss
+                count += 1
+
+        if count:
+            _rank0_print(f"> Patched {count} Eagle3Model(s) with fused KL loss (torch.compile)")
+
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
 
@@ -608,6 +634,7 @@ class LumenConfig:
         tier3 = [
             name
             for name in (
+                "fused_kl_loss",
                 "fused_mlp",
                 "cpu_offload",
                 "delay_wgrad",
