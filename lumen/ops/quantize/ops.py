@@ -19,6 +19,7 @@ import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
 from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+    quant_fp8_blockwise_for_act_grad_kernel,
     quant_fp8_blockwise_kernel,
     quant_fp8_blockwise_segment_m_kernel,
 )
@@ -105,6 +106,64 @@ def quant_fp8_blockwise_impl_meta(
     scales_shape = (triton.cdiv(M, block_size), N) if axis == 0 else (M, triton.cdiv(N, block_size))
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
     return x_fp8, x_scales
+
+
+@triton_op("lumen::quant_fp8_blockwise_dual_axis_impl", mutates_args=())
+def quant_fp8_blockwise_dual_axis_impl(
+    x: torch.Tensor,
+    dtype: torch.dtype,
+    block_size: int = 128,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fused dual-axis blockwise FP8 quant: emit row-wise (1×B) AND col-wise (B×1) in one pass.
+
+    Loads each BLOCK×BLOCK tile of BF16 ``x`` once and writes both layouts —
+    saves one BF16 read + amax pass vs calling ``quant_fp8_blockwise_impl``
+    twice.  Used in the blockwise2d (Jet-RL §4.2) backward where the same
+    grad tensor feeds both DGrad (1×128 along axis=1) and WGrad (128×1 along
+    axis=0).
+
+    Returns ``(x_fp8_row, x_scales_row, x_fp8_col, x_scales_col)`` with
+    shapes ``(M, N)``, ``(M, N/B)``, ``(M, N)``, ``(M/B, N)``.  Scales are
+    stored as dequant multipliers (``amax / FP8_MAX``), matching the
+    convention of ``quant_fp8_blockwise_impl``.
+    """
+    assert x.is_contiguous() and x.dim() == 2, "Input must be 2D and contiguous"
+    M, N = x.shape
+
+    x_fp8_row = torch.empty((M, N), dtype=dtype, device=x.device)
+    x_fp8_col = torch.empty((M, N), dtype=dtype, device=x.device)
+    x_scales_row = torch.empty((M, triton.cdiv(N, block_size)), dtype=torch.float32, device=x.device)
+    x_scales_col = torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device)
+
+    grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
+    wrap_triton(quant_fp8_blockwise_for_act_grad_kernel)[grid](
+        x,
+        x_fp8_row,
+        x_scales_row,
+        x_fp8_col,
+        x_scales_col,
+        M,
+        N,
+        block_size,
+        torch.finfo(dtype).max,
+    )
+    return x_fp8_row, x_scales_row, x_fp8_col, x_scales_col
+
+
+@quant_fp8_blockwise_dual_axis_impl.register_fake
+def quant_fp8_blockwise_dual_axis_impl_meta(
+    x: torch.Tensor,
+    dtype: torch.dtype,
+    block_size: int = 128,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    assert x.dim() == 2, "Input must be 2D"
+    M, N = x.shape
+    return (
+        torch.empty((M, N), dtype=dtype, device=x.device),
+        torch.empty((M, triton.cdiv(N, block_size)), dtype=torch.float32, device=x.device),
+        torch.empty((M, N), dtype=dtype, device=x.device),
+        torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device),
+    )
 
 
 def quant_fp8_blockwise_segment_m_impl(

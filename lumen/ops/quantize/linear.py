@@ -278,35 +278,36 @@ def _quant_blockwise(x, dtype, block_size=128):
 
 
 def _quant_blockwise2d_activation(x, dtype, block_size=128):
-    """1×block FP8 activation quant via AITER's torch reference.
+    """1×block FP8 activation quant via AITER's HIP kernel.
 
-    Delegates to ``aiter.ops.quant.get_torch_quant`` with
-    ``QuantType.per_1x128``; underlying impl is
-    ``per_block_quant_wrapper((1, 128))(pertoken_quant)`` (pure torch),
-    producing a ``(M, N/block_size)`` fp32 scale matching what
-    ``gemm_a8w8_blockscale`` expects.
+    Delegates to ``aiter.ops.quant.get_hip_quant(QuantType.per_1x128)``
+    (compiled HIP ``dynamic_per_token_scaled_quant``), producing a
+    ``(M, N/block_size)`` fp32 scale matching ``gemm_a8w8_blockscale``.
     """
     from aiter.ops.enum import QuantType
-    from aiter.ops.quant import get_torch_quant
+    from aiter.ops.quant import get_hip_quant
 
     assert block_size == 128, (
-        f"blockwise2d torch activation quant only supports block_size=128, got {block_size}"
+        f"blockwise2d activation quant only supports block_size=128, got {block_size}"
     )
     orig_shape = x.shape
     flat = _to_2d(x)
-    quant_fn = get_torch_quant(QuantType.per_1x128)
+    quant_fn = get_hip_quant(QuantType.per_1x128)
     x_fp8, x_scale = quant_fn(flat, quant_dtype=dtype)
     return x_fp8.view(orig_shape), x_scale
 
 
 def _quant_blockwise2d_weight(w, dtype, block_size=128):
-    """2D (block × block) FP8 weight quant — pure torch, no AITER dep.
+    """2D (block × block) FP8 weight quant via AITER's HIP per-token kernel.
 
     DeepSeek-V3 / Jet-RL scheme: weight ``(N, K)`` split into
-    ``block_size × block_size`` tiles, one scale per tile.  Returns
-    ``(w_fp8 (N, K), w_scales (N/block, K/block))``.  ``gemm_a8w8_blockscale``
-    routes the 2D scale natively via ``GROUP_N`` / ``GROUP_K``.
+    ``block_size × block_size`` tiles, one scale per tile.  Reshapes
+    ``(M, N)`` into tile-major ``(sm·sn, block·block)`` so each tile is one
+    contiguous row, then runs HIP ``per_token_quant_hip`` (one scale per
+    row); reshapes back.  Returns ``(w_fp8 (N, K), w_scales (N/block, K/block))``.
     """
+    from aiter.ops.quant import per_token_quant_hip
+
     assert block_size == 128, (
         f"blockwise2d weight quant only supports block_size=128, got {block_size}"
     )
@@ -317,17 +318,23 @@ def _quant_blockwise2d_weight(w, dtype, block_size=128):
         f"shape ({M}, {N}) not divisible by block_size={block_size}"
     )
 
-    fp8_max = torch.finfo(dtype).max
-    # Reshape into per-tile view: (sm, blk, sn, blk) → tile amax (sm, sn).
     sm, sn = M // block_size, N // block_size
-    tiled = flat.view(sm, block_size, sn, block_size).to(torch.float32)
-    amax = tiled.abs().amax(dim=(1, 3)).clamp_min(1e-4)
-    scales = amax / fp8_max  # dequant multiplier, shape (sm, sn)
-
-    # Apply per-tile divisor and cast to FP8.
-    w_fp8 = (tiled / scales.view(sm, 1, sn, 1)).clamp(-fp8_max, fp8_max).to(dtype)
-    w_fp8 = w_fp8.view(M, N)
-    return w_fp8.view(orig_shape), scales
+    # (M,N) → (sm,blk,sn,blk) → permute → (sm,sn,blk,blk) → flatten tile rows.
+    tiles = (
+        flat.view(sm, block_size, sn, block_size)
+        .permute(0, 2, 1, 3)
+        .contiguous()
+        .view(sm * sn, block_size * block_size)
+    )
+    y, tile_scale = per_token_quant_hip(tiles, quant_dtype=dtype)
+    # Invert reshape to recover (M, N).
+    w_fp8 = (
+        y.view(sm, sn, block_size, block_size)
+        .permute(0, 2, 1, 3)
+        .contiguous()
+        .view(M, N)
+    )
+    return w_fp8.view(orig_shape), tile_scale.view(sm, sn)
 
 
 _IN_GRAPH_CAPTURE = False
@@ -1072,6 +1079,20 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
         if fp8_weight_cache is not None and fp8_weight_scale is not None:
             from lumen.quantize.descriptor import FP8Descriptor as _FP8D
+            # blockwise2d expects a 2D (N/block, K/block) scale — fail fast if
+            # the cache was produced by per-tensor store_weights_fp8 (which
+            # yields a scalar scale) and the user picked blockwise2d.
+            if scaling_type == "blockwise2d":
+                N_w, K_w = fp8_weight_cache.shape[-2], fp8_weight_cache.shape[-1]
+                expected = (N_w // block_size, K_w // block_size)
+                assert (
+                    fp8_weight_scale.dim() == 2
+                    and tuple(fp8_weight_scale.shape) == expected
+                ), (
+                    f"blockwise2d + fp8_weight_cache expects scale shape "
+                    f"{expected}, got {tuple(fp8_weight_scale.shape)} — the "
+                    f"cache must be 128×128 2D-block quantized (not per-tensor)."
+                )
             weight_desc = _FP8D(
                 data=fp8_weight_cache.contiguous(),
                 scale=fp8_weight_scale.to(fp8_weight_cache.device) if fp8_weight_scale.device != fp8_weight_cache.device else fp8_weight_scale,
@@ -1104,16 +1125,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if bias is not None and not _fuse_bias:
             output = output + bias
 
-        # blockwise2d backward (DGrad + WGrad) re-quantizes X as per_128x1 along
-        # the token axis (Jet-RL §4.2). Save BF16 X so the bwd quant runs from
-        # original precision, not from a fwd FP8 round-trip.
+        # blockwise2d bwd (Jet-RL §4.2): activation is stored in FP8 (1×128
+        # quantized) for memory efficiency.  WGrad will "Requantize" it to
+        # 128×1 by dequantizing back to BF16 and re-quantizing along axis=0.
         if scaling_type == "blockwise2d":
             ctx.save_for_backward(
-                input_desc.data,
-                input_desc.scale,
                 weight_desc.data,
                 weight_desc.scale,
-                input_2d,
+                input_desc.data,
+                input_desc.scale,
             )
         else:
             ctx.save_for_backward(
@@ -1266,10 +1286,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
 
         if scaling_type == "blockwise2d":
-            input_data, input_scale, weight_data, weight_scale, bf16_input = ctx.saved_tensors
+            weight_data, weight_scale, input_data, input_scale = ctx.saved_tensors
         else:
             input_data, input_scale, weight_data, weight_scale = ctx.saved_tensors
-            bf16_input = None
         fp8_dtype = ctx.fp8_dtype
         block_size = ctx.block_size
         weight_desc = FP8Descriptor.from_tensors(weight_data, weight_scale, fp8_dtype)
@@ -1277,20 +1296,36 @@ class QuantizedLinearFunction(torch.autograd.Function):
         mgr = ctx.scaling_manager
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
 
-        # ----- blockwise2d: dedicated FP8 DGrad + WGrad (Jet-RL §4.2) -----
-        # DGrad reuses FProp's (1×128)×(128×128) kernel by transposing both W
-        # data and its 2D scale (square tile symmetry).  WGrad runs a second
-        # (1×128)×(1×128) kernel where both operands are blockwise-quantized
-        # along the token axis ("128×1" in the paper's notation).
+        # ----- blockwise2d: full FP8 DGrad + WGrad (Jet-RL §4.2) -----
+        # Activation is stored in FP8 (1×128) from fwd for memory efficiency.
+        # DGrad reuses FProp's (1×128)×(128×128) kernel by transposing W data
+        # and its 2D scale (square-tile symmetry — O(1) memory op).
+        # WGrad runs a (1×128)×(1×128) FP8 GEMM via Triton; activation is
+        # "Requantized" — dequantize FP8(1×128) back to BF16, then quantize
+        # along the token axis (128×1).  Grad is quantized once into both
+        # axis layouts via the fused dual-axis kernel.
+        #
+        # weight_data may come from fp8_weight_cache (VeRL offline FP8 quant)
+        # or fwd inline quant; both produce the 128×128 layout.
         if scaling_type == "blockwise2d":
-            from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
+            from aiter.ops.enum import QuantType
+            from aiter.ops.quant import get_hip_quant
+            from lumen.ops.quantize.ops import (
+                quant_fp8_blockwise_dual_axis_impl,
+                quant_fp8_blockwise_impl,
+            )
             from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
 
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
             M, N_out = grad_flat.shape
-            K_in = bf16_input.shape[-1]
-            _aligned = (M % block_size == 0 and K_in % block_size == 0
-                        and N_out % block_size == 0)
+            K_in = input_data.shape[-1]
+
+            # DGrad = ∇Y(1×128) × W(128×128) — needs N_out, K_in aligned to
+            # block; M is unconstrained.
+            _aligned_dgrad = (N_out % block_size == 0 and K_in % block_size == 0)
+            # WGrad = ∇Y^T(1×128) × X(1×128) sharing the token axis M —
+            # needs M aligned for the axis=0 grad / X quantization grids.
+            _aligned_wgrad = (M % block_size == 0)
 
             def _bf16_dgrad():
                 w_bf16 = _dequant_fp8_weight(weight_data, weight_scale, block_size).bfloat16()
@@ -1298,26 +1333,52 @@ class QuantizedLinearFunction(torch.autograd.Function):
                                      w_bf16.t().contiguous(), None, None, "none")
 
             def _bf16_wgrad():
-                # dispatch_gemm(..., "none") computes Y = A @ B^T.
-                # ∇W = ∇Y^T @ X = (N_out, M) @ (M, K_in).  Feed
-                #   A = grad_flat.T (N_out, M), B = bf16_input.T (K_in, M)
-                # so that A @ B^T = grad_flat.T @ bf16_input = ∇W (N_out, K_in).
+                # Recover BF16 X from saved FP8 (1×128) via dequant, then
+                # do BF16 GEMM ∇W = ∇Y^T @ X.  dispatch_gemm("none") is
+                # Y = A @ B^T, so feed (∇Y^T, X^T).
+                x_bf16 = _dequant_fp8_weight(input_data, input_scale, block_size).bfloat16()
                 return dispatch_gemm(
                     grad_flat.t().contiguous().bfloat16(),
-                    bf16_input.t().contiguous().bfloat16(),
+                    x_bf16.t().contiguous(),
                     None, None, "none",
                 )
 
-            # DGrad
-            if _aligned:
+            # Fused dual-axis grad quant: one BF16 read, both layouts
+            # (Jet-RL §4.2 "we fuse these quantization processes").  Only
+            # usable when M, N_out are both block-aligned (kernel grid).
+            g_row = g_row_s = g_col = g_col_s = None
+            if _aligned_dgrad and _aligned_wgrad:
                 try:
-                    g_fp8, g_scale = quant_fp8_blockwise_impl(
-                        grad_flat, dtype=fp8_dtype, axis=1, block_size=block_size,
+                    g_row, g_row_s, g_col, g_col_s = quant_fp8_blockwise_dual_axis_impl(
+                        grad_flat, dtype=fp8_dtype, block_size=block_size,
                     )
+                except (AssertionError, RuntimeError) as e:
+                    _logger.warning(
+                        "blockwise2d fused grad quant rejected (%s); falling back to single-axis", e
+                    )
+            if g_row is None and _aligned_dgrad:
+                # axis=1 (per_1x128 along K) — use HIP kernel.
+                try:
+                    g_row, g_row_s = get_hip_quant(QuantType.per_1x128)(
+                        grad_flat, quant_dtype=fp8_dtype,
+                    )
+                except (AssertionError, RuntimeError) as e:
+                    _logger.warning("blockwise2d dgrad grad quant rejected (%s)", e)
+            if g_col is None and _aligned_wgrad:
+                try:
+                    g_col, g_col_s = quant_fp8_blockwise_impl(
+                        grad_flat, dtype=fp8_dtype, axis=0, block_size=block_size,
+                    )
+                except (AssertionError, RuntimeError) as e:
+                    _logger.warning("blockwise2d wgrad grad quant rejected (%s)", e)
+
+            # DGrad (FP8)
+            if g_row is not None:
+                try:
                     grad_input = gemm_blockscale(
-                        g_fp8,
+                        g_row,
                         weight_data.t().contiguous(),
-                        g_scale,
+                        g_row_s,
                         weight_scale.t().contiguous(),
                     )
                 except (AssertionError, RuntimeError) as e:
@@ -1327,26 +1388,27 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 grad_input = _bf16_dgrad()
             grad_input = grad_input.view(*grad_output.shape[:-1], K_in)
 
-            # WGrad — wrapped so delay_wgrad can defer it.
+            # WGrad (FP8 (1×128)×(1×128) via Triton blockscale).
+            # Requantize: FP8 X (1×128) → BF16 → FP8 X (128×1 along token axis).
+            # Then ∇W = ∇Y^T @ X with both operands transposed for the kernel.
             def _compute_grad_weight():
-                if _aligned:
-                    try:
-                        g0, g0s = quant_fp8_blockwise_impl(
-                            grad_flat, dtype=fp8_dtype, axis=0, block_size=block_size,
-                        )
-                        x0, x0s = quant_fp8_blockwise_impl(
-                            bf16_input.contiguous(), dtype=fp8_dtype,
-                            axis=0, block_size=block_size,
-                        )
-                        return gemm_blockscale(
-                            g0.t().contiguous(),
-                            x0.t().contiguous(),
-                            g0s.t().contiguous(),
-                            x0s.t().contiguous(),
-                        )
-                    except (AssertionError, RuntimeError) as e:
-                        _logger.warning("blockwise2d wgrad: kernel rejected (%s); BF16 fallback", e)
-                return _bf16_wgrad()
+                if g_col is None:
+                    return _bf16_wgrad()
+                try:
+                    x_bf16 = _dequant_fp8_weight(input_data, input_scale, block_size).bfloat16()
+                    x_col, x_col_s = quant_fp8_blockwise_impl(
+                        x_bf16.contiguous(), dtype=fp8_dtype,
+                        axis=0, block_size=block_size,
+                    )
+                    return _gemm_blockscale_triton(
+                        g_col.t().contiguous(),     # (N_out, M) ∇Y^T
+                        x_col.t().contiguous(),     # (K_in,  M) X^T
+                        g_col_s.t().contiguous(),   # (N_out, M/128)
+                        x_col_s.t().contiguous(),   # (K_in,  M/128)
+                    )
+                except (AssertionError, RuntimeError) as e:
+                    _logger.warning("blockwise2d wgrad: triton rejected (%s); BF16 fallback", e)
+                    return _bf16_wgrad()
 
             if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
                 _w_ref = ctx.weight_ref
