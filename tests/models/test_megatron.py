@@ -1254,20 +1254,19 @@ class TestLossFuncEarlyStop:
 
 class TestPatchCrossEntropy:
     def test_patches_idempotently(self):
-        import lumen.models.megatron as meg_mod
+        import lumen.modules.megatron_layer_patches as patches_mod
 
-        orig = meg_mod._cross_entropy_patched
-        meg_mod._cross_entropy_patched = False
+        orig = patches_mod._cross_entropy_patched
+        patches_mod._cross_entropy_patched = False
 
         try:
-            with mock.patch("lumen.models.megatron.print_rank_0"):
-                meg_mod._patch_cross_entropy()
-                assert meg_mod._cross_entropy_patched is True
+            patches_mod.patch_cross_entropy()
+            assert patches_mod._cross_entropy_patched is True
 
-                meg_mod._patch_cross_entropy()
-                assert meg_mod._cross_entropy_patched is True
+            patches_mod.patch_cross_entropy()
+            assert patches_mod._cross_entropy_patched is True
         finally:
-            meg_mod._cross_entropy_patched = orig
+            patches_mod._cross_entropy_patched = orig
 
 
 # ===================================================================

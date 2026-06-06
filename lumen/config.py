@@ -410,7 +410,9 @@ class LumenConfig:
                 "TENorm",
                 "LumenRMSNorm",
                 "_MegatronCompatibleTLNorm",
+                "MegatronCompatibleTLNorm",
                 "_MegatronCompatibleTLRMSNorm",
+                "MegatronCompatibleTLRMSNorm",
             )
             count = 0
             for _name, module in model.named_modules():
