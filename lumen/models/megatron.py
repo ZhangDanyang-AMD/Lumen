@@ -2161,6 +2161,16 @@ def add_common_megatron_args(parser):
         default=False,
         help="Use fused MLP modules (LumenFusedMLP / LumenGatedMLP) for reduced kernel launch overhead.",
     )
+    safe_add_argument(
+        lumen,
+        "--lumen-rollout",
+        type=str,
+        default="",
+        help="Forward-op alignment with inference engine. "
+        "'ATOM' aligns forward operators (RMSNorm, Linear GEMM, SiLU+Mul, Attention) "
+        "with ATOM inference for train-inference numerical consistency. "
+        "'' (empty) keeps default Lumen operator dispatch.",
+    )
     mxfp8 = parser.add_argument_group(title="mxfp8-block-config")
     safe_add_argument(mxfp8, "--mxfp8-block-m-fwd", type=int, default=128)
     safe_add_argument(mxfp8, "--mxfp8-block-n-fwd", type=int, default=128)
