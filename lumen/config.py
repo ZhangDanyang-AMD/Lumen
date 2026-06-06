@@ -147,6 +147,9 @@ class LumenConfig:
     hip_graphs: bool = False
     fp8_checkpoint: bool = False
 
+    # -- Rollout: forward-op alignment with inference engines --
+    rollout: str = ""  # "" = default Lumen ops, "ATOM" = align forward with ATOM inference
+
     # -- Tier 0: FP8 weight storage (applied before everything else) --
     fp8_param_manager: bool = False
 
@@ -199,7 +202,8 @@ class LumenConfig:
     def has_any_features(self) -> bool:
         """Return True if any Lumen feature is enabled."""
         return (
-            self.quant_config.is_quantized
+            bool(self.rollout)
+            or self.quant_config.is_quantized
             or self.lumen_norm
             or self.hf_attn_patch
             or self.lumen_linear
@@ -238,6 +242,15 @@ class LumenConfig:
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
         import torch
+
+        if self.rollout.upper() == "ATOM":
+            self._patch_norms(model, atom_mode=True)
+            self._patch_sdpa()
+            self._patch_linear(model, atom_mode=True)
+            self._patch_mlp_activation(model)
+            model._lumen_config = self
+            _rank0_print("> ATOM rollout mode: forward ops aligned with ATOM inference")
+            return None, model
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
@@ -353,8 +366,60 @@ class LumenConfig:
         )
         return model
 
-    def _patch_norms(self, model) -> None:
+    def _patch_norms(self, model, *, atom_mode: bool = False) -> None:
         import torch
+
+        if atom_mode:
+            from aiter import rmsnorm2d_fwd
+
+            class _AtomRMSNormFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, weight, eps):
+                    ctx.save_for_backward(x, weight)
+                    ctx.eps = eps
+                    x_2d = x.reshape(-1, x.shape[-1])
+                    y = rmsnorm2d_fwd(x_2d, weight, eps)
+                    return y.reshape(x.shape)
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    x, weight = ctx.saved_tensors
+                    from aiter.ops.triton.normalization.rmsnorm import _rmsnorm_backward
+
+                    x_2d = x.reshape(-1, x.shape[-1])
+                    go_2d = grad_output.reshape(-1, grad_output.shape[-1])
+                    dx, dw = _rmsnorm_backward(go_2d, x_2d, weight, ctx.eps)
+                    return dx.reshape(x.shape), dw, None
+
+            class _AtomRMSNorm(torch.nn.Module):
+                def __init__(self, weight, eps):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(weight.data.clone())
+                    self.eps = eps
+
+                def forward(self, x):
+                    return _AtomRMSNormFn.apply(x, self.weight, self.eps)
+
+            count = 0
+            for _name, module in model.named_modules():
+                for attr_name, child in list(module.named_children()):
+                    cls_name = type(child).__name__
+                    if cls_name in (
+                        "RMSNorm",
+                        "LlamaRMSNorm",
+                        "MistralRMSNorm",
+                        "Qwen2RMSNorm",
+                    ):
+                        eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
+                        repl = _AtomRMSNorm(child.weight, eps)
+                        if child.weight.is_meta:
+                            repl.to(device="meta")
+                        setattr(module, attr_name, repl)
+                        count += 1
+            if count:
+                _rank0_print(f"> Replaced {count} RMSNorm modules with ATOM-aligned aiter.rmsnorm2d_fwd")
+            return
+
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
         count = 0
@@ -413,14 +478,53 @@ class LumenConfig:
         """
         pass
 
-    def _patch_linear(self, model) -> None:
+    def _patch_linear(self, model, *, atom_mode: bool = False) -> None:
         """Replace ``nn.Linear`` forward with AITER GEMM (BF16, autograd-safe).
 
-        Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
-        configs exist, then patches forward with ``dispatch_gemm``.
+        When ``atom_mode=True``, uses ``TunedGemm().mm()`` (same as ATOM inference).
+        Otherwise uses ``dispatch_gemm`` (Lumen default dispatch).
         """
         import torch
         import torch.nn as nn
+
+        if atom_mode:
+            from aiter.tuned_gemm import TunedGemm
+
+            tgemm = TunedGemm()
+
+            class _AtomLinearFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input, weight, bias):
+                    ctx.save_for_backward(input, weight)
+                    ctx.has_bias = bias is not None
+                    return tgemm.mm(input, weight, bias, otype=input.dtype)
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    input, weight = ctx.saved_tensors
+                    grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+                    input_flat = input.reshape(-1, input.shape[-1])
+                    grad_input = grad_flat @ weight
+                    grad_input = grad_input.reshape(input.shape)
+                    grad_weight = grad_flat.t() @ input_flat
+                    grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
+                    return grad_input, grad_weight, grad_bias
+
+            count = 0
+            for _name, module in model.named_modules():
+                if isinstance(module, nn.Linear):
+
+                    def _make_atom_forward(mod):
+                        def _forward(input):
+                            return _AtomLinearFn.apply(input, mod.weight, mod.bias)
+                        return _forward
+
+                    module.forward = _make_atom_forward(module)
+                    count += 1
+
+            if count:
+                _rank0_print(f"> Replaced {count} nn.Linear forward with ATOM TunedGemm.mm()")
+            return
 
         self._auto_tune_bf16_gemm(model)
 
@@ -460,6 +564,53 @@ class LumenConfig:
 
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+
+    def _patch_mlp_activation(self, model) -> None:
+        """Replace HF MLP forward with ATOM's fused ``aiter.silu_and_mul``."""
+        import torch
+
+        from aiter import silu_and_mul
+
+        class _AtomSiluAndMulFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                out = torch.empty(
+                    [*x.shape[:-1], x.shape[-1] // 2],
+                    device=x.device, dtype=x.dtype,
+                )
+                silu_and_mul(out, x)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, = ctx.saved_tensors
+                d = x.shape[-1] // 2
+                gate, up = x[..., :d], x[..., d:]
+                sig = torch.sigmoid(gate)
+                d_gate = grad_output * up * (sig + gate * sig * (1.0 - sig))
+                d_up = grad_output * (gate * sig)
+                return torch.cat([d_gate, d_up], dim=-1)
+
+        count = 0
+        for _name, module in model.named_modules():
+            if (hasattr(module, 'gate_proj') and hasattr(module, 'up_proj')
+                    and hasattr(module, 'down_proj') and hasattr(module, 'act_fn')):
+
+                def _make_atom_mlp_forward(m):
+                    def _forward(x):
+                        gate = m.gate_proj(x)
+                        up = m.up_proj(x)
+                        gate_up = torch.cat([gate, up], dim=-1)
+                        hidden = _AtomSiluAndMulFn.apply(gate_up)
+                        return m.down_proj(hidden)
+                    return _forward
+
+                module.forward = _make_atom_mlp_forward(module)
+                count += 1
+
+        if count:
+            _rank0_print(f"> Replaced {count} MLP forward with ATOM fused silu_and_mul")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
