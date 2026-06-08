@@ -371,6 +371,12 @@ class LumenConfig:
         import torch
 
         if atom_mode:
+            import os
+
+            if os.environ.get("ATOM_USE_TORCH_RMSNORM", "0") == "1":
+                _rank0_print("> ATOM rollout: ATOM_USE_TORCH_RMSNORM=1, keeping original RMSNorm")
+                return
+
             from aiter import rmsnorm2d_fwd
 
             class _AtomRMSNormFn(torch.autograd.Function):
