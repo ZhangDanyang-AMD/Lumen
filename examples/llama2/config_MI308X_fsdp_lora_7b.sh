@@ -20,6 +20,11 @@
 #       bash run_fsdp_lora_mi308.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Capture any env overrides BEFORE sourcing the base config, which unconditionally
+# exports TRAIN_STEPS/SAVE_* and would otherwise clobber a caller-provided value.
+_OVR_TRAIN_STEPS="${TRAIN_STEPS:-}"
+_OVR_SAVE_INTERVAL="${SAVE_INTERVAL:-}"
+_OVR_SAVE_CKPT="${SAVE_CKPT:-}"
 # Inherit all FSDP launcher defaults (NCCL/ROCm perf env, arg plumbing).
 source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"
 
@@ -42,7 +47,7 @@ export VAL_SAMPLES=500
 export SEQ_LEN=8192
 export MBS=1
 export GRAD_ACCUM=1          # GBS = MBS(1) x DP(8) x accum(1) = 8
-export TRAIN_STEPS=200       # full bring-up run
+export TRAIN_STEPS="${_OVR_TRAIN_STEPS:-200}"   # 7B default 200; override via env
 export LR=4e-4
 export MIN_LR=0
 export LR_WARMUP_STEPS=0
@@ -85,8 +90,16 @@ case "${MODE}" in
     # FP8 backward is unsupported (CLAUDE.md). Compute weight gradient in BF16.
     export FP8_WGRAD=0
     ;;
+  fp8_blockwise2d)
+    export FP8_TRAINING=1
+    export FP8_SCALING="blockwise2d"
+    # blockwise2d (Jet-RL) uses square 128x128 scale tiles and supports full FP8
+    # DGrad + WGrad. WGrad needs token count M % 128 == 0 — satisfied here since
+    # M = MBS(1) x seq_len(8192) = 8192.
+    export FP8_WGRAD=1
+    ;;
   *)
-    echo "ERROR: unknown MODE='${MODE}' (use: bf16 | fp8_delayed | fp8_blockwise)" >&2
+    echo "ERROR: unknown MODE='${MODE}' (use: bf16 | fp8_delayed | fp8_blockwise | fp8_blockwise2d)" >&2
     exit 1
     ;;
 esac
@@ -104,7 +117,7 @@ export STEP_TIME_ATOL=0      # no step-time assertion
 # ---- Logging / checkpoint / eval --------------------------------------------
 export LOG_INTERVAL=1
 export SAVE_DIR="/results/checkpoints"
-export SAVE_INTERVAL=0       # no checkpoint saves during the test
+export SAVE_INTERVAL="${_OVR_SAVE_INTERVAL:-0}"   # 0 = no periodic saves; override via env
 export EVAL_EVERY=80         # eval cadence in sequences -> 10 steps at GBS=8
 export EVAL_INTERVAL=0       # let run_finetune.sh derive from EVAL_EVERY
 export START_EVAL_AT=0
@@ -114,7 +127,7 @@ export SHARDING="full_shard"
 # ---- Misc --------------------------------------------------------------------
 export USE_SDMA=0
 export USE_CKPT=0
-export SAVE_CKPT=0
+export SAVE_CKPT="${_OVR_SAVE_CKPT:-0}"   # 1 = save final adapter; override via env
 
 # Disable online GEMM autotuning: the first-step tuning sweep adds minutes of
 # startup that is wasted for a short pipeline test. Default hipBLASLt heuristics

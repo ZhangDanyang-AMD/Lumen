@@ -52,6 +52,9 @@ docker run --rm --init \
     -e PYTORCH_TUNABLEOP_ENABLED=0 \
     -e RUN_CONFIG="${CONFIG}" \
     -e MODE="${MODE:-}" \
+    -e TRAIN_STEPS="${TRAIN_STEPS:-}" \
+    -e SAVE_INTERVAL="${SAVE_INTERVAL:-}" \
+    -e SAVE_CKPT="${SAVE_CKPT:-}" \
     "${IMAGE}" \
     bash -c '
 set -euo pipefail
