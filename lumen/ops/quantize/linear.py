@@ -496,22 +496,30 @@ def _expand_per_tensor_scale(scale, size):
     return scale.float().reshape(1).expand(size).contiguous()
 
 
-def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w):
+def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
+    # w_transposed is hipBLASLt-only (CK computes Y = A @ W^T directly); ignored here.
     from aiter.ops.gemm_op_a8w8 import gemm_a8w8_CK
 
     M, N = a_fp8.shape[0], w_fp8.shape[0]
     sa = _expand_per_tensor_scale(scale_a, M).unsqueeze(1)
     sw = _expand_per_tensor_scale(scale_w, N).unsqueeze(1)
-    return gemm_a8w8_CK(a_fp8, w_fp8, sa, sw)
+    out = gemm_a8w8_CK(a_fp8, w_fp8, sa, sw)
+    if bias is not None:
+        out = out + bias
+    return out
 
 
-def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w):
+def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
+    # w_transposed is hipBLASLt-only (Triton computes Y = A @ W^T directly); ignored here.
     from aiter.ops.triton.gemm.basic.gemm_a8w8 import gemm_a8w8
 
     M, N = a_fp8.shape[0], w_fp8.shape[0]
     sa = _expand_per_tensor_scale(scale_a, M)
     sw = _expand_per_tensor_scale(scale_w, N)
-    return gemm_a8w8(a_fp8, w_fp8, sa, sw)
+    out = gemm_a8w8(a_fp8, w_fp8, sa, sw)
+    if bias is not None:
+        out = out + bias
+    return out
 
 
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):

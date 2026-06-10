@@ -79,7 +79,14 @@ def _probe_aiter_static_quant() -> bool:
     if _AITER_STATIC_QUANT_AVAILABLE is not None:
         return _AITER_STATIC_QUANT_AVAILABLE
     try:
-        from aiter.ops.triton.quant import static_per_tensor_quant_fp8_i8  # noqa: F401
+        # The static-quant path uses both the plain kernel and the amax-fused
+        # variant (compute_amax=True). Require both so a partial/older AITER
+        # build cleanly falls back to the eager torch quant path instead of
+        # ImportError-ing mid-step.
+        from aiter.ops.triton.quant import (  # noqa: F401
+            static_per_tensor_quant_fp8_i8,
+            static_per_tensor_quant_fp8_i8_with_amax,
+        )
 
         _AITER_STATIC_QUANT_AVAILABLE = True
     except ImportError:

@@ -1,0 +1,1165 @@
+STARTING LLAMA2 FINETUNE AT 2026-06-10 08:56:05 AM (backend=fsdp)
++ ret_code=0
++ case "${BACKEND}" in
++ run_fsdp
++ python -c 'import transformers'
++ CMD='torchrun --nproc_per_node=8'
++ CMD+=' /workspace/Lumen/examples/llama2/finetune_llama2.py'
++ CMD+=' --backend fsdp'
++ CMD+=' --model-name-or-path /model-hf'
++ CMD+=' --tokenizer-name-or-path /workspace/Lumen/examples/llama2/tokenizer'
++ CMD+=' --seq-length 8192'
++ CMD+=' --micro-batch-size 1'
++ CMD+=' --gradient-accumulation-steps 1'
++ CMD+=' --max-steps 200'
++ CMD+=' --lr 4e-4'
++ CMD+=' --min-lr 0'
++ CMD+=' --lr-warmup-steps 0'
++ CMD+=' --weight-decay 1e-4'
++ CMD+=' --max-grad-norm 0.3'
++ CMD+=' --log-interval 1'
++ CMD+=' --save-interval 0'
++ CMD+=' --eval-interval 10'
++ CMD+=' --save-dir /results/checkpoints'
++ CMD+=' --num-workers 4'
++ CMD+=' --train-data-path /data/train.npy'
++ CMD+=' --train-samples 10000'
++ CMD+=' --val-samples 500'
++ CMD+=' --sharding-strategy full_shard'
++ '[' -n /data/validation.npy ']'
++ CMD+=' --val-data-path /data/validation.npy'
++ '[' 16 -gt 0 ']'
++ CMD+=' --lora-rank 16 --lora-alpha 32 --lora-dropout 0.1'
++ '[' 1 = 1 ']'
++ CMD+=' --linear-fp8'
++ CMD+=' --linear-fp8-format fp8_e4m3 --linear-fp8-scaling delayed'
++ CMD+=' --linear-fp8-block-size 128 --linear-fp8-amax-algo max'
++ CMD+=' --linear-fp8-amax-history 16'
++ '[' 0 = 1 ']'
++ '[' 1 = 0 ']'
++ '[' 1 = 0 ']'
++ '[' -n '' ']'
++ '[' 0 = 1 ']'
++ '[' 0 -eq 1 ']'
++ '[' 0 -gt 0 ']'
++ '[' -n '' ']'
++ CMD+=' --continual-ckpt-path /results/saved_ckpts'
++ CMD+=' --target-log-ppl 0.0'
++ CMD+=' --step-time-atol 0'
++ CMD+=' --ckpt-start-step 0'
++ CMD+=' --eval-every 80'
++ CMD+=' --start-eval-at 0'
++ CMD+=' --primus-turbo-fp8-attention 0'
++ CMD+=' --primus-turbo-mxfp8-attention 0'
++ CMD+=' --dbg-attn-output 0'
++ CMD+=' '
++ echo ================================================================
+================================================================
++ echo 'LLaMA2 SFT — FSDP backend'
+LLaMA2 SFT — FSDP backend
++ echo '  Config:     config_MI308X_fsdp_lora_7b_fp8_nowarmup.sh'
+  Config:     config_MI308X_fsdp_lora_7b_fp8_nowarmup.sh
++ echo '  Model:      /model-hf'
+  Model:      /model-hf
++ echo '  GPUs:       8'
+  GPUs:       8
++ echo '  Batch:      MBS=1 x accum=1 | seq_len=8192'
+  Batch:      MBS=1 x accum=1 | seq_len=8192
++ echo '  Sharding:   full_shard'
+  Sharding:   full_shard
++ echo '  LoRA:       rank=16'
+  LoRA:       rank=16
++ echo '  FP8:        training=1 format=fp8_e4m3'
+  FP8:        training=1 format=fp8_e4m3
++ echo '  SDMA:       use=0 mori=0'
+  SDMA:       use=0 mori=0
++ echo '  Primus:     fp8_attn=0 mxfp8_attn=0 dbg=0'
+  Primus:     fp8_attn=0 mxfp8_attn=0 dbg=0
++ echo '  Target:     log_ppl=0.0 step_atol=0'
+  Target:     log_ppl=0.0 step_atol=0
++ echo '  Ckpt:       use=0 save=0 fp8_params=0 start_step=0'
+  Ckpt:       use=0 save=0 fp8_params=0 start_step=0
++ echo '  Eval:       every=80seqs (10steps) start_at=0'
+  Eval:       every=80seqs (10steps) start_at=0
++ echo ================================================================
+================================================================
++ eval torchrun --nproc_per_node=8 /workspace/Lumen/examples/llama2/finetune_llama2.py --backend fsdp --model-name-or-path /model-hf --tokenizer-name-or-path /workspace/Lumen/examples/llama2/tokenizer --seq-length 8192 --micro-batch-size 1 --gradient-accumulation-steps 1 --max-steps 200 --lr 4e-4 --min-lr 0 --lr-warmup-steps 0 --weight-decay 1e-4 --max-grad-norm 0.3 --log-interval 1 --save-interval 0 --eval-interval 10 --save-dir /results/checkpoints --num-workers 4 --train-data-path /data/train.npy --train-samples 10000 --val-samples 500 --sharding-strategy full_shard --val-data-path /data/validation.npy --lora-rank 16 --lora-alpha 32 --lora-dropout 0.1 --linear-fp8 --linear-fp8-format fp8_e4m3 --linear-fp8-scaling delayed --linear-fp8-block-size 128 --linear-fp8-amax-algo max --linear-fp8-amax-history 16 --continual-ckpt-path /results/saved_ckpts --target-log-ppl 0.0 --step-time-atol 0 --ckpt-start-step 0 --eval-every 80 --start-eval-at 0 --primus-turbo-fp8-attention 0 --primus-turbo-mxfp8-attention 0 --dbg-attn-output 0
+++ torchrun --nproc_per_node=8 /workspace/Lumen/examples/llama2/finetune_llama2.py --backend fsdp --model-name-or-path /model-hf --tokenizer-name-or-path /workspace/Lumen/examples/llama2/tokenizer --seq-length 8192 --micro-batch-size 1 --gradient-accumulation-steps 1 --max-steps 200 --lr 4e-4 --min-lr 0 --lr-warmup-steps 0 --weight-decay 1e-4 --max-grad-norm 0.3 --log-interval 1 --save-interval 0 --eval-interval 10 --save-dir /results/checkpoints --num-workers 4 --train-data-path /data/train.npy --train-samples 10000 --val-samples 500 --sharding-strategy full_shard --val-data-path /data/validation.npy --lora-rank 16 --lora-alpha 32 --lora-dropout 0.1 --linear-fp8 --linear-fp8-format fp8_e4m3 --linear-fp8-scaling delayed --linear-fp8-block-size 128 --linear-fp8-amax-algo max --linear-fp8-amax-history 16 --continual-ckpt-path /results/saved_ckpts --target-log-ppl 0.0 --step-time-atol 0 --ckpt-start-step 0 --eval-every 80 --start-eval-at 0 --primus-turbo-fp8-attention 0 --primus-turbo-mxfp8-attention 0 --dbg-attn-output 0
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+[92mSuccessfully preprocessed all matching files.[0m
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+[W610 08:56:26.582369238 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.596352049 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602445999 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602454245 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602481900 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602516978 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602575157 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W610 08:56:26.602645267 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+WARNING:torchao:Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+INFO:lumen.models.fsdp:> Loading LLaMA2 from /model-hf ...
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<00:53,  5.39it/s]Loading weights:   0%|          | 1/291 [00:00<00:52,  5.57it/s]Loading weights:   0%|          | 1/291 [00:00<00:51,  5.68it/s]Loading weights:   0%|          | 1/291 [00:00<00:51,  5.66it/s]Loading weights:   0%|          | 1/291 [00:00<00:53,  5.45it/s]Loading weights:   0%|          | 1/291 [00:00<00:52,  5.49it/s]Loading weights:   0%|          | 1/291 [00:00<00:52,  5.51it/s]Loading weights:   0%|          | 1/291 [00:00<00:51,  5.61it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 80.17it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 79.02it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 77.67it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 80.14it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 82.14it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 83.66it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 84.52it/s]Loading weights:   8%|▊         | 22/291 [00:00<00:03, 80.19it/s]Loading weights:  11%|█▏        | 33/291 [00:00<00:02, 91.21it/s]Loading weights:  11%|█▏        | 33/291 [00:00<00:02, 87.71it/s]Loading weights:  11%|█▏        | 33/291 [00:00<00:02, 92.81it/s]Loading weights:  11%|█▏        | 33/291 [00:00<00:02, 90.22it/s]Loading weights:  13%|█▎        | 37/291 [00:00<00:02, 97.89it/s]Loading weights:  13%|█▎        | 37/291 [00:00<00:02, 98.77it/s]Loading weights:  13%|█▎        | 37/291 [00:00<00:02, 98.81it/s]Loading weights:  13%|█▎        | 37/291 [00:00<00:02, 103.13it/s]Loading weights:  16%|█▌        | 47/291 [00:00<00:02, 108.23it/s]Loading weights:  16%|█▌        | 47/291 [00:00<00:02, 106.80it/s]Loading weights:  16%|█▌        | 46/291 [00:00<00:02, 99.27it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:02, 97.75it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:02, 93.90it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:02, 96.67it/s] Loading weights:  17%|█▋        | 49/291 [00:00<00:02, 93.93it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:02, 93.38it/s]Loading weights:  20%|██        | 59/291 [00:00<00:02, 97.24it/s] Loading weights:  20%|██        | 59/291 [00:00<00:02, 97.94it/s] Loading weights:  21%|██        | 60/291 [00:00<00:02, 97.35it/s]Loading weights:  21%|██        | 60/291 [00:00<00:02, 97.36it/s]Loading weights:  21%|██        | 60/291 [00:00<00:02, 99.35it/s]Loading weights:  21%|██        | 60/291 [00:00<00:02, 96.97it/s]Loading weights:  21%|██        | 60/291 [00:00<00:02, 100.01it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:02, 88.84it/s]Loading weights:  24%|██▍       | 70/291 [00:00<00:02, 100.11it/s]Loading weights:  24%|██▍       | 70/291 [00:00<00:02, 99.50it/s]Loading weights:  25%|██▌       | 74/291 [00:00<00:01, 111.08it/s]Loading weights:  25%|██▌       | 74/291 [00:00<00:01, 110.54it/s]Loading weights:  25%|██▌       | 74/291 [00:00<00:01, 108.97it/s]Loading weights:  25%|██▌       | 74/291 [00:00<00:01, 108.98it/s]Loading weights:  25%|██▌       | 74/291 [00:00<00:01, 108.67it/s]Loading weights:  26%|██▌       | 76/291 [00:00<00:02, 100.79it/s]Loading weights:  29%|██▉       | 85/291 [00:00<00:02, 99.96it/s] Loading weights:  30%|██▉       | 86/291 [00:00<00:02, 99.81it/s] Loading weights:  30%|██▉       | 86/291 [00:00<00:02, 100.72it/s]Loading weights:  30%|██▉       | 86/291 [00:00<00:02, 100.99it/s]Loading weights:  29%|██▉       | 85/291 [00:00<00:02, 99.56it/s]Loading weights:  30%|██▉       | 86/291 [00:00<00:02, 99.57it/s] Loading weights:  30%|██▉       | 86/291 [00:00<00:02, 99.36it/s] Loading weights:  30%|██▉       | 87/291 [00:00<00:01, 102.90it/s]Loading weights:  33%|███▎      | 97/291 [00:01<00:01, 102.13it/s]Loading weights:  33%|███▎      | 97/291 [00:01<00:01, 102.04it/s]Loading weights:  33%|███▎      | 97/291 [00:01<00:01, 102.71it/s]Loading weights:  33%|███▎      | 97/291 [00:01<00:01, 102.87it/s]Loading weights:  33%|███▎      | 96/291 [00:01<00:01, 102.06it/s]Loading weights:  33%|███▎      | 97/291 [00:01<00:01, 101.97it/s]Loading weights:  33%|███▎      | 96/291 [00:01<00:01, 101.82it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:01, 104.73it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 100.51it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 100.56it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 100.92it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 101.02it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 102.89it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 100.43it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:01, 102.73it/s]Loading weights:  39%|███▉      | 114/291 [00:01<00:01, 104.44it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 103.67it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 102.25it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 101.86it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 101.88it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 101.84it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 102.15it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:01, 103.56it/s]Loading weights:  44%|████▍     | 128/291 [00:01<00:01, 113.57it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 103.33it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 103.06it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 103.26it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 103.09it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 104.10it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 104.02it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:01, 102.92it/s]Loading weights:  48%|████▊     | 140/291 [00:01<00:01, 101.83it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 103.67it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 104.47it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 103.63it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 103.61it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 103.76it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 104.51it/s]Loading weights:  52%|█████▏    | 150/291 [00:01<00:01, 103.79it/s]Loading weights:  53%|█████▎    | 154/291 [00:01<00:01, 110.25it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 103.91it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 104.37it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 103.79it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 100.32it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 104.34it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 103.78it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 103.87it/s]Loading weights:  57%|█████▋    | 166/291 [00:01<00:01, 103.79it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.18it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.11it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.12it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.53it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 101.54it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.18it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.50it/s]Loading weights:  61%|██████    | 177/291 [00:01<00:01, 104.10it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 104.11it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 102.18it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 103.85it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 103.85it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 103.79it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 104.05it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 103.78it/s]Loading weights:  66%|██████▋   | 193/291 [00:01<00:00, 103.77it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 104.14it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 103.98it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 104.14it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 102.69it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 103.96it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 103.93it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 103.93it/s]Loading weights:  70%|███████   | 204/291 [00:02<00:00, 103.96it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 104.11it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 104.01it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 104.11it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 103.97it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 103.98it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 103.99it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 104.00it/s]Loading weights:  76%|███████▌  | 220/291 [00:02<00:00, 103.15it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.09it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.10it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.08it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.18it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.10it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.18it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 103.49it/s]Loading weights:  79%|███████▉  | 231/291 [00:02<00:00, 104.10it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.25it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.25it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.26it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.27it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.30it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.30it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 103.84it/s]Loading weights:  85%|████████▍ | 247/291 [00:02<00:00, 104.25it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.33it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.33it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.34it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.34it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.30it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.26it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 104.30it/s]Loading weights:  89%|████████▊ | 258/291 [00:02<00:00, 103.96it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.86it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.80it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.79it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.80it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.63it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.86it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.80it/s]Loading weights:  94%|█████████▍| 274/291 [00:02<00:00, 104.82it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.21it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.21it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.22it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.20it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.18it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.18it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.15it/s]Loading weights:  98%|█████████▊| 285/291 [00:02<00:00, 105.01it/s]Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.35it/s]
+Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.21it/s]Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.84it/s]
+
+Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.21it/s]
+Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.40it/s]
+Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.65it/s]Loading weights: 100%|██████████| 291/291 [00:02<00:00, 101.79it/s]
+
+Loading weights: 100%|██████████| 291/291 [00:02<00:00, 102.02it/s]
+INFO:lumen.models.fsdp:> Gradient checkpointing enabled
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.config:> LoRA applied (rank=16, alpha=32.0) — trainable: 39,976,960 / 6,778,392,576 (0.59%)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.config:> LumenConfig enabled (format=fp8_e4m3, scaling=delayed, lora_rank=16)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+INFO:lumen.quantize:Quantization enabled on 673 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=delayed, amax_algo=max, weight+activation)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+INFO:lumen.models.fsdp:> FSDP model ready (version=1, sharding=full_shard, world_size=8)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+RCCL version : 2.26.6-HEAD:17055da
+HIP version  : 7.0.51831-a3e329ad8
+ROCm version : 7.0.0.0-82-9428210
+Hostname     : hjbog-srdc-34
+Librccl path : /opt/rocm/lib/librccl.so.1
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:28:429 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:27:427 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:26:433 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:24:428 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:25:431 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:29:432 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:22:426 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-10 08:56:41] hjbog-srdc-34:23:430 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] start build [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_gemm_a8w8
+INFO:aiter:start build [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_gemm_a8w8
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8
+[aiter] [32mfinish build [module_gemm_a8w8], cost 169.0s [0m
+INFO:aiter:[32mfinish build [module_gemm_a8w8], cost 169.0s [0m
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+INFO:aiter:import [module_gemm_a8w8] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8.so
+[aiter] type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> gemm_a8w8(XQ: torch.Tensor, WQ: torch.Tensor, x_scale: torch.Tensor, w_scale: torch.Tensor, Out: torch.Tensor, bias: Optional[torch.Tensor] = None, splitK: int | typing.SupportsIndex = 0) -> torch.Tensor
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:11008, K:16, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:4096, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:16, K:11008, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:8192, N:32000, K:4096, q_dtype_w:torch.float8_e4m3fnuz, not found tuned config in /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_tuned_gemm.csv, will use default config!
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+INFO:aiter:import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+INFO:lumen.ops.quantize.linear:hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+[aiter] type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+WARNING:aiter:type hints mismatch, override to --> hipb_mm(mat1: torch.Tensor, mat2: torch.Tensor, solution_index: int | typing.SupportsIndex, bias: Optional[torch.Tensor] = None, out_dtype: Optional[torch.dtype] = None, scaleA: Optional[torch.Tensor] = None, scaleB: Optional[torch.Tensor] = None, scaleOut: Optional[torch.Tensor] = None, bpreshuffle: Optional[bool] = None) -> torch.Tensor
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:1204: UserWarning: Called FSDP.clip_grad_norm_() on rank 5 with no gradients -- returning the total norm in the default dtype torch.float32
+  warnings.warn(
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:1204: UserWarning: Called FSDP.clip_grad_norm_() on rank 3 with no gradients -- returning the total norm in the default dtype torch.float32
+  warnings.warn(
+INFO:lumen.models.fsdp:  step 1/200 | loss 4.5907 | lr 4.00e-04 | step_time_ms 188397.2
+INFO:lumen.models.fsdp:  step 2/200 | loss 4.7164 | lr 4.00e-04 | step_time_ms 6765.1
+INFO:lumen.models.fsdp:  step 3/200 | loss 4.2934 | lr 4.00e-04 | step_time_ms 6763.9
+INFO:lumen.models.fsdp:  step 4/200 | loss 4.1726 | lr 4.00e-04 | step_time_ms 6823.4
+INFO:lumen.models.fsdp:  step 5/200 | loss 3.9764 | lr 3.99e-04 | step_time_ms 6764.3
+INFO:lumen.models.fsdp:  step 6/200 | loss 3.8029 | lr 3.99e-04 | step_time_ms 6763.7
+INFO:lumen.models.fsdp:  step 7/200 | loss 3.8584 | lr 3.99e-04 | step_time_ms 6765.1
+INFO:lumen.models.fsdp:  step 8/200 | loss 3.6217 | lr 3.98e-04 | step_time_ms 6761.8
+INFO:lumen.models.fsdp:  step 9/200 | loss 3.4256 | lr 3.98e-04 | step_time_ms 7483.2
+INFO:lumen.models.fsdp:  step 10/200 | loss 3.5343 | lr 3.98e-04 | step_time_ms 7215.0
+INFO:lumen.models.fsdp:  step 10/200 | val_loss 3.2423
+INFO:lumen.models.fsdp:  step 11/200 | loss 3.5627 | lr 3.97e-04 | step_time_ms 6757.5
+INFO:lumen.models.fsdp:  step 12/200 | loss 3.2724 | lr 3.96e-04 | step_time_ms 6761.5
+INFO:lumen.models.fsdp:  step 13/200 | loss 3.1867 | lr 3.96e-04 | step_time_ms 6763.4
+INFO:lumen.models.fsdp:  step 14/200 | loss 2.9856 | lr 3.95e-04 | step_time_ms 6769.3
+INFO:lumen.models.fsdp:  step 15/200 | loss 2.9268 | lr 3.94e-04 | step_time_ms 6768.4
+INFO:lumen.models.fsdp:  step 16/200 | loss 2.6440 | lr 3.94e-04 | step_time_ms 6768.5
+INFO:lumen.models.fsdp:  step 17/200 | loss 2.7841 | lr 3.93e-04 | step_time_ms 6762.7
+INFO:lumen.models.fsdp:  step 18/200 | loss 2.7395 | lr 3.92e-04 | step_time_ms 7938.4
+INFO:lumen.models.fsdp:  step 19/200 | loss 2.3229 | lr 3.91e-04 | step_time_ms 8019.3
+INFO:lumen.models.fsdp:  step 20/200 | loss 2.6441 | lr 3.90e-04 | step_time_ms 6769.9
+INFO:lumen.models.fsdp:  step 20/200 | val_loss 2.4196
+INFO:lumen.models.fsdp:  step 21/200 | loss 2.4189 | lr 3.89e-04 | step_time_ms 6822.4
+INFO:lumen.models.fsdp:  step 22/200 | loss 2.3547 | lr 3.88e-04 | step_time_ms 6772.4
+INFO:lumen.models.fsdp:  step 23/200 | loss 2.4905 | lr 3.87e-04 | step_time_ms 6771.9
+INFO:lumen.models.fsdp:  step 24/200 | loss 2.5816 | lr 3.86e-04 | step_time_ms 6766.6
+INFO:lumen.models.fsdp:  step 25/200 | loss 2.0633 | lr 3.85e-04 | step_time_ms 6829.0
+INFO:lumen.models.fsdp:  step 26/200 | loss 2.6015 | lr 3.84e-04 | step_time_ms 6763.1
+INFO:lumen.models.fsdp:  step 27/200 | loss 2.0631 | lr 3.82e-04 | step_time_ms 8631.3
+INFO:lumen.models.fsdp:  step 28/200 | loss 2.2582 | lr 3.81e-04 | step_time_ms 7334.8
+INFO:lumen.models.fsdp:  step 29/200 | loss 2.3031 | lr 3.80e-04 | step_time_ms 6770.5
+INFO:lumen.models.fsdp:  step 30/200 | loss 1.8920 | lr 3.78e-04 | step_time_ms 6764.2
+INFO:lumen.models.fsdp:  step 30/200 | val_loss 1.9559
+INFO:lumen.models.fsdp:  step 31/200 | loss 2.1417 | lr 3.77e-04 | step_time_ms 6763.0
+INFO:lumen.models.fsdp:  step 32/200 | loss 2.0668 | lr 3.75e-04 | step_time_ms 6764.7
+INFO:lumen.models.fsdp:  step 33/200 | loss 2.0167 | lr 3.74e-04 | step_time_ms 6769.7
+INFO:lumen.models.fsdp:  step 34/200 | loss 2.2149 | lr 3.72e-04 | step_time_ms 6764.6
+INFO:lumen.models.fsdp:  step 35/200 | loss 1.8710 | lr 3.71e-04 | step_time_ms 7261.4
+INFO:lumen.models.fsdp:  step 36/200 | loss 1.9556 | lr 3.69e-04 | step_time_ms 7952.8
+INFO:lumen.models.fsdp:  step 37/200 | loss 1.8013 | lr 3.67e-04 | step_time_ms 8067.5
+INFO:lumen.models.fsdp:  step 38/200 | loss 1.9874 | lr 3.65e-04 | step_time_ms 6763.4
+INFO:lumen.models.fsdp:  step 39/200 | loss 1.8804 | lr 3.64e-04 | step_time_ms 6769.6
+INFO:lumen.models.fsdp:  step 40/200 | loss 1.8379 | lr 3.62e-04 | step_time_ms 6772.2
+INFO:lumen.models.fsdp:  step 40/200 | val_loss 1.6935
+INFO:lumen.models.fsdp:  step 41/200 | loss 1.7254 | lr 3.60e-04 | step_time_ms 6759.5
+INFO:lumen.models.fsdp:  step 42/200 | loss 1.6827 | lr 3.58e-04 | step_time_ms 6761.9
+INFO:lumen.models.fsdp:  step 43/200 | loss 1.7494 | lr 3.56e-04 | step_time_ms 6763.5
+INFO:lumen.models.fsdp:  step 44/200 | loss 2.0422 | lr 3.54e-04 | step_time_ms 7232.9
+INFO:lumen.models.fsdp:  step 45/200 | loss 1.7269 | lr 3.52e-04 | step_time_ms 7977.6
+INFO:lumen.models.fsdp:  step 46/200 | loss 1.6921 | lr 3.50e-04 | step_time_ms 7994.8
+INFO:lumen.models.fsdp:  step 47/200 | loss 1.7520 | lr 3.48e-04 | step_time_ms 6845.5
+INFO:lumen.models.fsdp:  step 48/200 | loss 1.6722 | lr 3.46e-04 | step_time_ms 6762.4
+INFO:lumen.models.fsdp:  step 49/200 | loss 1.8979 | lr 3.44e-04 | step_time_ms 6764.1
+INFO:lumen.models.fsdp:  step 50/200 | loss 1.6926 | lr 3.41e-04 | step_time_ms 6765.5
+INFO:lumen.models.fsdp:  step 50/200 | val_loss 1.5644
+INFO:lumen.models.fsdp:  step 51/200 | loss 1.6195 | lr 3.39e-04 | step_time_ms 6823.6
+INFO:lumen.models.fsdp:  step 52/200 | loss 1.4554 | lr 3.37e-04 | step_time_ms 6892.3
+INFO:lumen.models.fsdp:  step 53/200 | loss 1.7788 | lr 3.35e-04 | step_time_ms 7352.7
+INFO:lumen.models.fsdp:  step 54/200 | loss 2.0219 | lr 3.32e-04 | step_time_ms 8266.0
+INFO:lumen.models.fsdp:  step 55/200 | loss 1.6900 | lr 3.30e-04 | step_time_ms 7805.9
+INFO:lumen.models.fsdp:  step 56/200 | loss 1.6178 | lr 3.27e-04 | step_time_ms 6830.4
+INFO:lumen.models.fsdp:  step 57/200 | loss 1.7939 | lr 3.25e-04 | step_time_ms 6771.1
+INFO:lumen.models.fsdp:  step 58/200 | loss 1.6550 | lr 3.23e-04 | step_time_ms 6769.8
+INFO:lumen.models.fsdp:  step 59/200 | loss 1.5777 | lr 3.20e-04 | step_time_ms 6769.0
+INFO:lumen.models.fsdp:  step 60/200 | loss 1.7285 | lr 3.18e-04 | step_time_ms 6769.5
+INFO:lumen.models.fsdp:  step 60/200 | val_loss 1.4982
+INFO:lumen.models.fsdp:  step 61/200 | loss 1.6949 | lr 3.15e-04 | step_time_ms 6823.5
+INFO:lumen.models.fsdp:  step 62/200 | loss 1.6441 | lr 3.12e-04 | step_time_ms 7473.2
+INFO:lumen.models.fsdp:  step 63/200 | loss 1.6972 | lr 3.10e-04 | step_time_ms 8349.0
+INFO:lumen.models.fsdp:  step 64/200 | loss 1.4603 | lr 3.07e-04 | step_time_ms 7441.5
+INFO:lumen.models.fsdp:  step 65/200 | loss 1.6326 | lr 3.04e-04 | step_time_ms 6771.1
+INFO:lumen.models.fsdp:  step 66/200 | loss 1.5522 | lr 3.02e-04 | step_time_ms 6772.8
+INFO:lumen.models.fsdp:  step 67/200 | loss 1.5169 | lr 2.99e-04 | step_time_ms 6771.1
+INFO:lumen.models.fsdp:  step 68/200 | loss 1.6543 | lr 2.96e-04 | step_time_ms 6761.2
+INFO:lumen.models.fsdp:  step 69/200 | loss 1.5447 | lr 2.94e-04 | step_time_ms 6762.6
+INFO:lumen.models.fsdp:  step 70/200 | loss 1.5926 | lr 2.91e-04 | step_time_ms 6761.9
+INFO:lumen.models.fsdp:  step 70/200 | val_loss 1.4624
+INFO:lumen.models.fsdp:  step 71/200 | loss 1.3268 | lr 2.88e-04 | step_time_ms 7474.6
+INFO:lumen.models.fsdp:  step 72/200 | loss 1.6621 | lr 2.85e-04 | step_time_ms 10222.3
+INFO:lumen.models.fsdp:  step 73/200 | loss 1.7113 | lr 2.82e-04 | step_time_ms 7456.8
+INFO:lumen.models.fsdp:  step 74/200 | loss 1.6842 | lr 2.79e-04 | step_time_ms 6762.3
+INFO:lumen.models.fsdp:  step 75/200 | loss 1.5002 | lr 2.77e-04 | step_time_ms 6769.8
+INFO:lumen.models.fsdp:  step 76/200 | loss 1.7277 | lr 2.74e-04 | step_time_ms 6770.1
+INFO:lumen.models.fsdp:  step 77/200 | loss 1.5069 | lr 2.71e-04 | step_time_ms 6825.5
+INFO:lumen.models.fsdp:  step 78/200 | loss 1.5959 | lr 2.68e-04 | step_time_ms 6761.2
+INFO:lumen.models.fsdp:  step 79/200 | loss 1.6464 | lr 2.65e-04 | step_time_ms 6765.3
+INFO:lumen.models.fsdp:  step 80/200 | loss 1.5653 | lr 2.62e-04 | step_time_ms 6762.0
+INFO:lumen.models.fsdp:  step 80/200 | val_loss 1.4405
+INFO:lumen.models.fsdp:  step 81/200 | loss 1.4153 | lr 2.59e-04 | step_time_ms 9037.6
+INFO:lumen.models.fsdp:  step 82/200 | loss 1.5070 | lr 2.56e-04 | step_time_ms 7335.1
+INFO:lumen.models.fsdp:  step 83/200 | loss 1.6028 | lr 2.53e-04 | step_time_ms 6766.9
+INFO:lumen.models.fsdp:  step 84/200 | loss 1.3411 | lr 2.50e-04 | step_time_ms 6761.3
+INFO:lumen.models.fsdp:  step 85/200 | loss 1.6392 | lr 2.47e-04 | step_time_ms 6767.8
+INFO:lumen.models.fsdp:  step 86/200 | loss 1.4837 | lr 2.44e-04 | step_time_ms 6762.2
+INFO:lumen.models.fsdp:  step 87/200 | loss 1.4752 | lr 2.41e-04 | step_time_ms 6768.8
+INFO:lumen.models.fsdp:  step 88/200 | loss 1.2716 | lr 2.37e-04 | step_time_ms 6766.7
+INFO:lumen.models.fsdp:  step 89/200 | loss 1.4759 | lr 2.34e-04 | step_time_ms 6766.0
+INFO:lumen.models.fsdp:  step 90/200 | loss 1.5585 | lr 2.31e-04 | step_time_ms 7250.9
+INFO:lumen.models.fsdp:  step 90/200 | val_loss 1.4251
+INFO:lumen.models.fsdp:  step 91/200 | loss 1.5008 | lr 2.28e-04 | step_time_ms 8027.8
+INFO:lumen.models.fsdp:  step 92/200 | loss 1.4131 | lr 2.25e-04 | step_time_ms 6760.8
+INFO:lumen.models.fsdp:  step 93/200 | loss 1.5434 | lr 2.22e-04 | step_time_ms 6762.6
+INFO:lumen.models.fsdp:  step 94/200 | loss 1.6415 | lr 2.19e-04 | step_time_ms 6763.4
+INFO:lumen.models.fsdp:  step 95/200 | loss 1.5721 | lr 2.16e-04 | step_time_ms 6769.4
+INFO:lumen.models.fsdp:  step 96/200 | loss 1.6266 | lr 2.13e-04 | step_time_ms 6769.1
+INFO:lumen.models.fsdp:  step 97/200 | loss 1.5458 | lr 2.09e-04 | step_time_ms 6760.5
+INFO:lumen.models.fsdp:  step 98/200 | loss 1.5261 | lr 2.06e-04 | step_time_ms 6764.1
+INFO:lumen.models.fsdp:  step 99/200 | loss 1.3759 | lr 2.03e-04 | step_time_ms 7246.4
+INFO:lumen.models.fsdp:  step 100/200 | loss 1.4650 | lr 2.00e-04 | step_time_ms 7763.0
+INFO:lumen.models.fsdp:  step 100/200 | val_loss 1.4148
+INFO:lumen.models.fsdp:  step 101/200 | loss 1.6728 | lr 1.97e-04 | step_time_ms 7532.3
+INFO:lumen.models.fsdp:  step 102/200 | loss 1.6246 | lr 1.94e-04 | step_time_ms 6825.8
+INFO:lumen.models.fsdp:  step 103/200 | loss 1.4951 | lr 1.91e-04 | step_time_ms 6766.2
+INFO:lumen.models.fsdp:  step 104/200 | loss 1.3971 | lr 1.87e-04 | step_time_ms 6759.2
+INFO:lumen.models.fsdp:  step 105/200 | loss 1.5531 | lr 1.84e-04 | step_time_ms 6822.8
+INFO:lumen.models.fsdp:  step 106/200 | loss 1.5104 | lr 1.81e-04 | step_time_ms 6885.0
+INFO:lumen.models.fsdp:  step 107/200 | loss 1.4748 | lr 1.78e-04 | step_time_ms 6765.7
+INFO:lumen.models.fsdp:  step 108/200 | loss 1.4680 | lr 1.75e-04 | step_time_ms 7244.5
+INFO:lumen.models.fsdp:  step 109/200 | loss 1.5248 | lr 1.72e-04 | step_time_ms 7965.5
+INFO:lumen.models.fsdp:  step 110/200 | loss 1.6945 | lr 1.69e-04 | step_time_ms 7348.9
+INFO:lumen.models.fsdp:  step 110/200 | val_loss 1.4083
+INFO:lumen.models.fsdp:  step 111/200 | loss 1.5495 | lr 1.66e-04 | step_time_ms 6758.2
+INFO:lumen.models.fsdp:  step 112/200 | loss 1.7694 | lr 1.63e-04 | step_time_ms 6760.8
+INFO:lumen.models.fsdp:  step 113/200 | loss 1.6038 | lr 1.59e-04 | step_time_ms 6762.2
+INFO:lumen.models.fsdp:  step 114/200 | loss 1.6414 | lr 1.56e-04 | step_time_ms 6778.7
+INFO:lumen.models.fsdp:  step 115/200 | loss 1.5490 | lr 1.53e-04 | step_time_ms 6760.5
+INFO:lumen.models.fsdp:  step 116/200 | loss 1.2623 | lr 1.50e-04 | step_time_ms 6831.6
+INFO:lumen.models.fsdp:  step 117/200 | loss 1.6465 | lr 1.47e-04 | step_time_ms 7734.6
+INFO:lumen.models.fsdp:  step 118/200 | loss 1.5108 | lr 1.44e-04 | step_time_ms 8100.9
+INFO:lumen.models.fsdp:  step 119/200 | loss 1.5618 | lr 1.41e-04 | step_time_ms 6760.7
+INFO:lumen.models.fsdp:  step 120/200 | loss 1.5046 | lr 1.38e-04 | step_time_ms 6762.0
+INFO:lumen.models.fsdp:  step 120/200 | val_loss 1.4026
+INFO:lumen.models.fsdp:  step 121/200 | loss 1.4116 | lr 1.35e-04 | step_time_ms 6758.4
+INFO:lumen.models.fsdp:  step 122/200 | loss 1.4892 | lr 1.32e-04 | step_time_ms 6762.9
+INFO:lumen.models.fsdp:  step 123/200 | loss 1.5836 | lr 1.29e-04 | step_time_ms 6762.9
+INFO:lumen.models.fsdp:  step 124/200 | loss 1.5967 | lr 1.26e-04 | step_time_ms 6765.5
+INFO:lumen.models.fsdp:  step 125/200 | loss 1.8165 | lr 1.23e-04 | step_time_ms 7305.1
+INFO:lumen.models.fsdp:  step 126/200 | loss 1.5589 | lr 1.21e-04 | step_time_ms 9451.3
+INFO:lumen.models.fsdp:  step 127/200 | loss 1.6948 | lr 1.18e-04 | step_time_ms 6764.1
+INFO:lumen.models.fsdp:  step 128/200 | loss 1.6684 | lr 1.15e-04 | step_time_ms 7513.5
+INFO:lumen.models.fsdp:  step 129/200 | loss 1.5081 | lr 1.12e-04 | step_time_ms 6763.0
+INFO:lumen.models.fsdp:  step 130/200 | loss 1.3774 | lr 1.09e-04 | step_time_ms 6762.7
+INFO:lumen.models.fsdp:  step 130/200 | val_loss 1.3987
+INFO:lumen.models.fsdp:  step 131/200 | loss 1.3680 | lr 1.06e-04 | step_time_ms 6758.7
+INFO:lumen.models.fsdp:  step 132/200 | loss 1.8015 | lr 1.04e-04 | step_time_ms 6762.6
+INFO:lumen.models.fsdp:  step 133/200 | loss 1.7773 | lr 1.01e-04 | step_time_ms 6763.9
+INFO:lumen.models.fsdp:  step 134/200 | loss 1.2999 | lr 9.82e-05 | step_time_ms 7725.7
+INFO:lumen.models.fsdp:  step 135/200 | loss 1.2823 | lr 9.55e-05 | step_time_ms 7384.6
+INFO:lumen.models.fsdp:  step 136/200 | loss 1.3737 | lr 9.28e-05 | step_time_ms 6764.0
+INFO:lumen.models.fsdp:  step 137/200 | loss 1.5672 | lr 9.02e-05 | step_time_ms 7503.0
+INFO:lumen.models.fsdp:  step 138/200 | loss 1.5838 | lr 8.76e-05 | step_time_ms 6768.3
+INFO:lumen.models.fsdp:  step 139/200 | loss 1.5466 | lr 8.50e-05 | step_time_ms 6768.7
+INFO:lumen.models.fsdp:  step 140/200 | loss 1.7155 | lr 8.24e-05 | step_time_ms 6760.8
+INFO:lumen.models.fsdp:  step 140/200 | val_loss 1.3966
+INFO:lumen.models.fsdp:  step 141/200 | loss 1.6486 | lr 7.99e-05 | step_time_ms 6759.4
+INFO:lumen.models.fsdp:  step 142/200 | loss 1.7888 | lr 7.74e-05 | step_time_ms 7239.9
+INFO:lumen.models.fsdp:  step 143/200 | loss 1.6065 | lr 7.50e-05 | step_time_ms 6763.6
+INFO:lumen.models.fsdp:  step 144/200 | loss 1.3754 | lr 7.25e-05 | step_time_ms 7363.7
+INFO:lumen.models.fsdp:  step 145/200 | loss 1.3984 | lr 7.01e-05 | step_time_ms 7413.7
+INFO:lumen.models.fsdp:  step 146/200 | loss 1.3503 | lr 6.77e-05 | step_time_ms 7433.4
+INFO:lumen.models.fsdp:  step 147/200 | loss 1.4407 | lr 6.54e-05 | step_time_ms 6774.3
+INFO:lumen.models.fsdp:  step 148/200 | loss 1.5127 | lr 6.31e-05 | step_time_ms 6761.0
+INFO:lumen.models.fsdp:  step 149/200 | loss 1.4385 | lr 6.08e-05 | step_time_ms 6764.4
+INFO:lumen.models.fsdp:  step 150/200 | loss 1.3028 | lr 5.86e-05 | step_time_ms 6762.4
+INFO:lumen.models.fsdp:  step 150/200 | val_loss 1.3946
+INFO:lumen.models.fsdp:  step 151/200 | loss 1.4260 | lr 5.64e-05 | step_time_ms 6760.1
+INFO:lumen.models.fsdp:  step 152/200 | loss 1.7963 | lr 5.42e-05 | step_time_ms 7329.8
+INFO:lumen.models.fsdp:  step 153/200 | loss 1.6384 | lr 5.21e-05 | step_time_ms 7244.7
+INFO:lumen.models.fsdp:  step 154/200 | loss 1.2401 | lr 5.00e-05 | step_time_ms 7338.1
+INFO:lumen.models.fsdp:  step 155/200 | loss 1.5561 | lr 4.79e-05 | step_time_ms 7387.8
+INFO:lumen.models.fsdp:  step 156/200 | loss 1.4358 | lr 4.59e-05 | step_time_ms 6768.4
+INFO:lumen.models.fsdp:  step 157/200 | loss 1.8858 | lr 4.39e-05 | step_time_ms 6762.3
+INFO:lumen.models.fsdp:  step 158/200 | loss 1.5421 | lr 4.20e-05 | step_time_ms 6760.9
+INFO:lumen.models.fsdp:  step 159/200 | loss 1.5167 | lr 4.01e-05 | step_time_ms 6763.5
+INFO:lumen.models.fsdp:  step 160/200 | loss 1.6830 | lr 3.82e-05 | step_time_ms 6761.4
+INFO:lumen.models.fsdp:  step 160/200 | val_loss 1.3934
+INFO:lumen.models.fsdp:  step 161/200 | loss 1.5129 | lr 3.64e-05 | step_time_ms 7454.9
+INFO:lumen.models.fsdp:  step 162/200 | loss 1.5116 | lr 3.46e-05 | step_time_ms 7896.5
+INFO:lumen.models.fsdp:  step 163/200 | loss 1.6919 | lr 3.28e-05 | step_time_ms 6826.4
+INFO:lumen.models.fsdp:  step 164/200 | loss 1.3436 | lr 3.11e-05 | step_time_ms 7509.2
+INFO:lumen.models.fsdp:  step 165/200 | loss 1.5837 | lr 2.95e-05 | step_time_ms 6764.5
+INFO:lumen.models.fsdp:  step 166/200 | loss 1.3542 | lr 2.79e-05 | step_time_ms 6765.7
+INFO:lumen.models.fsdp:  step 167/200 | loss 1.4735 | lr 2.63e-05 | step_time_ms 6763.5
+INFO:lumen.models.fsdp:  step 168/200 | loss 1.3041 | lr 2.47e-05 | step_time_ms 6764.0
+INFO:lumen.models.fsdp:  step 169/200 | loss 1.4880 | lr 2.32e-05 | step_time_ms 6829.1
+INFO:lumen.models.fsdp:  step 170/200 | loss 1.8301 | lr 2.18e-05 | step_time_ms 6827.2
+INFO:lumen.models.fsdp:  step 170/200 | val_loss 1.3926
+INFO:lumen.models.fsdp:  step 171/200 | loss 1.6165 | lr 2.04e-05 | step_time_ms 8631.6
+INFO:lumen.models.fsdp:  step 172/200 | loss 1.3300 | lr 1.90e-05 | step_time_ms 6763.2
+INFO:lumen.models.fsdp:  step 173/200 | loss 1.4810 | lr 1.77e-05 | step_time_ms 7507.1
+INFO:lumen.models.fsdp:  step 174/200 | loss 1.3113 | lr 1.64e-05 | step_time_ms 6768.9
+INFO:lumen.models.fsdp:  step 175/200 | loss 1.3512 | lr 1.52e-05 | step_time_ms 6767.8
+INFO:lumen.models.fsdp:  step 176/200 | loss 1.6902 | lr 1.40e-05 | step_time_ms 6768.0
+INFO:lumen.models.fsdp:  step 177/200 | loss 1.4967 | lr 1.29e-05 | step_time_ms 6768.2
+INFO:lumen.models.fsdp:  step 178/200 | loss 1.6917 | lr 1.18e-05 | step_time_ms 6764.6
+INFO:lumen.models.fsdp:  step 179/200 | loss 1.3231 | lr 1.08e-05 | step_time_ms 6834.3
+INFO:lumen.models.fsdp:  step 180/200 | loss 1.7861 | lr 9.79e-06 | step_time_ms 8802.4
+INFO:lumen.models.fsdp:  step 180/200 | val_loss 1.3923
+INFO:lumen.models.fsdp:  step 181/200 | loss 1.6398 | lr 8.84e-06 | step_time_ms 7276.4
+INFO:lumen.models.fsdp:  step 182/200 | loss 1.3189 | lr 7.94e-06 | step_time_ms 7445.1
+INFO:lumen.models.fsdp:  step 183/200 | loss 1.5295 | lr 7.09e-06 | step_time_ms 6761.7
+INFO:lumen.models.fsdp:  step 184/200 | loss 1.6348 | lr 6.28e-06 | step_time_ms 6761.4
+INFO:lumen.models.fsdp:  step 185/200 | loss 1.4643 | lr 5.53e-06 | step_time_ms 6763.2
+INFO:lumen.models.fsdp:  step 186/200 | loss 1.5353 | lr 4.82e-06 | step_time_ms 6764.1
+INFO:lumen.models.fsdp:  step 187/200 | loss 1.5182 | lr 4.16e-06 | step_time_ms 6762.8
+INFO:lumen.models.fsdp:  step 188/200 | loss 1.5165 | lr 3.54e-06 | step_time_ms 6764.6
+INFO:lumen.models.fsdp:  step 189/200 | loss 1.2770 | lr 2.98e-06 | step_time_ms 7354.7
+INFO:lumen.models.fsdp:  step 190/200 | loss 1.5464 | lr 2.46e-06 | step_time_ms 7728.0
+INFO:lumen.models.fsdp:  step 190/200 | val_loss 1.3922
+INFO:lumen.models.fsdp:  step 191/200 | loss 1.7774 | lr 2.00e-06 | step_time_ms 7524.2
+INFO:lumen.models.fsdp:  step 192/200 | loss 1.6523 | lr 1.58e-06 | step_time_ms 6765.3
+INFO:lumen.models.fsdp:  step 193/200 | loss 1.3787 | lr 1.21e-06 | step_time_ms 6760.2
+INFO:lumen.models.fsdp:  step 194/200 | loss 1.6271 | lr 8.88e-07 | step_time_ms 6767.3
+INFO:lumen.models.fsdp:  step 195/200 | loss 1.5083 | lr 6.17e-07 | step_time_ms 6815.1
+INFO:lumen.models.fsdp:  step 196/200 | loss 1.5273 | lr 3.95e-07 | step_time_ms 6760.3
+INFO:lumen.models.fsdp:  step 197/200 | loss 1.5546 | lr 2.22e-07 | step_time_ms 6764.7
+INFO:lumen.models.fsdp:  step 198/200 | loss 1.3587 | lr 9.87e-08 | step_time_ms 7353.5
+INFO:lumen.models.fsdp:  step 199/200 | loss 1.8100 | lr 2.47e-08 | step_time_ms 6764.0
+INFO:lumen.models.fsdp:  step 200/200 | loss 1.4848 | lr 0.00e+00 | step_time_ms 8094.8
+INFO:lumen.models.fsdp:  step 200/200 | val_loss 1.3921
+INFO:lumen.models.fsdp:> Training complete after 200 steps.
+[rank0]:[W610 09:29:38.023801365 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
++ [[ 0 != 0 ]]
+++ date +%s
++ end=1781083780
+++ date '+%Y-%m-%d %r'
++ end_fmt='2026-06-10 09:29:40 AM'
++ echo 'ENDING LLAMA2 FINETUNE AT 2026-06-10 09:29:40 AM'
+ENDING LLAMA2 FINETUNE AT 2026-06-10 09:29:40 AM
++ result=2015
++ echo 'RESULT,LLM_FINETUNING,,2015,AMD,2026-06-10 08:56:05 AM'
+RESULT,LLM_FINETUNING,,2015,AMD,2026-06-10 08:56:05 AM
++ exit 0
