@@ -46,13 +46,52 @@ export LORA_RANK=16
 export LORA_ALPHA=32
 export LORA_DROPOUT=0.1
 
-# ---- Precision: BF16 (FP8 disabled) -----------------------------------------
-export FP8_TRAINING=0
+# ---- Precision / scaling mode (switchable via MODE) -------------------------
+export MODE="${MODE:-bf16}"
 export LUMEN_NORM=0          # keep plain HF RMSNorm for stability
 
+# Shared FP8 knobs (consumed only when FP8_TRAINING=1; overridden per-mode).
+export FP8_FORMAT="fp8_e4m3"
+export FP8_BLOCK_SIZE=128
+export FP8_AMAX_ALGO="max"
+export FP8_AMAX_HISTORY=16
+export FP8_REDUCE_AMAX=0
+export FP8_ACTIVATION=1
+export GRAD_QUANT_TYPE=""
+export FIRST_LAST_BF16=0
+
+case "${MODE}" in
+  bf16)
+    export FP8_TRAINING=0
+    ;;
+  fp8_delayed)
+    export FP8_TRAINING=1
+    export FP8_SCALING="delayed"
+    export FP8_WGRAD=1
+    ;;
+  fp8_blockwise)
+    export FP8_TRAINING=1
+    export FP8_SCALING="blockwise"
+    export FP8_WGRAD=0          # plain blockwise: BF16 wgrad (scales misalign on w.t())
+    ;;
+  fp8_blockwise2d)
+    export FP8_TRAINING=1
+    export FP8_SCALING="blockwise2d"
+    export FP8_WGRAD=1          # blockwise2d supports full FP8 DGrad+WGrad (M=8192 %128 ok)
+    ;;
+  *)
+    echo "ERROR: unknown MODE='${MODE}' (use: bf16 | fp8_delayed | fp8_blockwise | fp8_blockwise2d)" >&2
+    exit 1
+    ;;
+esac
+echo "[config_MI308X_fsdp_lora_70b] MODE=${MODE} FP8_TRAINING=${FP8_TRAINING} scaling=${FP8_SCALING:-n/a} wgrad=${FP8_WGRAD:-n/a}"
+
 # ---- Warmup / early stopping -------------------------------------------------
-export WARMUP_STEPS=0        # no synthetic FP8 calibration needed in BF16
-export VAL_LOSS_TARGET=""    # run the full 1024 steps (no early stop)
+export WARMUP_STEPS=0
+# MLPerf target: stop as soon as a validation hits val_loss <= this.
+export VAL_LOSS_TARGET="${VAL_LOSS_TARGET:-0.925}"
+export STEP_TIME_ATOL=0      # no step-time assertion (70B FSDP steps are ~minute-scale)
+export TARGET_LOG_PPL=0.0    # unused when VAL_LOSS_TARGET is set
 
 # ---- Logging / checkpoint / eval --------------------------------------------
 export LOG_INTERVAL=1
@@ -74,8 +113,4 @@ export SAVE_CKPT=0
 # reproduction. Default hipBLASLt heuristics keep step 1 fast.
 export PYTORCH_TUNABLEOP_ENABLED=0
 
-# Diagnostics for the 80-layer hang: per-rank RCCL INFO to separate files so the
-# main training log stays readable; if a collective stalls, the tail of these
-# files points at the stuck ring/op.
-export NCCL_DEBUG=INFO
-export NCCL_DEBUG_FILE="/results/nccl_rank.%h.%p.log"
+export NCCL_DEBUG=WARN

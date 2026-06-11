@@ -904,11 +904,15 @@ def dispatch_gemm(a, w, scale_a=None, scale_w=None, scaling_type="none", bias=No
         Output tensor ``(M, N)``.
     """
     w_transposed = None
+    # scale_f32_1x1 collapses the scale to (1,1) for hipBLASLt's per-tensor
+    # epilogue; that is only valid for per-tensor scalings. block/token/mx
+    # scalings carry multi-element scales that must be passed through as-is.
+    _per_tensor = scaling_type in ("delayed", "dynamic")
     if isinstance(a, FP8Descriptor):
-        scale_a = a.scale_f32_1x1 if _PREFER_HIPBLASLT else a.scale
+        scale_a = a.scale_f32_1x1 if (_PREFER_HIPBLASLT and _per_tensor) else a.scale
         a = a.data
     if isinstance(w, FP8Descriptor):
-        scale_w = w.scale_f32_1x1 if _PREFER_HIPBLASLT else w.scale
+        scale_w = w.scale_f32_1x1 if (_PREFER_HIPBLASLT and _per_tensor) else w.scale
         if w._transpose is not None:
             w_transposed = w._transpose
         w = w.data

@@ -24,7 +24,7 @@ HOST_LUMEN="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ---- Host paths (model / data / results) — overridable via env --------------
 HOST_MODEL="${HOST_MODEL:-/mnt/raid0/leiwu/mlperf/llama2_70b_hf}"
-HOST_DATA="${HOST_DATA:-/mnt/raid0/leiwu/mlperf/data}"
+HOST_DATA="${HOST_DATA:-/mnt/raid0/leiwu/mlperf/data_mlperf}"   # answer-only loss-mask (MLPerf-aligned)
 HOST_RESULTS="${HOST_RESULTS:-/mnt/raid0/leiwu/mlperf/results/fsdp_lora_bf16}"
 CONFIG="${CONFIG:-config_MI308X_fsdp_lora_70b.sh}"
 IMAGE="${IMAGE:-lumen/llama2:latest}"
@@ -49,7 +49,7 @@ docker run --rm --init \
     -e HF_HUB_OFFLINE=1 \
     -e TRANSFORMERS_OFFLINE=1 \
     -e TOKENIZERS_PARALLELISM=false \
-    -e PYTORCH_TUNABLEOP_ENABLED=0 \
+    -e PYTORCH_TUNABLEOP_ENABLED="${PYTORCH_TUNABLEOP_ENABLED:-0}" \
     -e RUN_CONFIG="${CONFIG}" \
     -e MODE="${MODE:-}" \
     -e TRAIN_STEPS="${TRAIN_STEPS:-}" \

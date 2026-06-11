@@ -1189,6 +1189,53 @@ def install_fp8_param_gather_hook() -> None:
     _mt_training.setup_model_and_optimizer = _setup_with_fp8_hook
 
 
+def install_val_loss_early_stop_hook() -> None:
+    """Stop training when the *reduced* validation loss reaches val_loss_target.
+
+    Wraps ``megatron.training.training.evaluate`` whose returned
+    ``total_loss_dict['lm loss']`` is already averaged AND all-reduced across
+    ranks, so it is identical on every rank. When that value <=
+    ``args.val_loss_target`` we set ``args.train_iters = args.iteration`` on ALL
+    ranks at the same eval point, so the train loop exits collectively. This
+    replaces the old per-rank training-loss EMA stop in ``loss_func`` that
+    desynced DP ranks (one rank exiting while others kept running -> mismatched
+    collectives -> NCCL deadlock).
+    """
+    try:
+        import megatron.training.training as _train_mod
+        from megatron.training import get_args
+    except ImportError:
+        return
+    if getattr(_train_mod, "_lumen_val_early_stop_patched", False):
+        return
+
+    _orig_evaluate = _train_mod.evaluate
+
+    def _evaluate_with_early_stop(*a, **kw):
+        result = _orig_evaluate(*a, **kw)
+        try:
+            args = get_args()
+            target = getattr(args, "val_loss_target", None)
+            if target is not None and result and isinstance(result[0], dict):
+                v = result[0].get("lm loss")
+                if v is not None:
+                    val = v.item() if hasattr(v, "item") else float(v)
+                    if val <= float(target):
+                        cur = getattr(args, "iteration", None)
+                        if cur:
+                            args.train_iters = cur
+                        print_rank_0(
+                            f"> [Early Stop] validation loss ({val:.4f}) <= "
+                            f"target ({float(target):.4f}) -> stopping at iter {cur}."
+                        )
+        except Exception as e:  # never let the hook break eval
+            print_rank_0(f"> [Early Stop] hook skipped ({e})")
+        return result
+
+    _train_mod.evaluate = _evaluate_with_early_stop
+    _train_mod._lumen_val_early_stop_patched = True
+
+
 def install_fp8_param_storage_hook() -> None:
     """Hook the training setup to enable FP8 parameter storage.
 
@@ -1481,6 +1528,40 @@ def _patch_float16_module() -> None:
     Float16Module.__init__ = _fp8_safe_init
 
 
+def _get_fp8_store_scaling() -> str:
+    """FP8 scaling type for param storage (from Megatron args; default per-tensor)."""
+    try:
+        from megatron.training import get_args
+
+        return getattr(get_args(), "linear_fp8_scaling", "delayed") or "delayed"
+    except Exception:
+        return "delayed"
+
+
+def _fp8_store_quantize_weight(weight_bf16, fp8_dtype, scaling_type, block_size: int = 128):
+    """Quantize a frozen weight for FP8 param storage.
+
+    Returns ``(fp8_data, scale, transpose)``:
+      - ``blockwise2d``: ``scale`` is the 2D ``(ceil(N/bs), ceil(K/bs))`` dequant
+        factor consumed directly by ``gemm_blockscale``; ``transpose`` is None
+        (the blockscale kernel transposes internally).
+      - otherwise: per-tensor scalar quant factor (``fp8_max/amax``) plus a
+        precomputed transpose for the hipBLASLt per-tensor path.
+    """
+    import torch
+
+    if scaling_type == "blockwise2d":
+        from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+        fp8_data, scale = _quant_blockwise2d_weight(weight_bf16, fp8_dtype, block_size)
+        return fp8_data, scale, None
+
+    amax = weight_bf16.float().abs().amax().clamp(min=1e-12)
+    scale = torch.finfo(fp8_dtype).max / amax
+    fp8_data = (weight_bf16.float() * scale).to(fp8_dtype)
+    return fp8_data, scale, _precompute_fp8_transpose(fp8_data)
+
+
 def _precompute_fp8_transpose(fp8_data: "torch.Tensor") -> "Optional[torch.Tensor]":
     """Pre-compute the transposed layout for an FP8 weight tensor.
 
@@ -1592,13 +1673,14 @@ def _patch_load_checkpoint_for_fp8() -> None:
                     continue
                 if w.dtype == torch.bfloat16:
                     old_bytes = w.numel() * w.element_size()
-                    amax = w.data.abs().amax().clamp(min=1e-12)
-                    scale = torch.finfo(fp8_dtype).max / amax
-                    fp8_data = (w.data.float() * scale).to(fp8_dtype)
+                    _scaling = _get_fp8_store_scaling()
+                    fp8_data, scale, fp8_data_t = _fp8_store_quantize_weight(
+                        w.data, fp8_dtype, _scaling
+                    )
                     w.data = fp8_data
                     w._fp8_scale = scale.to(w.device)
-                    w._fp8_scale_reciprocal = (1.0 / scale).to(w.device)
-                    fp8_data_t = _precompute_fp8_transpose(fp8_data)
+                    if _scaling not in ("blockwise", "blockwise2d"):
+                        w._fp8_scale_reciprocal = (1.0 / scale).to(w.device)
                     w._fp8_desc = FP8Descriptor(
                         data=w.data,
                         scale=w._fp8_scale,
@@ -1674,14 +1756,14 @@ def _wrap_load_from_state_dict(module, fp8_dtype):
                 incoming = state_dict[weight_key]
                 if isinstance(incoming, torch.Tensor):
                     device = w.device if str(w.device) != "meta" else torch.device("cuda")
-                    amax = incoming.abs().amax().clamp(min=1e-12)
-                    fp8_max = torch.finfo(fp8_dtype).max
-                    scale = fp8_max / amax
-                    fp8_w = (incoming.float() * scale).to(fp8_dtype).to(device)
+                    _scaling = _get_fp8_store_scaling()
+                    fp8_w, scale, fp8_w_t = _fp8_store_quantize_weight(
+                        incoming.to(device), fp8_dtype, _scaling
+                    )
                     w.data = fp8_w
                     w._fp8_scale = scale.to(device)
-                    w._fp8_scale_reciprocal = (1.0 / scale).to(device)
-                    fp8_w_t = _precompute_fp8_transpose(fp8_w)
+                    if _scaling not in ("blockwise", "blockwise2d"):
+                        w._fp8_scale_reciprocal = (1.0 / scale).to(device)
                     w._fp8_desc = FP8Descriptor(
                         data=w.data,
                         scale=w._fp8_scale,
@@ -1742,7 +1824,14 @@ def _install_embedding_output_fp8_hooks(model):
             if hasattr(w, "_fp8_desc"):
                 orig_dtype = getattr(w, "_fp8_original_dtype", torch.bfloat16)
                 _mod._fp8_emb_saved = w.data
-                w.data = (w.data.to(torch.float32) / w._fp8_desc.scale).to(orig_dtype)
+                _sc = w._fp8_desc.scale
+                if _sc.numel() > 1:
+                    # blockwise2d 2D block scale (dequant factor) -> expand+multiply
+                    from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
+                    w.data = _dequant_fp8_weight(w.data, _sc, 128).to(orig_dtype)
+                else:
+                    w.data = (w.data.to(torch.float32) / _sc).to(orig_dtype)
 
         def _post(m, inputs, output, _mod=mod):
             if hasattr(_mod, "_fp8_emb_saved"):
@@ -1864,29 +1953,16 @@ _early_stop_logged = False
 
 
 def loss_func(loss_mask: torch.Tensor, output_tensor: torch.Tensor, model=None):
-    """LM loss with optional early stopping based on a validation-loss EMA."""
-    global _val_loss_ema, _early_stop_logged
-
+    """LM loss. Early stopping is handled collectively on the *reduced*
+    validation loss by ``install_val_loss_early_stop_hook`` — NOT here. The
+    previous per-step, per-rank training-loss EMA stop caused a DP desync
+    (one rank crossed the threshold on its local loss and exited the train
+    loop while others continued -> mismatched collectives -> NCCL deadlock)."""
     losses = output_tensor.view(-1).float()
     loss_mask = loss_mask.view(-1).float()
     loss = torch.sum(losses * loss_mask)
     num_tokens = loss_mask.sum().clone().detach().to(torch.int)
     reporting = torch.cat([loss.clone().detach().view(1), num_tokens.view(1)])
-
-    args = get_args()
-    val_target = getattr(args, "val_loss_target", None)
-    if val_target is not None and not _early_stop_logged:
-        avg_loss = (loss.clone().detach() / num_tokens.clamp(min=1)).item()
-        if _val_loss_ema is None:
-            _val_loss_ema = avg_loss
-        else:
-            _val_loss_ema = 0.9 * _val_loss_ema + 0.1 * avg_loss
-        if _val_loss_ema < val_target:
-            print_rank_0(f"> [Early Stop] Loss EMA ({_val_loss_ema:.4f}) < " f"target ({val_target:.4f}). Stopping.")
-            if hasattr(args, "iteration"):
-                args.train_iters = args.iteration
-            _early_stop_logged = True
-
     return loss, num_tokens, {"lm loss": reporting}
 
 

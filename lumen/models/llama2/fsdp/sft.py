@@ -239,12 +239,19 @@ class FSDPTrainer:
 
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name_or_path)
 
+        # shuffle=True selects the per-row sample path (one packed row == one
+        # sample, padded to seq_len+1) plus NeMo-style epoch-level shuffling,
+        # matching the MLPerf reference. Without it the dataset falls back to a
+        # streaming path that re-concatenates already-packed 8192 rows across
+        # document boundaries.
         dataset = LLaMA2SFTDataset(
             num_samples=num_samples,
             data_path=data_path,
             seq_length=args.seq_length,
             tokenizer=tokenizer,
             is_hf_tokenizer=True,
+            shuffle=True,
+            seed=getattr(args, "seed", 1234),
         )
 
         sampler = (

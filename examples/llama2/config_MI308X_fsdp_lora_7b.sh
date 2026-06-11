@@ -25,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _OVR_TRAIN_STEPS="${TRAIN_STEPS:-}"
 _OVR_SAVE_INTERVAL="${SAVE_INTERVAL:-}"
 _OVR_SAVE_CKPT="${SAVE_CKPT:-}"
+_OVR_TUNABLEOP="${PYTORCH_TUNABLEOP_ENABLED:-}"   # config_MI355X hardcodes =1; capture caller value first
 # Inherit all FSDP launcher defaults (NCCL/ROCm perf env, arg plumbing).
 source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"
 
@@ -129,7 +130,7 @@ export USE_SDMA=0
 export USE_CKPT=0
 export SAVE_CKPT="${_OVR_SAVE_CKPT:-0}"   # 1 = save final adapter; override via env
 
-# Disable online GEMM autotuning: the first-step tuning sweep adds minutes of
-# startup that is wasted for a short pipeline test. Default hipBLASLt heuristics
-# keep step 1 fast. (perf_env.sh honors this pre-set value.)
-export PYTORCH_TUNABLEOP_ENABLED=0
+# Online GEMM autotuning. Default OFF (the first-step tuning sweep adds startup
+# time that is wasted for short runs); set PYTORCH_TUNABLEOP_ENABLED=1 at launch
+# to turn it on. (perf_env.sh honors this pre-set value.)
+export PYTORCH_TUNABLEOP_ENABLED="${_OVR_TUNABLEOP:-0}"

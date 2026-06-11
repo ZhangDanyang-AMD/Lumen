@@ -96,7 +96,10 @@ class LumenLinear(nn.Module):
             torch.float8_e4m3fnuz,
             torch.float8_e5m2,
         ):
-            pqw = (w._fp8_desc.data, 1.0 / w._fp8_desc.scale)
+            _sc = w._fp8_desc.scale
+            # blockwise(2d) stores a 2D block scale used directly; per-tensor
+            # uses the reciprocal (dequant factor).
+            pqw = (w._fp8_desc.data, _sc if _sc.numel() > 1 else 1.0 / _sc)
         return quantized_linear(
             input,
             self.weight,
