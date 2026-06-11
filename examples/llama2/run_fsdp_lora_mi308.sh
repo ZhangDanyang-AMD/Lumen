@@ -55,6 +55,10 @@ docker run --rm --init \
     -e TRAIN_STEPS="${TRAIN_STEPS:-}" \
     -e SAVE_INTERVAL="${SAVE_INTERVAL:-}" \
     -e SAVE_CKPT="${SAVE_CKPT:-}" \
+    -e LUMEN_ROCPROF="${LUMEN_ROCPROF:-}" \
+    -e LUMEN_ROCPROF_OPTS="${LUMEN_ROCPROF_OPTS:-}" \
+    -e LUMEN_ROCPROF_DIR="${LUMEN_ROCPROF_DIR:-}" \
+    -e LUMEN_ROCPROF_NAME="${LUMEN_ROCPROF_NAME:-}" \
     "${IMAGE}" \
     bash -c '
 set -euo pipefail
