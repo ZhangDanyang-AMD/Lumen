@@ -1134,9 +1134,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # 128×1 by dequantizing back to BF16 and re-quantizing along axis=0.
         if scaling_type == "blockwise2d":
             # Frozen-weight cache may carry the precomputed transposed weight
-            # (data_t, scale_t) for DGrad — thread it onto ctx (see
+            # (data_t, scale_t) for DGrad and a skip-wgrad marker (frozen base →
+            # its grad is discarded) — thread both onto ctx (see
             # lumen.quantize._maybe_cache_frozen_weight).
             ctx._weight_t = getattr(weight_desc.data, "_lumen_wt", None)
+            ctx._skip_wgrad = getattr(weight_desc.data, "_lumen_skip_wgrad", False)
             ctx.save_for_backward(
                 weight_desc.data,
                 weight_desc.scale,
@@ -1420,7 +1422,13 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     _logger.warning("blockwise2d wgrad: triton rejected (%s); BF16 fallback", e)
                     return _bf16_wgrad()
 
-            if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
+            if getattr(ctx, "_skip_wgrad", False):
+                # Frozen base weight (LoRA): its grad is discarded, so skip the
+                # whole WGrad (dequant→requant + transpose copies + GEMM). Under
+                # FSDP a frozen view can report requires_grad=True, so this is
+                # gated by the patch-time frozen flag (cache_frozen_weight path).
+                grad_weight = None
+            elif ctx.delay_wgrad and ctx.deferred_wgrad is not None:
                 _w_ref = ctx.weight_ref
                 _gaf = ctx.gradient_accumulation_fusion
                 _mgr = mgr

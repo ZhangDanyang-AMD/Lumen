@@ -421,10 +421,13 @@ def _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size):
         return
     module._fp8_weight_data = desc.data
     module._fp8_weight_scale = desc.scale
+    # The weight is frozen → its WGrad is discarded; mark it so the backward can
+    # skip the whole WGrad (dequant→requant + transpose + GEMM). Attached to the
+    # (stable) cache tensor so the forward threads it onto ctx.
+    desc.data._lumen_skip_wgrad = True
     # Also cache the transposed FP8 weight + scale (frozen → constant) so the
     # blockwise2d DGrad reuses it instead of doing weight_data.t().contiguous()
-    # (~7.6 GB/step of copies) every backward.  Attached to the (stable) cache
-    # tensor so the forward can thread it onto ctx for the backward.
+    # (~7.6 GB/step of copies) every backward.
     if scaling_type == "blockwise2d":
         try:
             desc.data._lumen_wt = (desc.data.t().contiguous(), desc.scale.t().contiguous())

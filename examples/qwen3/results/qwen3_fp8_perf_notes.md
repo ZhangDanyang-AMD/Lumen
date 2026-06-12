@@ -70,20 +70,24 @@ the tuned kernels). lm_head (N/K=151936) left untuned (tuner too slow on it; ~1%
      ~7.6 GB/step) every backward. The transpose is attached to the stable cache tensor and
      threaded onto `ctx` in the forward — no autograd-signature churn.
 
+     The same `cache_frozen_weight` flag also **skips the frozen base weight's entire WGrad**
+     (its grad is discarded under LoRA anyway): the backward returns `grad_weight=None` and
+     never runs the dequant→requant + transpose + WGrad GEMM. This is the biggest single win
+     after the fwd cache. DGrad (grad to the input) is unaffected — verified bit-identical.
+
      | | copy_ Self CUDA | step_time | loss |
      |---|---|---|---|
      | baseline | 2.934 s | 2785 ms | — |
      | + weight-quant cache | 1.762 s (−40%) | 2645 ms (−5%) | bit-identical |
-     | + DGrad transpose cache | **0.980 s (−67%)** | **2390 ms (−14%)** | **bit-identical** |
+     | + DGrad transpose cache | 0.980 s (−67%) | 2390 ms (−14%) | bit-identical |
+     | + skip frozen WGrad | **0.336 s (−89%)** | **1912 ms (−31%)** | **bit-identical** |
 
-     Forward weight-quant copies (items 1-2) and the DGrad weight transpose (item 3) are
-     eliminated; loss is unchanged (cache == per-fwd quant, deterministic). Tests:
-     `tests/quantize/test_cache_frozen_weight.py`. Remaining copy is the WGrad
-     gradient-derived transposes (items 4-5) — those are recomputed each step (not frozen) and
-     cannot be cached.
-   - Note: a first attempt at the **WGrad requant** path (`linear.py:1398-1412`) gave **zero**
-     gain — copy trace showed WGrad is minor and, under frozen-weight LoRA, the base WGrad is
-     discarded anyway. Do not optimize WGrad for the LoRA recipe.
+     Net: FP8 blockwise2d goes from +61% slower than BF16 (1730 ms) to **+11%**. Loss is
+     unchanged at every step (frozen base weight contributes no grad; only DGrad + LoRA grads
+     matter). Tests: `tests/quantize/test_cache_frozen_weight.py` (incl. DGrad-preservation).
+   - Note: a first attempt to *optimize* (not skip) the WGrad requant path gave zero gain —
+     under frozen-weight LoRA the base WGrad is discarded, so the right move is to skip it
+     entirely, not speed it up.
 
 2. **elementwise 15%** — quant/dequant elementwise + dual-axis grad quant. Action: rely on the
    fused dual-axis grad-quant path (`quant_fp8_blockwise_dual_axis_impl`, `linear.py:1356`) wherever

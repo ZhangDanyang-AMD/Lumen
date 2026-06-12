@@ -65,6 +65,33 @@ def test_cached_matches_uncached_output():
 
 
 @_CUDA
+def test_skip_wgrad_preserves_dgrad():
+    """Skipping the frozen weight's WGrad must not change the input grad (DGrad)."""
+    from lumen.quantize import disable, enable
+    from lumen.quantize.config import QuantConfig
+
+    torch.manual_seed(0)
+    w = (torch.randn(256, 256) * 0.05).cuda().to(torch.bfloat16)
+    x0 = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+
+    grads = {}
+    for cache in (False, True):
+        m = _frozen_linear()
+        m.weight.data.copy_(w)
+        enable(m, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128,
+                                              cache_frozen_weight=cache))
+        x = x0.clone().requires_grad_(True)
+        m(x).sum().backward()
+        grads[cache] = x.grad.float()
+        # frozen weight never accumulates grad regardless
+        assert m.weight.grad is None
+        disable(m)
+
+    # WGrad skip (cache=True) must leave the DGrad identical to the full path.
+    torch.testing.assert_close(grads[True], grads[False], rtol=0, atol=0)
+
+
+@_CUDA
 def test_trainable_weight_not_cached():
     """Cache must NOT engage for trainable weights (only frozen base)."""
     from lumen.quantize import disable, enable
