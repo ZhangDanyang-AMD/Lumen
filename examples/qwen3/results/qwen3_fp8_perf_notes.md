@@ -107,10 +107,17 @@ the tuned kernels). lm_head (N/K=151936) left untuned (tuner too slow on it; ~1%
      (1730 ms). **Default keeps grad-ckpt ON** — disabling needs activation memory (fits at 8B
      mb1 seq2048 / 192 GB; **will OOM at 70B or large batch/seq**).
 
-3. **comm — FULL_SHARD is the right choice here.** Tried `SHARD_GRAD_OP` (ZeRO-2): **slower**
-   (step 1912→2059 ms, all_gather 0.79→1.55 s). Under grad-ckpt + FP8 the resident full params
-   gather in fewer/larger, less-overlapped ops. Keep FULL_SHARD. (After disabling grad-ckpt the
-   backward all-gathers also drop, so comm is no longer the bottleneck.)
+3. **comm — `SHARD_GRAD_OP` once grad-ckpt is off.** FULL_SHARD frees params after forward and
+   **re-all-gathers them in backward** for DGrad (the backward bubbles around `_post_backward_hook`;
+   all_gather 73/step = 37 fwd + 36 bwd). `SHARD_GRAD_OP` (ZeRO-2) keeps params resident → **no
+   backward all-gather** (73→37/step). step_time 1610→**1542 ms**, loss bit-identical.
+   - Caveat: `SHARD_GRAD_OP` is only a win **with grad-ckpt off**. With grad-ckpt ON it was
+     *slower* (1912→2059 ms) — the recompute still re-gathers and the resident full params hurt
+     overlap. So pair them: `GRAD_CKPT=0 SHARDING=shard_grad_op`.
+   - `NO_SHARD` (remove the fwd all-gather too) is deprecated and errors here
+     ("Cannot writeback when the parameter shape changes" on lm_head) — not viable.
+   - Note: backward all-gather of the frozen base weight is itself wasted (our DGrad uses the
+     cached FP8 transpose, not the gathered BF16) — `SHARD_GRAD_OP` sidesteps it by not freeing.
 
 4. **elementwise** — largely already removed by the frozen-weight cache (the biggest
    elementwise kernel fell 490→161 ms/step). Remainder is mostly FSDP `reduce_dtype=float32`

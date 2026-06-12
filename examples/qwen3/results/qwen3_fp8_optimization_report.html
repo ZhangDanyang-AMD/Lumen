@@ -41,12 +41,12 @@
 
   <h2>1. 总体收益</h2>
   <div class="kpi">
-    <div class="box"><div class="muted">稳态 step time</div><div class="big">2784 → <span class="good">1610 ms</span></div><div class="good">−42%</div></div>
+    <div class="box"><div class="muted">稳态 step time</div><div class="big">2784 → <span class="good">1542 ms</span></div><div class="good">−45%</div></div>
     <div class="box"><div class="muted">aten::copy_ (GPU)</div><div class="big">2.93 → <span class="good">0.34 s</span></div><div class="good">−89%</div></div>
     <div class="box"><div class="muted">精度 (val_loss)</div><div class="big good">逐位一致</div><div class="muted">零精度损失</div></div>
   </div>
   <div class="card">
-    <p>全部优化 loss 与 baseline <strong>逐位一致</strong>。优化后 FP8 step time <strong>1610 ms</strong>，已<span class="good">低于带 grad-ckpt 的 BF16 baseline（1730 ms）</span>。折算一个 epoch（≈6269 步）从 ~4.85h 缩到 ~2.80h。</p>
+    <p>全部优化 loss 与 baseline <strong>逐位一致</strong>。优化后 FP8 step time <strong>1542 ms</strong>，已<span class="good">低于带 grad-ckpt 的 BF16 baseline（1730 ms）</span>。折算一个 epoch（≈6269 步）从 ~4.85h 缩到 ~2.68h。</p>
     <table>
       <tr><th>配置</th><th class="num">step time</th><th class="num">copy_</th><th>说明</th></tr>
       <tr><td>BF16 baseline (grad-ckpt)</td><td class="num">1730 ms</td><td class="num">—</td><td class="muted">参考（不量化）</td></tr>
@@ -54,9 +54,10 @@
       <tr><td>+ frozen-weight cache (fwd)</td><td class="num">2645 ms</td><td class="num">1.76 s</td><td>消除 fwd 权重重量化</td></tr>
       <tr><td>+ DGrad transpose cache</td><td class="num">2390 ms</td><td class="num">0.98 s</td><td>消除 DGrad 权重转置</td></tr>
       <tr><td>+ skip frozen WGrad</td><td class="num">1912 ms</td><td class="num good">0.34 s</td><td>跳过冻结权重整条 WGrad</td></tr>
-      <tr><td><strong>+ 关 grad-ckpt + overlap</strong></td><td class="num good"><strong>1610 ms</strong></td><td class="num">—</td><td>去掉 backward 重算（GEMM 758→506/step）</td></tr>
+      <tr><td>+ 关 grad-ckpt + overlap</td><td class="num">1610 ms</td><td class="num">—</td><td>去掉 backward 重算（GEMM 758→506/step）</td></tr>
+      <tr><td><strong>+ SHARD_GRAD_OP</strong></td><td class="num good"><strong>1542 ms</strong></td><td class="num">—</td><td>消除 backward all-gather（73→37 次/step）</td></tr>
     </table>
-    <p class="muted">step time 为稳态中位数；val_loss 全程逐位一致（1.5968@50）。前 4 项为库层无损优化（默认可开）；关 grad-ckpt 为显存换速度的训练配置（默认仍开 grad-ckpt，8B 可关、70B 不可）。</p>
+    <p class="muted">step time 为稳态中位数；val_loss 全程逐位一致（1.5968@50）。前 4 项为库层无损优化（默认可开）；关 grad-ckpt + SHARD_GRAD_OP 为显存换速度的训练配置（默认仍 grad-ckpt + full_shard，8B 可关、70B 不可）。</p>
   </div>
 
   <h2>2. Profiling 热点（优化前，Self CUDA）</h2>
@@ -116,8 +117,13 @@
   </div>
 
   <div class="card">
-    <h3><span class="pill skip">已验证更慢</span> ①d SHARD_GRAD_OP (ZeRO-2)</h3>
-    <p>试图用 SHARD_GRAD_OP 免去每步参数 all-gather，结果<strong>更慢</strong>（1912→2059 ms，all_gather 0.79→1.55s）：grad-ckpt + FP8 下完整参数常驻，反而是少数超大块 all-gather、overlap 更差。保持 <strong>FULL_SHARD</strong>。</p>
+    <h3><span class="pill done">已完成</span> ①d SHARD_GRAD_OP 消除 backward all-gather（−4%，需配合关 grad-ckpt）</h3>
+    <p>FULL_SHARD 在 forward 后 free 参数，<strong>backward 要重新 all-gather 每层参数</strong>算 DGrad（all_gather 73/step = fwd 37 + bwd 36）—— 这正是 backward 的通信气泡。SHARD_GRAD_OP（ZeRO-2）参数常驻不 free → <strong>backward 无 all-gather</strong>（73→37/step），step 1610→<strong>1542 ms</strong>，loss 逐位一致。</p>
+    <ul>
+      <li><span class="warn">前提</span>：必须和关 grad-ckpt 配合。grad-ckpt 开着时 SHARD_GRAD_OP 反而更慢（重算仍 re-gather + 常驻参数挤占 overlap）。用法：<code>GRAD_CKPT=0 SHARDING=shard_grad_op</code>。</li>
+      <li>另:base weight 冻结时,backward 那次 all-gather 本就是浪费(DGrad 用的是缓存 FP8 转置,非 gather 的 BF16);SHARD_GRAD_OP 通过"不 free"绕过它。</li>
+      <li><code>NO_SHARD</code>(连 fwd all-gather 也去掉)已 deprecated 且在本配置报错(lm_head writeback)，不可用。</li>
+    </ul>
   </div>
 
   <div class="card">
@@ -145,8 +151,8 @@
     <table>
       <tr><th>目标</th><th>占比/收益</th><th>状态</th><th>说明</th></tr>
       <tr>
-        <td>FSDP 通信 / overlap</td><td class="num">9-13%</td><td><span class="pill skip">已处理</span></td>
-        <td>SHARD_GRAD_OP 试过更慢(①d)，保持 FULL_SHARD。关 grad-ckpt(①c)后 backward all-gather 也降，通信不再是瓶颈。</td>
+        <td>FSDP 通信 / overlap</td><td class="num">已处理</td><td><span class="pill done">完成</span></td>
+        <td>关 grad-ckpt + SHARD_GRAD_OP 消除 backward all-gather(①c/①d)。NO_SHARD 不可用。剩余 fwd all-gather 已基本被 overlap 覆盖。</td>
       </tr>
       <tr>
         <td>elementwise 融合</td><td class="num">余量小</td><td><span class="pill skip">低 ROI</span></td>
@@ -171,7 +177,7 @@
   <div class="card">
     <h3>启用全部优化训练（8B，显存充足）</h3>
     <pre>CACHE_FROZEN_WEIGHT=1 USE_TUNED_GEMM=1 \
-GRAD_CKPT=0 LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
+GRAD_CKPT=0 SHARDING=shard_grad_op LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
 MODE=fp8_blockwise2d  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
     <p class="muted">显存吃紧（大模型/大 batch）时去掉 <code>GRAD_CKPT=0</code>（保留 grad-ckpt），仍有 cache+skip-wgrad 的 −31%。</p>
     <h3>Profiling（含 copy 归因）</h3>
