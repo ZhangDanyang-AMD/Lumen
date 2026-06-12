@@ -31,15 +31,17 @@ EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
 IMAGE="${IMAGE:-lumen/llama2:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-lumen_qwen3_fsdp}"
 
-# Optional: host path to a tuned a8w8_blockscale CSV (gfx-keyed) to override the
-# image's default. Empty = disabled (image default kernels). When set, the file's
-# dir is mounted ro and AITER_CONFIG_GEMM_A8W8_BLOCKSCALE points at it so the
-# runtime selects the tuned CK kernels for matching (gfx,cu_num,M,N,K) shapes.
-AITER_TUNED_CSV="${AITER_TUNED_CSV:-}"
+# Optional: use the in-repo tuned a8w8_blockscale CSV (gfx942/MI308X, 80 CU) to
+# override the image's default kernels for the Qwen3 transformer-layer shapes.
+# USE_TUNED_GEMM=1 enables it. Default off — the gain is small (~3%; the default
+# kernel is already near-optimal) and it only matches gfx942/cu_num=80/M=2048;
+# on other hardware it would drop the image's gfx950 tuned configs, so keep off
+# unless on MI308X. The CSV lives under the already-mounted examples/ dir.
+USE_TUNED_GEMM="${USE_TUNED_GEMM:-0}"
+TUNED_GEMM_CSV="${TUNED_GEMM_CSV:-/workspace/Lumen/examples/qwen3/configs/a8w8_blockscale_tuned_gemm.csv}"
 EXTRA_DOCKER_ARGS=()
-if [[ -n "${AITER_TUNED_CSV}" ]]; then
-    EXTRA_DOCKER_ARGS+=( -v "$(cd "$(dirname "${AITER_TUNED_CSV}")" && pwd):/aiter_tune:ro" )
-    EXTRA_DOCKER_ARGS+=( -e "AITER_CONFIG_GEMM_A8W8_BLOCKSCALE=/aiter_tune/$(basename "${AITER_TUNED_CSV}")" )
+if [[ "${USE_TUNED_GEMM}" != "0" ]]; then
+    EXTRA_DOCKER_ARGS+=( -e "AITER_CONFIG_GEMM_A8W8_BLOCKSCALE=${TUNED_GEMM_CSV}" )
     EXTRA_DOCKER_ARGS+=( -e "AITER_LOG_TUNED_CONFIG=${AITER_LOG_TUNED_CONFIG:-1}" )
 fi
 
