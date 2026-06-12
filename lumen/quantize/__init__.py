@@ -316,6 +316,14 @@ def _patch_linear_layers(
             module._quant_enabled = True
             module._quant_tensor_id = tensor_id
             module._quant_scaling_type = scaling_type
+            # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
+            # already frozen the base weight, so requires_grad is reliable here.
+            # Under FSDP the gathered view can falsely report requires_grad=True.
+            _w = getattr(module, "weight", None)
+            module._lumen_cache_frozen = (
+                getattr(config, "cache_frozen_weight", False)
+                and _w is not None and not _w.requires_grad
+            )
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
             _replace_forward(
@@ -371,6 +379,59 @@ def _pop_pre_quantized_activation():
     return result
 
 
+def _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size):
+    """Quantize a *frozen* weight to FP8 once and cache it on the module.
+
+    When ``cache_frozen_weight`` is on, the base (LoRA-frozen) weight's FP8
+    quant never changes, yet ``quantized_linear`` re-quantizes it every forward
+    (and again on each gradient-checkpointing recompute) — ~43 GB/step of copies
+    at 8B.  Compute it once here (in the forward, where FSDP has gathered the
+    full weight) and stash ``_fp8_weight_data`` / ``_fp8_weight_scale``; the
+    existing ``fp8_weight_cache`` path then feeds it straight to the GEMM.
+
+    Guards: only for frozen weights, only when the gathered weight is the full
+    2D tensor (skip FSDP-sharded views), and only for scalings whose cached
+    weight scale matches what the GEMM expects (blockwise2d's 2D tile scale).
+    """
+    # _lumen_cache_frozen is set at patch time (before FSDP wrap) and already
+    # encodes "frozen base weight" — do NOT re-check weight.requires_grad here:
+    # under FSDP a frozen view can report requires_grad=True (flat-param taint).
+    if not getattr(module, "_lumen_cache_frozen", False):
+        return
+    if getattr(module, "_fp8_weight_data", None) is not None:
+        return
+    weight = getattr(module, "weight", None)
+    if weight is None or weight.dim() != 2:
+        return
+    # FSDP may expose a flattened/sharded view mid-init; require K divisible by
+    # block_size so the blockwise quantizer's tiling is valid (full weight).
+    if scaling_type == "blockwise2d" and (weight.shape[0] % block_size or weight.shape[1] % block_size):
+        return
+    if scaling_type not in ("blockwise2d", "blockwise"):
+        return  # per-tensor caches go through store_weights_fp8 separately
+    from lumen.ops.quantize.linear import quantize_input
+    try:
+        desc = quantize_input(
+            weight.detach().contiguous(), scaling_type, fp8_dtype,
+            block_size, None, getattr(module, "_quant_tensor_id", "weight"),
+            is_weight=True,
+        )
+    except (AssertionError, RuntimeError) as e:
+        logger.warning("cache_frozen_weight: quant failed (%s); will re-quant per fwd", e)
+        return
+    module._fp8_weight_data = desc.data
+    module._fp8_weight_scale = desc.scale
+    # Also cache the transposed FP8 weight + scale (frozen → constant) so the
+    # blockwise2d DGrad reuses it instead of doing weight_data.t().contiguous()
+    # (~7.6 GB/step of copies) every backward.  Attached to the (stable) cache
+    # tensor so the forward can thread it onto ctx for the backward.
+    if scaling_type == "blockwise2d":
+        try:
+            desc.data._lumen_wt = (desc.data.t().contiguous(), desc.scale.t().contiguous())
+        except (AssertionError, RuntimeError):
+            pass
+
+
 def _replace_forward(
     module,
     manager,
@@ -424,6 +485,7 @@ def _replace_forward(
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
             return quantized_linear(
                 input_tensor,
                 module.weight,

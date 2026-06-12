@@ -1,0 +1,93 @@
+#!/bin/bash
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Qwen3-8B LoRA SFT — 8x MI308X, PyTorch FSDP + Lumen FP8 blockwise2d.
+#
+# Launches the lumen/llama2 container, overlays the host Lumen package and
+# examples (keeping the image's compiled third_party AITER/mori), mounts the HF
+# model + alpaca jsonl dataset, and runs train_qwen3_fsdp_fp8_blockwise2d.py.
+#
+# Overridable env: HOST_MODEL, HOST_DATA, HOST_RESULTS, TRAIN_FILE, VAL_FILE,
+# SEQ_LENGTH, MAX_STEPS, EVAL_INTERVAL, IMAGE, CONTAINER_NAME.
+#
+# Example:
+#   HOST_MODEL=/path/to/Qwen3-8B HOST_DATA=/path/to/alpaca_jsons \
+#     bash run_qwen3_fsdp_mi308.sh
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_LUMEN="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# ---- Host paths (model / data / results) — overridable via env --------------
+HOST_MODEL="${HOST_MODEL:-/mnt/raid0/changcui/models/Qwen3-8B}"
+HOST_DATA="${HOST_DATA:-/mnt/raid0/zrz/qwen/qwen-datasets/jsons}"
+HOST_RESULTS="${HOST_RESULTS:-/mnt/raid0/leiwu/mlperf/results/qwen3_fsdp_fp8_blockwise2d}"
+TRAIN_FILE="${TRAIN_FILE:-alpaca_zh-train-general.jsonl}"
+VAL_FILE="${VAL_FILE:-alpaca_zh-valid-general.jsonl}"
+MODE="${MODE:-fp8_blockwise2d}"        # bf16 | fp8_blockwise2d
+SEQ_LENGTH="${SEQ_LENGTH:-2048}"
+MAX_STEPS="${MAX_STEPS:-200}"
+EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
+IMAGE="${IMAGE:-lumen/llama2:latest}"
+CONTAINER_NAME="${CONTAINER_NAME:-lumen_qwen3_fsdp}"
+
+# Optional: host path to a tuned a8w8_blockscale CSV (gfx-keyed) to override the
+# image's default. Empty = disabled (image default kernels). When set, the file's
+# dir is mounted ro and AITER_CONFIG_GEMM_A8W8_BLOCKSCALE points at it so the
+# runtime selects the tuned CK kernels for matching (gfx,cu_num,M,N,K) shapes.
+AITER_TUNED_CSV="${AITER_TUNED_CSV:-}"
+EXTRA_DOCKER_ARGS=()
+if [[ -n "${AITER_TUNED_CSV}" ]]; then
+    EXTRA_DOCKER_ARGS+=( -v "$(cd "$(dirname "${AITER_TUNED_CSV}")" && pwd):/aiter_tune:ro" )
+    EXTRA_DOCKER_ARGS+=( -e "AITER_CONFIG_GEMM_A8W8_BLOCKSCALE=/aiter_tune/$(basename "${AITER_TUNED_CSV}")" )
+    EXTRA_DOCKER_ARGS+=( -e "AITER_LOG_TUNED_CONFIG=${AITER_LOG_TUNED_CONFIG:-1}" )
+fi
+
+mkdir -p "${HOST_RESULTS}"
+
+docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+docker run --rm --init \
+    ${EXTRA_DOCKER_ARGS[@]+"${EXTRA_DOCKER_ARGS[@]}"} \
+    --name "${CONTAINER_NAME}" \
+    --device /dev/dri --device /dev/kfd \
+    --group-add video --group-add render \
+    --ipc=host --network=host \
+    --security-opt=seccomp=unconfined \
+    --cap-add=SYS_PTRACE \
+    -v "${HOST_LUMEN}/lumen:/workspace/Lumen/lumen" \
+    -v "${HOST_LUMEN}/examples:/workspace/Lumen/examples" \
+    -v "${HOST_MODEL}:/model-qwen3:ro" \
+    -v "${HOST_DATA}:/data:ro" \
+    -v "${HOST_RESULTS}:/results" \
+    -e HF_HUB_OFFLINE=1 \
+    -e TRANSFORMERS_OFFLINE=1 \
+    -e TOKENIZERS_PARALLELISM=false \
+    -e PYTORCH_TUNABLEOP_ENABLED="${PYTORCH_TUNABLEOP_ENABLED:-0}" \
+    -e TRAIN_FILE="${TRAIN_FILE}" \
+    -e VAL_FILE="${VAL_FILE}" \
+    -e MODE="${MODE}" \
+    -e LUMEN_PROF_START="${LUMEN_PROF_START:-}" \
+    -e LUMEN_PROF_END="${LUMEN_PROF_END:-}" \
+    -e LUMEN_PROF_OUTPUT="${LUMEN_PROF_OUTPUT:-}" \
+    -e LUMEN_PROF_TRACE="${LUMEN_PROF_TRACE:-}" \
+    -e LUMEN_COPY_TRACE="${LUMEN_COPY_TRACE:-}" \
+    -e SEQ_LENGTH="${SEQ_LENGTH}" \
+    -e MAX_STEPS="${MAX_STEPS}" \
+    -e EVAL_INTERVAL="${EVAL_INTERVAL}" \
+    -e CACHE_FROZEN_WEIGHT="${CACHE_FROZEN_WEIGHT:-}" \
+    "${IMAGE}" \
+    bash -c '
+set -euo pipefail
+cd /workspace/Lumen/examples/qwen3
+EXTRA=""
+[[ -n "${CACHE_FROZEN_WEIGHT}" ]] && EXTRA="--cache-frozen-weight"
+torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
+    --model-name-or-path /model-qwen3 \
+    --train-data-path "/data/${TRAIN_FILE}" \
+    --val-data-path "/data/${VAL_FILE}" \
+    --mode "${MODE}" ${EXTRA} \
+    --seq-length "${SEQ_LENGTH}" --max-steps "${MAX_STEPS}" \
+    --eval-interval "${EVAL_INTERVAL}" --seed 1234 2>&1 \
+    | tee "/results/train_${MODE}.log"
+'

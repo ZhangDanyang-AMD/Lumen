@@ -190,6 +190,13 @@ class QuantConfig:
     # When False, compute wgrad in BF16 instead of FP8.
     fp8_wgrad: bool = True
 
+    # Cache the FP8 quantization of *frozen* weights (requires_grad=False, e.g.
+    # the LoRA base) on first forward and reuse it, skipping the per-forward (and
+    # gradient-checkpointing recompute) re-quantization.  Trades resident memory
+    # (full FP8 weight stays cached) for speed — keep OFF for very large models
+    # under FSDP where the cached weights would not fit.
+    cache_frozen_weight: bool = False
+
     # Keep the first and last N transformer layers in BF16 (unpatched) even
     # during FP8 training.
     first_last_layers_bf16: bool = False

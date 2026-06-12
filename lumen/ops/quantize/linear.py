@@ -1133,6 +1133,10 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # quantized) for memory efficiency.  WGrad will "Requantize" it to
         # 128×1 by dequantizing back to BF16 and re-quantizing along axis=0.
         if scaling_type == "blockwise2d":
+            # Frozen-weight cache may carry the precomputed transposed weight
+            # (data_t, scale_t) for DGrad — thread it onto ctx (see
+            # lumen.quantize._maybe_cache_frozen_weight).
+            ctx._weight_t = getattr(weight_desc.data, "_lumen_wt", None)
             ctx.save_for_backward(
                 weight_desc.data,
                 weight_desc.scale,
@@ -1379,12 +1383,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # DGrad (FP8)
             if g_row is not None:
                 try:
-                    grad_input = gemm_blockscale(
-                        g_row,
-                        weight_data.t().contiguous(),
-                        g_row_s,
-                        weight_scale.t().contiguous(),
-                    )
+                    # Reuse the frozen weight's cached transpose if available,
+                    # else materialize it (the per-backward copy hotspot).
+                    _wt = getattr(ctx, "_weight_t", None)
+                    if _wt is not None:
+                        w_t, w_s_t = _wt
+                    else:
+                        w_t, w_s_t = weight_data.t().contiguous(), weight_scale.t().contiguous()
+                    grad_input = gemm_blockscale(g_row, w_t, g_row_s, w_s_t)
                 except (AssertionError, RuntimeError) as e:
                     _logger.warning("blockwise2d dgrad: kernel rejected (%s); BF16 fallback", e)
                     grad_input = _bf16_dgrad()
