@@ -1,0 +1,48 @@
+Qwen3 FP8 blockwise2d profile, steps 12-13
+
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+                       FullyShardedDataParallel.forward         0.00%       0.000us         0.00%       0.000us       0.000us        1.253s        46.91%        1.253s      16.930ms            74  
+             aiter::gemm_a8w8_blockscale_bpreshuffle_ck         1.04%      19.253ms         1.55%      28.539ms      28.200us     792.737ms        29.68%     792.737ms     783.337us          1012  
+void ck::kernel_gemm_xdl_cshuffle_v3_multi_d_blocksc...         0.00%       0.000us         0.00%       0.000us       0.000us     771.851ms        28.90%     771.851ms     764.209us          1010  
+           FullyShardedDataParallel._post_backward_hook         0.00%       0.000us         0.00%       0.000us       0.000us     517.019ms        19.36%     517.019ms       7.181ms            72  
+                                     record_param_comms         0.45%       8.246ms         0.55%      10.083ms      68.126us     515.815ms        19.31%     515.815ms       3.485ms           148  
+void rcclGenericKernel<4, false>(ncclDevKernelArgsSt...         0.00%       0.000us         0.00%       0.000us       0.000us     515.815ms        19.31%     515.815ms       3.485ms           148  
+                              nccl:_reduce_scatter_base         0.00%       0.000us         0.00%       0.000us       0.000us     289.523ms        10.84%     289.523ms       4.021ms            72  
+                        aten::_flash_attention_backward         0.10%       1.884ms         0.28%       5.258ms      73.030us     267.543ms        10.02%     267.543ms       3.716ms            72  
+                                            aten::copy_         0.73%      13.462ms         4.03%      74.466ms      20.906us     246.921ms         9.25%     246.996ms      69.342us          3562  
+                                  nccl:_all_gather_base         0.00%       0.000us         0.00%       0.000us       0.000us     222.402ms         8.33%     222.402ms       3.005ms            74  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us     191.428ms         7.17%     191.428ms     291.811us           656  
+                                              aten::mul         1.63%      30.113ms         3.18%      58.632ms      12.491us     160.113ms         6.00%     160.113ms      34.110us          4694  
+                                       bwd_kernel_dk_dv         0.00%       0.000us         0.00%       0.000us       0.000us     159.598ms         5.98%     159.598ms       2.217ms            72  
+                                               aten::mm         5.52%     101.827ms        18.49%     341.260ms     112.851us     152.765ms         5.72%     152.765ms      50.518us          3024  
+                                          bwd_kernel_dq         0.00%       0.000us         0.00%       0.000us       0.000us     106.533ms         3.99%     106.533ms       1.480ms            72  
+                                              aten::cat         0.20%       3.614ms         0.32%       5.929ms      16.288us      84.484ms         3.16%      84.484ms     232.099us           364  
+                         aten::_flash_attention_forward         0.07%       1.337ms         0.23%       4.234ms      58.811us      81.622ms         3.06%      82.100ms       1.140ms            72  
+                                               attn_fwd         0.00%       0.000us         0.00%       0.000us       0.000us      81.622ms         3.06%      81.622ms       1.134ms            72  
+void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us      69.099ms         2.59%      69.099ms     959.715us            72  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      61.771ms         2.31%      61.771ms     417.372us           148  
+                                             aten::div_         0.05%     978.701us         0.08%       1.561ms      10.843us      61.748ms         2.31%      61.748ms     428.806us           144  
+                                        hipEventDestroy         0.04%     730.849us         0.04%     730.849us       0.437us      61.746ms         2.31%      61.746ms      36.885us          1674  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      55.581ms         2.08%      55.581ms      32.202us          1726  
+                                             aten::add_         0.34%       6.256ms         3.06%      56.435ms      32.697us      54.754ms         2.05%      54.754ms      31.723us          1726  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      48.567ms         1.82%      48.567ms      30.622us          1586  
+              lumen::quant_fp8_blockwise_dual_axis_impl         3.86%      71.160ms         5.30%      97.887ms     193.453us      40.641ms         1.52%      40.641ms      80.319us           506  
+                quant_fp8_blockwise_for_act_grad_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      40.641ms         1.52%      40.641ms      80.319us           506  
+                                              aten::sum         0.31%       5.667ms         0.52%       9.639ms      16.619us      39.102ms         1.46%      39.102ms      67.417us           580  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      38.460ms         1.44%      38.460ms      38.155us          1008  
+Cijk_Ailk_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT512x1...         0.00%       0.000us         0.00%       0.000us       0.000us      31.066ms         1.16%      31.066ms      71.913us           432  
+                                   aten::native_dropout         0.32%       5.864ms         0.65%      11.944ms      23.698us      28.700ms         1.07%      28.700ms      56.944us           504  
+void at::native::(anonymous namespace)::fused_dropou...         0.00%       0.000us         0.00%       0.000us       0.000us      28.700ms         1.07%      28.700ms      56.944us           504  
+void at::native::reduce_kernel<128, 4, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us      27.983ms         1.05%      27.983ms      97.162us           288  
+void at::native::elementwise_kernel_manual_unroll<12...         0.00%       0.000us         0.00%       0.000us       0.000us      27.684ms         1.04%      27.684ms      38.237us           724  
+                                            aten::fill_         0.11%       2.060ms         0.31%       5.640ms       5.529us      23.402ms         0.88%      23.402ms      22.943us          1020  
+                                              aten::add         0.37%       6.790ms         0.60%      11.019ms      10.146us      23.200ms         0.87%      23.200ms      21.363us          1086  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      22.913ms         0.86%      22.913ms      28.570us           802  
+void at::native::vectorized_elementwise_kernel<8, at...         0.00%       0.000us         0.00%       0.000us       0.000us      22.245ms         0.83%      22.245ms      61.791us           360  
+Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x2...         0.00%       0.000us         0.00%       0.000us       0.000us      21.975ms         0.82%      21.975ms     152.602us           144  
+void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      21.424ms         0.80%      21.424ms      22.647us           946  
+-------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
+Self CPU time total: 1.846s
+Self CUDA time total: 2.671s

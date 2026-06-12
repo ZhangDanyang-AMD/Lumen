@@ -123,8 +123,28 @@ the tuned kernels). lm_head (N/K=151936) left untuned (tuner too slow on it; ~1%
    elementwise kernel fell 490→161 ms/step). Remainder is mostly FSDP `reduce_dtype=float32`
    grad casts (framework, not the quant path) — low ROI.
 
-5. **GEMM (now ~50-57% after the above) — near-optimal.** tuning confirmed only ~3% headroom.
-   Remaining GEMM volume reduction would mean lm_head→BF16 (tune too slow; ~1%).
+5. **GEMM — B-preshuffle kernel is the big win (~2.6x).** The blockscale CK kernel's per-128×128
+   dequant has poor MFMA/memory layout. AITER's **bpreshuffle** blockscale GEMM pre-shuffles the
+   weight (`shuffle_weight(w,(16,16))`) into an engine-friendly layout — **bit-identical** math,
+   ~2.5-2.8x faster on gfx942 (micro-bench). The base weight is frozen, so the shuffle is done
+   **once and cached** (alongside the FP8 cache); the activation scale is supplied in the kernel's
+   transposed layout. Forward + DGrad both use it.
+   - Enable: `bpreshuffle_gemm` (needs `cache_frozen_weight`) / `--bpreshuffle` / `BPRESHUFFLE=1`.
+   - Qwen3-8B end-to-end: FP8 GEMM **1028 → 396 ms/step (~2.6x)**, step_time **1542 → 960 ms
+     (−38%)**, loss **bit-identical**. Tests: `test_cache_frozen_weight.py::test_bpreshuffle_matches_blockscale`.
+   - Regular kernel-id tuning was only ~3% (CK instances near-equal); bpreshuffle is a *different*
+     kernel family, hence the large gain.
+   - lm_head→BF16 (~1%) is the only remaining GEMM-volume lever; not worth it.
+
+## Cumulative (Qwen3-8B FSDP fp8 blockwise2d, 8×MI308X)
+
+| stage | step_time | note |
+|---|---|---|
+| FP8 baseline | 2785 ms | — |
+| + frozen-weight cache + skip WGrad | 1912 ms | lossless |
+| + no grad-ckpt + overlap | 1610 ms | memory-for-speed |
+| + SHARD_GRAD_OP | 1542 ms | memory-for-speed |
+| **+ bpreshuffle GEMM** | **960 ms** | lossless; **−66% vs baseline, 44% faster than BF16 (1730)** |
 
 > Reproduce the profile: `LUMEN_PROF_START=12 LUMEN_PROF_END=15 MODE=fp8_blockwise2d MAX_STEPS=16 \
 > bash run_qwen3_fsdp_mi308.sh`. Baseline vs tuned profiles:

@@ -197,6 +197,11 @@ class QuantConfig:
     # under FSDP where the cached weights would not fit.
     cache_frozen_weight: bool = False
 
+    # Use the B-preshuffle blockscale GEMM (pre-shuffled weight layout, ~2.5x
+    # faster on gfx942, bit-identical). Requires cache_frozen_weight (the shuffle
+    # is cached once per frozen weight). Only affects blockwise/blockwise2d.
+    bpreshuffle_gemm: bool = False
+
     # Keep the first and last N transformer layers in BF16 (unpatched) even
     # during FP8 training.
     first_last_layers_bf16: bool = False

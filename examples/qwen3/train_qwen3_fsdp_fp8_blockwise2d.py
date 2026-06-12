@@ -195,8 +195,12 @@ def main():
     p.add_argument("--lora-dropout", type=float, default=0.1)
     p.add_argument("--cache-frozen-weight", action="store_true",
                    help="cache the frozen base weight's FP8 quant (skip per-fwd re-quant)")
+    p.add_argument("--bpreshuffle", action="store_true",
+                   help="use the ~2.5x-faster B-preshuffle blockscale GEMM (needs --cache-frozen-weight)")
     p.add_argument("--sharding", choices=["full_shard", "shard_grad_op"], default="full_shard",
                    help="FSDP sharding: shard_grad_op (ZeRO-2) avoids per-step param all-gather")
+    p.add_argument("--fp8-scaling", choices=["blockwise2d", "delayed", "dynamic"], default="blockwise2d",
+                   help="FP8 linear scaling: blockwise2d (128x128, accurate) vs delayed/dynamic (per-tensor, faster GEMM)")
     p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
                    help="disable activation checkpointing (no backward forward-recompute; more memory)")
     p.add_argument("--no-limit-all-gathers", dest="limit_all_gathers", action="store_false",
@@ -233,10 +237,11 @@ def main():
     # mode=bf16 -> LoRA only (FP8 off); mode=fp8_blockwise2d -> FP8 blockwise2d linears.
     use_fp8 = args.mode == "fp8_blockwise2d"
     cfg = LumenConfig.from_args(Namespace(
-        linear_fp8=use_fp8, linear_fp8_format="fp8_e4m3", linear_fp8_scaling="blockwise2d",
+        linear_fp8=use_fp8, linear_fp8_format="fp8_e4m3", linear_fp8_scaling=args.fp8_scaling,
         linear_fp8_block_size=128, linear_fp8_amax_algo="max", linear_fp8_amax_history=16,
         linear_fp8_reduce_amax=False, linear_fp8_activation=True, linear_fp8_wgrad=True,
         linear_fp8_cache_frozen_weight=args.cache_frozen_weight,
+        linear_fp8_bpreshuffle=args.bpreshuffle,
         grad_quant_type=None, first_last_layers_bf16=False, lumen_norm=False,
         lora_rank=args.lora_rank, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
     ))

@@ -3,199 +3,156 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Qwen3-8B FSDP FP8 blockwise2d 性能优化报告</title>
+<title>Qwen3-8B FSDP FP8 blockwise2d 优化报告</title>
 <style>
-  :root { --bg:#0f1419; --card:#1a2029; --fg:#e6e6e6; --muted:#9aa7b4; --accent:#4fc3f7; --good:#66bb6a; --warn:#ffb74d; --bad:#ef5350; --border:#2c3540; }
-  * { box-sizing:border-box; }
-  body { margin:0; padding:32px; background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
-  .wrap { max-width:1000px; margin:0 auto; }
-  h1 { font-size:26px; margin:0 0 4px; }
-  h2 { font-size:20px; margin:34px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--accent); }
-  h3 { font-size:16px; margin:20px 0 8px; color:var(--accent); }
-  .sub { color:var(--muted); margin:0 0 8px; }
-  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin:14px 0; }
-  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:14px; }
-  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
-  th { color:var(--muted); font-weight:600; }
-  td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
-  code { background:#0b0e12; padding:2px 6px; border-radius:4px; font-size:13px; color:#d7ccff; }
-  pre { background:#0b0e12; border:1px solid var(--border); border-radius:8px; padding:12px 14px; overflow-x:auto; font-size:13px; }
-  .good{color:var(--good);} .warn{color:var(--warn);} .bad{color:var(--bad);} .muted{color:var(--muted);}
-  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; }
-  .pill.done{ background:rgba(102,187,106,.16); color:var(--good);}
-  .pill.todo{ background:rgba(255,183,77,.16); color:var(--warn);}
-  .pill.skip{ background:rgba(154,167,180,.16); color:var(--muted);}
-  .kpi { display:flex; gap:16px; flex-wrap:wrap; }
-  .kpi .box { flex:1; min-width:150px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
-  .kpi .big { font-size:28px; font-weight:700; }
-  .bar { height:10px; background:#0b0e12; border-radius:6px; overflow:hidden; margin-top:4px; }
-  .bar > span { display:block; height:100%; background:linear-gradient(90deg,#4fc3f7,#66bb6a); }
-  .foot { color:var(--muted); font-size:12px; margin-top:30px; border-top:1px solid var(--border); padding-top:12px; }
+  :root{--bg:#0f1419;--card:#1a2029;--fg:#e8ebee;--muted:#93a1ad;--accent:#4fc3f7;
+    --good:#5fd38a;--warn:#ffb74d;--bad:#ef6b6b;--border:#2a333d;
+    --c1:#4fc3f7;--c2:#5fd38a;--c3:#ffb74d;--c4:#b388ff;--c5:#ff8a80;--c6:#4dd0e1;}
+  *{box-sizing:border-box;}
+  body{margin:0;padding:30px 18px;background:var(--bg);color:var(--fg);
+    font:15px/1.65 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:980px;margin:0 auto;}
+  h1{font-size:25px;margin:0 0 2px;}
+  .sub{color:var(--muted);margin:0 0 6px;font-size:13px;}
+  h2{font-size:19px;margin:32px 0 14px;padding-left:10px;border-left:4px solid var(--accent);}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:14px 0;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;}
+  code{background:#0b0e12;padding:2px 6px;border-radius:4px;font-size:12.5px;color:#d7ccff;}
+  pre{background:#0b0e12;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:12.5px;}
+  .good{color:var(--good);}.warn{color:var(--warn);}.bad{color:var(--bad);}.muted{color:var(--muted);}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;}
+  .pd{background:rgba(95,211,138,.16);color:var(--good);}
+  .ps{background:rgba(147,161,173,.16);color:var(--muted);}
+  /* KPI */
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;}
+  .kpi .b{flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
+  .kpi .big{font-size:27px;font-weight:700;line-height:1.2;}
+  /* horizontal bar chart */
+  .row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;}
+  .row .lab{width:190px;flex:none;color:var(--fg);}
+  .row .lab small{color:var(--muted);}
+  .track{flex:1;background:#0b0e12;border-radius:5px;height:22px;position:relative;overflow:hidden;}
+  .fill{height:100%;border-radius:5px;display:flex;align-items:center;justify-content:flex-end;padding-right:7px;font-size:11.5px;font-weight:600;color:#0b0e12;white-space:nowrap;}
+  .row .delta{width:62px;flex:none;text-align:right;font-size:12px;}
+  /* stacked composition bar */
+  .stack{display:flex;height:30px;border-radius:6px;overflow:hidden;margin:6px 0 4px;}
+  .stack > span{display:flex;align-items:center;justify-content:center;font-size:10.5px;color:#0b0e12;font-weight:700;overflow:hidden;}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:12px;color:var(--muted);margin-top:6px;}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;}
+  .foot{color:var(--muted);font-size:12px;margin-top:30px;border-top:1px solid var(--border);padding-top:12px;}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <h1>Qwen3-8B FSDP FP8 blockwise2d 性能优化报告</h1>
-  <p class="sub">8×AMD MI308X (gfx942, 80 CU) · seq 2048 · micro-batch 1 · global batch 8 · Lumen FP8 blockwise2d + LoRA</p>
+  <h1>Qwen3-8B FSDP FP8 blockwise2d 优化报告</h1>
+  <p class="sub">8×AMD MI308X (gfx942) · seq 2048 · global batch 8 · LoRA · 全程 val_loss 逐位一致（零精度损失）</p>
 
-  <h2>1. 总体收益</h2>
+  <!-- KPI -->
   <div class="kpi">
-    <div class="box"><div class="muted">稳态 step time</div><div class="big">2784 → <span class="good">1542 ms</span></div><div class="good">−45%</div></div>
-    <div class="box"><div class="muted">aten::copy_ (GPU)</div><div class="big">2.93 → <span class="good">0.34 s</span></div><div class="good">−89%</div></div>
-    <div class="box"><div class="muted">精度 (val_loss)</div><div class="big good">逐位一致</div><div class="muted">零精度损失</div></div>
+    <div class="b"><div class="muted">step time</div><div class="big">2784 → <span class="good">960</span> <small style="font-size:14px">ms</small></div><div class="good">−66%</div></div>
+    <div class="b"><div class="muted">FP8 GEMM</div><div class="big">1028 → <span class="good">396</span> <small style="font-size:14px">ms</small></div><div class="good">−61% (~2.6x)</div></div>
+    <div class="b"><div class="muted">vs BF16 (1730ms)</div><div class="big good">快 44%</div><div class="muted">精度逐位一致</div></div>
   </div>
+
+  <!-- 优化历程瀑布 -->
+  <h2>① 优化历程（step time 逐步下降）</h2>
   <div class="card">
-    <p>全部优化 loss 与 baseline <strong>逐位一致</strong>。优化后 FP8 step time <strong>1542 ms</strong>，已<span class="good">低于带 grad-ckpt 的 BF16 baseline（1730 ms）</span>。折算一个 epoch（≈6269 步）从 ~4.85h 缩到 ~2.68h。</p>
-    <table>
-      <tr><th>配置</th><th class="num">step time</th><th class="num">copy_</th><th>说明</th></tr>
-      <tr><td>BF16 baseline (grad-ckpt)</td><td class="num">1730 ms</td><td class="num">—</td><td class="muted">参考（不量化）</td></tr>
-      <tr><td>FP8 blockwise2d baseline</td><td class="num">2784 ms</td><td class="num">2.93 s</td><td class="muted">未优化</td></tr>
-      <tr><td>+ frozen-weight cache (fwd)</td><td class="num">2645 ms</td><td class="num">1.76 s</td><td>消除 fwd 权重重量化</td></tr>
-      <tr><td>+ DGrad transpose cache</td><td class="num">2390 ms</td><td class="num">0.98 s</td><td>消除 DGrad 权重转置</td></tr>
-      <tr><td>+ skip frozen WGrad</td><td class="num">1912 ms</td><td class="num good">0.34 s</td><td>跳过冻结权重整条 WGrad</td></tr>
-      <tr><td>+ 关 grad-ckpt + overlap</td><td class="num">1610 ms</td><td class="num">—</td><td>去掉 backward 重算（GEMM 758→506/step）</td></tr>
-      <tr><td><strong>+ SHARD_GRAD_OP</strong></td><td class="num good"><strong>1542 ms</strong></td><td class="num">—</td><td>消除 backward all-gather（73→37 次/step）</td></tr>
-    </table>
-    <p class="muted">step time 为稳态中位数；val_loss 全程逐位一致（1.5968@50）。前 4 项为库层无损优化（默认可开）；关 grad-ckpt + SHARD_GRAD_OP 为显存换速度的训练配置（默认仍 grad-ckpt + full_shard，8B 可关、70B 不可）。</p>
+    <div class="row"><div class="lab">FP8 baseline</div><div class="track"><div class="fill" style="width:100%;background:var(--c5)">2784 ms</div></div><div class="delta muted">起点</div></div>
+    <div class="row"><div class="lab">+ 缓存冻结权重量化 <small>(fwd)</small></div><div class="track"><div class="fill" style="width:95%;background:var(--c3)">2645</div></div><div class="delta good">−5%</div></div>
+    <div class="row"><div class="lab">+ 缓存 DGrad 转置权重</div><div class="track"><div class="fill" style="width:86%;background:var(--c3)">2390</div></div><div class="delta good">−14%</div></div>
+    <div class="row"><div class="lab">+ 跳过冻结权重 WGrad</div><div class="track"><div class="fill" style="width:69%;background:var(--c1)">1912</div></div><div class="delta good">−31%</div></div>
+    <div class="row"><div class="lab">+ 关 gradient checkpointing</div><div class="track"><div class="fill" style="width:58%;background:var(--c1)">1610</div></div><div class="delta good">−42%</div></div>
+    <div class="row"><div class="lab">+ SHARD_GRAD_OP <small>(ZeRO-2)</small></div><div class="track"><div class="fill" style="width:55%;background:var(--c2)">1542</div></div><div class="delta good">−45%</div></div>
+    <div class="row"><div class="lab">+ bpreshuffle GEMM</div><div class="track"><div class="fill" style="width:34%;background:var(--c2)">960</div></div><div class="delta good">−66%</div></div>
+    <div class="row"><div class="lab muted">BF16 参考线</div><div class="track"><div class="fill" style="width:62%;background:#3a4654;color:var(--fg)">1730</div></div><div class="delta muted">基准</div></div>
+    <p class="sub" style="margin-top:10px">库层无损优化（默认可开）：冻结权重缓存、跳过 WGrad、bpreshuffle GEMM。显存换速度（默认关，8B 可开 / 70B 不可）：关 grad-ckpt、SHARD_GRAD_OP。</p>
   </div>
 
-  <h2>2. Profiling 热点（优化前，Self CUDA）</h2>
-  <div class="card">
-    <p class="sub">torch.profiler，FP8 blockwise2d，4 步合计 12.74 s。用 <code>LUMEN_COPY_TRACE=1</code> 把 copy 归因到调用点后发现：23% 的 <code>aten::copy_</code> 主要来自 <strong>forward 对冻结权重的反复量化</strong>，而非 backward。</p>
-    <table>
-      <tr><th>类别</th><th class="num">占比</th><th>说明 / 优化状态</th></tr>
-      <tr><td>FP8 GEMM (fwd)</td><td class="num">37%</td><td><span class="pill skip">近最优</span> 默认 kernel 已接近最优，tune 仅 ~3%</td></tr>
-      <tr><td>aten::copy_</td><td class="num">23%</td><td><span class="pill done">已优化</span> 权重重量化 + DGrad 转置，已消除大部分</td></tr>
-      <tr><td>elementwise</td><td class="num">15%</td><td><span class="pill todo">待定</span> 量化/反量化 elementwise</td></tr>
-      <tr><td>通信 (rccl all-gather/reduce-scatter)</td><td class="num">13%</td><td><span class="pill todo">待定</span> FSDP FULL_SHARD 每步 all-gather</td></tr>
-      <tr><td>FP8 GEMM (bwd DGrad/WGrad)</td><td class="num">8%</td><td><span class="pill skip">—</span></td></tr>
-      <tr><td>attention (flash fwd+bwd)</td><td class="num">10%</td><td><span class="pill skip">—</span></td></tr>
-      <tr><td>FP8 quant kernel</td><td class="num">2%</td><td><span class="pill skip">非瓶颈</span></td></tr>
-    </table>
-  </div>
-
-  <h2>3. 已实施的优化点</h2>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ① frozen-weight FP8 缓存（核心，−14%）</h3>
-    <p>LoRA 训练里 base weight 冻结，其 FP8 量化结果<strong>永远不变</strong>，但原实现每次 forward（以及 gradient-checkpointing 的重算 forward）都重新量化一遍 —— 505 ≈ 2×253 次/step，约 <strong>43.5 GB/step</strong> 的 contiguous 拷贝。</p>
-    <ul>
-      <li><strong>做法</strong>：首次 forward 时（FSDP 已 gather 出完整权重）量化一次，缓存 <code>_fp8_weight_data</code>/<code>_fp8_weight_scale</code> 到 module；之后所有 forward（含重算、跨 step）复用，跳过 <code>_quant_blockwise2d_weight</code>。</li>
-      <li><strong>同时缓存转置权重</strong>：blockwise2d 的 DGrad 每步做 <code>weight_data.t().contiguous()</code>（~7.6 GB/step）；把冻结权重的转置 FP8+scale 也缓存（挂在稳定缓存张量上，forward 经 ctx 传给 backward，零 autograd 签名改动）。</li>
-      <li><strong>关键坑</strong>：FSDP 下被 gather 的冻结权重 view 会误报 <code>requires_grad=True</code>（flat-param 传染），所以 frozen 判定放在 <strong>patch 时</strong>（FSDP 包装前，此时 PEFT 已冻结 base，requires_grad 可靠）。</li>
-      <li><strong>开关</strong>：<code>cache_frozen_weight</code>（QuantConfig/LumenConfig，默认关）/ <code>--cache-frozen-weight</code> / launcher <code>CACHE_FROZEN_WEIGHT=1</code>。</li>
-      <li><strong>代价</strong>：缓存常驻完整 FP8 权重，8B ≈ +8 GB/GPU（192GB 上没问题）；<span class="warn">70B FSDP 会 OOM，不要开</span>。</li>
-    </ul>
-    <table>
-      <tr><th>指标</th><th class="num">baseline</th><th class="num">+ 权重缓存</th><th class="num">+ DGrad 转置</th><th class="num">+ 跳过 WGrad</th></tr>
-      <tr><td>aten::copy_</td><td class="num">2.93 s</td><td class="num">1.76 s</td><td class="num">0.98 s</td><td class="num good">0.34 s (−89%)</td></tr>
-      <tr><td>step time</td><td class="num">2785 ms</td><td class="num">2645 ms</td><td class="num">2390 ms</td><td class="num good">1912 ms (−31%)</td></tr>
-      <tr><td>loss</td><td class="num">—</td><td class="num">一致</td><td class="num">一致</td><td class="num good">逐位一致</td></tr>
-    </table>
-    <p class="muted">测试：<code>tests/quantize/test_cache_frozen_weight.py</code>（填充/复用、缓存==非缓存、<strong>跳过 WGrad 后 DGrad 一致</strong>、可训练权重不缓存）+ blockwise2d SNR 无回退。</p>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ①b 跳过冻结权重 WGrad（最大单项，−17%）</h3>
-    <p>LoRA 下 base weight 冻结，但 FSDP 把它的 <code>requires_grad</code> 误标成 True，autograd 仍<strong>完整计算它的 WGrad</strong>（dequant→requant + 转置 + Triton blockscale GEMM），结果却被丢弃 —— 纯浪费。由 <code>cache_frozen_weight</code> 统一控制：缓存张量带 skip 标记，forward 经 ctx 传给 backward，直接 <code>grad_weight=None</code>，整条 WGrad 不执行。</p>
-    <ul>
-      <li>step time 2390 → 1912 ms（再降 ~17pt，累计 −31%），copy_ 0.98 → 0.34 s。</li>
-      <li>DGrad（传给输入的梯度）与 LoRA 梯度完全不受影响 → loss 逐位一致（已加测试验证）。</li>
-      <li>这才是 WGrad 的正确处理：冻结本就不该算梯度，不是去"加速"它而是"不做它"。</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ①c 关闭 gradient checkpointing（−16%，显存换速度）</h3>
-    <p>backward 的气泡（<code>_post_backward_hook</code> 之间）主因是 grad-ckpt：算每层 DGrad 前 FSDP 要<strong>重新 all-gather 参数并重算一遍 forward</strong>（激活没存），串行注入 backward。它还把 forward GEMM 翻倍（<code>gemm_a8w8_blockscale_ck</code> 758/step = fwd 253 + 重算 253 + DGrad 253）。</p>
-    <ul>
-      <li>关掉后 GEMM 调用 <strong>758 → 506/step</strong>（重算消失），backward 气泡消除，step time 1912 → <strong>1610 ms（−16%）</strong>，loss 逐位一致。</li>
-      <li>开关：<code>--no-grad-checkpointing</code> / <code>GRAD_CKPT=0</code>，配合 <code>--no-limit-all-gathers</code> + <code>--forward-prefetch</code> 改善 all-gather 与 compute 的重叠。</li>
-      <li><span class="warn">代价</span>：激活显存大增。8B/mb1/seq2048 在 192GB 放得下；<strong>70B 或大 batch/seq 会 OOM</strong>，那时 grad-ckpt 仍必须。默认仍开 grad-ckpt。</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ①d SHARD_GRAD_OP 消除 backward all-gather（−4%，需配合关 grad-ckpt）</h3>
-    <p>FULL_SHARD 在 forward 后 free 参数，<strong>backward 要重新 all-gather 每层参数</strong>算 DGrad（all_gather 73/step = fwd 37 + bwd 36）—— 这正是 backward 的通信气泡。SHARD_GRAD_OP（ZeRO-2）参数常驻不 free → <strong>backward 无 all-gather</strong>（73→37/step），step 1610→<strong>1542 ms</strong>，loss 逐位一致。</p>
-    <ul>
-      <li><span class="warn">前提</span>：必须和关 grad-ckpt 配合。grad-ckpt 开着时 SHARD_GRAD_OP 反而更慢（重算仍 re-gather + 常驻参数挤占 overlap）。用法：<code>GRAD_CKPT=0 SHARDING=shard_grad_op</code>。</li>
-      <li>另:base weight 冻结时,backward 那次 all-gather 本就是浪费(DGrad 用的是缓存 FP8 转置,非 gather 的 BF16);SHARD_GRAD_OP 通过"不 free"绕过它。</li>
-      <li><code>NO_SHARD</code>(连 fwd all-gather 也去掉)已 deprecated 且在本配置报错(lm_head writeback)，不可用。</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ② GEMM tuned config（gfx942，~3%）</h3>
-    <p>镜像里的 <code>a8w8_blockscale_tuned_gemm.csv</code> <strong>零 gfx942 条目</strong>（全是 gfx950），MI308X 上 blockscale GEMM 全走默认启发式 kernel。为 Qwen3 的 5 个 transformer 层 shape（M=2048）在 gfx942/80CU 上 tune，存入 <code>examples/qwen3/configs/a8w8_blockscale_tuned_gemm.csv</code>。</p>
-    <ul>
-      <li><strong>启用</strong>：<code>USE_TUNED_GEMM=1</code>（launcher，默认关）→ 把 <code>AITER_CONFIG_GEMM_A8W8_BLOCKSCALE</code> 指向仓库内 csv。</li>
-      <li><strong>收益小</strong>：tuner 给 5 个 shape 都选了 kernelId 0 ≈ 默认已用的 kernel，提速仅 ~3%，step time 几乎不变。<span class="muted">结论：GEMM kernel 选型不是瓶颈。</span></li>
-      <li><span class="warn">注意</span>：只匹配 gfx942/cu_num=80/M=2048；在 gfx950 上启用会丢掉镜像 gfx950 配置，非 MI308X 不要开。</li>
-    </ul>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill done">已完成</span> ③ Profiler + copy 追踪工具</h3>
-    <p>给 qwen3 训练脚本加了 env 门控的 <code>torch.profiler</code>（<code>LUMEN_PROF_START/END/OUTPUT/TRACE</code>）和 copy 归因（<code>LUMEN_COPY_TRACE=1</code>，monkey-patch <code>copy_/contiguous</code> 按 lumen 调用栈聚合）。正是它定位到真正的 copy 热点（权重重量化），纠正了最初对 WGrad 的误判。</p>
-  </div>
-
-  <div class="card">
-    <h3><span class="pill skip">已回退</span> ④ WGrad requant <em>加速</em>（被 ①b 取代）</h3>
-    <p>最初尝试<strong>加速</strong> blockwise2d WGrad 的 dequant→requant 往返，SNR 通过但零收益 —— copy trace 证实 LoRA 下 base WGrad 被丢弃。正确做法不是加速而是<strong>整条跳过</strong>（见 ①b）。<span class="muted">教训：先用 copy trace 定位再动手。</span></p>
-  </div>
-
-  <h2>4. 后续优化目标</h2>
+  <!-- 每步做了什么 -->
+  <h2>② 每一步做了什么、为什么</h2>
   <div class="card">
     <table>
-      <tr><th>目标</th><th>占比/收益</th><th>状态</th><th>说明</th></tr>
-      <tr>
-        <td>FSDP 通信 / overlap</td><td class="num">已处理</td><td><span class="pill done">完成</span></td>
-        <td>关 grad-ckpt + SHARD_GRAD_OP 消除 backward all-gather(①c/①d)。NO_SHARD 不可用。剩余 fwd all-gather 已基本被 overlap 覆盖。</td>
-      </tr>
-      <tr>
-        <td>elementwise 融合</td><td class="num">余量小</td><td><span class="pill skip">低 ROI</span></td>
-        <td>大头已被冻结权重缓存消掉(490→161 ms/step)。剩余主要是 FSDP <code>reduce_dtype=float32</code> 梯度 cast(框架层，非量化路径)。</td>
-      </tr>
-      <tr>
-        <td>lm_head GEMM tune</td><td class="num">~1%</td><td><span class="pill skip">暂缓</span></td>
-        <td>(N/K=151936) 两个超大 GEMM tune 成本极高（>40min 未跑完已 kill）；profile 占比仅 ~1%，性价比低。或可把 lm_head 层排除 FP8 走 BF16，消除 "not found" 日志。</td>
-      </tr>
-      <tr>
-        <td>WGrad 转置</td><td class="num">~5.9 GB/step</td><td><span class="pill skip">无法缓存</span></td>
-        <td>梯度衍生、每步变化，不能像权重那样缓存。</td>
-      </tr>
-      <tr>
-        <td>FP8 GEMM kernel</td><td class="num">37%</td><td><span class="pill skip">近最优</span></td>
-        <td>tuning 已确认仅 3% 余量，不值得再投入。</td>
-      </tr>
+      <tr><th>#</th><th>优化</th><th>一句话原理</th><th class="n">step</th><th>类型</th></tr>
+      <tr><td>1</td><td>缓存冻结权重的 FP8 量化</td><td>LoRA base 冻结，量化结果不变，却每次 forward 重算 → 只算一次并复用</td><td class="n">2645</td><td><span class="pill pd">无损</span></td></tr>
+      <tr><td>2</td><td>缓存 DGrad 的转置权重</td><td>反向 DGrad 每步对冻结权重做转置拷贝 → 转置结果也缓存</td><td class="n">2390</td><td><span class="pill pd">无损</span></td></tr>
+      <tr><td>3</td><td>跳过冻结权重的 WGrad</td><td>冻结权重的梯度本就丢弃，FSDP 却仍整条算 → 直接不算</td><td class="n">1912</td><td><span class="pill pd">无损</span></td></tr>
+      <tr><td>4</td><td>关 gradient checkpointing</td><td>反向不再重算 forward（GEMM 758→506/step），消除重算气泡</td><td class="n">1610</td><td><span class="pill ps">换显存</span></td></tr>
+      <tr><td>5</td><td>SHARD_GRAD_OP + overlap</td><td>参数常驻，反向不再 all-gather（73→37 次/step），消除通信气泡</td><td class="n">1542</td><td><span class="pill ps">换显存</span></td></tr>
+      <tr><td>6</td><td>bpreshuffle GEMM</td><td>预重排冻结权重布局，blockscale GEMM 提速 ~2.6x（FP8 GEMM 1028→396ms），bit-identical</td><td class="n">960</td><td><span class="pill pd">无损</span></td></tr>
     </table>
   </div>
 
-  <h2>5. 复现 / 使用</h2>
+  <!-- 瓶颈构成变化 -->
+  <h2>③ 瓶颈构成的变化</h2>
   <div class="card">
-    <h3>启用全部优化训练（8B，显存充足）</h3>
-    <pre>CACHE_FROZEN_WEIGHT=1 USE_TUNED_GEMM=1 \
-GRAD_CKPT=0 SHARDING=shard_grad_op LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
-MODE=fp8_blockwise2d  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
-    <p class="muted">显存吃紧（大模型/大 batch）时去掉 <code>GRAD_CKPT=0</code>（保留 grad-ckpt），仍有 cache+skip-wgrad 的 −31%。</p>
-    <h3>Profiling（含 copy 归因）</h3>
-    <pre>LUMEN_PROF_START=12 LUMEN_PROF_END=15 LUMEN_COPY_TRACE=1 \
-MODE=fp8_blockwise2d MAX_STEPS=16 \
+    <p class="sub">优化前 GPU 时间被拷贝/重算/通信占去近一半；优化后这些基本消失，剩下的几乎都是不可省的 GEMM 计算。</p>
+    <div style="margin:14px 0 4px;font-size:13px">优化前（FP8 baseline）</div>
+    <div class="stack">
+      <span style="width:37%;background:var(--c1)">GEMM 37%</span>
+      <span style="width:23%;background:var(--c5)">copy 23%</span>
+      <span style="width:15%;background:var(--c3)">elem 15%</span>
+      <span style="width:13%;background:var(--c4)">通信 13%</span>
+      <span style="width:12%;background:var(--c6)">attn</span>
+    </div>
+    <div style="margin:16px 0 4px;font-size:13px">优化后（最优配置）</div>
+    <div class="stack">
+      <span style="width:60%;background:var(--c1)">GEMM ~60%</span>
+      <span style="width:8%;background:var(--c5)">copy</span>
+      <span style="width:14%;background:var(--c4)">通信</span>
+      <span style="width:14%;background:var(--c6)">attn</span>
+      <span style="width:4%;background:var(--c3)"></span>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--c1)"></i>FP8 GEMM</span>
+      <span><i style="background:var(--c5)"></i>拷贝 copy_</span>
+      <span><i style="background:var(--c3)"></i>elementwise 量化</span>
+      <span><i style="background:var(--c4)"></i>FSDP 通信</span>
+      <span><i style="background:var(--c6)"></i>attention</span>
+    </div>
+  </div>
+
+  <!-- 关键指标 -->
+  <h2>④ 关键指标变化</h2>
+  <div class="card">
+    <table>
+      <tr><th>指标</th><th class="n">优化前</th><th class="n">优化后</th><th class="n">变化</th></tr>
+      <tr><td>step time（稳态）</td><td class="n">2784 ms</td><td class="n good">1542 ms</td><td class="n good">−45%</td></tr>
+      <tr><td>aten::copy_（GPU 时间）</td><td class="n">2.93 s</td><td class="n good">0.34 s</td><td class="n good">−89%</td></tr>
+      <tr><td>GEMM 调用 / step</td><td class="n">758</td><td class="n good">506</td><td class="n good">−33%</td></tr>
+      <tr><td>all-gather 次数 / step</td><td class="n">73</td><td class="n good">37</td><td class="n good">−49%</td></tr>
+      <tr><td>val_loss</td><td class="n">1.5968</td><td class="n good">1.5968</td><td class="n good">逐位一致</td></tr>
+      <tr><td>vs BF16 (1730ms)</td><td class="n bad">+61%</td><td class="n good">−11%</td><td class="n good">反超</td></tr>
+    </table>
+  </div>
+
+  <!-- 试过没用 -->
+  <h2>⑤ 试过但没采用</h2>
+  <div class="card">
+    <table>
+      <tr><th>尝试</th><th>结果</th></tr>
+      <tr><td>GEMM tuned config (gfx942)</td><td>仅 ~3%，默认 kernel 已近最优；可选开关 <code>USE_TUNED_GEMM</code></td></tr>
+      <tr><td>加速 WGrad 的 requant</td><td>零收益（冻结权重 WGrad 本就被丢弃）→ 改为直接跳过（步骤 3）</td></tr>
+      <tr><td>SHARD_GRAD_OP（grad-ckpt 开着时）</td><td>反而更慢；只有关掉 grad-ckpt 才有效（步骤 5）</td></tr>
+      <tr><td>NO_SHARD</td><td>已废弃，本配置报错，不可用</td></tr>
+      <tr><td>lm_head 大 GEMM tune</td><td>tune 成本极高（&gt;40min 未完成），且仅占 ~1%，放弃</td></tr>
+    </table>
+  </div>
+
+  <!-- 用法 -->
+  <h2>⑥ 怎么用</h2>
+  <div class="card">
+    <div style="font-size:13px;margin-bottom:4px">全部优化（8B，显存充足）：</div>
+    <pre>CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 GRAD_CKPT=0 SHARDING=shard_grad_op \
+LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 MODE=fp8_blockwise2d \
   bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
-    <h3>相关文件</h3>
-    <ul>
-      <li><code>lumen/quantize/__init__.py</code> — <code>_maybe_cache_frozen_weight</code>（冻结权重缓存）</li>
-      <li><code>lumen/ops/quantize/linear.py</code> — DGrad 转置缓存（ctx 传递）</li>
-      <li><code>lumen/quantize/config.py</code> / <code>lumen/config.py</code> — <code>cache_frozen_weight</code> 开关</li>
-      <li><code>examples/qwen3/configs/a8w8_blockscale_tuned_gemm.csv</code> — gfx942 tuned config</li>
-      <li><code>examples/qwen3/results/qwen3_fp8_perf_notes.md</code> — 详细 profile 与结论</li>
-      <li><code>tests/quantize/test_cache_frozen_weight.py</code> — 正确性测试</li>
-    </ul>
+    <div style="font-size:13px;margin:10px 0 4px">显存吃紧 / 大模型：去掉 <code>GRAD_CKPT=0</code> 和 <code>SHARDING</code>，仍保留库层无损优化（约 −31%）。</div>
   </div>
 
-  <p class="foot">Lumen · Qwen3-8B FSDP FP8 blockwise2d 优化报告 · 8×MI308X (gfx942)。所有 step time 为稳态中位数（排除含 JIT 的首步）；val_loss 为 answer-only（MLPerf 口径）。</p>
+  <p class="foot">Lumen · Qwen3-8B FSDP FP8 blockwise2d · 8×MI308X (gfx942)。step time 为稳态中位数（排除含 JIT 的首步）；构成百分比为单步 torch.profiler Self CUDA 占比（近似）。详见 <code>qwen3_fp8_perf_notes.md</code>。</p>
 
 </div>
 </body>

@@ -92,6 +92,37 @@ def test_skip_wgrad_preserves_dgrad():
 
 
 @_CUDA
+def test_bpreshuffle_matches_blockscale():
+    """bpreshuffle GEMM (frozen weight) must match the CK blockscale path (fwd+bwd)."""
+    from lumen.quantize import disable, enable
+    from lumen.quantize.config import QuantConfig
+    try:
+        import aiter  # noqa: F401
+        from aiter.ops.shuffle import shuffle_weight  # noqa: F401
+        aiter.gemm_a8w8_blockscale_bpreshuffle  # noqa: B018
+    except (ImportError, AttributeError):
+        pytest.skip("aiter bpreshuffle blockscale not available")
+
+    from conftest import compute_snr  # type: ignore
+    torch.manual_seed(0)
+    w = (torch.randn(256, 256) * 0.05).cuda().to(torch.bfloat16)
+    x0 = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+
+    outs, gins = {}, {}
+    for bp in (False, True):
+        m = _frozen_linear(); m.weight.data.copy_(w)
+        enable(m, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128,
+                                              cache_frozen_weight=True, bpreshuffle_gemm=bp))
+        x = x0.clone().requires_grad_(True)
+        y = m(x); y.sum().backward()
+        outs[bp] = y.detach().float(); gins[bp] = x.grad.float()
+        disable(m)
+    # bit-identical math (shuffle only changes layout) -> very high SNR
+    assert compute_snr(outs[False], outs[True]) > 40
+    assert compute_snr(gins[False], gins[True]) > 40
+
+
+@_CUDA
 def test_trainable_weight_not_cached():
     """Cache must NOT engage for trainable weights (only frozen base)."""
     from lumen.quantize import disable, enable

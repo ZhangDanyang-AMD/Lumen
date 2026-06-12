@@ -78,7 +78,9 @@ docker run --rm --init \
     -e MAX_STEPS="${MAX_STEPS}" \
     -e EVAL_INTERVAL="${EVAL_INTERVAL}" \
     -e CACHE_FROZEN_WEIGHT="${CACHE_FROZEN_WEIGHT:-}" \
+    -e BPRESHUFFLE="${BPRESHUFFLE:-}" \
     -e SHARDING="${SHARDING:-full_shard}" \
+    -e FP8_SCALING="${FP8_SCALING:-blockwise2d}" \
     -e GRAD_CKPT="${GRAD_CKPT:-1}" \
     -e LIMIT_ALL_GATHERS="${LIMIT_ALL_GATHERS:-1}" \
     -e FORWARD_PREFETCH="${FORWARD_PREFETCH:-}" \
@@ -88,6 +90,7 @@ set -euo pipefail
 cd /workspace/Lumen/examples/qwen3
 EXTRA=""
 [[ -n "${CACHE_FROZEN_WEIGHT}" ]] && EXTRA="${EXTRA} --cache-frozen-weight"
+[[ -n "${BPRESHUFFLE}" ]] && EXTRA="${EXTRA} --bpreshuffle"
 [[ "${GRAD_CKPT}" == "0" ]] && EXTRA="${EXTRA} --no-grad-checkpointing"
 [[ "${LIMIT_ALL_GATHERS}" == "0" ]] && EXTRA="${EXTRA} --no-limit-all-gathers"
 [[ -n "${FORWARD_PREFETCH}" ]] && EXTRA="${EXTRA} --forward-prefetch"
@@ -95,7 +98,7 @@ torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
     --model-name-or-path /model-qwen3 \
     --train-data-path "/data/${TRAIN_FILE}" \
     --val-data-path "/data/${VAL_FILE}" \
-    --mode "${MODE}" ${EXTRA} --sharding "${SHARDING}" \
+    --mode "${MODE}" ${EXTRA} --sharding "${SHARDING}" --fp8-scaling "${FP8_SCALING}" \
     --seq-length "${SEQ_LENGTH}" --max-steps "${MAX_STEPS}" \
     --eval-interval "${EVAL_INTERVAL}" --seed 1234 2>&1 \
     | tee "/results/train_${MODE}.log"
