@@ -89,15 +89,35 @@ the tuned kernels). lm_head (N/K=151936) left untuned (tuner too slow on it; ~1%
      under frozen-weight LoRA the base WGrad is discarded, so the right move is to skip it
      entirely, not speed it up.
 
-2. **elementwise 15%** — quant/dequant elementwise + dual-axis grad quant. Action: rely on the
-   fused dual-axis grad-quant path (`quant_fp8_blockwise_dual_axis_impl`, `linear.py:1356`) wherever
-   M,N are block-aligned (already the fast path); cut redundant BF16 materializations feeding it.
+2. **gradient-checkpointing recompute — biggest training-config lever.** The backward bubbles
+   around `FullyShardedDataParallel._post_backward_hook` come from grad-ckpt: before each layer's
+   backward, FSDP re-all-gathers params and **re-runs the forward** (activations weren't saved) —
+   a serial block injected into the backward. It also doubles the forward GEMMs
+   (`gemm_a8w8_blockscale_ck` = 758/step = fwd 253 + **recompute 253** + DGrad 253).
+   - **Action (config, not a lib fix): disable grad-ckpt when memory allows.** `--no-grad-checkpointing`
+     / `GRAD_CKPT=0` + `--no-limit-all-gathers` + `--forward-prefetch`. Removes the recompute
+     (GEMM 758→506/step) and the backward bubbles.
 
-3. **comm 13%** — FSDP FULL_SHARD all-gathers all params every step. At 8B/8GPU this is structural.
-   Action: try `SHARD_GRAD_OP` (ZeRO-2, params stay resident, no per-step param all-gather) if memory
-   allows, or HSDP; measure vs FULL_SHARD.
+     | | step_time | GEMM/step | loss |
+     |---|---|---|---|
+     | + skip frozen WGrad (grad-ckpt on) | 1912 ms | 758 | — |
+     | + no grad-ckpt + overlap | **~1610 ms (−16%)** | **506** | **bit-identical** |
 
-4. **GEMM 37% — near-optimal** (see above). Not worth further kernel tuning.
+     Cumulative from baseline: **2785 → 1610 ms (−42%)**, below the BF16-with-ckpt baseline
+     (1730 ms). **Default keeps grad-ckpt ON** — disabling needs activation memory (fits at 8B
+     mb1 seq2048 / 192 GB; **will OOM at 70B or large batch/seq**).
+
+3. **comm — FULL_SHARD is the right choice here.** Tried `SHARD_GRAD_OP` (ZeRO-2): **slower**
+   (step 1912→2059 ms, all_gather 0.79→1.55 s). Under grad-ckpt + FP8 the resident full params
+   gather in fewer/larger, less-overlapped ops. Keep FULL_SHARD. (After disabling grad-ckpt the
+   backward all-gathers also drop, so comm is no longer the bottleneck.)
+
+4. **elementwise** — largely already removed by the frozen-weight cache (the biggest
+   elementwise kernel fell 490→161 ms/step). Remainder is mostly FSDP `reduce_dtype=float32`
+   grad casts (framework, not the quant path) — low ROI.
+
+5. **GEMM (now ~50-57% after the above) — near-optimal.** tuning confirmed only ~3% headroom.
+   Remaining GEMM volume reduction would mean lm_head→BF16 (tune too slow; ~1%).
 
 > Reproduce the profile: `LUMEN_PROF_START=12 LUMEN_PROF_END=15 MODE=fp8_blockwise2d MAX_STEPS=16 \
 > bash run_qwen3_fsdp_mi308.sh`. Baseline vs tuned profiles:

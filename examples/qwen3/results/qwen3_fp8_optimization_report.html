@@ -41,22 +41,22 @@
 
   <h2>1. 总体收益</h2>
   <div class="kpi">
-    <div class="box"><div class="muted">稳态 step time</div><div class="big">2784 → <span class="good">1912 ms</span></div><div class="good">−31%</div></div>
+    <div class="box"><div class="muted">稳态 step time</div><div class="big">2784 → <span class="good">1610 ms</span></div><div class="good">−42%</div></div>
     <div class="box"><div class="muted">aten::copy_ (GPU)</div><div class="big">2.93 → <span class="good">0.34 s</span></div><div class="good">−89%</div></div>
     <div class="box"><div class="muted">精度 (val_loss)</div><div class="big good">逐位一致</div><div class="muted">零精度损失</div></div>
   </div>
   <div class="card">
-    <p>全部优化为<strong>免费提速</strong>（loss 与 baseline 逐位一致）。优化后 FP8 与 BF16 的差距从 <span class="bad">+61%</span> 收窄到 <span class="good">+11%</span>（BF16 baseline ≈ 1730 ms/step）—— 基本追平 BF16。折算一个 epoch（≈6269 步）从 ~4.85h 缩到 ~3.33h。</p>
+    <p>全部优化 loss 与 baseline <strong>逐位一致</strong>。优化后 FP8 step time <strong>1610 ms</strong>，已<span class="good">低于带 grad-ckpt 的 BF16 baseline（1730 ms）</span>。折算一个 epoch（≈6269 步）从 ~4.85h 缩到 ~2.80h。</p>
     <table>
       <tr><th>配置</th><th class="num">step time</th><th class="num">copy_</th><th>说明</th></tr>
-      <tr><td>BF16 baseline</td><td class="num">1730 ms</td><td class="num">—</td><td class="muted">参考下限（不量化）</td></tr>
+      <tr><td>BF16 baseline (grad-ckpt)</td><td class="num">1730 ms</td><td class="num">—</td><td class="muted">参考（不量化）</td></tr>
       <tr><td>FP8 blockwise2d baseline</td><td class="num">2784 ms</td><td class="num">2.93 s</td><td class="muted">未优化</td></tr>
       <tr><td>+ frozen-weight cache (fwd)</td><td class="num">2645 ms</td><td class="num">1.76 s</td><td>消除 fwd 权重重量化</td></tr>
       <tr><td>+ DGrad transpose cache</td><td class="num">2390 ms</td><td class="num">0.98 s</td><td>消除 DGrad 权重转置</td></tr>
       <tr><td>+ skip frozen WGrad</td><td class="num">1912 ms</td><td class="num good">0.34 s</td><td>跳过冻结权重整条 WGrad</td></tr>
-      <tr><td><strong>+ GEMM tuned config</strong></td><td class="num good"><strong>~1910 ms</strong></td><td class="num">—</td><td>全部优化（GEMM tune 贡献 ~0）</td></tr>
+      <tr><td><strong>+ 关 grad-ckpt + overlap</strong></td><td class="num good"><strong>1610 ms</strong></td><td class="num">—</td><td>去掉 backward 重算（GEMM 758→506/step）</td></tr>
     </table>
-    <p class="muted">所有 step time 为稳态中位数；val_loss 全程逐位一致（1.5968@50）。</p>
+    <p class="muted">step time 为稳态中位数；val_loss 全程逐位一致（1.5968@50）。前 4 项为库层无损优化（默认可开）；关 grad-ckpt 为显存换速度的训练配置（默认仍开 grad-ckpt，8B 可关、70B 不可）。</p>
   </div>
 
   <h2>2. Profiling 热点（优化前，Self CUDA）</h2>
@@ -106,6 +106,21 @@
   </div>
 
   <div class="card">
+    <h3><span class="pill done">已完成</span> ①c 关闭 gradient checkpointing（−16%，显存换速度）</h3>
+    <p>backward 的气泡（<code>_post_backward_hook</code> 之间）主因是 grad-ckpt：算每层 DGrad 前 FSDP 要<strong>重新 all-gather 参数并重算一遍 forward</strong>（激活没存），串行注入 backward。它还把 forward GEMM 翻倍（<code>gemm_a8w8_blockscale_ck</code> 758/step = fwd 253 + 重算 253 + DGrad 253）。</p>
+    <ul>
+      <li>关掉后 GEMM 调用 <strong>758 → 506/step</strong>（重算消失），backward 气泡消除，step time 1912 → <strong>1610 ms（−16%）</strong>，loss 逐位一致。</li>
+      <li>开关：<code>--no-grad-checkpointing</code> / <code>GRAD_CKPT=0</code>，配合 <code>--no-limit-all-gathers</code> + <code>--forward-prefetch</code> 改善 all-gather 与 compute 的重叠。</li>
+      <li><span class="warn">代价</span>：激活显存大增。8B/mb1/seq2048 在 192GB 放得下；<strong>70B 或大 batch/seq 会 OOM</strong>，那时 grad-ckpt 仍必须。默认仍开 grad-ckpt。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="pill skip">已验证更慢</span> ①d SHARD_GRAD_OP (ZeRO-2)</h3>
+    <p>试图用 SHARD_GRAD_OP 免去每步参数 all-gather，结果<strong>更慢</strong>（1912→2059 ms，all_gather 0.79→1.55s）：grad-ckpt + FP8 下完整参数常驻，反而是少数超大块 all-gather、overlap 更差。保持 <strong>FULL_SHARD</strong>。</p>
+  </div>
+
+  <div class="card">
     <h3><span class="pill done">已完成</span> ② GEMM tuned config（gfx942，~3%）</h3>
     <p>镜像里的 <code>a8w8_blockscale_tuned_gemm.csv</code> <strong>零 gfx942 条目</strong>（全是 gfx950），MI308X 上 blockscale GEMM 全走默认启发式 kernel。为 Qwen3 的 5 个 transformer 层 shape（M=2048）在 gfx942/80CU 上 tune，存入 <code>examples/qwen3/configs/a8w8_blockscale_tuned_gemm.csv</code>。</p>
     <ul>
@@ -130,12 +145,12 @@
     <table>
       <tr><th>目标</th><th>占比/收益</th><th>状态</th><th>说明</th></tr>
       <tr>
-        <td>FSDP 通信 overlap</td><td class="num">13%</td><td><span class="pill todo">待做</span></td>
-        <td>FULL_SHARD 每步 all-gather 全部参数。试 <code>SHARD_GRAD_OP</code>(ZeRO-2，参数常驻免 all-gather) 或 HSDP，对比显存/速度。结构性，潜力最大。</td>
+        <td>FSDP 通信 / overlap</td><td class="num">9-13%</td><td><span class="pill skip">已处理</span></td>
+        <td>SHARD_GRAD_OP 试过更慢(①d)，保持 FULL_SHARD。关 grad-ckpt(①c)后 backward all-gather 也降，通信不再是瓶颈。</td>
       </tr>
       <tr>
-        <td>elementwise 融合</td><td class="num">15%</td><td><span class="pill todo">待做</span></td>
-        <td>量化/反量化 + dual-axis grad quant 的 elementwise。尽量走融合 dual-axis 路径，减少中间 BF16 物化。</td>
+        <td>elementwise 融合</td><td class="num">余量小</td><td><span class="pill skip">低 ROI</span></td>
+        <td>大头已被冻结权重缓存消掉(490→161 ms/step)。剩余主要是 FSDP <code>reduce_dtype=float32</code> 梯度 cast(框架层，非量化路径)。</td>
       </tr>
       <tr>
         <td>lm_head GEMM tune</td><td class="num">~1%</td><td><span class="pill skip">暂缓</span></td>
@@ -154,9 +169,11 @@
 
   <h2>5. 复现 / 使用</h2>
   <div class="card">
-    <h3>启用全部优化训练</h3>
-    <pre>CACHE_FROZEN_WEIGHT=1 USE_TUNED_GEMM=1 MODE=fp8_blockwise2d \
-  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
+    <h3>启用全部优化训练（8B，显存充足）</h3>
+    <pre>CACHE_FROZEN_WEIGHT=1 USE_TUNED_GEMM=1 \
+GRAD_CKPT=0 LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
+MODE=fp8_blockwise2d  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
+    <p class="muted">显存吃紧（大模型/大 batch）时去掉 <code>GRAD_CKPT=0</code>（保留 grad-ckpt），仍有 cache+skip-wgrad 的 −31%。</p>
     <h3>Profiling（含 copy 归因）</h3>
     <pre>LUMEN_PROF_START=12 LUMEN_PROF_END=15 LUMEN_COPY_TRACE=1 \
 MODE=fp8_blockwise2d MAX_STEPS=16 \

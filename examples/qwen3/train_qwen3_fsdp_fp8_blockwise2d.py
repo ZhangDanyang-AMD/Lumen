@@ -195,6 +195,15 @@ def main():
     p.add_argument("--lora-dropout", type=float, default=0.1)
     p.add_argument("--cache-frozen-weight", action="store_true",
                    help="cache the frozen base weight's FP8 quant (skip per-fwd re-quant)")
+    p.add_argument("--sharding", choices=["full_shard", "shard_grad_op"], default="full_shard",
+                   help="FSDP sharding: shard_grad_op (ZeRO-2) avoids per-step param all-gather")
+    p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
+                   help="disable activation checkpointing (no backward forward-recompute; more memory)")
+    p.add_argument("--no-limit-all-gathers", dest="limit_all_gathers", action="store_false",
+                   help="allow FSDP to overlap consecutive all-gathers with compute (more memory)")
+    p.add_argument("--forward-prefetch", action="store_true",
+                   help="FSDP forward_prefetch: prefetch next unit's all-gather during compute")
+    p.set_defaults(grad_checkpointing=True, limit_all_gathers=True)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-interval", type=int, default=1)
     p.add_argument("--eval-interval", type=int, default=50)
@@ -214,8 +223,11 @@ def main():
 
     rank0(f"> Loading Qwen3 from {args.model_name_or_path} ...")
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    rank0("> Gradient checkpointing enabled")
+    if args.grad_checkpointing:
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        rank0("> Gradient checkpointing enabled")
+    else:
+        rank0("> Gradient checkpointing DISABLED (more activation memory, no backward recompute)")
 
     # ---- Lumen LoRA (+ optional FP8 blockwise2d), same recipe as llama2 ----
     # mode=bf16 -> LoRA only (FP8 off); mode=fp8_blockwise2d -> FP8 blockwise2d linears.
@@ -234,16 +246,26 @@ def main():
         if "lora_" in nme and prm.dtype == torch.float32:
             prm.data = prm.data.to(torch.bfloat16)
 
+    # LoRA freezes the base weight, so FULL_SHARD wastefully all-gathers the
+    # (frozen) params every step. SHARD_GRAD_OP (ZeRO-2) keeps params resident
+    # (no per-step param all-gather, only grad reduce-scatter) — much less comm,
+    # at the cost of full params in memory (fine at 8B, may OOM at 70B).
+    _shard = {
+        "full_shard": ShardingStrategy.FULL_SHARD,
+        "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
+    }[args.sharding]
     model = FSDP(
         model,
         auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Qwen3DecoderLayer}),
         mixed_precision=MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, buffer_dtype=torch.bfloat16),
-        sharding_strategy=ShardingStrategy.FULL_SHARD,
+        sharding_strategy=_shard,
         device_id=local_rank,
-        limit_all_gathers=True,
+        limit_all_gathers=args.limit_all_gathers,
+        forward_prefetch=args.forward_prefetch,
         use_orig_params=True,
     )
-    rank0(f"> FSDP model ready (version=1, sharding=full_shard, world_size={world_size})")
+    rank0(f"> FSDP model ready (sharding={args.sharding}, limit_all_gathers={args.limit_all_gathers}, "
+          f"forward_prefetch={args.forward_prefetch}, grad_ckpt={args.grad_checkpointing}, world_size={world_size})")
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), eps=1e-5, weight_decay=args.weight_decay)
 
