@@ -21,6 +21,7 @@ linear-quantization recipes (**delayed**, **blockwise2d**), on the gov_report da
 | 4 | FSDP | 70B | bf16 | 60 | ⏸ stopped (snapshot) | all-token |
 | 5 | FSDP | 70B | fp8_blockwise2d | 256 | ⚠ NCCL watchdog hang ~256 | all-token |
 | 6 | Megatron | 70B | fp8_blockwise2d | 192 (first eval) | ⚠ then early-stop desync (fixed) | **answer-only (MLPerf)** |
+| 7 | **native** PyTorch FSDP | 7B | bf16 | 200 (full) | ✅ complete | all-token | final val 1.4233, ~4.5 s/step (baseline; see §7) |
 
 <!-- append new runs here -->
 
@@ -149,7 +150,28 @@ Faster than FSDP (TP1 + fp8 param-storage keeps weights resident, no per-step al
 
 ---
 
-## 7. (reserved for new runs)
+## 7. Native PyTorch FSDP vs Lumen FSDP (7B, BF16)
+
+A pure-PyTorch-FSDP baseline (`examples/llama2/native_fsdp_baseline.py` — HF + torch FSDP +
+PEFT, **no `LumenConfig`**; only `LLaMA2SFTDataset` reused for identical inputs), same §3
+hyperparameters, same old all-token data, 200 steps.
+
+| | final val | step time (steady, no-eval) | data pipeline |
+|---|---|---|---|
+| Lumen FSDP bf16 (run #1) | 1.3866 | ~5.23 s | `shuffle=False` (`_pack_next` packing) |
+| native PyTorch FSDP bf16 | **1.4233** | **~4.5 s** | `shuffle=True` (per-row) |
+
+Val convergence (native): 3.09→1.69→1.47→1.43→**1.4233** (@10/40/80/120/200).
+
+⚠ **Comparison is confounded — not yet a clean Lumen-vs-native result.** The two runs used
+**different data pipelines**: the run-#1 Lumen-bf16 log predates the `shuffle=True` dataset
+change, so it used the old `_pack_next` streaming packer; the native baseline uses the new
+per-row + epoch-shuffle path. The +0.037 val gap is dominated by this data-path difference,
+not by Lumen-vs-native. Step time is more directly comparable: native is ~0.7 s/step faster
+(no `LumenConfig` wrap / ExperimentTracker per-step overhead).
+
+**TODO for a clean comparison:** re-run Lumen-bf16 with the current code (`shuffle=True`) so
+both share the identical per-row+shuffle pipeline; then only the framework differs.
 
 <!-- add result subsections for future experiments here -->
 
@@ -214,6 +236,7 @@ The MLPerf target **0.925 is an answer-only validation loss**. The all-token val
 
 - 7B FSDP: `llama2_fsdp_train_bf16_lora_7b.log`, `llama2_fsdp_train_fp8_delayed_lora_7b.log`,
   `llama2_fsdp_train_fp8_blockwise2d_lora_7b.log`
+- 7B native FSDP baseline: `llama2_native_fsdp_train_bf16_lora_7b.log` (script `native_fsdp_baseline.py`)
 - 70B FSDP: `llama2_fsdp_train_bf16_lora_70b.log` (→60),
   `llama2_fsdp_train_fp8_blockwise2d_lora_70b.log` (→256)
 - 70B Megatron: `llama2_megatron_train_fp8_blockwise2d_70b.log` (iters 1–20 only);

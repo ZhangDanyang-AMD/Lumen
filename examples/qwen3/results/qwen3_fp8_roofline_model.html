@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qwen3-8B LoRA / MI308X — step time 理论建模</title>
+<style>
+  :root{--bg:#0f1419;--card:#1a2029;--fg:#e8ebee;--muted:#93a1ad;--accent:#4fc3f7;
+    --good:#5fd38a;--warn:#ffb74d;--bad:#ef6b6b;--border:#2a333d;
+    --c1:#4fc3f7;--c2:#5fd38a;--c3:#ffb74d;--c4:#b388ff;--c5:#ff8a80;--c6:#4dd0e1;}
+  *{box-sizing:border-box;}
+  body{margin:0;padding:30px 18px;background:var(--bg);color:var(--fg);
+    font:15px/1.65 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:960px;margin:0 auto;}
+  h1{font-size:24px;margin:0 0 2px;}
+  .sub{color:var(--muted);margin:0 0 6px;font-size:13px;}
+  h2{font-size:18px;margin:30px 0 12px;padding-left:10px;border-left:4px solid var(--accent);}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin:13px 0;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;}
+  code{background:#0b0e12;padding:2px 6px;border-radius:4px;font-size:12.5px;color:#d7ccff;}
+  .good{color:var(--good);}.warn{color:var(--warn);}.bad{color:var(--bad);}.muted{color:var(--muted);}
+  b.hl{color:var(--accent);}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;}
+  .kpi .b{flex:1;min-width:150px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
+  .kpi .big{font-size:26px;font-weight:700;line-height:1.2;}
+  .row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;}
+  .row .lab{width:230px;flex:none;}
+  .row .lab small{color:var(--muted);}
+  .track{flex:1;background:#0b0e12;border-radius:5px;height:24px;position:relative;overflow:hidden;}
+  .fill{height:100%;border-radius:5px;display:flex;align-items:center;justify-content:flex-end;padding-right:7px;font-size:11.5px;font-weight:700;color:#0b0e12;white-space:nowrap;}
+  .note{color:var(--muted);font-size:12.5px;margin-top:8px;}
+  .foot{color:var(--muted);font-size:12px;margin-top:30px;border-top:1px solid var(--border);padding-top:12px;}
+  .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:600;}
+  .pg{background:rgba(95,211,138,.16);color:var(--good);}.pw{background:rgba(255,183,77,.16);color:var(--warn);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Qwen3-8B LoRA · 8×MI308X — step time 理论建模 (roofline)</h1>
+  <p class="sub">per GPU · micro-batch 1 · seq 2048 · global batch 8 · FP8 blockwise2d · LoRA(base 冻结)</p>
+
+  <div class="kpi">
+    <div class="b"><div class="muted">理论最快</div><div class="big good">~320 <small style="font-size:14px">ms/step</small></div><div class="muted">FP8 GEMM 算力墙</div></div>
+    <div class="b"><div class="muted">当前最优</div><div class="big">960 <small style="font-size:14px">ms/step</small></div><div class="muted">已优化版本</div></div>
+    <div class="b"><div class="muted">剩余空间</div><div class="big warn">~3x</div><div class="muted">全在效率/重叠，非减计算</div></div>
+  </div>
+
+  <h2>① 硬件 & 模型输入</h2>
+  <div class="card">
+    <table>
+      <tr><th>MI308X (gfx942)</th><th class="n">值</th><th>Qwen3-8B</th><th class="n">值</th></tr>
+      <tr><td>CU 数</td><td class="n">80</td><td>hidden / intermediate</td><td class="n">4096 / 12288</td></tr>
+      <tr><td>HBM3 容量 / 带宽</td><td class="n">192 GB / 5.3 TB/s</td><td>层数 / 词表</td><td class="n">36 / 151936</td></tr>
+      <tr><td>FP8 实测单 GEMM</td><td class="n">~215 TFLOPS</td><td>q/kv heads · head_dim</td><td class="n">32/8 · 128</td></tr>
+      <tr><td>GPU 数</td><td class="n">8</td><td>base 参数 / lm_head</td><td class="n">6.95B / 0.62B</td></tr>
+    </table>
+    <div class="note">MI308X 为出口受限型号、算力被压低；实测 bpreshuffle 单 GEMM 已达 215-221 TFLOPS，基本贴近其实际可达上限，故理论建模取此为 FP8 可持续算力。</div>
+  </div>
+
+  <h2>② 每步计算量（FLOP / step / GPU）</h2>
+  <div class="card">
+    <p class="sub">LoRA 下 base 冻结 → 反向<strong>只有 DGrad、没有 WGrad</strong>（这是只有 2× 前向而非 3× 的关键）。</p>
+    <table>
+      <tr><th>部分</th><th class="n">FLOP</th><th>精度</th><th>说明</th></tr>
+      <tr><td>前向 linear（含 lm_head）</td><td class="n">31.0 TFLOP</td><td>FP8</td><td>2 × tokens × params</td></tr>
+      <tr><td>反向 DGrad</td><td class="n">31.0 TFLOP</td><td>FP8</td><td>= 前向</td></tr>
+      <tr><td><b class="hl">FP8 GEMM 小计</b></td><td class="n"><b class="hl">62.0 TFLOP</b></td><td>FP8</td><td>绝对主导</td></tr>
+      <tr><td>attention fwd+bwd（causal）</td><td class="n">3.7 TFLOP</td><td>BF16</td><td>flash attention</td></tr>
+      <tr><td>WGrad / LoRA adapter</td><td class="n">~0</td><td>—</td><td>冻结跳过 / rank16 极小</td></tr>
+    </table>
+  </div>
+
+  <h2>③ 三条 roofline 下限（取最大）</h2>
+  <div class="card">
+    <div class="row"><div class="lab">计算 <small>FP8 GEMM 62 TFLOP @215T</small></div><div class="track"><div class="fill" style="width:100%;background:var(--c5)">288 ms</div></div></div>
+    <div class="row"><div class="lab">计算 <small>+ attention 3.7 TFLOP @107T</small></div><div class="track"><div class="fill" style="width:12%;background:var(--c3)">35</div></div></div>
+    <div class="row"><div class="lab">显存 <small>权重读 ~15 GB @5.3TB/s</small></div><div class="track"><div class="fill" style="width:3%;background:var(--c4)">3</div></div></div>
+    <div class="row"><div class="lab">通信 <small>LoRA 梯度 ~88 MB</small></div><div class="track"><div class="fill" style="width:2%;background:var(--c6)">~2</div></div></div>
+    <p class="note">显存、通信都远小于计算 → <b class="hl">纯计算瓶颈</b>，理想情况下可被 GEMM 完全掩盖。理论 step ≈ 计算下限 = <b class="hl">~320 ms</b>（GEMM 288 + attn 35，二者部分串行）。</p>
+  </div>
+
+  <h2>④ 当前 vs 理论</h2>
+  <div class="card">
+    <div class="row"><div class="lab muted">理论下限</div><div class="track"><div class="fill" style="width:33%;background:var(--c2)">~320 ms</div></div></div>
+    <div class="row"><div class="lab">当前最优</div><div class="track"><div class="fill" style="width:100%;background:var(--c1)">960 ms</div></div></div>
+    <table style="margin-top:10px">
+      <tr><th></th><th class="n">step</th><th class="n">FP8 GEMM</th><th class="n">GEMM 聚合算力</th></tr>
+      <tr><td>当前最优</td><td class="n">960 ms</td><td class="n">396 ms</td><td class="n">157 TFLOPS</td></tr>
+      <tr><td>理论下限</td><td class="n good">~320 ms</td><td class="n good">~290 ms</td><td class="n good">~215 TFLOPS</td></tr>
+    </table>
+  </div>
+
+  <h2>⑤ ~640ms 差距来自哪（均非硬计算）</h2>
+  <div class="card">
+    <table>
+      <tr><th>来源</th><th class="n">量级</th><th>方向</th><th></th></tr>
+      <tr><td>GEMM 聚合效率 157→215 TFLOPS</td><td class="n">~106 ms</td><td>小 GEMM(k/v N=1024) + lm_head 利用率低；合并 qkv / 更优 tiling</td><td><span class="pill pw">可做</span></td></tr>
+      <tr><td>非 GEMM 未与 GEMM 重叠</td><td class="n">大头</td><td>attention/elementwise/copy/<b>通信 367ms</b> 应与 GEMM overlap，wall≈max(GEMM,通信)</td><td><span class="pill pw">可做</span></td></tr>
+      <tr><td>气泡 / 同步 / launch 间隙</td><td class="n">其余</td><td>kernel launch、stream 同步</td><td><span class="pill pw">可做</span></td></tr>
+      <tr><td>FP8 GEMM 计算本身</td><td class="n">~290 ms</td><td>不可压缩（算力墙）</td><td><span class="pill pg">已达</span></td></tr>
+    </table>
+    <p class="note">结论：理论极限约 <b class="hl">320 ms/step</b>（FP8 GEMM 算力墙）。当前 960ms 仍有 ~3x 空间，但全在<strong>效率与重叠</strong>，而非减少计算量。下一步方向：① qkv 合并 / 小 GEMM 与 lm_head 效率；② 通信 + elementwise 与 GEMM 充分重叠。</p>
+  </div>
+
+  <p class="foot">Lumen · roofline 理论建模 · 假设：FP8 可持续算力 215 TFLOPS（实测单 GEMM 上限）、HBM 5.3 TB/s、参数常驻（无每步 param all-gather）。FLOP 由模型维度精确推导；下限假设各资源完美重叠。</p>
+
+</div>
+</body>
+</html>
