@@ -96,7 +96,7 @@ export TARGET_LOG_PPL=0.0    # unused when VAL_LOSS_TARGET is set
 # ---- Logging / checkpoint / eval --------------------------------------------
 export LOG_INTERVAL=1
 export SAVE_DIR="/results/checkpoints"
-export SAVE_INTERVAL=256     # LoRA adapters are small
+export SAVE_INTERVAL="${SAVE_INTERVAL:-256}"     # LoRA adapters are small; set 0 to disable (FSDP save_state_dict collective is broken)
 export EVAL_EVERY=384        # eval cadence in sequences -> ~48 steps at GBS=8
 export EVAL_INTERVAL=0       # let run_finetune.sh derive from EVAL_EVERY
 export START_EVAL_AT=0

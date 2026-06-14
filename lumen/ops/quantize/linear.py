@@ -30,6 +30,7 @@ GEMM backends are selected automatically:
     - **hipBLASLt**: ``hipb_mm`` (per-tensor)
 """
 
+import functools
 import logging as _logging
 import os
 import threading
@@ -786,14 +787,33 @@ def _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w):
     return aiter.gemm_a8w8_blockscale_bpreshuffle(a_fp8, w_sh, scale_a_t, scale_w, torch.bfloat16)
 
 
+@functools.lru_cache(maxsize=1)
+def _bpreshuffle_onfly_enabled():
+    return os.environ.get("LUMEN_BPRESHUFFLE_ONFLY", "0") == "1"
+
+
+@functools.lru_cache(maxsize=1)
+def _skip_frozen_wgrad_enabled():
+    return os.environ.get("LUMEN_SKIP_FROZEN_WGRAD", "0") == "1"
+
+
 def gemm_blockscale(a_fp8, w_fp8, scale_a, scale_w):
     """Blockwise FP8 GEMM: Y = X @ W^T via AITER CK → Triton.
 
-    If the weight tensor carries a cached pre-shuffled copy (``_lumen_wsh``, set by
-    the frozen-weight cache when bpreshuffle is enabled), use the faster B-preshuffle
-    kernel; it is bit-identical to the CK path.
+    Two ways to use the ~2.5x-faster B-preshuffle kernel (bit-identical to CK):
+      - cached: the weight carries a pre-shuffled copy ``_lumen_wsh`` (frozen-weight
+        cache, set by ``_maybe_cache_frozen_weight``);
+      - on-the-fly: ``LUMEN_BPRESHUFFLE_ONFLY=1`` shuffles the weight per call. The
+        shuffle is ~6% of the GEMM, so it still wins ~2.4x even uncached — used for
+        large models (e.g. 70B FSDP) where caching the full FP8 weight would OOM.
     """
     w_sh = getattr(w_fp8, "_lumen_wsh", None)
+    if w_sh is None and _bpreshuffle_onfly_enabled():
+        try:
+            from aiter.ops.shuffle import shuffle_weight
+            w_sh = shuffle_weight(w_fp8, layout=(16, 16))
+        except (ImportError, RuntimeError, AssertionError):
+            w_sh = None
     if w_sh is not None:
         try:
             return _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w)
@@ -1162,7 +1182,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # its grad is discarded) — thread both onto ctx (see
             # lumen.quantize._maybe_cache_frozen_weight).
             ctx._weight_t = getattr(weight_desc.data, "_lumen_wt", None)
-            ctx._skip_wgrad = getattr(weight_desc.data, "_lumen_skip_wgrad", False)
+            # Skip the frozen base weight's WGrad (its grad is discarded). Two ways:
+            #   - cached path: marker on the cache tensor (_lumen_skip_wgrad);
+            #   - uncached (e.g. 70B FSDP): LUMEN_SKIP_FROZEN_WGRAD=1 + the patch-time
+            #     frozen marker threaded onto the weight (weight._lumen_frozen).
+            ctx._skip_wgrad = (
+                getattr(weight_desc.data, "_lumen_skip_wgrad", False)
+                or (getattr(weight, "_lumen_frozen", False) and _skip_frozen_wgrad_enabled())
+            )
             ctx.save_for_backward(
                 weight_desc.data,
                 weight_desc.scale,

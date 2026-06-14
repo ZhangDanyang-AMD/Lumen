@@ -320,9 +320,12 @@ def _patch_linear_layers(
             # already frozen the base weight, so requires_grad is reliable here.
             # Under FSDP the gathered view can falsely report requires_grad=True.
             _w = getattr(module, "weight", None)
+            # Patch-time frozen fact (PEFT froze base, pre-FSDP → reliable). Used to
+            # skip the frozen weight's (discarded) WGrad even without the FP8 cache
+            # (e.g. 70B FSDP), gated at runtime by LUMEN_SKIP_FROZEN_WGRAD.
+            module._lumen_frozen = (_w is not None and not _w.requires_grad)
             module._lumen_cache_frozen = (
-                getattr(config, "cache_frozen_weight", False)
-                and _w is not None and not _w.requires_grad
+                getattr(config, "cache_frozen_weight", False) and module._lumen_frozen
             )
             # bpreshuffle GEMM only makes sense with the frozen-weight cache (the
             # shuffle is amortized once); it is bit-identical to the CK blockscale.
@@ -514,6 +517,10 @@ def _replace_forward(
 
         def quant_forward(input_tensor, *args, **kwargs):
             _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
+            if getattr(module, "_lumen_frozen", False):
+                # thread the patch-time frozen fact onto the live weight tensor so the
+                # autograd Function can skip its WGrad (FSDP may swap the param view).
+                module.weight._lumen_frozen = True
             return quantized_linear(
                 input_tensor,
                 module.weight,

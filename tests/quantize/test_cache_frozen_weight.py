@@ -123,6 +123,36 @@ def test_bpreshuffle_matches_blockscale():
 
 
 @_CUDA
+def test_bpreshuffle_onfly_matches_blockscale(monkeypatch):
+    """On-the-fly bpreshuffle (LUMEN_BPRESHUFFLE_ONFLY, uncached) must match CK blockscale."""
+    import lumen.ops.quantize.linear as lin
+    try:
+        import aiter  # noqa: F401
+        from aiter.ops.shuffle import shuffle_weight  # noqa: F401
+        aiter.gemm_a8w8_blockscale_bpreshuffle  # noqa: B018
+    except (ImportError, AttributeError):
+        pytest.skip("aiter bpreshuffle blockscale not available")
+    from conftest import compute_snr  # type: ignore
+
+    torch.manual_seed(0)
+    M, N, K = 256, 256, 256
+    a = (torch.rand(M, K, device="cuda") / 10).to(torch.float8_e4m3fnuz
+         if "gfx94" in torch.cuda.get_device_properties(0).gcnArchName else torch.float8_e4m3fn)
+    w = (torch.rand(N, K, device="cuda") / 10).to(a.dtype)
+    sa = torch.rand(M, K // 128, device="cuda", dtype=torch.float32)
+    sw = torch.rand(N // 128, K // 128, device="cuda", dtype=torch.float32)
+
+    lin._bpreshuffle_onfly_enabled.cache_clear()
+    monkeypatch.delenv("LUMEN_BPRESHUFFLE_ONFLY", raising=False)
+    y_ck = lin.gemm_blockscale(a, w, sa, sw)
+    monkeypatch.setenv("LUMEN_BPRESHUFFLE_ONFLY", "1")
+    lin._bpreshuffle_onfly_enabled.cache_clear()
+    y_bp = lin.gemm_blockscale(a, w, sa, sw)
+    lin._bpreshuffle_onfly_enabled.cache_clear()
+    assert compute_snr(y_ck.float(), y_bp.float()) > 40
+
+
+@_CUDA
 def test_trainable_weight_not_cached():
     """Cache must NOT engage for trainable weights (only frozen base)."""
     from lumen.quantize import disable, enable
