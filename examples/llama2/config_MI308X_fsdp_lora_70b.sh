@@ -27,7 +27,7 @@ export TOKENIZER="${SCRIPT_DIR}/tokenizer"
 export TRAIN_DATA="/data/train.npy"
 export VALID_DATA="/data/validation.npy"
 export TRAIN_SAMPLES=10000
-export VAL_SAMPLES=500
+export VAL_SAMPLES="${VAL_SAMPLES:-500}"
 
 # ---- Training hyperparameters (MLPerf-aligned, see README) ------------------
 export SEQ_LEN=8192
@@ -97,7 +97,7 @@ export TARGET_LOG_PPL=0.0    # unused when VAL_LOSS_TARGET is set
 export LOG_INTERVAL=1
 export SAVE_DIR="/results/checkpoints"
 export SAVE_INTERVAL="${SAVE_INTERVAL:-256}"     # LoRA adapters are small; set 0 to disable (FSDP save_state_dict collective is broken)
-export EVAL_EVERY=384        # eval cadence in sequences -> ~48 steps at GBS=8
+export EVAL_EVERY="${EVAL_EVERY:-384}"   # eval cadence in sequences -> ~48 steps at GBS=8
 export EVAL_INTERVAL=0       # let run_finetune.sh derive from EVAL_EVERY
 export START_EVAL_AT=0
 export NUM_WORKERS=4
