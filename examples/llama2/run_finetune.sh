@@ -333,6 +333,10 @@ run_fsdp() {
     CMD+=" --train-samples ${TRAIN_SAMPLES}"
     CMD+=" --val-samples ${VAL_SAMPLES}"
     CMD+=" --sharding-strategy ${SHARDING}"
+    [ -n "${FSDP_VERSION:-}" ] && CMD+=" --fsdp-version ${FSDP_VERSION}"
+    # FSDP2-only: store the LoRA-frozen blockwise2d base weight as FP8 and
+    # all-gather it as FP8 (no per-step re-quant).
+    [ "${FSDP_FP8_PARAM_STORAGE:-0}" = "1" ] && CMD+=" --fsdp-fp8-param-storage"
 
     [ -n "${VALID_DATA}" ] && CMD+=" --val-data-path ${VALID_DATA}"
 
