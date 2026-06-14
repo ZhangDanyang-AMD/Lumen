@@ -502,13 +502,19 @@ def _replace_forward(
             if w._fp8_desc.data.data_ptr() != w.data.data_ptr():
                 w._fp8_desc.invalidate_transpose()
                 return None
-            return (w._fp8_desc.data, 1.0 / w._fp8_desc.scale)
+            # blockwise/blockwise2d GEMM wants the DIRECT (2D) dequant scale; per-tensor
+            # (delayed/dynamic, scalar) wants the reciprocal.
+            _s = w._fp8_desc.scale
+            _gs = _s if (isinstance(_s, _torch.Tensor) and _s.numel() > 1) else 1.0 / _s
+            return (w._fp8_desc.data, _gs)
         if hasattr(w, "_fp8_scale") and w.dtype in (
             _torch.float8_e4m3fn,
             _torch.float8_e4m3fnuz,
             _torch.float8_e5m2,
         ):
-            return (w.data, 1.0 / w._fp8_scale)
+            _s = w._fp8_scale
+            _gs = _s if (isinstance(_s, _torch.Tensor) and _s.numel() > 1) else 1.0 / _s
+            return (w.data, _gs)
         return None
 
     _act_tensor_id = tensor_id.replace(".weight", ".activation")
@@ -668,6 +674,81 @@ def store_weights_fp8(
         count += 1
 
     logger.info("store_weights_fp8: cached %d linear weights in %s", count, fp8_dtype)
+    return count
+
+
+def store_weights_fp8_blockwise2d(
+    model: nn.Module,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    block_size: int = 128,
+) -> int:
+    """Store **frozen** blockwise2d base weights as FP8 in-place (param-storage).
+
+    For each patched, frozen ``nn.Linear`` whose dims are block-aligned, quantize
+    the weight ONCE to FP8 with a 2D (N/block, K/block) scale, replace
+    ``weight.data`` with the FP8 tensor (BF16 freed → ~half the param bytes), and
+    stash the FP8 data + 2D scale as ``_fp8_weight_data`` / ``_fp8_weight_scale``
+    buffers. The ``quant_forward`` path then feeds these straight to
+    ``QuantizedLinearFunction`` (correct blockwise2d fwd + backward, no per-step
+    weight re-quantization), and (under FSDP) the param all-gathers as FP8.
+
+    A state_dict pre/post hook dequantizes FP8→BF16 so checkpoints stay BF16.
+    Only blockwise2d; per-tensor uses :func:`store_weights_fp8`.
+
+    Returns: number of weights stored in FP8.
+    """
+    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+    count = 0
+    for _name, module in model.named_modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2:
+            continue
+        if w.requires_grad:           # only frozen base weights (LoRA recipe)
+            continue
+        if getattr(module, "_fp8_weight_data", None) is not None:
+            continue
+        if w.shape[0] % block_size or w.shape[1] % block_size:
+            continue
+        with torch.no_grad():
+            fp8, scale2d = _quant_blockwise2d_weight(w.data.contiguous(), fp8_dtype, block_size)
+            # Route through the (tested) fp8_weight_cache → QuantizedLinearFunction
+            # path (correct blockwise2d backward + skip-wgrad/DGrad-transpose), NOT
+            # FP8StoredLinearFunction (whose blockwise2d bwd falls back to per-tensor).
+            module.register_buffer("_fp8_weight_data", fp8, persistent=False)
+            module.register_buffer("_fp8_weight_scale", scale2d, persistent=False)
+            module._fp8_weight_dtype = fp8_dtype
+            module._lumen_frozen = True   # so WGrad is skipped (grad discarded)
+            w._fp8_original_dtype = w.dtype
+            w.data = fp8                   # free the BF16 master (param.data → FP8)
+            w._fp8_storage_scale = scale2d
+        count += 1
+
+    # state_dict: emit dequantized BF16 weight, keep FP8 at runtime.
+    def _pre_save(mod, prefix, keep_vars):
+        from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+        for p in mod._parameters.values():
+            if p is None or not hasattr(p, "_fp8_storage_scale"):
+                continue
+            p._sd_backup = p.data
+            p.data = _dequant_fp8_weight(
+                p.data, p._fp8_storage_scale, block_size
+            ).to(getattr(p, "_fp8_original_dtype", torch.bfloat16))
+
+    def _post_save(mod, state_dict, prefix, local_metadata):
+        for p in mod._parameters.values():
+            if p is not None and hasattr(p, "_sd_backup"):
+                p.data = p._sd_backup
+                del p._sd_backup
+
+    for mod in model.modules():
+        if any(p is not None and hasattr(p, "_fp8_storage_scale") for p in mod._parameters.values()):
+            mod.register_state_dict_pre_hook(_pre_save)
+            mod.register_state_dict_post_hook(_post_save)
+
+    logger.info("store_weights_fp8_blockwise2d: stored %d frozen weights in %s", count, fp8_dtype)
     return count
 
 
