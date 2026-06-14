@@ -483,17 +483,17 @@ def _wrap_params_as_fp8_comm(model: nn.Module, fp8_dtype: torch.dtype) -> int:
 def _wrap_frozen_base_as_blockwise2d_fp8(
     model: nn.Module, fp8_dtype: torch.dtype, block_size: int = 128
 ) -> int:
-    """Replace each LoRA-frozen, blockwise2d base ``weight`` with a Blockwise2DFP8Param.
+    """Wrap each LoRA-frozen, blockwise2d base ``weight`` in a Blockwise2DFP8Param.
 
-    Quantizes the frozen base weight ONCE to FP8 with a 2D (N/block, K/block) scale
-    and wraps it in a :class:`Blockwise2DFP8Param` (requires_grad=False), so FSDP2
-    shards/all-gathers it as FP8 (1 byte) and the forward feeds the FP8 GEMM directly
-    with no per-step re-quant. Must run BEFORE ``fully_shard`` (on the full weight).
+    The wrapper holds the BF16 master (no quantization here — works for a CPU model
+    pre-shard); FSDP2 shards it like a BF16 param and its all-gather extension
+    quantizes the local shard to FP8 + 2D scale and ships FP8 on the wire, so the
+    forward GEMM consumes FP8 with no per-step full-weight re-quant. Must run BEFORE
+    ``fully_shard``.
 
     Only patched (``_quant_enabled``) frozen Linears with block-aligned dims qualify.
     """
     from lumen.quantize.comm_tensor import Blockwise2DFP8Param
-    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
 
     count = 0
     for module in model.modules():
@@ -502,14 +502,12 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
         w = getattr(module, "weight", None)
         if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2 or w.requires_grad:
             continue
-        if isinstance(w, Blockwise2DFP8Param) or isinstance(getattr(w, "data", None), Blockwise2DFP8Param):
+        if isinstance(w, Blockwise2DFP8Param):
             continue
         if w.shape[0] % block_size or w.shape[1] % block_size:
             continue
-        with torch.no_grad():
-            fp8, scale = _quant_blockwise2d_weight(w.data.contiguous(), fp8_dtype, block_size)
         module.weight = nn.Parameter(
-            Blockwise2DFP8Param(fp8, scale, w.dtype, block_size), requires_grad=False
+            Blockwise2DFP8Param(w.data, fp8_dtype, block_size), requires_grad=False
         )
         module._lumen_frozen = True
         count += 1
@@ -555,7 +553,15 @@ def apply_fsdp2(
     world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
     mesh = init_device_mesh("cuda", (world_size,))
 
-    if getattr(args, "linear_fp8", False):
+    if getattr(args, "fsdp_fp8_param_storage", False):
+        # param_dtype MUST stay None here: a non-None param_dtype makes FSDP2 cast
+        # every param (incl. the frozen FP8 Blockwise2DFP8Param) to that dtype before
+        # sharding, which collapses the FP8 subclass to a plain BF16 DTensor and
+        # bypasses its all-gather extension (the scale is then never applied). With
+        # param_dtype=None each param keeps its own dtype — FP8 base stays FP8 (its
+        # extension drives the all-gather), LoRA adapters stay BF16.
+        mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
+    elif getattr(args, "linear_fp8", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,

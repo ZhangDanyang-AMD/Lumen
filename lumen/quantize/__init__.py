@@ -47,7 +47,7 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
     quantized_linear,
 )
-from lumen.quantize.comm_tensor import Blockwise2DFP8Param, FP8CommTensor
+from lumen.quantize.comm_tensor import Blockwise2DFP8Gathered, FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -526,7 +526,7 @@ def _replace_forward(
             w = module.weight
             _wcache = getattr(module, "_fp8_weight_data", None)
             _wscale = getattr(module, "_fp8_weight_scale", None)
-            if isinstance(w, Blockwise2DFP8Param):
+            if isinstance(w, Blockwise2DFP8Gathered):
                 # FSDP2 all-gathered frozen FP8 base: feed its FP8 data + 2D scale
                 # straight to the GEMM (no per-step re-quant), reusing the verified
                 # blockwise2d cache backward path. Frozen → WGrad is skipped.

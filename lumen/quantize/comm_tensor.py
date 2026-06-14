@@ -9,7 +9,7 @@ import torch.utils._pytree as pytree
 
 from lumen.quantize.fp8_params import quantize_param_to_fp8
 
-__all__ = ["FP8CommTensor", "Blockwise2DFP8Param"]
+__all__ = ["FP8CommTensor", "Blockwise2DFP8Param", "Blockwise2DFP8Gathered"]
 
 
 class FP8CommTensor(torch.Tensor):
@@ -107,74 +107,129 @@ class FP8CommTensor(torch.Tensor):
         return func(*unwrapped_args, **unwrapped_kwargs)
 
 
-class Blockwise2DFP8Param(torch.Tensor):
-    """FSDP2 all-gather wrapper for a **frozen** blockwise2d base weight stored as FP8.
+class Blockwise2DFP8Gathered(torch.Tensor):
+    """The all-gathered, FP8 form of a frozen blockwise2d base weight.
 
-    Unlike :class:`FP8CommTensor` (per-tensor scale, wraps trainable params,
-    *dequantizes* back to BF16 after all-gather so the GEMM re-quantizes), this
-    wraps a LoRA-frozen base weight that was quantized **once** to FP8 with a 2D
-    ``(N/block, K/block)`` tile scale.  Because the weight never changes:
-
-      - ``fsdp_pre_all_gather`` hands over the local FP8 shard **and** its scale
-        rows verbatim — **no re-quantization** per step (kills the elementwise
-        re-quant that dominates 70B);
-      - ``fsdp_post_all_gather`` concatenates the gathered FP8 + scale and keeps
-        them **FP8** (no dequant), returning a ``Blockwise2DFP8Param`` so the
-        forward feeds the FP8 GEMM directly.
-
-    Both inner tensors shard along dim 0; the FP8 weight ``(N, K)`` and the scale
-    ``(N/block, K/block)`` stay consistent iff ``N % (block * world_size) == 0``
-    (so a rank's FP8 rows map exactly onto its scale rows).
+    Returned by :meth:`Blockwise2DFP8Param.fsdp_post_all_gather` and set as the
+    unsharded ``module.weight`` for the forward. Carries the full FP8 weight
+    ``(N, K)`` plus its 2D ``(N/block, K/block)`` tile scale; the patched Linear
+    forward detects this type and feeds ``(_fp8, _scale)`` straight to the FP8
+    GEMM — no re-quantization in the forward.
     """
 
-    _fp8_dtype: torch.dtype
-    _block_size: int
-
     @staticmethod
-    def __new__(cls, fp8_data: torch.Tensor, scale: torch.Tensor, orig_dtype, block_size: int = 128):
+    def __new__(cls, fp8_data, scale, orig_dtype, block_size=128):
         return torch.Tensor._make_wrapper_subclass(
-            cls,
-            fp8_data.shape,
-            dtype=orig_dtype,
-            device=fp8_data.device,
-            requires_grad=False,
+            cls, fp8_data.shape, dtype=orig_dtype, device=fp8_data.device, requires_grad=False
         )
 
-    def __init__(self, fp8_data: torch.Tensor, scale: torch.Tensor, orig_dtype, block_size: int = 128):
+    def __init__(self, fp8_data, scale, orig_dtype, block_size=128):
         self._fp8 = fp8_data
         self._scale = scale
-        self._fp8_dtype = fp8_data.dtype
         self._orig_dtype = orig_dtype
         self._block_size = block_size
 
     def __repr__(self):
         return (
-            f"Blockwise2DFP8Param(shape={list(self.shape)}, fp8={self._fp8_dtype}, "
-            f"scale={list(self._scale.shape)}, block={self._block_size})"
+            f"Blockwise2DFP8Gathered(shape={list(self.shape)}, fp8={self._fp8.dtype}, "
+            f"scale={list(self._scale.shape)})"
         )
 
     def __tensor_flatten__(self):
         return ["_fp8", "_scale"], {"orig_dtype": self._orig_dtype, "block_size": self._block_size}
 
     @classmethod
-    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
-        return cls(
-            inner_tensors["_fp8"],
-            inner_tensors["_scale"],
-            metadata["orig_dtype"],
-            metadata["block_size"],
+    def __tensor_unflatten__(cls, inner, meta, outer_size, outer_stride):
+        return cls(inner["_fp8"], inner["_scale"], meta["orig_dtype"], meta["block_size"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        kwargs = kwargs or {}
+
+        def _unwrap(x):
+            return x._fp8 if isinstance(x, Blockwise2DFP8Gathered) else x
+
+        source = next(
+            (a for a in pytree.tree_leaves(args) if isinstance(a, Blockwise2DFP8Gathered)),
+            None,
+        )
+        result = func(*pytree.tree_map(_unwrap, args), **pytree.tree_map(_unwrap, kwargs))
+        if (
+            source is not None
+            and isinstance(result, torch.Tensor)
+            and not isinstance(result, Blockwise2DFP8Gathered)
+            and result.shape == source._fp8.shape
+        ):
+            return Blockwise2DFP8Gathered(result, source._scale, source._orig_dtype, source._block_size)
+        return result
+
+
+class Blockwise2DFP8Param(torch.Tensor):
+    """FSDP2 parameter wrapper for a **frozen** blockwise2d base weight.
+
+    Unlike :class:`FP8CommTensor` (per-tensor scale, wraps *trainable* params,
+    dequantizes back to BF16 so the GEMM re-quantizes), this wraps a LoRA-frozen
+    base weight to all-gather it as FP8 and feed the FP8 GEMM directly.
+
+    Design (mirrors torchao's float8 FSDP2 integration): the param holds a single
+    BF16 inner tensor (``_tensor``) whose dtype/shape match the outer wrapper, so
+    FSDP2 shards it like any BF16 param and keeps the subclass as the sharded-local
+    tensor (a wrapper subclass with two inner tensors of *different* shapes is not
+    preserved by FSDP2 — it collapses to a plain DTensor and the extension never
+    fires). The FP8 conversion happens in the all-gather extension:
+
+      - ``fsdp_pre_all_gather`` quantizes the **local BF16 shard** to FP8 + 2D scale
+        (1/world_size of the work, overlapped with the all-gather) and ships FP8 on
+        the wire (~half the param-comm bytes);
+      - ``fsdp_post_all_gather`` returns a :class:`Blockwise2DFP8Gathered` carrying
+        the gathered FP8 + 2D scale — the forward GEMM consumes it with no re-quant.
+
+    Per-shard blockwise2d quant is exact iff ``N % (block * world_size) == 0`` (dim-0
+    shards never split a 128-row tile).
+    """
+
+    _fp8_dtype: torch.dtype
+    _block_size: int
+
+    @staticmethod
+    def __new__(cls, tensor: torch.Tensor, fp8_dtype: torch.dtype, block_size: int = 128):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            tensor.shape,
+            dtype=tensor.dtype,
+            device=tensor.device,
+            requires_grad=tensor.requires_grad,
         )
 
-    @staticmethod
-    def fsdp_pre_all_gather(tensor) -> tuple[tuple[torch.Tensor, ...], dict]:
-        # Frozen + pre-quantized: ship the FP8 shard and its scale rows as-is.
-        return (tensor._fp8, tensor._scale), {
-            "orig_dtype": tensor._orig_dtype,
-            "block_size": tensor._block_size,
-        }
+    def __init__(self, tensor: torch.Tensor, fp8_dtype: torch.dtype, block_size: int = 128):
+        self._tensor = tensor           # BF16 master (sharded by FSDP2)
+        self._fp8_dtype = fp8_dtype
+        self._block_size = block_size
 
-    @staticmethod
+    def __repr__(self):
+        return f"Blockwise2DFP8Param(shape={list(self.shape)}, master={self._tensor.dtype}, fp8={self._fp8_dtype})"
+
+    def __tensor_flatten__(self):
+        return ["_tensor"], {"fp8_dtype": self._fp8_dtype, "block_size": self._block_size}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_tensor"], metadata["fp8_dtype"], metadata["block_size"])
+
+    # NOTE: FSDP2 (torch 2.8) introspects the parameter count of these hooks and only
+    # accepts the *instance-method* forms (1 param after ``self`` = old BC signature,
+    # or 5 = new). A ``@staticmethod`` taking ``(tensor)`` is read as the 1-param form
+    # and FSDP2 passes the *mesh* in place of the tensor — silently mis-invoking it.
+    def fsdp_pre_all_gather(self, mesh) -> tuple[tuple[torch.Tensor, ...], dict]:
+        from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+        fp8, scale = _quant_blockwise2d_weight(
+            self._tensor.contiguous(), self._fp8_dtype, self._block_size
+        )
+        return (fp8, scale), {"orig_dtype": self._tensor.dtype, "block_size": self._block_size}
+
     def fsdp_post_all_gather(
+        self,
         all_gather_outputs: tuple[torch.Tensor, ...],
         metadata: dict,
         param_dtype: torch.dtype,
@@ -183,41 +238,43 @@ class Blockwise2DFP8Param(torch.Tensor):
     ):
         fp8_full, scale_full = all_gather_outputs
         if out is not None:
-            # In-place reconstruction path: refresh the existing subclass's inners.
-            assert isinstance(out, Blockwise2DFP8Param)
-            out._fp8.copy_(fp8_full)
-            out._scale.copy_(scale_full)
+            assert isinstance(out, Blockwise2DFP8Gathered)
+            if out._fp8.data_ptr() != fp8_full.data_ptr():
+                out._fp8.copy_(fp8_full)
+            if out._scale.data_ptr() != scale_full.data_ptr():
+                out._scale.copy_(scale_full)
             return
-        result = Blockwise2DFP8Param(
+        result = Blockwise2DFP8Gathered(
             fp8_full, scale_full, metadata["orig_dtype"], metadata["block_size"]
         )
-        # Second element: inner tensors FSDP2 may free after copy-in.
         return result, (fp8_full, scale_full)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         kwargs = kwargs or {}
 
-        # Most FSDP2 plumbing ops (copy_/view/detach/clone/...) act on the FP8
-        # storage; unwrap to _fp8 and re-wrap with the same scale when the result
-        # is a plain tensor derived from this param.
         def _unwrap(x):
-            return x._fp8 if isinstance(x, Blockwise2DFP8Param) else x
+            return x._tensor if isinstance(x, Blockwise2DFP8Param) else x
 
         source = next(
             (a for a in pytree.tree_leaves(args) if isinstance(a, Blockwise2DFP8Param)),
             None,
         )
-        unwrapped_args = pytree.tree_map(_unwrap, args)
-        unwrapped_kwargs = pytree.tree_map(_unwrap, kwargs)
-        result = func(*unwrapped_args, **unwrapped_kwargs)
-        if (
-            source is not None
-            and isinstance(result, torch.Tensor)
-            and not isinstance(result, Blockwise2DFP8Param)
-            and result.shape == source._fp8.shape
-        ):
-            return Blockwise2DFP8Param(
-                result, source._scale, source._orig_dtype, source._block_size
-            )
-        return result
+        result = func(*pytree.tree_map(_unwrap, args), **pytree.tree_map(_unwrap, kwargs))
+        if source is None:
+            return result
+
+        # Re-wrap every master-dtype tensor output so the subclass SURVIVES FSDP2's
+        # sharding ops (chunk/narrow/view/clone/copy_/detach all change shape or alias
+        # but keep dtype). A shape check here would drop the subclass on the sharded
+        # shard → the all-gather extension would never attach.
+        def _wrap(t):
+            if (
+                isinstance(t, torch.Tensor)
+                and not isinstance(t, Blockwise2DFP8Param)
+                and t.dtype == source._tensor.dtype
+            ):
+                return Blockwise2DFP8Param(t, source._fp8_dtype, source._block_size)
+            return t
+
+        return pytree.tree_map(_wrap, result)
