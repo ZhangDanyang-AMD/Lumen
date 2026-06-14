@@ -142,6 +142,26 @@ def test_wrap_frozen_base_only_wraps_frozen_quant_linears():
 
 
 @_CUDA
+def test_wrap_frozen_base_skips_shard_misaligned():
+    """A weight whose dim0 is block-aligned but NOT block*world_size-aligned (e.g.
+    lm_head N=vocab) must be skipped — its per-rank shard wouldn't be 128-aligned."""
+    import torch.nn as nn
+    from lumen.quantize import enable
+    from lumen.quantize.config import QuantConfig
+    from lumen.quantize.comm_tensor import Blockwise2DFP8Param
+    from lumen.models.fsdp import _wrap_frozen_base_as_blockwise2d_fp8
+
+    # 384 % 128 == 0 but 384 % (128*4) == 128 != 0 → not shardable over 4 ranks.
+    lm = nn.Linear(256, 384, bias=False).cuda().to(torch.bfloat16)
+    lm.weight.requires_grad_(False)
+    enable(lm, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128))
+
+    n = _wrap_frozen_base_as_blockwise2d_fp8(lm, _fp8(), 128, world_size=4)
+    assert n == 0
+    assert not isinstance(lm.weight, Blockwise2DFP8Param)
+
+
+@_CUDA
 def test_wrap_frozen_base_cpu_weight():
     """Big models load on CPU before fully_shard; the helper wraps the CPU BF16
     master with no kernel call (quant is deferred to the all-gather extension)."""

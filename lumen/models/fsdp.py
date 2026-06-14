@@ -481,7 +481,7 @@ def _wrap_params_as_fp8_comm(model: nn.Module, fp8_dtype: torch.dtype) -> int:
 
 
 def _wrap_frozen_base_as_blockwise2d_fp8(
-    model: nn.Module, fp8_dtype: torch.dtype, block_size: int = 128
+    model: nn.Module, fp8_dtype: torch.dtype, block_size: int = 128, world_size: int = 1
 ) -> int:
     """Wrap each LoRA-frozen, blockwise2d base ``weight`` in a Blockwise2DFP8Param.
 
@@ -491,11 +491,15 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
     forward GEMM consumes FP8 with no per-step full-weight re-quant. Must run BEFORE
     ``fully_shard``.
 
-    Only patched (``_quant_enabled``) frozen Linears with block-aligned dims qualify.
+    Eligibility (patched + frozen + 2D), plus ``N % (block * world_size) == 0`` and
+    ``K % block == 0`` so each rank's dim-0 shard is itself block-aligned (per-shard
+    quant must not split a 128-row tile). Weights that fail this (e.g. lm_head /
+    embedding with N = vocab = 32000, not a multiple of block*world_size) stay BF16.
     """
     from lumen.quantize.comm_tensor import Blockwise2DFP8Param
 
     count = 0
+    skipped = 0
     for module in model.modules():
         if not getattr(module, "_quant_enabled", False):
             continue
@@ -504,13 +508,19 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
             continue
         if isinstance(w, Blockwise2DFP8Param):
             continue
-        if w.shape[0] % block_size or w.shape[1] % block_size:
+        if w.shape[0] % (block_size * world_size) or w.shape[1] % block_size:
+            skipped += 1
             continue
         module.weight = nn.Parameter(
             Blockwise2DFP8Param(w.data, fp8_dtype, block_size), requires_grad=False
         )
         module._lumen_frozen = True
         count += 1
+    if skipped:
+        _rank0_print(
+            f"> Blockwise2DFP8Param: skipped {skipped} weights not divisible by "
+            f"block*world_size ({block_size}*{world_size}) — kept BF16"
+        )
     return count
 
 
@@ -583,7 +593,7 @@ def apply_fsdp2(
         from lumen.quantize.config import _get_float8_e4m3
 
         fp8_dtype = _get_float8_e4m3()
-        n_stored = _wrap_frozen_base_as_blockwise2d_fp8(model, fp8_dtype)
+        n_stored = _wrap_frozen_base_as_blockwise2d_fp8(model, fp8_dtype, world_size=world_size)
         _rank0_print(f"> Blockwise2DFP8Param storage: {n_stored} frozen base weights")
 
     sharded_layers = False
