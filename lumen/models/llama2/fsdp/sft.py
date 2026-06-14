@@ -381,9 +381,20 @@ class FSDPTrainer:
             }
         )
 
+        # Optional env-gated torch.profiler (rank0): LUMEN_PROF_START/END/OUTPUT/TRACE.
+        _prof_start = int(os.environ.get("LUMEN_PROF_START") or 0)
+        _prof = {"on": _prof_start > 0 and self.global_rank == 0, "start": _prof_start,
+                 "end": int(os.environ.get("LUMEN_PROF_END") or (_prof_start + 1)),
+                 "out": os.environ.get("LUMEN_PROF_OUTPUT") or "/results/fsdp_profile.txt",
+                 "trace": os.environ.get("LUMEN_PROF_TRACE") or "", "p": None}
+
         data_iter = iter(self.train_loader)
         try:
             while global_step < effective_stop_step:
+                if _prof["on"] and global_step == _prof["start"]:
+                    _prof["p"] = torch.profiler.profile(activities=[
+                        torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
+                    _prof["p"].__enter__()
                 self.tracker.record_train_step_start(global_step)
                 self.optimizer.zero_grad()
                 accum_loss = 0.0
@@ -421,6 +432,17 @@ class FSDPTrainer:
                         f"  step {global_step}/{effective_stop_step} | "
                         f"loss {avg_loss:.4f} | lr {lr:.2e} | step_time_ms {step_time_ms:.1f}"
                     )
+
+                if _prof["p"] is not None and global_step == _prof["end"]:
+                    _prof["p"].__exit__(None, None, None)
+                    tbl = _prof["p"].key_averages().table(sort_by="self_cuda_time_total", row_limit=40)
+                    with open(_prof["out"], "w") as f:
+                        f.write(f"FSDP profile steps {_prof['start']}-{_prof['end']}\n\n{tbl}")
+                    _rank0_print(f"> Profiler wrote {_prof['out']}")
+                    if _prof["trace"]:
+                        _prof["p"].export_chrome_trace(_prof["trace"])
+                        _rank0_print(f"> Profiler wrote chrome trace {_prof['trace']}")
+                    _prof["p"] = None
 
                 if self.tracker.should_preempt(global_step=global_step):
                     _rank0_print(f"> Preemptive stop triggered at step {global_step}")
