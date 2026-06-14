@@ -322,8 +322,13 @@ class FSDPTrainer:
         self.optimizer.step()
 
     def _validate(self) -> float:
+        """Token-only validation loss: global sum(masked per-token loss) / sum(valid
+        tokens) over the WHOLE val set and all ranks (every answer token weighted
+        equally). Not mean-of-per-batch-means — so the number is normalization-stable
+        and comparable across batch/shard counts."""
         self.model.eval()
-        total_loss, n_batches = 0.0, 0
+        sum_loss = torch.zeros((), device=self.local_rank, dtype=torch.float64)
+        sum_tokens = torch.zeros((), device=self.local_rank, dtype=torch.float64)
         with torch.no_grad():
             for batch in self.val_loader:
                 input_ids = batch["input_ids"][:, :-1].to(self.local_rank)
@@ -332,27 +337,20 @@ class FSDPTrainer:
 
                 outputs = self.model(input_ids=input_ids)
                 logits = outputs.logits
-                shift_logits = logits.view(-1, logits.size(-1))
-                shift_labels = labels.reshape(-1)
                 per_token_loss = nn.functional.cross_entropy(
-                    shift_logits,
-                    shift_labels,
+                    logits.view(-1, logits.size(-1)),
+                    labels.reshape(-1),
                     reduction="none",
                 )
-                masked_loss = (per_token_loss * loss_mask.reshape(-1)).sum()
-                num_tokens = loss_mask.sum()
-                total_loss += (masked_loss / num_tokens.clamp(min=1)).item()
-                n_batches += 1
-                if n_batches >= 10:
-                    break
+                sum_loss += (per_token_loss * loss_mask.reshape(-1)).sum().double()
+                sum_tokens += loss_mask.sum().double()
 
         self.model.train()
-        avg = total_loss / max(n_batches, 1)
         if dist.is_initialized():
-            t = torch.tensor([avg], device="cuda")
-            dist.all_reduce(t, op=dist.ReduceOp.AVG)
-            avg = t.item()
-        return avg
+            t = torch.stack([sum_loss, sum_tokens])
+            dist.all_reduce(t, op=dist.ReduceOp.SUM)
+            sum_loss, sum_tokens = t[0], t[1]
+        return (sum_loss / sum_tokens.clamp(min=1)).item()
 
     def train(self):
         """Run the full training loop."""
