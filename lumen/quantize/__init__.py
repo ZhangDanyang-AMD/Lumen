@@ -47,7 +47,7 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
     quantized_linear,
 )
-from lumen.quantize.comm_tensor import FP8CommTensor
+from lumen.quantize.comm_tensor import Blockwise2DFP8Param, FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -523,13 +523,22 @@ def _replace_forward(
 
         def quant_forward(input_tensor, *args, **kwargs):
             _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
-            if getattr(module, "_lumen_frozen", False):
+            w = module.weight
+            _wcache = getattr(module, "_fp8_weight_data", None)
+            _wscale = getattr(module, "_fp8_weight_scale", None)
+            if isinstance(w, Blockwise2DFP8Param):
+                # FSDP2 all-gathered frozen FP8 base: feed its FP8 data + 2D scale
+                # straight to the GEMM (no per-step re-quant), reusing the verified
+                # blockwise2d cache backward path. Frozen → WGrad is skipped.
+                _wcache, _wscale = w._fp8, w._scale
+                w._lumen_frozen = True
+            elif getattr(module, "_lumen_frozen", False):
                 # thread the patch-time frozen fact onto the live weight tensor so the
                 # autograd Function can skip its WGrad (FSDP may swap the param view).
-                module.weight._lumen_frozen = True
+                w._lumen_frozen = True
             return quantized_linear(
                 input_tensor,
-                module.weight,
+                w,
                 module.bias,
                 scaling_manager=manager,
                 backend=backend,
@@ -543,8 +552,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
-                fp8_weight_cache=getattr(module, "_fp8_weight_data", None),
-                fp8_weight_scale=getattr(module, "_fp8_weight_scale", None),
+                fp8_weight_cache=_wcache,
+                fp8_weight_scale=_wscale,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
             )

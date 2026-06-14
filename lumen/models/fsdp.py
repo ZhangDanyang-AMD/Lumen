@@ -256,6 +256,14 @@ def add_common_fsdp_args(parser):
         default=False,
         help="Store and all-gather parameters in FP8 for reduced comm volume.",
     )
+    fp8p.add_argument(
+        "--fsdp-fp8-param-storage",
+        action="store_true",
+        default=False,
+        help="FSDP2 only: store the LoRA-frozen blockwise2d base weight as FP8 and "
+        "all-gather it as FP8 (no per-step re-quant). Requires --fsdp-version 2 + "
+        "--linear-fp8-scaling blockwise2d.",
+    )
 
     # -- Fused RoPE --
     rope = parser.add_argument_group("fused-rope")
@@ -472,6 +480,42 @@ def _wrap_params_as_fp8_comm(model: nn.Module, fp8_dtype: torch.dtype) -> int:
     return count
 
 
+def _wrap_frozen_base_as_blockwise2d_fp8(
+    model: nn.Module, fp8_dtype: torch.dtype, block_size: int = 128
+) -> int:
+    """Replace each LoRA-frozen, blockwise2d base ``weight`` with a Blockwise2DFP8Param.
+
+    Quantizes the frozen base weight ONCE to FP8 with a 2D (N/block, K/block) scale
+    and wraps it in a :class:`Blockwise2DFP8Param` (requires_grad=False), so FSDP2
+    shards/all-gathers it as FP8 (1 byte) and the forward feeds the FP8 GEMM directly
+    with no per-step re-quant. Must run BEFORE ``fully_shard`` (on the full weight).
+
+    Only patched (``_quant_enabled``) frozen Linears with block-aligned dims qualify.
+    """
+    from lumen.quantize.comm_tensor import Blockwise2DFP8Param
+    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+    count = 0
+    for module in model.modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2 or w.requires_grad:
+            continue
+        if isinstance(w, Blockwise2DFP8Param) or isinstance(getattr(w, "data", None), Blockwise2DFP8Param):
+            continue
+        if w.shape[0] % block_size or w.shape[1] % block_size:
+            continue
+        with torch.no_grad():
+            fp8, scale = _quant_blockwise2d_weight(w.data.contiguous(), fp8_dtype, block_size)
+        module.weight = nn.Parameter(
+            Blockwise2DFP8Param(fp8, scale, w.dtype, block_size), requires_grad=False
+        )
+        module._lumen_frozen = True
+        count += 1
+    return count
+
+
 def apply_fsdp2(
     model: nn.Module,
     args,
@@ -528,6 +572,13 @@ def apply_fsdp2(
         fp8_dtype = _get_float8_e4m3()
         n_wrapped = _wrap_params_as_fp8_comm(model, fp8_dtype)
         _rank0_print(f"> FP8CommTensor wrapping: {n_wrapped} params")
+
+    if getattr(args, "fsdp_fp8_param_storage", False):
+        from lumen.quantize.config import _get_float8_e4m3
+
+        fp8_dtype = _get_float8_e4m3()
+        n_stored = _wrap_frozen_base_as_blockwise2d_fp8(model, fp8_dtype)
+        _rank0_print(f"> Blockwise2DFP8Param storage: {n_stored} frozen base weights")
 
     sharded_layers = False
     for module in model.modules():

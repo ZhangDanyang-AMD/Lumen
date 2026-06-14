@@ -83,6 +83,68 @@ def test_blockwise2d_fp8_param_dequant_matches_weight():
 
 
 @_CUDA
+def test_blockwise2d_fp8_param_forward_matches_inplace():
+    """A Linear whose weight is a Blockwise2DFP8Param (the FSDP2 all-gathered form)
+    must match the in-place per-step blockwise2d quant path in fwd and DGrad."""
+    import torch.nn as nn
+    from lumen.quantize import enable, disable
+    from lumen.quantize.config import QuantConfig
+    from lumen.quantize.comm_tensor import Blockwise2DFP8Param
+    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+    from conftest import compute_snr  # type: ignore
+
+    torch.manual_seed(0)
+    w = (torch.randn(256, 256) * 0.05).cuda().to(torch.bfloat16)
+    x0 = torch.randn(128, 256, device="cuda", dtype=torch.bfloat16)
+    cfg = lambda: QuantConfig.from_str(scaling="blockwise2d", block_size=128)
+
+    outs, gins = {}, {}
+    for wrapped in (False, True):
+        m = nn.Linear(256, 256, bias=False).cuda().to(torch.bfloat16)
+        m.weight.requires_grad_(False)
+        m.weight.data.copy_(w)
+        enable(m, config=cfg())
+        if wrapped:
+            fp8, scale = _quant_blockwise2d_weight(w, _fp8(), 128)
+            m.weight = nn.Parameter(
+                Blockwise2DFP8Param(fp8, scale, torch.bfloat16, 128), requires_grad=False
+            )
+        x = x0.clone().requires_grad_(True)
+        y = m(x); y.sum().backward()
+        outs[wrapped] = y.detach().float(); gins[wrapped] = x.grad.float()
+        disable(m)
+
+    assert compute_snr(outs[False], outs[True]) > 40, "wrapped fwd != in-place quant fwd"
+    assert compute_snr(gins[False], gins[True]) > 20, "wrapped DGrad != in-place DGrad"
+
+
+@_CUDA
+def test_wrap_frozen_base_only_wraps_frozen_quant_linears():
+    """_wrap_frozen_base_as_blockwise2d_fp8 wraps frozen patched Linears as FP8,
+    leaves trainable and non-patched ones untouched."""
+    import torch.nn as nn
+    from lumen.quantize import enable
+    from lumen.quantize.config import QuantConfig
+    from lumen.quantize.comm_tensor import Blockwise2DFP8Param
+    from lumen.models.fsdp import _wrap_frozen_base_as_blockwise2d_fp8
+
+    frozen = nn.Linear(256, 256, bias=False).cuda().to(torch.bfloat16)
+    frozen.weight.requires_grad_(False)
+    enable(frozen, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128))
+
+    trainable = nn.Linear(256, 256, bias=False).cuda().to(torch.bfloat16)
+    enable(trainable, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128))
+
+    model = nn.ModuleList([frozen, trainable])
+    n = _wrap_frozen_base_as_blockwise2d_fp8(model, _fp8(), 128)
+
+    assert n == 1
+    assert isinstance(frozen.weight, Blockwise2DFP8Param)
+    assert frozen.weight._fp8.dtype == _fp8()
+    assert not isinstance(trainable.weight, Blockwise2DFP8Param)
+
+
+@_CUDA
 def test_blockwise2d_fp8_param_flatten_roundtrip():
     """__tensor_flatten__/__tensor_unflatten__ must preserve FP8 data + scale."""
     from lumen.quantize.comm_tensor import Blockwise2DFP8Param
