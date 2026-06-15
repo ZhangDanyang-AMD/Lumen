@@ -123,7 +123,8 @@ export NCCL_DEBUG=WARN
 
 # Re-apply launcher env overrides captured before the base source above, so they
 # win over both the base config and this file's defaults.
-[ -n "${_OV_SAVE_INTERVAL}" ] && export SAVE_INTERVAL="${_OV_SAVE_INTERVAL}"
-[ -n "${_OV_EVAL_EVERY}" ]    && export EVAL_EVERY="${_OV_EVAL_EVERY}"
-[ -n "${_OV_VAL_SAMPLES}" ]   && export VAL_SAMPLES="${_OV_VAL_SAMPLES}"
-[ -n "${_OV_TRAIN_STEPS}" ]   && export TRAIN_STEPS="${_OV_TRAIN_STEPS}"
+# Use if/fi (not `test && cmd`) so an empty override does not trip `set -e`.
+if [ -n "${_OV_SAVE_INTERVAL}" ]; then export SAVE_INTERVAL="${_OV_SAVE_INTERVAL}"; fi
+if [ -n "${_OV_EVAL_EVERY}" ];    then export EVAL_EVERY="${_OV_EVAL_EVERY}"; fi
+if [ -n "${_OV_VAL_SAMPLES}" ];   then export VAL_SAMPLES="${_OV_VAL_SAMPLES}"; fi
+if [ -n "${_OV_TRAIN_STEPS}" ];   then export TRAIN_STEPS="${_OV_TRAIN_STEPS}"; fi
