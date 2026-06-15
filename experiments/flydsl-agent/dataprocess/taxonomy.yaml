@@ -1,0 +1,66 @@
+# Taxonomy definition for FlyDSL Code Agent training data pipeline.
+# Unified label system serving: auto-filtering scripts, AI annotation prompts,
+# and training data sampling weights.
+
+operator:
+  - gemm
+  - flash_attn
+  - mla
+  - moe
+  - softmax
+  - rmsnorm
+  - layernorm
+  - rope
+  - topk
+  - paged_attn
+  - allreduce
+  - quant
+  - custom
+
+hardware:
+  - gfx942      # MI300X / MI325X (CDNA3)
+  - gfx950      # MI350 / MI355X (CDNA4)
+  - gfx1250     # MI400 (future)
+  - generic
+
+features:
+  - swizzle_xor16
+  - pipeline
+  - async_copy
+  - double_buffer
+  - preshuffle
+  - blockscale
+  - split_k
+  - epilogue_fusion
+  - multi_wave
+  - sage_attention
+  - mxfp4
+
+complexity:
+  - beginner       # <300 lines, no advanced features
+  - intermediate   # 300-800 lines
+  - advanced       # 800-1500 lines, 2+ advanced features
+  - expert         # >1500 lines or 3+ advanced features
+
+content_type:
+  - kernel_impl       # Triton/CK/ASM kernel implementation
+  - framework_api     # Python API / ops wrappers
+  - test              # Unit tests / operator tests
+  - doc_guide         # Markdown/RST documentation
+  - hardware_spec     # Hardware-specific code/docs
+  - expert_skill      # .claude/skills/*.md
+  - repo_guide        # CLAUDE.md, README.md
+  - tuned_config      # aiter/configs/*.csv
+  - build_script      # setup.py, CI scripts
+
+priority:
+  - P0   # Core kernels + API + documentation
+  - P1   # Tests + auxiliary code
+  - P2   # Hardware docs + reference code
+
+quality_grade:
+  - gold      # >=70% roofline, compiles + correct
+  - silver    # 40-70% roofline, compiles + correct
+  - bronze    # <40% or compile-only
+  - ungraded  # Not benchmarked (docs, configs, etc.)
+  - reject    # Compile failure
