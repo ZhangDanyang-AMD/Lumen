@@ -54,6 +54,7 @@ class StepProfiler:
         self.out = os.environ.get("LUMEN_PROF_OUTPUT") or "/results/qwen3_profile.txt"
         self.trace = os.environ.get("LUMEN_PROF_TRACE") or ""
         self.copy_trace = os.environ.get("LUMEN_COPY_TRACE", "0") == "1"
+        self.shapes = os.environ.get("LUMEN_PROF_SHAPES", "0") == "1"
         self.prof = None
         self._tracing = False
         self._copy_n = Counter(); self._copy_mb = defaultdict(float)
@@ -112,6 +113,7 @@ class StepProfiler:
         if self.enabled and step == self.start:
             self.prof = torch.profiler.profile(
                 activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=self.shapes,
             )
             self.prof.__enter__()
             if self.copy_trace:
@@ -126,6 +128,14 @@ class StepProfiler:
             with open(self.out, "w") as f:
                 f.write(f"Qwen3 FP8 blockwise2d profile, steps {self.start}-{self.end}\n\n{table}")
             rank0(f"> Profiler wrote {self.out}")
+            if self.shapes:
+                # Per-op latency grouped by input shape (needs record_shapes=True).
+                stbl = self.prof.key_averages(group_by_input_shape=True).table(
+                    sort_by="self_cuda_time_total", row_limit=80)
+                spath = self.out.replace(".txt", "_shapes.txt")
+                with open(spath, "w") as f:
+                    f.write(f"Qwen3 FP8 blockwise2d per-shape profile, steps {self.start}-{self.end}\n\n{stbl}")
+                rank0(f"> Profiler wrote per-shape table {spath}")
             if self.trace:
                 self.prof.export_chrome_trace(self.trace)
                 rank0(f"> Profiler wrote chrome trace {self.trace}")
@@ -201,12 +211,21 @@ def main():
                    help="FSDP sharding: shard_grad_op (ZeRO-2) avoids per-step param all-gather")
     p.add_argument("--fp8-scaling", choices=["blockwise2d", "delayed", "dynamic"], default="blockwise2d",
                    help="FP8 linear scaling: blockwise2d (128x128, accurate) vs delayed/dynamic (per-tensor, faster GEMM)")
+    p.add_argument("--aiter-attn", action="store_true",
+                   help="route SDPA attention through AITER (CK FMHA) instead of PyTorch AOTriton (hf_attn_patch)")
+    p.add_argument("--lumen-norm", action="store_true",
+                   help="replace HF Qwen3RMSNorm with Lumen fused RMSNorm (AITER)")
     p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
                    help="disable activation checkpointing (no backward forward-recompute; more memory)")
     p.add_argument("--no-limit-all-gathers", dest="limit_all_gathers", action="store_false",
                    help="allow FSDP to overlap consecutive all-gathers with compute (more memory)")
     p.add_argument("--forward-prefetch", action="store_true",
                    help="FSDP forward_prefetch: prefetch next unit's all-gather during compute")
+    p.add_argument("--fsdp-version", type=int, choices=[1, 2], default=1,
+                   help="FSDP version: 1 (FullyShardedDataParallel) or 2 (fully_shard)")
+    p.add_argument("--fsdp-fp8-param-storage", action="store_true",
+                   help="FSDP2 only: store the frozen blockwise2d base weight as FP8 and "
+                        "all-gather it as FP8 (no per-step re-quant)")
     p.set_defaults(grad_checkpointing=True, limit_all_gathers=True)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-interval", type=int, default=1)
@@ -242,7 +261,8 @@ def main():
         linear_fp8_reduce_amax=False, linear_fp8_activation=True, linear_fp8_wgrad=True,
         linear_fp8_cache_frozen_weight=args.cache_frozen_weight,
         linear_fp8_bpreshuffle=args.bpreshuffle,
-        grad_quant_type=None, first_last_layers_bf16=False, lumen_norm=False,
+        grad_quant_type=None, first_last_layers_bf16=False, lumen_norm=args.lumen_norm,
+        hf_attn_patch=args.aiter_attn,   # route SDPA -> AITER CK FMHA when set
         lora_rank=args.lora_rank, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
     ))
     _manager, model = cfg.enable(model)  # logs INFO:lumen.quantize + INFO:lumen.config (LoRA + trainable)
@@ -255,22 +275,37 @@ def main():
     # (frozen) params every step. SHARD_GRAD_OP (ZeRO-2) keeps params resident
     # (no per-step param all-gather, only grad reduce-scatter) — much less comm,
     # at the cost of full params in memory (fine at 8B, may OOM at 70B).
-    _shard = {
-        "full_shard": ShardingStrategy.FULL_SHARD,
-        "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
-    }[args.sharding]
-    model = FSDP(
-        model,
-        auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Qwen3DecoderLayer}),
-        mixed_precision=MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, buffer_dtype=torch.bfloat16),
-        sharding_strategy=_shard,
-        device_id=local_rank,
-        limit_all_gathers=args.limit_all_gathers,
-        forward_prefetch=args.forward_prefetch,
-        use_orig_params=True,
-    )
-    rank0(f"> FSDP model ready (sharding={args.sharding}, limit_all_gathers={args.limit_all_gathers}, "
-          f"forward_prefetch={args.forward_prefetch}, grad_ckpt={args.grad_checkpointing}, world_size={world_size})")
+    if args.fsdp_version == 2:
+        # FSDP2 (fully_shard, per-param sharding). Shards each Qwen3 decoder layer
+        # via apply_fsdp2's `.layers` detection; with --fsdp-fp8-param-storage the
+        # frozen blockwise2d base weights are wrapped as Blockwise2DFP8Param and
+        # all-gathered as FP8 (no per-step re-quant).
+        from lumen.models.fsdp import apply_fsdp2
+        apply_fsdp2(model, Namespace(
+            linear_fp8=use_fp8,
+            sharding_strategy=args.sharding,
+            fsdp_fp8_param_storage=args.fsdp_fp8_param_storage,
+        ))
+        rank0(f"> FSDP2 model ready (sharding={args.sharding}, "
+              f"fp8_param_storage={args.fsdp_fp8_param_storage}, grad_ckpt={args.grad_checkpointing}, "
+              f"world_size={world_size})")
+    else:
+        _shard = {
+            "full_shard": ShardingStrategy.FULL_SHARD,
+            "shard_grad_op": ShardingStrategy.SHARD_GRAD_OP,
+        }[args.sharding]
+        model = FSDP(
+            model,
+            auto_wrap_policy=partial(transformer_auto_wrap_policy, transformer_layer_cls={Qwen3DecoderLayer}),
+            mixed_precision=MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, buffer_dtype=torch.bfloat16),
+            sharding_strategy=_shard,
+            device_id=local_rank,
+            limit_all_gathers=args.limit_all_gathers,
+            forward_prefetch=args.forward_prefetch,
+            use_orig_params=True,
+        )
+        rank0(f"> FSDP model ready (sharding={args.sharding}, limit_all_gathers={args.limit_all_gathers}, "
+              f"forward_prefetch={args.forward_prefetch}, grad_ckpt={args.grad_checkpointing}, world_size={world_size})")
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95), eps=1e-5, weight_decay=args.weight_decay)
 
@@ -335,7 +370,12 @@ def main():
             (l / ga).backward()
             acc += l.item()
         if args.max_grad_norm > 0:
-            model.clip_grad_norm_(args.max_grad_norm)
+            # FSDP1 wraps the model and exposes .clip_grad_norm_; FSDP2 (fully_shard)
+            # returns the bare model → clip via the param-list utility (handles DTensor).
+            if args.fsdp_version == 2:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+            else:
+                model.clip_grad_norm_(args.max_grad_norm)
         opt.step(); sched.step()
         torch.cuda.synchronize(); step_time_ms = (time.perf_counter() - t0) * 1e3
         if step % args.log_interval == 0:

@@ -44,6 +44,10 @@ if [[ "${USE_TUNED_GEMM}" != "0" ]]; then
     EXTRA_DOCKER_ARGS+=( -e "AITER_CONFIG_GEMM_A8W8_BLOCKSCALE=${TUNED_GEMM_CSV}" )
     EXTRA_DOCKER_ARGS+=( -e "AITER_LOG_TUNED_CONFIG=${AITER_LOG_TUNED_CONFIG:-1}" )
 fi
+# RCCL all-gather tuning: only pass a var when the caller set it (avoid empty-string).
+for _v in NCCL_MIN_P2P_NCHANNELS NCCL_MIN_CTAS NCCL_NCHANNELS_PER_NET_PEER NCCL_NVLS_ENABLE NCCL_DEBUG; do
+    [[ -n "${!_v:-}" ]] && EXTRA_DOCKER_ARGS+=( -e "${_v}=${!_v}" )
+done
 
 mkdir -p "${HOST_RESULTS}"
 
@@ -74,6 +78,7 @@ docker run --rm --init \
     -e LUMEN_PROF_OUTPUT="${LUMEN_PROF_OUTPUT:-}" \
     -e LUMEN_PROF_TRACE="${LUMEN_PROF_TRACE:-}" \
     -e LUMEN_COPY_TRACE="${LUMEN_COPY_TRACE:-}" \
+    -e LUMEN_PROF_SHAPES="${LUMEN_PROF_SHAPES:-}" \
     -e SEQ_LENGTH="${SEQ_LENGTH}" \
     -e MAX_STEPS="${MAX_STEPS}" \
     -e EVAL_INTERVAL="${EVAL_INTERVAL}" \
@@ -84,6 +89,12 @@ docker run --rm --init \
     -e GRAD_CKPT="${GRAD_CKPT:-1}" \
     -e LIMIT_ALL_GATHERS="${LIMIT_ALL_GATHERS:-1}" \
     -e FORWARD_PREFETCH="${FORWARD_PREFETCH:-}" \
+    -e FSDP_VERSION="${FSDP_VERSION:-}" \
+    -e FSDP_FP8_PARAM_STORAGE="${FSDP_FP8_PARAM_STORAGE:-}" \
+    -e LUMEN_BPRESHUFFLE_ONFLY="${LUMEN_BPRESHUFFLE_ONFLY:-}" \
+    -e LUMEN_SKIP_FROZEN_WGRAD="${LUMEN_SKIP_FROZEN_WGRAD:-}" \
+    -e AITER_ATTN="${AITER_ATTN:-}" \
+    -e LUMEN_NORM="${LUMEN_NORM:-}" \
     "${IMAGE}" \
     bash -c '
 set -euo pipefail
@@ -94,6 +105,10 @@ EXTRA=""
 [[ "${GRAD_CKPT}" == "0" ]] && EXTRA="${EXTRA} --no-grad-checkpointing"
 [[ "${LIMIT_ALL_GATHERS}" == "0" ]] && EXTRA="${EXTRA} --no-limit-all-gathers"
 [[ -n "${FORWARD_PREFETCH}" ]] && EXTRA="${EXTRA} --forward-prefetch"
+[[ -n "${FSDP_VERSION}" ]] && EXTRA="${EXTRA} --fsdp-version ${FSDP_VERSION}"
+[[ -n "${FSDP_FP8_PARAM_STORAGE}" ]] && EXTRA="${EXTRA} --fsdp-fp8-param-storage"
+[[ -n "${AITER_ATTN}" ]] && EXTRA="${EXTRA} --aiter-attn"
+[[ -n "${LUMEN_NORM}" ]] && EXTRA="${EXTRA} --lumen-norm"
 torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
     --model-name-or-path /model-qwen3 \
     --train-data-path "/data/${TRAIN_FILE}" \
