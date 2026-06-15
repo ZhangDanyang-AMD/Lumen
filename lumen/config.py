@@ -372,6 +372,7 @@ class LumenConfig:
                     "LlamaRMSNorm",
                     "MistralRMSNorm",
                     "Qwen2RMSNorm",
+                    "Qwen3RMSNorm",
                 ):
                     hidden = child.weight.shape[0]
                     eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
