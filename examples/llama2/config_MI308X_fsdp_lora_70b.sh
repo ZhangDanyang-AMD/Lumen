@@ -11,6 +11,12 @@
 #   CONFIG=config_MI308X_fsdp_lora_70b.sh BACKEND=fsdp bash run_finetune.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Capture env overrides BEFORE sourcing the base config (which exports these
+# unconditionally and would otherwise clobber values passed via the launcher).
+_OV_SAVE_INTERVAL="${SAVE_INTERVAL:-}"
+_OV_EVAL_EVERY="${EVAL_EVERY:-}"
+_OV_VAL_SAMPLES="${VAL_SAMPLES:-}"
+_OV_TRAIN_STEPS="${TRAIN_STEPS:-}"
 # Inherit all FSDP launcher defaults (NCCL/ROCm perf env, arg plumbing).
 source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"
 
@@ -114,3 +120,10 @@ export SAVE_CKPT=0
 export PYTORCH_TUNABLEOP_ENABLED=0
 
 export NCCL_DEBUG=WARN
+
+# Re-apply launcher env overrides captured before the base source above, so they
+# win over both the base config and this file's defaults.
+[ -n "${_OV_SAVE_INTERVAL}" ] && export SAVE_INTERVAL="${_OV_SAVE_INTERVAL}"
+[ -n "${_OV_EVAL_EVERY}" ]    && export EVAL_EVERY="${_OV_EVAL_EVERY}"
+[ -n "${_OV_VAL_SAMPLES}" ]   && export VAL_SAMPLES="${_OV_VAL_SAMPLES}"
+[ -n "${_OV_TRAIN_STEPS}" ]   && export TRAIN_STEPS="${_OV_TRAIN_STEPS}"
