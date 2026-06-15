@@ -305,7 +305,13 @@ run_fsdp() {
     }
 
     CMD="torchrun --nproc_per_node=${NGPU}"
-    CMD+=" ${SCRIPT_DIR}/finetune_llama2.py"
+    if [ "${LUMEN_ROCPROF:-0}" = "1" ]; then
+        # Profile each rank through a wrapper that runs rocprofv3 on rank 0 only.
+        # --no-python makes torchrun exec the wrapper directly with the full cmd.
+        CMD+=" --no-python ${SCRIPT_DIR}/scripts/rocprof_wrap.sh python ${SCRIPT_DIR}/finetune_llama2.py"
+    else
+        CMD+=" ${SCRIPT_DIR}/finetune_llama2.py"
+    fi
     CMD+=" --backend fsdp"
     CMD+=" --model-name-or-path ${MODEL}"
     CMD+=" --tokenizer-name-or-path ${TOKENIZER}"

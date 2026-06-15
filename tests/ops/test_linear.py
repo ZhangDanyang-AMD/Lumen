@@ -36,7 +36,12 @@ ALL_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "blockwise2
 # Only per-tensor (scalar) scales survive transposition; per_token (N,1),
 # blockwise (N,K/bs), and mxfp8 block scales become misaligned with the
 # transposed layout, causing GEMM kernel crashes.
-BWD_SCALING_TYPES = ["delayed", "dynamic", "none"]
+#
+# blockwise2d (Jet-RL §4.2) uses square 128×128 tiles whose scale grid IS
+# transpose-symmetric, so DGrad reuses the FProp kernel and WGrad runs a
+# (1×128)×(1×128) blockscale GEMM with X re-quantized along the token axis.
+# Requires M (token count) divisible by 128 — non-aligned M falls back to BF16.
+BWD_SCALING_TYPES = ["delayed", "dynamic", "blockwise2d", "none"]
 
 # SNR floors per scaling type — coarser quantization ⇒ lower expected SNR.
 # mxfp8 uses E8M0 exponent-only scales; blockwise has block granularity.
@@ -76,10 +81,16 @@ def _block_size_for(scaling_type, default=128):
     return default
 
 
-def _skip_if_unaligned(config, scaling_type):
+def _skip_if_unaligned(config, scaling_type, *, bwd=False):
     block_size = _block_size_for(scaling_type)
     if scaling_type in ("blockwise", "blockwise2d", "mxfp8") and config.K % block_size != 0:
         pytest.skip(f"K={config.K} not divisible by block_size={block_size}")
+    # blockwise2d backward needs M (token count) % 128 == 0 because the WGrad
+    # kernel groups along the M axis with GROUP_K=128. Non-aligned M would
+    # silently fall back to BF16 in production but we skip the test here so
+    # the FP8 path is what's being exercised.
+    if bwd and scaling_type == "blockwise2d" and config.M % block_size != 0:
+        pytest.skip(f"blockwise2d bwd needs M={config.M} divisible by {block_size}")
     if scaling_type == "mxfp8":
         try:
             from aiter.ops.triton._triton_kernels.gemm.basic.gemm_a8w8_blockscale import _get_config
@@ -140,10 +151,9 @@ def test_fp8_linear_fwd(config, scaling_type):
 def test_fp8_linear_fwd_bwd(config, scaling_type):
     """Forward + backward through quantized linear.
 
-    Only tests scaling types with per-tensor (scalar) scales — see
-    BWD_SCALING_TYPES comment for why per_token/blockwise/mxfp8 are excluded.
+    See BWD_SCALING_TYPES comment for which scaling modes support FP8 bwd.
     """
-    _skip_if_unaligned(config, scaling_type)
+    _skip_if_unaligned(config, scaling_type, bwd=True)
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
@@ -189,6 +199,7 @@ def test_fp8_linear_fwd_bwd(config, scaling_type):
 @pytest.mark.parametrize("scaling_type", BWD_SCALING_TYPES)
 def test_fp8_linear_bias(config, scaling_type):
     """Forward + backward with bias."""
+    _skip_if_unaligned(config, scaling_type, bwd=True)
     dtype = torch.bfloat16
     M, K, N = config.M, config.K, config.N
 
@@ -237,8 +248,8 @@ FWD_ONLY_SCALING_TYPES = [s for s in ALL_SCALING_TYPES if s not in BWD_SCALING_T
 def test_fp8_linear_bias_fwd_only(config, scaling_type):
     """Forward-only bias test for scaling types that don't support backward.
 
-    per_token/blockwise/blockwise2d/mxfp8 weight scales become misaligned
-    after transposition in the backward pass (see BWD_SCALING_TYPES comment),
+    per_token / blockwise / mxfp8 weight scales become misaligned after
+    transposition in the backward pass (see BWD_SCALING_TYPES comment),
     so we only verify the forward output here.
     """
     _skip_if_unaligned(config, scaling_type)

@@ -86,8 +86,8 @@ class ScalingType(Enum):
 
     DYNAMIC = "dynamic"  # Scale from current tensor amax (= current per-tensor)
     DELAYED = "delayed"  # Scale from amax history (TE-style delayed per-tensor)
-    BLOCKWISE = "blockwise"  # Per-block scaling (e.g. per-128 elements)
-    BLOCKWISE2D = "blockwise2d"  # 2D block scaling for attention Q/K/V
+    BLOCKWISE = "blockwise"  # 1×block per-group scaling along axis=1 (both X and W)
+    BLOCKWISE2D = "blockwise2d"  # Jet-RL / DeepSeek-V3: activation 1×block, weight block×block 2D tiles
     PER_TOKEN = "per_token"  # Per-row (per-token) dynamic scaling
     NONE = "none"  # No quantization (BF16 passthrough)
 

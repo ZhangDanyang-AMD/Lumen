@@ -1080,6 +1080,7 @@ def install_all():
     # install_split_along_dim()  # disabled — adds forward overhead
 
     # SDMA DP gradient all-reduce (replaces NCCL when --use-sdma is set)
-    from lumen.models.sdma_dp_grad_reduce import install_sdma_dp_grad_reduce
-
-    install_sdma_dp_grad_reduce()
+    # Disabled: the sdma_dp_grad_reduce module was never committed on this
+    # branch (only the import line exists). NCCL grad reduce is used instead.
+    # from lumen.models.sdma_dp_grad_reduce import install_sdma_dp_grad_reduce
+    # install_sdma_dp_grad_reduce()

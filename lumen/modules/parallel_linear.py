@@ -275,9 +275,15 @@ def _do_gemm(
             _fp8_stored = False
 
     if _fp8_stored and scaling_type != "none":
-        gemm_scale = getattr(weight, "_fp8_scale_reciprocal", None)
-        if gemm_scale is None:
-            gemm_scale = 1.0 / weight._fp8_desc.scale
+        _stored_scale = weight._fp8_desc.scale
+        if _stored_scale.numel() > 1:
+            # blockwise/blockwise2d: GEMM consumes the block scale directly
+            # (dequant factor), NOT the reciprocal used for per-tensor scaling.
+            gemm_scale = _stored_scale
+        else:
+            gemm_scale = getattr(weight, "_fp8_scale_reciprocal", None)
+            if gemm_scale is None:
+                gemm_scale = 1.0 / _stored_scale
         _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
             pre_quantized_input,
             consume_fp8_activation=True,

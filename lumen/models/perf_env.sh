@@ -19,5 +19,8 @@ export TORCH_BLAS_PREFER_HIPBLASLT=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 # ---- TunableOp ---------------------------------------------------------------
-export PYTORCH_TUNABLEOP_ENABLED=1
-export PYTORCH_TUNABLEOP_FILENAME=tunableop_results.csv
+# Default ON, but honor a value already set by the caller (config/docker -e) so
+# it can be disabled — the 70B/8192 first-step tuning sweep takes tens of minutes
+# and is wasted for convergence runs.
+export PYTORCH_TUNABLEOP_ENABLED="${PYTORCH_TUNABLEOP_ENABLED:-1}"
+export PYTORCH_TUNABLEOP_FILENAME="${PYTORCH_TUNABLEOP_FILENAME:-tunableop_results.csv}"

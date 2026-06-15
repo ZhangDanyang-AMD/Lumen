@@ -120,11 +120,27 @@ def _dequant_fp8_weight(
       - per-tensor / dynamic / delayed: ``(1,)``
       - per_token: ``(N, 1)``
       - blockwise: ``(N, ceil(K / block_size))``
+      - blockwise2d (Jet-RL / DeepSeek-V3 weight scheme):
+        ``(ceil(N / block_size), ceil(K / block_size))``
     """
     if weight_scale.numel() == 1:
         return weight_fp8.bfloat16() * weight_scale.bfloat16()
 
-    K = weight_fp8.shape[-1]
+    N, K = weight_fp8.shape[-2], weight_fp8.shape[-1]
+
+    # 2D block scale: (N/block, K/block) — expand along both axes.
+    if (
+        weight_scale.dim() == 2
+        and weight_scale.shape[0] != N
+        and weight_scale.shape[0] * block_size >= N
+    ):
+        scales_expanded = (
+            weight_scale.bfloat16()
+            .repeat_interleave(block_size, dim=0)[:N]
+            .repeat_interleave(block_size, dim=1)[:, :K]
+        )
+        return weight_fp8.bfloat16() * scales_expanded
+
     scale_cols = weight_scale.shape[-1] if weight_scale.dim() > 1 else 1
 
     if scale_cols == 1 or scale_cols >= K:
