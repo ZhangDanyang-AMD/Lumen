@@ -275,3 +275,87 @@ class TestFusedRoPECorrectness:
             atol=1e-4,
             rtol=1e-4,
         )
+
+
+# ── HF-style reference for the autograd path (full cos/sin [S, D]) ──────────
+
+
+def _rope_hf_full(x, cos, sin):
+    """HF reference: x*cos + rotate_half(x)*sin. cos/sin are full [S, D]."""
+    half = x.shape[-1] // 2
+    x1, x2 = x[..., :half], x[..., half:]
+    rot = torch.cat((-x2, x1), dim=-1)
+    return x * cos[None, None] + rot * sin[None, None]
+
+
+def _make_cos_sin_full(seq_len, head_dim, device="cpu"):
+    """Full [S, D] cos/sin (NeoX: front half duplicated), as HF produces."""
+    cos_h, sin_h = _make_cos_sin(seq_len, head_dim, device=device)  # [S, D/2]
+    return torch.cat([cos_h, cos_h], dim=-1), torch.cat([sin_h, sin_h], dim=-1)
+
+
+@_CUDA
+class TestRoPEAutograd:
+    """apply_rotary_qk_autograd: zero-copy fwd + bwd vs HF reference.
+
+    The training path feeds AITER's stride-aware rope kernel BHSD-view inputs and
+    has it write a contiguous BHSD output (no permute().contiguous() round trip),
+    so verify fwd + dQ/dK match the HF reference and outputs/grads are contiguous.
+    """
+
+    @pytest.mark.parametrize("Hq,Hk", [(4, 4), (8, 2)])  # MHA and GQA
+    def test_fwd_bwd_matches_reference(self, Hq, Hk):
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        B, S, D = 1, 64, 128
+        cos, sin = _make_cos_sin_full(S, D, device=DEVICE)
+
+        q = torch.randn(B, Hq, S, D, device=DEVICE, dtype=torch.float32)
+        k = torch.randn(B, Hk, S, D, device=DEVICE, dtype=torch.float32)
+        go_q, go_k = torch.randn_like(q), torch.randn_like(k)
+
+        # reference
+        qr = q.clone().requires_grad_(True)
+        kr = k.clone().requires_grad_(True)
+        (_rope_hf_full(qr, cos, sin) * go_q).sum().backward()
+        (_rope_hf_full(kr, cos, sin) * go_k).sum().backward()
+
+        # lumen autograd (zero-copy)
+        ql = q.clone().requires_grad_(True)
+        kl = k.clone().requires_grad_(True)
+        oq, ok = apply_rotary_qk_autograd(ql, kl, cos, sin)
+        (oq * go_q).sum().backward()
+        (ok * go_k).sum().backward()
+
+        torch.testing.assert_close(oq, _rope_hf_full(q, cos, sin), atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(ok, _rope_hf_full(k, cos, sin), atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(ql.grad, qr.grad, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(kl.grad, kr.grad, atol=1e-4, rtol=1e-4)
+
+    def test_outputs_and_grads_contiguous(self):
+        """Zero-copy path must still hand attention/optimizer contiguous tensors."""
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        B, Hq, Hk, S, D = 1, 8, 2, 64, 128
+        cos, sin = _make_cos_sin_full(S, D, device=DEVICE)
+        q = torch.randn(B, Hq, S, D, device=DEVICE, requires_grad=True)
+        k = torch.randn(B, Hk, S, D, device=DEVICE, requires_grad=True)
+
+        oq, ok = apply_rotary_qk_autograd(q, k, cos, sin)
+        assert oq.is_contiguous() and ok.is_contiguous()
+        (oq.sum() + ok.sum()).backward()
+        assert q.grad.is_contiguous() and k.grad.is_contiguous()
+
+    def test_bf16(self):
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        B, Hq, Hk, S, D = 1, 8, 2, 64, 128
+        cos, sin = _make_cos_sin_full(S, D, device=DEVICE)
+        q = torch.randn(B, Hq, S, D, device=DEVICE, dtype=torch.bfloat16, requires_grad=True)
+        k = torch.randn(B, Hk, S, D, device=DEVICE, dtype=torch.bfloat16, requires_grad=True)
+
+        oq, ok = apply_rotary_qk_autograd(q, k, cos, sin)
+        ref_q = _rope_hf_full(q.float(), cos.float(), sin.float()).bfloat16()
+        torch.testing.assert_close(oq, ref_q, atol=5e-2, rtol=5e-2)
+        (oq.sum() + ok.sum()).backward()
+        assert q.grad is not None and k.grad is not None

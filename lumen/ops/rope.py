@@ -52,6 +52,20 @@ def _get_aiter_rope_cached_bwd():
 
 
 @functools.lru_cache(maxsize=1)
+def _get_aiter_rope_cached_fwd_lowlevel():
+    from aiter.ops.triton.rope.rope import _rope_cached_fwd
+
+    return _rope_cached_fwd
+
+
+@functools.lru_cache(maxsize=1)
+def _get_aiter_rope_cached_bwd_lowlevel():
+    from aiter.ops.triton.rope.rope import _rope_cached_bwd
+
+    return _rope_cached_bwd
+
+
+@functools.lru_cache(maxsize=1)
 def _get_aiter_rope_fwd_2d():
     from aiter.ops.triton.rope.rope import rope_fwd_2d
 
@@ -173,24 +187,41 @@ def fused_rope(
 # fwd SNR ~56 dB, dX SNR ~53 dB (bf16). NEOX layout, full cos/sin [S,D].
 
 
+def _rope_cached_bhsd(x, cos4, sin4, low_level_fn):
+    """Apply cached RoPE to a [B,H,S,D] tensor with zero layout copies.
+
+    The AITER rope kernel works on [S,B,H,D] and is stride-aware (it reads x and
+    writes out via their .stride()). So instead of permute().contiguous() round
+    trips, we feed a strided [S,B,H,D] *view* of the BHSD input and have the
+    kernel write through a strided [S,B,H,D] view of a freshly-allocated, already
+    contiguous [B,H,S,D] output. No contiguous() on either side; the returned
+    tensor is contiguous BHSD as attention expects. Math is identical.
+    """
+    b, h, s, d = x.shape
+    out = torch.empty((b, h, s, d), dtype=x.dtype, device=x.device)
+    x_sbhd = x.permute(2, 0, 1, 3)        # [S,B,H,D] view, no copy
+    out_sbhd = out.permute(2, 0, 1, 3)    # [S,B,H,D] view of contiguous BHSD out
+    low_level_fn(
+        x_sbhd, out_sbhd, cos4, sin4, None, None,
+        NEOX_STYLE, False, False, False, False,  # rotate_style, reuse, nope, inplace, transpose_output
+    )
+    return out
+
+
 class _RoPEAutograd(torch.autograd.Function):
     """RoPE on one [B,H,S,D] tensor; cos4/sin4 are [S,1,1,D] (full, NEOX)."""
 
     @staticmethod
     def forward(ctx, x, cos4, sin4):
-        fwd = _get_aiter_rope_cached_fwd()
-        xs = _bhsd_to_sbhd(x)
-        out = fwd(xs, cos4, sin4, NEOX_STYLE, False, False)
+        out = _rope_cached_bhsd(x, cos4, sin4, _get_aiter_rope_cached_fwd_lowlevel())
         ctx.save_for_backward(cos4, sin4)
-        return _sbhd_to_bhsd(out)
+        return out
 
     @staticmethod
     def backward(ctx, grad_out):
-        bwd = _get_aiter_rope_cached_bwd()
         cos4, sin4 = ctx.saved_tensors
-        gs = _bhsd_to_sbhd(grad_out)
-        gx = bwd(gs, cos4, sin4, NEOX_STYLE, False, False, False)
-        return _sbhd_to_bhsd(gx), None, None
+        gx = _rope_cached_bhsd(grad_out, cos4, sin4, _get_aiter_rope_cached_bwd_lowlevel())
+        return gx, None, None
 
 
 def apply_rotary_qk_autograd(q, k, cos, sin):
