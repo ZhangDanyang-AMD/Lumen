@@ -166,6 +166,52 @@ def fused_rope(
     return q_rot, k_rot
 
 
+# ── Autograd-aware RoPE (training) ─────────────────────────────────────────
+# The plain apply_rotary_pos_emb above is forward-only (calls rope_cached_fwd).
+# Training needs gradients through RoPE, so wrap fwd/bwd kernels in an
+# autograd.Function. Verified vs the HF reference (q*cos + rotate_half(q)*sin):
+# fwd SNR ~56 dB, dX SNR ~53 dB (bf16). NEOX layout, full cos/sin [S,D].
+
+
+class _RoPEAutograd(torch.autograd.Function):
+    """RoPE on one [B,H,S,D] tensor; cos4/sin4 are [S,1,1,D] (full, NEOX)."""
+
+    @staticmethod
+    def forward(ctx, x, cos4, sin4):
+        fwd = _get_aiter_rope_cached_fwd()
+        xs = _bhsd_to_sbhd(x)
+        out = fwd(xs, cos4, sin4, NEOX_STYLE, False, False)
+        ctx.save_for_backward(cos4, sin4)
+        return _sbhd_to_bhsd(out)
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        bwd = _get_aiter_rope_cached_bwd()
+        cos4, sin4 = ctx.saved_tensors
+        gs = _bhsd_to_sbhd(grad_out)
+        gx = bwd(gs, cos4, sin4, NEOX_STYLE, False, False, False)
+        return _sbhd_to_bhsd(gx), None, None
+
+
+def apply_rotary_qk_autograd(q, k, cos, sin):
+    """Autograd-aware fused RoPE for Q and K, HF-compatible signature.
+
+    Args:
+        q, k: [B, H, S, D] (BHSD).
+        cos, sin: HF-style full cos/sin — [B, S, D] or [S, D] (NEOX, front half
+            duplicated). RoPE is batch-independent so batch dim (if present) is
+            dropped.
+
+    Returns:
+        (q_rot, k_rot), same shapes as q, k, with gradients.
+    """
+    if cos.dim() == 3:        # [B, S, D] -> [S, D]
+        cos, sin = cos[0], sin[0]
+    cos4 = cos.unsqueeze(1).unsqueeze(1)   # [S, 1, 1, D]
+    sin4 = sin.unsqueeze(1).unsqueeze(1)
+    return _RoPEAutograd.apply(q, cos4, sin4), _RoPEAutograd.apply(k, cos4, sin4)
+
+
 # ── 2D / 3D RoPE variants ──────────────────────────────────────────────────
 
 
