@@ -151,3 +151,83 @@ the tuned kernels). lm_head (N/K=151936) left untuned (tuner too slow on it; ~1%
 > `qwen3_profile_fp8_blockwise2d.txt` / `qwen3_profile_fp8_blockwise2d_tuned.txt`.
 > Attribute copies to call sites: add `LUMEN_COPY_TRACE=1` → `<out>_copy_trace.txt`
 > (see `qwen3_copy_trace.txt`).
+
+---
+
+# FSDP2 (`fully_shard`) — FP8 param-storage + model-level fusions
+
+Everything above is FSDP1 (`FullyShardedDataParallel`). This section covers the FSDP2
+(`fully_shard`, per-parameter sharding) path added on top: **FP8 param-storage** (for large
+models that can't cache the full FP8 weight) and three **model-level fusions** (AITER attention,
+fused RMSNorm, fused RoPE) that apply on the HF forward path.
+
+Enable FSDP2: `FSDP_VERSION=2`. Enable param-storage: `FSDP_FP8_PARAM_STORAGE=1`.
+Fusions (independent flags): `AITER_ATTN=1`, `LUMEN_NORM=1`, `FUSE_ROPE=1`.
+
+## FP8 param-storage — store the frozen base weight as FP8 (70B OOM fix)
+
+`cache_frozen_weight` (FSDP1 win above) caches the **full FP8 weight resident** — fine at 8B,
+OOM at 70B. FSDP2 param-storage instead stores the frozen base as FP8 **in the shard** and
+quantizes per-shard inside the all-gather:
+
+- `Blockwise2DFP8Param` (`lumen/quantize/comm_tensor.py`) — a tensor subclass holding a single
+  BF16 master (`_tensor`) that FSDP2 shards normally. Its **`fsdp_pre_all_gather(self, mesh)`**
+  (must be an *instance* method — torch 2.8 introspects the param count) quantizes the **local
+  shard** to blockwise2d FP8, and `fsdp_post_all_gather` returns a separate
+  `Blockwise2DFP8Gathered` (fp8 data + 2D scale) that feeds the FP8 GEMM directly. Per-shard
+  quant is exact iff `N % (block × world_size) == 0`; misaligned weights (lm_head/embed) are
+  skipped (`cef7153`).
+- `MixedPrecisionPolicy(param_dtype=None)` — must **not** upcast the FP8 subclass for all-gather,
+  or the FP8-comm benefit (~half the param bytes) is lost. LoRA stays BF16.
+- The subclass must survive sharding: `__torch_dispatch__` re-wraps all master-dtype outputs so
+  the param stays a `Blockwise2DFP8Param` after FSDP2's internal `chunk`/`copy_` (`07b1795`).
+- This is the FSDP analogue of Megatron's `--fp8-param-storage`. **It is *not* the fastest 8B
+  config** — quantizing in *every* all-gather (and twice/step under grad-ckpt) makes copy/cat +
+  elementwise explode (1419 ms/step). Its purpose is **memory**: it lets 70B fit and all-gather
+  FP8 instead of BF16. For 8B, the FSDP1 `cache_frozen_weight` path (quantize once) is faster.
+- Validated at scale: llama2-70B FSDP2 param-storage reaches **val_loss 0.9235 @450** (token-only
+  normalization), bit-identical math. See `examples/llama2/results/llama2_lora_sft_report.md` #8.
+
+## Model-level fusions (HF forward path) — lossless, apply to any FSDP version
+
+Measured on the **8B best** config (`cache_frozen_weight` + `shard_grad_op` + no-grad-ckpt +
+bpreshuffle), FSDP2. Each is bit-identical (loss unchanged). Trace breakdown:
+`qwen3_fsdp2_operator_breakdown.xlsx`.
+
+1. **AITER CK FMHA v3 attention (`AITER_ATTN=1`).** Replaces PyTorch's AOTriton SDPA
+   (`attn_fwd` / `bwd_kernel_dk_dv` / `bwd_kernel_dq`) with AITER's CK FMHA v3
+   (`aiter::fmha_fwd/bwd_hd128_bf16_causal`), enabled via `hf_attn_patch` → `_patch_sdpa()`.
+   The AOTriton **backward** was the big inefficiency (dk_dv 71.6 + dq 50.3 ms/step).
+   - attention GPU self-time **185.9 → 59 ms/step**; step **767 → 681 ms (−11%)**.
+
+2. **Fused RMSNorm (`LUMEN_NORM=1`).** Routes Qwen3's RMSNorm through `LumenRMSNorm` (fused
+   norm kernel) via `_patch_norms`. Required adding `"Qwen3RMSNorm"` to the patch's cls_name
+   tuple (`47e0198`) — it was a silent no-op for Qwen3 before. Folds the multi-kernel
+   reduce+mul+rsqrt into one kernel.
+   - step **681 → 647 ms (−5%)**.
+
+3. **Fused RoPE (`FUSE_ROPE=1`).** Monkey-patches HF `modeling_qwen3.apply_rotary_pos_emb` to
+   `apply_rotary_qk_autograd` (`lumen/ops/rope.py`), an **autograd-aware** wrapper around AITER's
+   `rope_cached_fwd`/`rope_cached_bwd` (NEOX, full cos/sin). The plain `fused_rope` was
+   forward-only (would break training grads) — `_RoPEAutograd` adds the backward. Validated
+   fwd SNR ~56 dB / dX ~53 dB.
+   - step **647 → 634 ms (−2%)**.
+
+## Cumulative (Qwen3-8B FSDP2 fp8 blockwise2d, 8×MI308X)
+
+| stage | step_time | note |
+|---|---|---|
+| FSDP2 best (cache + shard_grad_op + no-ckpt + bpreshuffle) | 767 ms | = FSDP1 lib+mem opts on FSDP2 |
+| + AITER CK FMHA v3 attention | 681 ms | lossless (−11%) |
+| + fused RMSNorm | 647 ms | lossless (−5%) |
+| **+ fused RoPE** | **634 ms** | lossless (−2%); **−17% over FSDP2 best** |
+
+GPU self-time totals (trace, per the xlsx): param-storage baseline 1547.7 ms → best 657.4 ms
+(> wall 634 ms because compute/comm streams overlap). Top remaining cost is the FP8 GEMM itself
+(~296 ms/step, near-roofline) — compute-bound, little left to remove.
+
+> Reproduce best: `FSDP_VERSION=2 CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 GRAD_CKPT=0 \
+> SHARDING=shard_grad_op LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
+> AITER_ATTN=1 LUMEN_NORM=1 FUSE_ROPE=1 MODE=fp8_blockwise2d bash run_qwen3_fsdp_mi308.sh`.
+> Reproduce 70B param-storage: `FSDP_VERSION=2 FSDP_FP8_PARAM_STORAGE=1 ...` (see llama2 launcher).
+> Operator breakdown (param-storage vs best, per-kernel + roofline): `qwen3_fsdp2_operator_breakdown.xlsx`.

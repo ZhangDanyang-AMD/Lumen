@@ -48,14 +48,14 @@
 <body>
 <div class="wrap">
 
-  <h1>Qwen3-8B FSDP FP8 blockwise2d 优化报告</h1>
+  <h1>Qwen3-8B FSDP / FSDP2 FP8 blockwise2d 优化报告</h1>
   <p class="sub">8×AMD MI308X (gfx942) · seq 2048 · global batch 8 · LoRA · 全程 val_loss 逐位一致（零精度损失）</p>
 
   <!-- KPI -->
   <div class="kpi">
-    <div class="b"><div class="muted">step time</div><div class="big">2784 → <span class="good">960</span> <small style="font-size:14px">ms</small></div><div class="good">−66%</div></div>
-    <div class="b"><div class="muted">FP8 GEMM</div><div class="big">1028 → <span class="good">396</span> <small style="font-size:14px">ms</small></div><div class="good">−61% (~2.6x)</div></div>
-    <div class="b"><div class="muted">vs BF16 (1730ms)</div><div class="big good">快 44%</div><div class="muted">精度逐位一致</div></div>
+    <div class="b"><div class="muted">step time（FSDP1）</div><div class="big">2784 → <span class="good">960</span> <small style="font-size:14px">ms</small></div><div class="good">−66%</div></div>
+    <div class="b"><div class="muted">step time（FSDP2 + 融合）</div><div class="big">→ <span class="good">634</span> <small style="font-size:14px">ms</small></div><div class="good">再 −17%</div></div>
+    <div class="b"><div class="muted">vs BF16 (1730ms)</div><div class="big good">快 63%</div><div class="muted">精度逐位一致</div></div>
   </div>
 
   <!-- 优化历程瀑布 -->
@@ -67,9 +67,13 @@
     <div class="row"><div class="lab">+ 跳过冻结权重 WGrad</div><div class="track"><div class="fill" style="width:69%;background:var(--c1)">1912</div></div><div class="delta good">−31%</div></div>
     <div class="row"><div class="lab">+ 关 gradient checkpointing</div><div class="track"><div class="fill" style="width:58%;background:var(--c1)">1610</div></div><div class="delta good">−42%</div></div>
     <div class="row"><div class="lab">+ SHARD_GRAD_OP <small>(ZeRO-2)</small></div><div class="track"><div class="fill" style="width:55%;background:var(--c2)">1542</div></div><div class="delta good">−45%</div></div>
-    <div class="row"><div class="lab">+ bpreshuffle GEMM</div><div class="track"><div class="fill" style="width:34%;background:var(--c2)">960</div></div><div class="delta good">−66%</div></div>
+    <div class="row"><div class="lab">+ bpreshuffle GEMM <small>(FSDP1 最优)</small></div><div class="track"><div class="fill" style="width:34%;background:var(--c2)">960</div></div><div class="delta good">−66%</div></div>
+    <div class="row"><div class="lab">FSDP2 同配置基线</div><div class="track"><div class="fill" style="width:27.5%;background:var(--c6)">767</div></div><div class="delta good">−72%</div></div>
+    <div class="row"><div class="lab">+ AITER CK FMHA v3 attn</div><div class="track"><div class="fill" style="width:24.5%;background:var(--c6)">681</div></div><div class="delta good">−76%</div></div>
+    <div class="row"><div class="lab">+ 融合 RMSNorm</div><div class="track"><div class="fill" style="width:23.2%;background:var(--c2)">647</div></div><div class="delta good">−77%</div></div>
+    <div class="row"><div class="lab">+ 融合 RoPE <small>(最优)</small></div><div class="track"><div class="fill" style="width:22.8%;background:var(--c2)">634</div></div><div class="delta good">−77%</div></div>
     <div class="row"><div class="lab muted">BF16 参考线</div><div class="track"><div class="fill" style="width:62%;background:#3a4654;color:var(--fg)">1730</div></div><div class="delta muted">基准</div></div>
-    <p class="sub" style="margin-top:10px">库层无损优化（默认可开）：冻结权重缓存、跳过 WGrad、bpreshuffle GEMM。显存换速度（默认关，8B 可开 / 70B 不可）：关 grad-ckpt、SHARD_GRAD_OP。</p>
+    <p class="sub" style="margin-top:10px">库层无损优化（默认可开）：冻结权重缓存、跳过 WGrad、bpreshuffle GEMM、AITER attention、融合 RMSNorm/RoPE。显存换速度（默认关，8B 可开 / 70B 不可）：关 grad-ckpt、SHARD_GRAD_OP。最后三步（attn/norm/rope）为 HF 前向路径的算子融合，对 FSDP1/FSDP2 通用。</p>
   </div>
 
   <!-- 每步做了什么 -->
@@ -98,13 +102,13 @@
       <span style="width:13%;background:var(--c4)">通信 13%</span>
       <span style="width:12%;background:var(--c6)">attn</span>
     </div>
-    <div style="margin:16px 0 4px;font-size:13px">优化后（最优配置）</div>
+    <div style="margin:16px 0 4px;font-size:13px">优化后（最优配置，634ms）</div>
     <div class="stack">
       <span style="width:60%;background:var(--c1)">GEMM ~60%</span>
-      <span style="width:8%;background:var(--c5)">copy</span>
-      <span style="width:14%;background:var(--c4)">通信</span>
-      <span style="width:14%;background:var(--c6)">attn</span>
-      <span style="width:4%;background:var(--c3)"></span>
+      <span style="width:14%;background:var(--c6)">attn 14%</span>
+      <span style="width:14%;background:var(--c4)">通信 14%</span>
+      <span style="width:8%;background:var(--c5)">copy 8%</span>
+      <span style="width:4%;background:var(--c3)">elem 4%</span>
     </div>
     <div class="legend">
       <span><i style="background:var(--c1)"></i>FP8 GEMM</span>
@@ -119,13 +123,13 @@
   <h2>④ 关键指标变化</h2>
   <div class="card">
     <table>
-      <tr><th>指标</th><th class="n">优化前</th><th class="n">优化后</th><th class="n">变化</th></tr>
-      <tr><td>step time（稳态）</td><td class="n">2784 ms</td><td class="n good">1542 ms</td><td class="n good">−45%</td></tr>
+      <tr><th>指标</th><th class="n">优化前</th><th class="n">优化后（最优配置）</th><th class="n">变化</th></tr>
+      <tr><td>step time（稳态）</td><td class="n">2784 ms</td><td class="n good">634 ms</td><td class="n good">−77%</td></tr>
       <tr><td>aten::copy_（GPU 时间）</td><td class="n">2.93 s</td><td class="n good">0.34 s</td><td class="n good">−89%</td></tr>
       <tr><td>GEMM 调用 / step</td><td class="n">758</td><td class="n good">506</td><td class="n good">−33%</td></tr>
       <tr><td>all-gather 次数 / step</td><td class="n">73</td><td class="n good">37</td><td class="n good">−49%</td></tr>
       <tr><td>val_loss</td><td class="n">1.5968</td><td class="n good">1.5968</td><td class="n good">逐位一致</td></tr>
-      <tr><td>vs BF16 (1730ms)</td><td class="n bad">+61%</td><td class="n good">−11%</td><td class="n good">反超</td></tr>
+      <tr><td>vs BF16 (1730ms)</td><td class="n bad">+61%</td><td class="n good">−63%</td><td class="n good">反超（快 63%）</td></tr>
     </table>
   </div>
 
@@ -142,17 +146,32 @@
     </table>
   </div>
 
-  <!-- 用法 -->
-  <h2>⑥ 怎么用</h2>
+  <!-- FSDP2 -->
+  <h2>⑥ FSDP2：FP8 param-storage + 模型级融合</h2>
   <div class="card">
-    <div style="font-size:13px;margin-bottom:4px">全部优化（8B，显存充足）：</div>
-    <pre>CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 GRAD_CKPT=0 SHARDING=shard_grad_op \
-LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 MODE=fp8_blockwise2d \
-  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
-    <div style="font-size:13px;margin:10px 0 4px">显存吃紧 / 大模型：去掉 <code>GRAD_CKPT=0</code> 和 <code>SHARDING</code>，仍保留库层无损优化（约 −31%）。</div>
+    <p class="sub">前 6 步是 FSDP1。FSDP2（<code>fully_shard</code>，逐参数分片）再叠加：① FP8 param-storage（大模型防 OOM）；② 三个 HF 前向路径的算子融合（无损，FSDP1/2 通用）。</p>
+    <table>
+      <tr><th>优化</th><th>一句话原理</th><th class="n">step</th><th>开关</th><th>类型</th></tr>
+      <tr><td>AITER CK FMHA v3 attention</td><td>用 AITER CK FMHA v3 替换 PyTorch AOTriton SDPA；AOTriton 的反向最慢（attn 186→59ms）</td><td class="n">681</td><td><code>AITER_ATTN=1</code></td><td><span class="pill pd">无损</span></td></tr>
+      <tr><td>融合 RMSNorm</td><td>Qwen3RMSNorm 走 LumenRMSNorm 融合核（reduce+mul+rsqrt 合一）</td><td class="n">647</td><td><code>LUMEN_NORM=1</code></td><td><span class="pill pd">无损</span></td></tr>
+      <tr><td>融合 RoPE</td><td>HF apply_rotary_pos_emb → AITER rope_cached（带 autograd 反向，fwd 56dB/dX 53dB）</td><td class="n">634</td><td><code>FUSE_ROPE=1</code></td><td><span class="pill pd">无损</span></td></tr>
+    </table>
+    <div style="font-size:13px;margin:14px 0 4px"><b>FP8 param-storage</b>（<code>FSDP_FP8_PARAM_STORAGE=1</code>）：冻结 base 权重以 FP8 存在<b>分片</b>里，在 all-gather 内逐分片量化（<code>Blockwise2DFP8Param.fsdp_pre_all_gather</code>），all-gather FP8 而非 BF16（约省一半参数通信）。</div>
+    <p class="sub" style="margin:4px 0 0">这<b>不是 8B 最快配置</b>——每次 all-gather（grad-ckpt 下每步两次前向）都重量化 → 拷贝/elementwise 暴涨（1419ms/step）。它的价值是<b>显存</b>：让 70B 装得下。已验证 llama2-70B param-storage 达 val_loss <span class="good">0.9235 @450</span>（token-only 归一化，数值逐位一致）。8B 求快请用 <code>cache_frozen_weight</code>（只量化一次）。</p>
   </div>
 
-  <p class="foot">Lumen · Qwen3-8B FSDP FP8 blockwise2d · 8×MI308X (gfx942)。step time 为稳态中位数（排除含 JIT 的首步）；构成百分比为单步 torch.profiler Self CUDA 占比（近似）。详见 <code>qwen3_fp8_perf_notes.md</code>。</p>
+  <!-- 用法 -->
+  <h2>⑦ 怎么用</h2>
+  <div class="card">
+    <div style="font-size:13px;margin-bottom:4px">FSDP2 全部优化（8B 最快，634ms，显存充足）：</div>
+    <pre>FSDP_VERSION=2 CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 GRAD_CKPT=0 \
+SHARDING=shard_grad_op LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \
+AITER_ATTN=1 LUMEN_NORM=1 FUSE_ROPE=1 MODE=fp8_blockwise2d \
+  bash examples/qwen3/run_qwen3_fsdp_mi308.sh</pre>
+    <div style="font-size:13px;margin:10px 0 4px">FSDP1（960ms，去掉融合三项与 <code>FSDP_VERSION</code>）。大模型防 OOM：<code>FSDP_VERSION=2 FSDP_FP8_PARAM_STORAGE=1</code>，去掉 <code>GRAD_CKPT=0</code>/<code>SHARDING</code> 与 <code>cache_frozen_weight</code>。</div>
+  </div>
+
+  <p class="foot">Lumen · Qwen3-8B FSDP/FSDP2 FP8 blockwise2d · 8×MI308X (gfx942)。step time 为稳态中位数（排除含 JIT 的首步）；构成百分比为单步 torch.profiler Self CUDA 占比（近似）。详见 <code>qwen3_fp8_perf_notes.md</code> 与算子明细 <code>qwen3_fsdp2_operator_breakdown.xlsx</code>。</p>
 
 </div>
 </body>

@@ -1,0 +1,502 @@
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[W615 14:18:05.466009141 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights: 100%|██████████| 399/399 [00:00<00:00, 11429.32it/s]
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[W615 14:18:06.313953141 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[W615 14:18:06.317009926 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights: 100%|██████████| 399/399 [00:00<00:00, 13556.43it/s]
+Loading weights: 100%|██████████| 399/399 [00:00<00:00, 20969.68it/s]
+[W615 14:18:06.668942498 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W615 14:18:06.668955609 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W615 14:18:06.668975830 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[W615 14:18:06.676597354 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+INFO:lumen.models.fsdp:> Loading Qwen3 from /model-qwen3 ...
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[W615 14:18:06.694294304 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights:   0%|          | 0/399 [00:00<?, ?it/s]Loading weights: 100%|██████████| 399/399 [00:00<00:00, 14279.61it/s]
+Loading weights: 100%|██████████| 399/399 [00:00<00:00, 13805.93it/s]
+Loading weights: 100%|██████████| 399/399 [00:00<00:00, 25020.59it/s]
+Loading weights: 100%|██████████| 399/399 [00:00<00:00, 14109.97it/s]
+INFO:lumen.models.fsdp:> Fused RoPE: HF apply_rotary_pos_emb -> AITER autograd RoPE
+INFO:lumen.models.fsdp:> Gradient checkpointing DISABLED (more activation memory, no backward recompute)
+Loading weights: 100%|██████████| 399/399 [00:00<00:00, 14307.20it/s]
+INFO:lumen.config:> LoRA applied (rank=16, alpha=32.0) — trainable: 43,646,976 / 8,234,382,336 (0.53%)
+INFO:lumen.config:> Replaced 145 norm modules with Lumen implementations
+INFO:lumen.ops.attention.hf_patch:Patched F.scaled_dot_product_attention with Lumen/AITER attention
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+[92mSuccessfully preprocessed all matching files.[0m
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+INFO:megatron.core.distributed.fsdp.src.megatron_fsdp.megatron_fsdp:Detected Megatron Core, using Megatron-FSDP with Megatron.
+INFO:megatron.core.distributed.fsdp.src.megatron_fsdp.param_and_grad_buffer:Detected Megatron Core, using Megatron-FSDP with Megatron.
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+WARNING:megatron.core.utils:fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+INFO:lumen.quantize:Quantization enabled on 253 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=504)
+INFO:lumen.config:> LumenConfig enabled (format=fp8_e4m3, scaling=blockwise2d, lora_rank=16, lumen_norm, hf_attn_patch)
+INFO:lumen.models.fsdp:> FSDP2 applied (fully_shard, 36 layers, reshard=False, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, output_dtype=None, cast_forward_inputs=True))
+INFO:lumen.models.fsdp:> FSDP2 model ready (sharding=shard_grad_op, fp8_param_storage=False, grad_ckpt=False, world_size=8)
+INFO:lumen.models.fsdp:Loaded 50151 samples from /data/alpaca_zh-train-general.jsonl
+INFO:lumen.models.fsdp:Loaded 200 samples from /data/alpaca_zh-valid-general.jsonl
+INFO:lumen.models.fsdp:> Profiler armed: steps 8-10 -> /results/qwen3_fuserope_profile.txt
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] waiting for baton release at /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv.lock
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] waiting for baton release at /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv.lock
+INFO:aiter:waiting for baton release at /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv.lock
+[aiter] import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+INFO:aiter:import [module_quant] under /workspace/Lumen/third_party/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+WARNING:aiter:type hints mismatch, override to --> dynamic_per_token_scaled_quant(out: torch.Tensor, input: torch.Tensor, scales: torch.Tensor, scale_ub: Optional[torch.Tensor] = None, shuffle_scale: bool = False, num_rows: Optional[torch.Tensor] = None, num_rows_factor: int | typing.SupportsIndex = 1) -> None
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+INFO:aiter:merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_dsv3.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/a8w8_blockscale_bpreshuffle_tuned_gemm_qwen3_235b.csv
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] start build [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:start build [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+INFO:aiter:import [module_gemm_common] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+WARNING:aiter:type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_gemm_a8w8_blockscale_bpreshuffle
+[aiter] [32mfinish build [module_gemm_a8w8_blockscale_bpreshuffle], cost 71.7s [0m
+INFO:aiter:[32mfinish build [module_gemm_a8w8_blockscale_bpreshuffle], cost 71.7s [0m
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+INFO:aiter:import [module_gemm_a8w8_blockscale_bpreshuffle] under /workspace/Lumen/third_party/aiter/aiter/jit/module_gemm_a8w8_blockscale_bpreshuffle.so
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] start build [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_fwd
+INFO:aiter:start build [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+[aiter] shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:1024, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+[aiter] [32mfinish build [module_fmha_v3_fwd], cost 38.7s [0m
+INFO:aiter:[32mfinish build [module_fmha_v3_fwd], cost 38.7s [0m
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+INFO:aiter:import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_fwd/MI308/fwd_hd128_bf16_causal_rtna.co GetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter31fmha_fwd_hd128_bf16_causal_rtnaE Success
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:12288, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:12288, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:151936, K:4096, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:151936, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] start build [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_bwd
+INFO:aiter:start build [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+INFO:aiter:waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [32mfinish build [module_fmha_v3_bwd], cost 42.5s [0m
+INFO:aiter:[32mfinish build [module_fmha_v3_bwd], cost 42.5s [0m
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+INFO:aiter:import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+WARNING:aiter:type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, is_causal: bool, window_size_left: int | typing.SupportsIndex, window_size_right: int | typing.SupportsIndex, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int | typing.SupportsIndex, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_odo_bf16.co GetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E
+[aiter] hipModuleGetFunction: _ZN5aiter23fmha_bwd_hd128_odo_bf16E Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_rtna_psskddv.co GetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE
+[aiter] hipModuleGetFunction: _ZN5aiter46fmha_bwd_hd128_bf16_causal_br_a32_rtna_psskddvE Success
+[aiter] hipModuleLoad: /workspace/Lumen/third_party/aiter/hsa//gfx942/fmha_v3_bwd/bwd_hd128_dq_convert_bf16_rtna.co GetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE
+[aiter] hipModuleGetFunction: _ZN5aiter35fmha_bwd_hd128_dq_convert_bf16_rtnaE Success
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+[aiter] shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:aiter:shape is M:2048, N:4096, K:1024, not found tuned config in /tmp/aiter_configs/a8w8_blockscale_bpreshuffle_tuned_gemm.csv, will use default config!
+INFO:lumen.models.fsdp:  step 1/14 | loss 6.3899 | lr 3.95e-04 | step_time_ms 168126.4
+INFO:lumen.models.fsdp:  step 2/14 | loss 6.1133 | lr 3.80e-04 | step_time_ms 631.8
+INFO:lumen.models.fsdp:  step 3/14 | loss 2.6682 | lr 3.56e-04 | step_time_ms 628.5
+INFO:lumen.models.fsdp:  step 4/14 | loss 1.7778 | lr 3.25e-04 | step_time_ms 629.8
+INFO:lumen.models.fsdp:  step 5/14 | loss 2.0782 | lr 2.87e-04 | step_time_ms 925.7
+INFO:lumen.models.fsdp:  step 6/14 | loss 0.7843 | lr 2.45e-04 | step_time_ms 630.0
+INFO:lumen.models.fsdp:  step 7/14 | loss 2.8925 | lr 2.00e-04 | step_time_ms 630.8
+INFO:lumen.models.fsdp:  step 8/14 | loss 2.0937 | lr 1.55e-04 | step_time_ms 642.3
+INFO:lumen.models.fsdp:  step 9/14 | loss 2.8682 | lr 1.13e-04 | step_time_ms 640.9
+INFO:lumen.models.fsdp:  step 10/14 | loss 1.4279 | lr 7.53e-05 | step_time_ms 641.9
+[rank0]:[W615 14:21:24.713450975 collection.cpp:1116] Warning: ROCTracer produced duplicate flow start: 2 (function operator())
+INFO:lumen.models.fsdp:> Profiler wrote /results/qwen3_fuserope_profile.txt
+INFO:lumen.models.fsdp:> Profiler wrote per-shape table /results/qwen3_fuserope_profile_shapes.txt
+INFO:lumen.models.fsdp:> Profiler wrote chrome trace /results/qwen3_fuserope_trace.json
+INFO:lumen.models.fsdp:  step 11/14 | loss 1.5754 | lr 4.36e-05 | step_time_ms 632.8
+INFO:lumen.models.fsdp:  step 12/14 | loss 2.5099 | lr 1.98e-05 | step_time_ms 944.0
+INFO:lumen.models.fsdp:  step 13/14 | loss 0.4815 | lr 5.01e-06 | step_time_ms 653.4
+INFO:lumen.models.fsdp:  step 14/14 | loss 1.9377 | lr 0.00e+00 | step_time_ms 629.8
+INFO:lumen.models.fsdp:> Training complete after 14 steps.
+[rank0]:[W615 14:21:52.167426799 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
