@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlyDSL Agent Dataset — Pipeline Report v3.0</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #181a24; --surface-2: #1e2130; --border: #2a2d3e;
+    --text: #e4e6f0; --text-secondary: #9498ad; --text-tertiary: #6b6f84;
+    --accent: #6c8cff; --accent-dim: rgba(108,140,255,.12);
+    --success: #3ecf8e; --success-dim: rgba(62,207,142,.12);
+    --warning: #f5a623; --warning-dim: rgba(245,166,35,.12);
+    --info: #56b4f9; --info-dim: rgba(86,180,249,.12);
+    --danger: #ef4444; --danger-dim: rgba(239,68,68,.12);
+    --radius: 10px; --radius-sm: 6px;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:var(--font); background:var(--bg); color:var(--text); line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .container { max-width:960px; margin:0 auto; padding:48px 24px 80px; }
+  .header { margin-bottom:40px; }
+  .header h1 { font-size:2rem; font-weight:800; letter-spacing:-0.02em; margin-bottom:8px; background:linear-gradient(135deg,var(--accent),#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+  .header p { color:var(--text-secondary); font-size:0.95rem; max-width:640px; }
+  .stat-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:40px; }
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; text-align:center; }
+  .stat-card .value { font-size:1.75rem; font-weight:700; color:var(--accent); }
+  .stat-card .label { font-size:0.8rem; color:var(--text-secondary); margin-top:4px; font-weight:500; }
+  .stat-card.success .value { color:var(--success); }
+  .stat-card.warning .value { color:var(--warning); }
+  .divider { height:1px; background:var(--border); margin:40px 0; }
+  h2 { font-size:1.35rem; font-weight:700; margin-bottom:16px; letter-spacing:-0.01em; }
+  h3 { font-size:1.05rem; font-weight:600; margin-bottom:12px; color:var(--text-secondary); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .card-header { display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); font-weight:600; font-size:0.9rem; }
+  .card-body { padding:20px; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:20px; font-size:0.75rem; font-weight:600; }
+  .pill-info { background:var(--info-dim); color:var(--info); }
+  .pill-success { background:var(--success-dim); color:var(--success); }
+  .pill-warning { background:var(--warning-dim); color:var(--warning); }
+  .pill-accent { background:var(--accent-dim); color:var(--accent); }
+  .pill-danger { background:var(--danger-dim); color:var(--danger); }
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
+  .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:24px; }
+  .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+  .table-wrap { overflow-x:auto; margin-bottom:24px; }
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  thead th { text-align:left; padding:10px 14px; background:var(--surface-2); color:var(--text-secondary); font-weight:600; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid var(--border); }
+  thead th.right { text-align:right; }
+  tbody td { padding:10px 14px; border-bottom:1px solid var(--border); }
+  tbody td.right { text-align:right; font-variant-numeric:tabular-nums; }
+  tbody tr:nth-child(even) { background:rgba(255,255,255,.015); }
+  tbody tr.highlight { background:var(--info-dim); }
+  tbody tr.highlight-success { background:var(--success-dim); }
+  .progress-item { margin-bottom:12px; }
+  .progress-label { display:flex; justify-content:space-between; font-size:0.82rem; margin-bottom:4px; font-weight:500; }
+  .progress-label span:last-child { color:var(--text-secondary); }
+  .progress-bar { height:7px; border-radius:4px; background:var(--surface-2); overflow:hidden; }
+  .progress-fill { height:100%; border-radius:4px; background:var(--accent); }
+  .callout { background:var(--info-dim); border-left:3px solid var(--info); border-radius:0 var(--radius-sm) var(--radius-sm) 0; padding:16px 20px; margin-bottom:24px; }
+  .callout-title { font-weight:600; font-size:0.9rem; margin-bottom:6px; color:var(--info); }
+  .callout p { font-size:0.88rem; color:var(--text-secondary); }
+  .chart-container { position:relative; }
+  .chart-container canvas { max-height:280px; }
+  .code-block { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:16px 20px; font-family:var(--mono); font-size:0.78rem; line-height:1.7; overflow-x:auto; white-space:pre; color:var(--text-secondary); margin-bottom:24px; }
+  .text-small { font-size:0.82rem; color:var(--text-tertiary); margin-bottom:24px; }
+  .mb-16 { margin-bottom:16px; }
+  .mb-24 { margin-bottom:24px; }
+  @media (max-width:700px) { .stat-strip,.grid-4 { grid-template-columns:repeat(2,1fr); } .grid-2,.grid-3 { grid-template-columns:1fr; } .header h1 { font-size:1.5rem; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>FlyDSL Agent Dataset Pipeline v3.0</h1>
+    <p>三源数据（FlyDSL + aiter + gpu-docs）→ 5 阶段处理 → 三阶段训练数据 + 机密保护方案</p>
+  </div>
+
+  <!-- Key Metrics -->
+  <div class="stat-strip">
+    <div class="stat-card"><div class="value">1,967</div><div class="label">CPT Documents</div></div>
+    <div class="stat-card"><div class="value">3,072</div><div class="label">SFT Pairs</div></div>
+    <div class="stat-card"><div class="value">2,878</div><div class="label">RL Specs</div></div>
+    <div class="stat-card success"><div class="value">7,917</div><div class="label">Total Records</div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- CPT Design -->
+  <h2>CPT 设计逻辑：加权采样</h2>
+  <p class="mb-16" style="color:var(--text-secondary);font-size:0.9rem;">通过权重让模型多看高质量代码、少看低价值文件。gpu-docs 权重故意设低（0.5x）以内化但不过度记忆。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">CPT 权重分布 <span class="pill pill-info">1,967 docs</span></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chartWeights"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">GPU Benchmark Grading <span class="pill pill-success">755 tests passed</span></div>
+      <div class="card-body"><div class="chart-container" style="max-width:240px;margin:0 auto;"><canvas id="chartGrade"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">权重公式</div>
+    <p><code>weight = priority_weight &times; grade_weight &times; type_weight</code><br>
+    Gold kernel: P0(3.0) &times; Gold(1.5) &times; kernel(1.2) = <strong>5.4x</strong><br>
+    gpu-docs: P1(1.5) &times; ungraded(1.0) &times; hw_spec(0.3) = <strong>0.5x</strong>（§13.3 低权重设计）</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- SFT Design -->
+  <h2>SFT 设计逻辑：15 种来源 + 拒答边界</h2>
+  <p class="mb-16" style="color:var(--text-secondary);font-size:0.9rem;">多种来源覆盖不同指令类型。拒答数据（4.8%）教模型拒绝规格提取，反例（0.4%）防过度拒答。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">SFT 来源分布 (Top 8) <span class="pill pill-info">2,808 train</span></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chartSft"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">安全边界占比 <span class="pill pill-warning">§13 Protection</span></div>
+      <div class="card-body">
+        <div class="progress-item" style="margin-bottom:8px;">
+          <div class="progress-label"><span>正常 kernel SFT</span><span>2,668 (95.0%)</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:95%"></div></div>
+        </div>
+        <div class="progress-item" style="margin-bottom:8px;">
+          <div class="progress-label"><span>拒答边界 (source J)</span><span>135 (4.8%)</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:4.8%;background:var(--warning)"></div></div>
+        </div>
+        <div class="progress-item" style="margin-bottom:16px;">
+          <div class="progress-label"><span>合法解释（防过度拒答）</span><span>12 (0.4%)</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:0.4%;background:var(--success)"></div></div>
+        </div>
+        <p style="font-size:0.82rem;color:var(--text-tertiary);">v3.0 删除了 gpu_docs_qa (2,625 对) —— 它们教模型回答规格问题，与 §13 矛盾。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- RL Design -->
+  <h2>RL 设计逻辑：GPU 在线评估</h2>
+  <p class="mb-16" style="color:var(--text-secondary);font-size:0.9rem;">只给任务规格，不给参考答案。模型生成 kernel → GPU 编译+测试+benchmark → 奖励信号。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">RL Operator 分布 <span class="pill pill-info">2,878 specs</span></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chartRl"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">奖励函数设计</div>
+      <div class="card-body">
+        <div class="progress-item" style="margin-bottom:8px;">
+          <div class="progress-label"><span>编译通过 (compiles)</span><span>0.3</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:30%;background:var(--info)"></div></div>
+        </div>
+        <div class="progress-item" style="margin-bottom:8px;">
+          <div class="progress-label"><span>正确性 (correct)</span><span>0.3</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:30%;background:var(--success)"></div></div>
+        </div>
+        <div class="progress-item">
+          <div class="progress-label"><span>性能效率 (efficiency)</span><span>0.4</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:40%;background:var(--accent)"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Security -->
+  <h2>gpu-docs 机密保护（Plan §13）</h2>
+  <p class="mb-16" style="color:var(--text-secondary);font-size:0.9rem;">
+    API-only 交付场景下，全精度训练 + 拒答行为 + 推理时中间件，保护 AMD 硬件规格不被系统性泄露。
+  </p>
+
+  <h3>方案选型</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>方案</th><th>Kernel 质量</th><th>防泄露</th><th>选用</th></tr></thead>
+      <tbody>
+        <tr><td><s>加密训练数据</s></td><td><span class="pill pill-danger">破坏</span></td><td><span class="pill pill-success">Yes</span></td><td>&cross;</td></tr>
+        <tr><td><s>重度蒸馏</s></td><td><span class="pill pill-warning">降级</span></td><td><span class="pill pill-success">Yes</span> (常量仍泄)</td><td>&cross;</td></tr>
+        <tr class="highlight-success"><td><strong>全精度 + 拒答 SFT</strong></td><td><span class="pill pill-success">最优</span></td><td><span class="pill pill-success">行为+中间件</span></td><td><strong>&check;</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>推理时 4 层防御</h3>
+  <div class="code-block">请求 &rarr; [A: Query Classifier] &rarr; [B: System Prompt] &rarr; [C: RAG 隔离] &rarr; 模型生成 &rarr; [D: Output Filter] &rarr; 返回
+                  正则+语义拦截        安全约束注入         gpu-docs 不入索引       散文脱敏，代码不动</div>
+
+  <h3>能力边界</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>威胁</th><th>能防？</th><th>机制</th></tr></thead>
+      <tbody>
+        <tr class="highlight-success"><td>逐字提取文档</td><td><span class="pill pill-success">✓</span></td><td>拒答训练 + classifier</td></tr>
+        <tr class="highlight-success"><td>当规格问答机</td><td><span class="pill pill-success">✓</span></td><td>拒答训练 + classifier</td></tr>
+        <tr class="highlight-success"><td>RAG 泄露原文</td><td><span class="pill pill-success">✓</span></td><td>不在向量索引中</td></tr>
+        <tr><td>从 kernel 常量反推参数</td><td><span class="pill pill-warning">✗</span> (可接受)</td><td>代码即知识，固有限制</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>验收指标</h3>
+  <div class="grid-4 mb-24">
+    <div class="stat-card success"><div class="value">&ge;95%</div><div class="label">攻击拦截率</div></div>
+    <div class="stat-card success"><div class="value">&le;5%</div><div class="label">误杀率</div></div>
+    <div class="stat-card success"><div class="value">0</div><div class="label">RAG 泄露</div></div>
+    <div class="stat-card"><div class="value">&le;2%</div><div class="label">散文数值泄露</div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- 5-Model Annotation -->
+  <h2>5-Model AI 共识标注</h2>
+  <div class="grid-3 mb-24">
+    <div class="stat-card success"><div class="value">69%</div><div class="label">Operator 一致率</div></div>
+    <div class="stat-card"><div class="value">5</div><div class="label">标注模型数</div></div>
+    <div class="stat-card success"><div class="value">401</div><div class="label">标注 Kernel</div></div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">共识投票逻辑</div>
+    <p>Enum 字段（operator, complexity）→ 多数投票，≥50%+1 接受，否则标 needs_human_review<br>
+       List 字段（features）→ ≥2 票纳入<br>
+       Text 字段（description）→ 选最长非空回答<br>
+       Shapes → 取各模型并集（max 5）</p>
+  </div>
+
+  <p class="text-small" style="margin-top:24px;">v3.0 · 2026-06-16 · 遵循 plan.md §4 + §13</p>
+
+</div>
+
+<script>
+const C = {
+  accent:'#6c8cff', alt:'#a78bfa', success:'#3ecf8e', warning:'#f5a623', info:'#56b4f9',
+  pal:['#6c8cff','#a78bfa','#56b4f9','#3ecf8e','#f5a623','#f472b6','#34d399','#fbbf24']
+};
+Chart.defaults.color='#9498ad'; Chart.defaults.borderColor='#2a2d3e';
+Chart.defaults.font.family="'Inter',sans-serif"; Chart.defaults.font.size=12;
+Chart.defaults.plugins.legend.labels.usePointStyle=true; Chart.defaults.plugins.legend.labels.pointStyle='circle';
+
+new Chart(document.getElementById('chartWeights'),{
+  type:'bar',
+  data:{
+    labels:['Skills','CLAUDE.md','Gold kernel','FlyDSL docs','Framework','Silver','gpu-docs','Build'],
+    datasets:[{label:'Weight',data:[7.5,6.0,5.4,4.5,3.0,2.0,0.5,0.4],
+      backgroundColor:[C.pal[0],C.pal[1],C.success,C.pal[2],C.pal[3],C.accent,C.warning,'#3a3d50'],
+      borderWidth:0,borderRadius:4}]
+  },
+  options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},
+    scales:{x:{grid:{color:'#2a2d3e44'}},y:{grid:{display:false}}}}
+});
+
+new Chart(document.getElementById('chartGrade'),{
+  type:'doughnut',
+  data:{labels:['Gold (14)','Silver (80)','Bronze (16)','Ungraded'],
+    datasets:[{data:[14,80,16,1857],backgroundColor:[C.success,C.accent,C.warning,'#3a3d50'],borderWidth:0}]},
+  options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom',labels:{padding:10,font:{size:10}}}}}
+});
+
+new Chart(document.getElementById('chartSft'),{
+  type:'bar',
+  data:{labels:['hw aug','doc qa','reverse','ai annot','refusal','tile','test','git'],
+    datasets:[{label:'Pairs',data:[766,669,388,375,135,105,89,88],
+      backgroundColor:C.pal.map(c=>c+'99'),borderColor:C.pal,borderWidth:1,borderRadius:4}]},
+  options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},
+    scales:{x:{grid:{color:'#2a2d3e44'}},y:{grid:{display:false}}}}
+});
+
+new Chart(document.getElementById('chartRl'),{
+  type:'bar',
+  data:{labels:['gemm','custom','quant','moe','flash_attn','rope','topk','rmsnorm','softmax'],
+    datasets:[{label:'Specs',data:[1152,317,316,254,228,133,124,110,79],
+      backgroundColor:C.accent+'88',borderColor:C.accent,borderWidth:1,borderRadius:4}]},
+  options:{responsive:true,plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false}},y:{grid:{color:'#2a2d3e44'},beginAtZero:true}}}
+});
+</script>
+</body>
+</html>
