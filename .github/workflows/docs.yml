@@ -5,11 +5,13 @@ on:
     branches: [main, dev/RL]
     paths:
       - 'lumen-docs/**'
+      - 'experiments/flydsl-agent/dataprocess/pipeline-report.html'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths:
       - 'lumen-docs/**'
+      - 'experiments/flydsl-agent/dataprocess/pipeline-report.html'
   workflow_dispatch:
 
 permissions:
@@ -47,6 +49,7 @@ jobs:
           cp lumen-docs/site/rl.html _site/rl.html
           cp -r lumen-docs/site/rl _site/rl
           cp -r lumen-docs/docs/build/html _site/docs
+          cp experiments/flydsl-agent/dataprocess/pipeline-report.html _site/pipeline-report.html
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev/RL'
