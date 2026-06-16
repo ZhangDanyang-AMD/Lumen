@@ -215,6 +215,8 @@ def main():
                    help="route SDPA attention through AITER (CK FMHA) instead of PyTorch AOTriton (hf_attn_patch)")
     p.add_argument("--lumen-norm", action="store_true",
                    help="replace HF Qwen3RMSNorm with Lumen fused RMSNorm (AITER)")
+    p.add_argument("--fuse-rope", action="store_true",
+                   help="replace HF apply_rotary_pos_emb with AITER autograd RoPE (fwd+bwd)")
     p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
                    help="disable activation checkpointing (no backward forward-recompute; more memory)")
     p.add_argument("--no-limit-all-gathers", dest="limit_all_gathers", action="store_false",
@@ -246,6 +248,17 @@ def main():
 
     rank0(f"> Loading Qwen3 from {args.model_name_or_path} ...")
     model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+
+    if args.fuse_rope:
+        # Replace HF NEOX rope (mul+rotate_half+mul+add) with AITER autograd RoPE.
+        import transformers.models.qwen3.modeling_qwen3 as _q3
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+            return apply_rotary_qk_autograd(q, k, cos, sin)
+
+        _q3.apply_rotary_pos_emb = _lumen_rope
+        rank0("> Fused RoPE: HF apply_rotary_pos_emb -> AITER autograd RoPE")
     if args.grad_checkpointing:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         rank0("> Gradient checkpointing enabled")

@@ -95,6 +95,7 @@ docker run --rm --init \
     -e LUMEN_SKIP_FROZEN_WGRAD="${LUMEN_SKIP_FROZEN_WGRAD:-}" \
     -e AITER_ATTN="${AITER_ATTN:-}" \
     -e LUMEN_NORM="${LUMEN_NORM:-}" \
+    -e FUSE_ROPE="${FUSE_ROPE:-}" \
     "${IMAGE}" \
     bash -c '
 set -euo pipefail
@@ -109,6 +110,7 @@ EXTRA=""
 [[ -n "${FSDP_FP8_PARAM_STORAGE}" ]] && EXTRA="${EXTRA} --fsdp-fp8-param-storage"
 [[ -n "${AITER_ATTN}" ]] && EXTRA="${EXTRA} --aiter-attn"
 [[ -n "${LUMEN_NORM}" ]] && EXTRA="${EXTRA} --lumen-norm"
+[[ -n "${FUSE_ROPE}" ]] && EXTRA="${EXTRA} --fuse-rope"
 torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
     --model-name-or-path /model-qwen3 \
     --train-data-path "/data/${TRAIN_FILE}" \
