@@ -57,7 +57,7 @@ torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
 
 The base recipe above is the **unoptimized FP8 baseline** (~2.78 s/step, ~61% slower
 than BF16 — overhead-bound). A series of **lossless** (loss bit-identical) and
-**memory-for-speed** optimizations bring it down to **~634 ms/step** (faster than BF16).
+**memory-for-speed** optimizations bring it down to **~568 ms/step** (faster than BF16).
 Full analysis: [`results/qwen3_fp8_perf_notes.md`](results/qwen3_fp8_perf_notes.md) and the
 visual report [`results/qwen3_fp8_optimization_report.html`](results/qwen3_fp8_optimization_report.html);
 per-operator breakdown in `results/qwen3_fsdp2_operator_breakdown.xlsx`.
@@ -91,7 +91,16 @@ HOST_MODEL=/data/Qwen3-8B HOST_DATA=/data/alpaca \
 | + frozen-weight cache + skip WGrad | 1912 ms |
 | + no grad-ckpt + SHARD_GRAD_OP | 1542 ms |
 | + bpreshuffle GEMM (FSDP1 best) | 960 ms |
-| + FSDP2 + AITER attn + fused RMSNorm/RoPE | **634 ms** |
+| + FSDP2 + AITER attn + fused RMSNorm/RoPE | 634 ms |
+| + RMSNorm-bwd large-M-small-N kernel (AITER) | 603 ms |
+| + FP8 GEMM gfx942 tune (AITER) | 578 ms |
+| + zero-copy RoPE layout (Lumen) | **568 ms** |
+
+> The last three are: an AITER RMSNorm-bwd kernel (q/k per-head norm row-parallel
+> specialization, 37→9 ms/step), gfx942 bpreshuffle GEMM tuning (FP8 GEMM 295→277 ms),
+> and a Lumen zero-copy RoPE layout (drops ~2.3 GB/step of contiguous copies). The two
+> AITER items ship in `third_party/aiter` (effective once built into the image); the RoPE
+> change is in `lumen/` (default-on). All numerically equivalent / exact.
 
 When memory is tight (large model / batch / seq), drop `GRAD_CKPT=0` and `SHARDING`;
 the lossless lib-level flags alone still give ~−31%.
@@ -123,4 +132,4 @@ change only kernel selection / scheduling, not the math). Logs:
 |---|---|
 | `results/qwen3_fsdp_train_bf16_lora_8b.log` | BF16 reference (~1.73 s/step) |
 | `results/qwen3_fsdp1_train_fp8_blockwise2d_lora_8b.log` | FSDP1 FP8 baseline (~2.78 s/step) |
-| `results/qwen3_fsdp2_train_fp8_blockwise2d_best_lora_8b.log` | FSDP2 fully-optimized (~634 ms/step) |
+| `results/qwen3_fsdp2_train_fp8_blockwise2d_best_lora_8b.log` | FSDP2 fully optimized — RMSNorm kernel + gfx942 GEMM tune + zero-copy RoPE (~568 ms/step) |

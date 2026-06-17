@@ -213,6 +213,58 @@ bpreshuffle), FSDP2. Each is bit-identical (loss unchanged). Trace breakdown:
    fwd SNR ~56 dB / dX ~53 dB.
    - step **647 → 634 ms (−2%)**.
 
+## RMSNorm backward — AITER large-M-small-N kernel specialization
+
+After the fusions above, the trace showed `_rmsnorm_bwd_triton` as the single worst
+roofline offender: **36.4 ms/step at 39.6× the roofline floor** (vs forward norm 4-6×,
+elementwise 3-6×). Root cause: the generic backward kernel caps its grid at
+`min(M, get_num_sms())` = `min(M, 80)` and grid-strides over rows, so Qwen3's per-head
+**q/k norm** (M = batch·seq·heads = 65536/16384, N = head_dim = 128) serializes ~800/200 rows
+per program; `num_warps=8` also wastes 75 % of lanes at N=128. The **forward** already had a
+`large_m_small_n` specialization, but the **backward** did not.
+
+Fix (in AITER, per the kernel-ownership rule): added `_rmsnorm_bwd_large_m_small_n_triton`
+(2D grid over rows, one BLOCK_M×BLOCK_N tile per program, partial dγ reduced by the existing
+`_rmsnorm_bwd_dg_reduce_triton`) + a `_should_use_large_m_small_n` dispatch in
+`_rmsnorm_backward`. Mirrors the forward. N=4096 norms keep the generic kernel (no regression).
+
+Measured (8×MI308X, same-session A/B, best config):
+
+| | RMSNorm bwd GPU time | step_time |
+|---|---|---|
+| generic bwd | 37.2 ms/step | ~630 ms |
+| **+ large-M-small-N bwd** | **9.1 ms/step (−75 %, 4.1×)** | **~603 ms (−27 ms, −4.3 %)** |
+
+Backward-only micro-bench: q_norm (65536×128) **5.75×**, k_norm (16384×128) **2.65×**, main
+norm (2048×4096) 1.01× (unchanged). Numerically **equivalent** (not bit-identical): dX/dW SNR
+95 dB+ vs the PyTorch reference — different reduction order, bf16-noise-level deltas, so the loss
+trajectory differs by ~1e-5. Tests: the existing aiter `test_rmsnorm` (added shapes 65536×128 /
+16384×128) covers fwd+dX+dW. Lives in `third_party/aiter` (needs the submodule built into the
+image, or the two `.py` files mounted, to take effect at runtime — Triton JIT, no recompile).
+
+## FP8 GEMM — gfx942 (MI308X) bpreshuffle tuning
+
+The shipped `a8w8_blockscale_bpreshuffle_tuned_gemm.csv` had **only gfx950** entries, so MI308X
+(gfx942/80CU) fell back to the default heuristic for every shape. Tuned the Qwen3 transformer
+shapes (M=2048; N/K over 1024/4096/12288) with the bpreshuffle tuner and appended the gfx942
+rows. Measured by profiler (FP8 GEMM self-time, immune to step noise): **295.1 → 276.6 ms/step
+(−18.5 ms, −6.3%)**, lossless (kernel selection only). The thin k/v (N=1024) was the worst
+offender (2.28× off in isolation); big shapes also gained ~1.2-1.3×. Isolated tuner gains were
+larger (~62 ms) but real training discounts to ~18 ms (memory contention) — same lesson as the
+non-bpreshuffle `USE_TUNED_GEMM` (~3%). lm_head (N=151936) left untuned (already ~220-245
+TFLOPS, near peak; tuning it is slow for ~3 ms). Lives in `third_party/aiter` configs.
+
+## RoPE — zero-copy layout (autograd path)
+
+The fused-RoPE autograd wrapper was the **#1 `contiguous`-copy source** (~2.3 GB/step across
+fwd+bwd): it did `permute().contiguous()` round trips to feed AITER's [S,B,H,D] rope kernel from
+the HF [B,H,S,D] tensors. But the kernel is **stride-aware** (reads x / writes out via their
+strides), so the copies are unnecessary: feed a strided [S,B,H,D] *view* of the BHSD input and
+let the kernel write through a strided view of a fresh **contiguous BHSD** output. No
+`contiguous()` either side; output stays contiguous BHSD for attention. **Exact** (fwd/dQ/dK SNR
+vs HF reference = inf in fp32, better than the old 56 dB round-trip). **−8 ms/step.** Pure Lumen
+change (`lumen/ops/rope.py`); test `tests/ops/test_fused_rope.py::TestRoPEAutograd`.
+
 ## Cumulative (Qwen3-8B FSDP2 fp8 blockwise2d, 8×MI308X)
 
 | stage | step_time | note |
@@ -220,11 +272,18 @@ bpreshuffle), FSDP2. Each is bit-identical (loss unchanged). Trace breakdown:
 | FSDP2 best (cache + shard_grad_op + no-ckpt + bpreshuffle) | 767 ms | = FSDP1 lib+mem opts on FSDP2 |
 | + AITER CK FMHA v3 attention | 681 ms | lossless (−11%) |
 | + fused RMSNorm | 647 ms | lossless (−5%) |
-| **+ fused RoPE** | **634 ms** | lossless (−2%); **−17% over FSDP2 best** |
+| + fused RoPE | 634 ms | lossless (−2%) |
+| + RMSNorm bwd large-M-small-N kernel | 603 ms | numerically equiv (−4.3%) |
+| + FP8 GEMM gfx942 tune | 578 ms | lossless (−4%) |
+| **+ zero-copy RoPE layout** | **568 ms** | exact (−2%); **−26% over FSDP2 best, ~67% faster than BF16 (1730)** |
 
-GPU self-time totals (trace, per the xlsx): param-storage baseline 1547.7 ms → best 657.4 ms
-(> wall 634 ms because compute/comm streams overlap). Top remaining cost is the FP8 GEMM itself
-(~296 ms/step, near-roofline) — compute-bound, little left to remove.
+GPU self-time totals (trace): param-storage baseline 1547.7 ms → 634-config 657.4 ms. The
+RMSNorm-bwd kernel removes ~28 ms (37→9 ms/step), the gfx942 GEMM tune ~18 ms (FP8 GEMM
+295→277), and zero-copy RoPE ~8 ms (drops ~2.3 GB/step of contiguous). Remaining dominant cost
+is the FP8 GEMM itself (~277 ms/step, ~209+ TFLOPS, near the MI308X FP8 wall) — compute-bound,
+little left. The rest is a long tail of small ops (elementwise/LoRA-GEMM/quant/optimizer) with
+poor fusion ROI; the only remaining lever with real magnitude (~6-8 ms) is gate_up GEMM fusion,
+which is an architectural change (PEFT + FP8 storage + checkpoint) — not pursued.
 
 > Reproduce best: `FSDP_VERSION=2 CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 GRAD_CKPT=0 \
 > SHARDING=shard_grad_op LIMIT_ALL_GATHERS=0 FORWARD_PREFETCH=1 \

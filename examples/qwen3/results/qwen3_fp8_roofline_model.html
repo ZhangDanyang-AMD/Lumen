@@ -45,8 +45,8 @@
 
   <div class="kpi">
     <div class="b"><div class="muted">理论最快</div><div class="big good">~320 <small style="font-size:14px">ms/step</small></div><div class="muted">FP8 GEMM 算力墙</div></div>
-    <div class="b"><div class="muted">当前最优</div><div class="big">634 <small style="font-size:14px">ms/step</small></div><div class="muted">FSDP2 全优化版本</div></div>
-    <div class="b"><div class="muted">剩余空间</div><div class="big warn">~2x</div><div class="muted">全在重叠/气泡，非减计算</div></div>
+    <div class="b"><div class="muted">当前最优</div><div class="big">568 <small style="font-size:14px">ms/step</small></div><div class="muted">FSDP2 全优化 + RMSNorm/GEMM/RoPE</div></div>
+    <div class="b"><div class="muted">剩余空间</div><div class="big warn">~1.8x</div><div class="muted">非 GEMM 计算串行 + 气泡(通信已重叠)</div></div>
   </div>
 
   <h2>① 硬件 & 模型输入</h2>
@@ -85,26 +85,28 @@
 
   <h2>④ 当前 vs 理论</h2>
   <div class="card">
-    <div class="row"><div class="lab muted">理论下限</div><div class="track"><div class="fill" style="width:50%;background:var(--c2)">~320 ms</div></div></div>
-    <div class="row"><div class="lab">当前最优</div><div class="track"><div class="fill" style="width:100%;background:var(--c1)">634 ms</div></div></div>
+    <div class="row"><div class="lab muted">理论下限</div><div class="track"><div class="fill" style="width:53%;background:var(--c2)">~320 ms</div></div></div>
+    <div class="row"><div class="lab">当前最优</div><div class="track"><div class="fill" style="width:100%;background:var(--c1)">568 ms</div></div></div>
     <table style="margin-top:10px">
       <tr><th></th><th class="n">step</th><th class="n">FP8 GEMM</th><th class="n">GEMM 聚合算力</th></tr>
-      <tr><td>当前最优</td><td class="n">634 ms</td><td class="n">296 ms</td><td class="n">~209 TFLOPS</td></tr>
+      <tr><td>当前最优</td><td class="n">568 ms</td><td class="n">277 ms</td><td class="n">~223 TFLOPS</td></tr>
       <tr><td>理论下限</td><td class="n good">~320 ms</td><td class="n good">~290 ms</td><td class="n good">~215 TFLOPS</td></tr>
     </table>
-    <div class="note">FP8 GEMM 已从早期 157 TFLOPS 提升到 ~209 TFLOPS（296 ms，bpreshuffle 后），基本贴近 215 算力墙 → <b class="hl">GEMM 本身已无明显空间</b>，剩余差距主要在非 GEMM 算子与 GEMM 的重叠。</div>
+    <div class="note">FP8 GEMM 已从早期 157 TFLOPS 提升到 ~223 TFLOPS（277 ms，bpreshuffle + gfx942 tune 后），达到/略超 215 估计墙 → <b class="hl">GEMM 本身已无明显空间</b>，剩余差距主要在非 GEMM 算子与 GEMM 的重叠。</div>
   </div>
 
-  <h2>⑤ ~310ms 差距来自哪（均非硬计算）</h2>
+  <h2>⑤ ~248ms 差距来自哪（均非硬计算）</h2>
   <div class="card">
+    <p class="sub" style="margin:0 0 8px">基于 chrome trace 的区间并集实测(非 self-time 求和):wall≈641 / 计算 busy≈582 / 通信 busy≈71 / GEMM busy≈350 ms/step。</p>
     <table>
       <tr><th>来源</th><th class="n">量级</th><th>方向</th><th></th></tr>
-      <tr><td>非 GEMM 未与 GEMM 重叠</td><td class="n">大头</td><td>GPU self-time 合计 657ms ≈ wall 634ms → 几乎串行；attention 59 / 通信 71 / copy 37 / elementwise 50 / RMSNorm 42 等应与 296ms 的 GEMM overlap</td><td><span class="pill pw">可做</span></td></tr>
-      <tr><td>气泡 / 同步 / launch 间隙</td><td class="n">其余</td><td>kernel launch、stream 同步</td><td><span class="pill pw">可做</span></td></tr>
+      <tr><td>非 GEMM <b>计算</b>与 GEMM 串行</td><td class="n">~232 ms</td><td>attention/elementwise/norm/copy 等与 GEMM 同在计算流,天然串行(计算 busy 582 − GEMM 350)。需多计算流并行或<b>减少 elementwise/copy 体量</b></td><td><span class="pill pw">可做(难)</span></td></tr>
+      <tr><td>气泡 / 同步 / launch 间隙</td><td class="n">~52 ms</td><td>wall 641 − 计算 busy 582 − 暴露通信 7；kernel launch、stream 同步</td><td><span class="pill pw">可做</span></td></tr>
+      <tr><td>通信未重叠(暴露部分)</td><td class="n">~7 ms</td><td>通信 71ms 已 <b>90% 与计算重叠</b>,仅 7ms 暴露 → 空间极小</td><td><span class="pill pg">基本达成</span></td></tr>
       <tr><td>GEMM 聚合效率 209→215 TFLOPS</td><td class="n">~8 ms</td><td>小 GEMM(k/v N=1024) + lm_head 利用率略低；空间已很小</td><td><span class="pill pg">基本达成</span></td></tr>
       <tr><td>FP8 GEMM 计算本身</td><td class="n">~290 ms</td><td>不可压缩（算力墙）</td><td><span class="pill pg">已达</span></td></tr>
     </table>
-    <p class="note">结论：理论极限约 <b class="hl">320 ms/step</b>（FP8 GEMM 算力墙）。当前 634ms 仍有 ~2x 空间，但<strong>几乎全在重叠</strong>——GPU self-time 合计（657ms）已接近 wall（634ms），说明非 GEMM 算子基本与 GEMM 串行执行。下一步方向：把通信 + attention + elementwise 与 GEMM 充分 overlap，使 wall 趋近 max(GEMM, 其它) 而非求和。</p>
+    <p class="note">结论：理论极限约 <b class="hl">320 ms/step</b>（FP8 GEMM 算力墙）。<strong>通信已 90% 重叠(暴露仅 ~7ms),不是瓶颈</strong>——之前「self-time 合计≈wall→几乎串行」是聚合启发式的误判,trace 区间并集证明通信被很好地掩盖。真正的差距是<strong>非 GEMM 计算与 GEMM 串行(~232ms,同一计算流)+ 气泡(~52ms)</strong>。下一步方向:① 减少 elementwise/copy 体量(融合);② 让非 GEMM 计算与 GEMM 用多流并行(难);③ 收紧 launch 气泡。</p>
   </div>
 
   <p class="foot">Lumen · roofline 理论建模 · 假设：FP8 可持续算力 215 TFLOPS（实测单 GEMM 上限）、HBM 5.3 TB/s、参数常驻（无每步 param all-gather）。FLOP 由模型维度精确推导；下限假设各资源完美重叠。</p>
