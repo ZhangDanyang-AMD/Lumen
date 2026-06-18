@@ -30,6 +30,7 @@ GEMM backends are selected automatically:
     - **hipBLASLt**: ``hipb_mm`` (per-tensor)
 """
 
+import functools
 import logging as _logging
 import os
 import threading
@@ -773,8 +774,51 @@ def _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w):
     return gemm_a8w8_blockscale(a_fp8, w_fp8, scale_a, scale_w)
 
 
+def _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w):
+    """Blockscale FP8 GEMM with a pre-shuffled weight (B-preshuffle layout).
+
+    Numerically identical to ``gemm_a8w8_blockscale`` but ~2.5x faster on gfx942:
+    the weight is reordered once (``shuffle_weight(w, (16,16))``, cached for frozen
+    weights) and the activation scale is supplied in the kernel's transposed layout.
+    """
+    import aiter
+    # bpreshuffle wants the (M, K/blk) activation scale in transposed memory order.
+    scale_a_t = scale_a.transpose(0, 1).contiguous().view(*scale_a.shape)
+    return aiter.gemm_a8w8_blockscale_bpreshuffle(a_fp8, w_sh, scale_a_t, scale_w, torch.bfloat16)
+
+
+@functools.lru_cache(maxsize=1)
+def _bpreshuffle_onfly_enabled():
+    return os.environ.get("LUMEN_BPRESHUFFLE_ONFLY", "0") == "1"
+
+
+@functools.lru_cache(maxsize=1)
+def _skip_frozen_wgrad_enabled():
+    return os.environ.get("LUMEN_SKIP_FROZEN_WGRAD", "0") == "1"
+
+
 def gemm_blockscale(a_fp8, w_fp8, scale_a, scale_w):
-    """Blockwise FP8 GEMM: Y = X @ W^T via AITER CK → Triton."""
+    """Blockwise FP8 GEMM: Y = X @ W^T via AITER CK → Triton.
+
+    Two ways to use the ~2.5x-faster B-preshuffle kernel (bit-identical to CK):
+      - cached: the weight carries a pre-shuffled copy ``_lumen_wsh`` (frozen-weight
+        cache, set by ``_maybe_cache_frozen_weight``);
+      - on-the-fly: ``LUMEN_BPRESHUFFLE_ONFLY=1`` shuffles the weight per call. The
+        shuffle is ~6% of the GEMM, so it still wins ~2.4x even uncached — used for
+        large models (e.g. 70B FSDP) where caching the full FP8 weight would OOM.
+    """
+    w_sh = getattr(w_fp8, "_lumen_wsh", None)
+    if w_sh is None and _bpreshuffle_onfly_enabled():
+        try:
+            from aiter.ops.shuffle import shuffle_weight
+            w_sh = shuffle_weight(w_fp8, layout=(16, 16))
+        except (ImportError, RuntimeError, AssertionError):
+            w_sh = None
+    if w_sh is not None:
+        try:
+            return _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w)
+        except (RuntimeError, AssertionError) as e:
+            _logger.warning("gemm_blockscale: bpreshuffle failed (%s); CK/Triton fallback", e)
     backends = []
     if _probe_aiter_ck_gemm():
         backends.append((Backend.CK, lambda: _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w)))
@@ -1133,6 +1177,19 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # quantized) for memory efficiency.  WGrad will "Requantize" it to
         # 128×1 by dequantizing back to BF16 and re-quantizing along axis=0.
         if scaling_type == "blockwise2d":
+            # Frozen-weight cache may carry the precomputed transposed weight
+            # (data_t, scale_t) for DGrad and a skip-wgrad marker (frozen base →
+            # its grad is discarded) — thread both onto ctx (see
+            # lumen.quantize._maybe_cache_frozen_weight).
+            ctx._weight_t = getattr(weight_desc.data, "_lumen_wt", None)
+            # Skip the frozen base weight's WGrad (its grad is discarded). Two ways:
+            #   - cached path: marker on the cache tensor (_lumen_skip_wgrad);
+            #   - uncached (e.g. 70B FSDP): LUMEN_SKIP_FROZEN_WGRAD=1 + the patch-time
+            #     frozen marker threaded onto the weight (weight._lumen_frozen).
+            ctx._skip_wgrad = (
+                getattr(weight_desc.data, "_lumen_skip_wgrad", False)
+                or (getattr(weight, "_lumen_frozen", False) and _skip_frozen_wgrad_enabled())
+            )
             ctx.save_for_backward(
                 weight_desc.data,
                 weight_desc.scale,
@@ -1379,12 +1436,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # DGrad (FP8)
             if g_row is not None:
                 try:
-                    grad_input = gemm_blockscale(
-                        g_row,
-                        weight_data.t().contiguous(),
-                        g_row_s,
-                        weight_scale.t().contiguous(),
-                    )
+                    # Reuse the frozen weight's cached transpose if available,
+                    # else materialize it (the per-backward copy hotspot).
+                    _wt = getattr(ctx, "_weight_t", None)
+                    if _wt is not None:
+                        w_t, w_s_t = _wt
+                    else:
+                        w_t, w_s_t = weight_data.t().contiguous(), weight_scale.t().contiguous()
+                    grad_input = gemm_blockscale(g_row, w_t, g_row_s, w_s_t)
                 except (AssertionError, RuntimeError) as e:
                     _logger.warning("blockwise2d dgrad: kernel rejected (%s); BF16 fallback", e)
                     grad_input = _bf16_dgrad()
@@ -1414,7 +1473,13 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     _logger.warning("blockwise2d wgrad: triton rejected (%s); BF16 fallback", e)
                     return _bf16_wgrad()
 
-            if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
+            if getattr(ctx, "_skip_wgrad", False):
+                # Frozen base weight (LoRA): its grad is discarded, so skip the
+                # whole WGrad (dequant→requant + transpose copies + GEMM). Under
+                # FSDP a frozen view can report requires_grad=True, so this is
+                # gated by the patch-time frozen flag (cache_frozen_weight path).
+                grad_weight = None
+            elif ctx.delay_wgrad and ctx.deferred_wgrad is not None:
                 _w_ref = ctx.weight_ref
                 _gaf = ctx.gradient_accumulation_fusion
                 _mgr = mgr

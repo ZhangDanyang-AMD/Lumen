@@ -47,7 +47,7 @@ from lumen.ops.quantize import (
     quant_fp8_tensorwise_impl,
     quantized_linear,
 )
-from lumen.quantize.comm_tensor import FP8CommTensor
+from lumen.quantize.comm_tensor import Blockwise2DFP8Gathered, FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -316,6 +316,22 @@ def _patch_linear_layers(
             module._quant_enabled = True
             module._quant_tensor_id = tensor_id
             module._quant_scaling_type = scaling_type
+            # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
+            # already frozen the base weight, so requires_grad is reliable here.
+            # Under FSDP the gathered view can falsely report requires_grad=True.
+            _w = getattr(module, "weight", None)
+            # Patch-time frozen fact (PEFT froze base, pre-FSDP → reliable). Used to
+            # skip the frozen weight's (discarded) WGrad even without the FP8 cache
+            # (e.g. 70B FSDP), gated at runtime by LUMEN_SKIP_FROZEN_WGRAD.
+            module._lumen_frozen = (_w is not None and not _w.requires_grad)
+            module._lumen_cache_frozen = (
+                getattr(config, "cache_frozen_weight", False) and module._lumen_frozen
+            )
+            # bpreshuffle GEMM only makes sense with the frozen-weight cache (the
+            # shuffle is amortized once); it is bit-identical to the CK blockscale.
+            module._lumen_bpreshuffle = (
+                getattr(config, "bpreshuffle_gemm", False) and module._lumen_cache_frozen
+            )
 
             is_megatron = megatron_types and isinstance(module, megatron_types)
             _replace_forward(
@@ -371,6 +387,82 @@ def _pop_pre_quantized_activation():
     return result
 
 
+def _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size):
+    """Quantize a *frozen* weight to FP8 once and cache it on the module.
+
+    When ``cache_frozen_weight`` is on, the base (LoRA-frozen) weight's FP8
+    quant never changes, yet ``quantized_linear`` re-quantizes it every forward
+    (and again on each gradient-checkpointing recompute) — ~43 GB/step of copies
+    at 8B.  Compute it once here (in the forward, where FSDP has gathered the
+    full weight) and stash ``_fp8_weight_data`` / ``_fp8_weight_scale``; the
+    existing ``fp8_weight_cache`` path then feeds it straight to the GEMM.
+
+    Guards: only for frozen weights, only when the gathered weight is the full
+    2D tensor (skip FSDP-sharded views), and only for scalings whose cached
+    weight scale matches what the GEMM expects (blockwise2d's 2D tile scale).
+    """
+    # _lumen_cache_frozen is set at patch time (before FSDP wrap) and already
+    # encodes "frozen base weight" — do NOT re-check weight.requires_grad here:
+    # under FSDP a frozen view can report requires_grad=True (flat-param taint).
+    if not getattr(module, "_lumen_cache_frozen", False):
+        return
+    if getattr(module, "_fp8_weight_data", None) is not None:
+        return
+    weight = getattr(module, "weight", None)
+    if weight is None or weight.dim() != 2:
+        return
+    # FSDP may expose a flattened/sharded view mid-init; require K divisible by
+    # block_size so the blockwise quantizer's tiling is valid (full weight).
+    if scaling_type == "blockwise2d" and (weight.shape[0] % block_size or weight.shape[1] % block_size):
+        return
+    if scaling_type not in ("blockwise2d", "blockwise"):
+        return  # per-tensor caches go through store_weights_fp8 separately
+    from lumen.ops.quantize.linear import quantize_input
+    try:
+        desc = quantize_input(
+            weight.detach().contiguous(), scaling_type, fp8_dtype,
+            block_size, None, getattr(module, "_quant_tensor_id", "weight"),
+            is_weight=True,
+        )
+    except (AssertionError, RuntimeError) as e:
+        logger.warning("cache_frozen_weight: quant failed (%s); will re-quant per fwd", e)
+        return
+    module._fp8_weight_data = desc.data
+    module._fp8_weight_scale = desc.scale
+    # The weight is frozen → its WGrad is discarded; mark it so the backward can
+    # skip the whole WGrad (dequant→requant + transpose + GEMM). Attached to the
+    # (stable) cache tensor so the forward threads it onto ctx.
+    desc.data._lumen_skip_wgrad = True
+    # Optionally pre-shuffle the (frozen) FP8 weight into the B-preshuffle layout
+    # so the blockscale GEMM uses the ~2.5x-faster bpreshuffle kernel. One-time
+    # (frozen), bit-identical to the CK path. Attached to the cache tensor so
+    # gemm_blockscale picks it up automatically.
+    def _shuffle(t):
+        if not getattr(module, "_lumen_bpreshuffle", False):
+            return None
+        try:
+            from aiter.ops.shuffle import shuffle_weight
+            return shuffle_weight(t, layout=(16, 16))
+        except (ImportError, RuntimeError, AssertionError) as e:
+            logger.warning("bpreshuffle: shuffle_weight failed (%s); using CK blockscale", e)
+            return None
+    wsh = _shuffle(desc.data)
+    if wsh is not None:
+        desc.data._lumen_wsh = wsh
+    # Also cache the transposed FP8 weight + scale (frozen → constant) so the
+    # blockwise2d DGrad reuses it instead of doing weight_data.t().contiguous()
+    # (~7.6 GB/step of copies) every backward.
+    if scaling_type == "blockwise2d":
+        try:
+            data_t = desc.data.t().contiguous()
+            wsh_t = _shuffle(data_t)
+            if wsh_t is not None:
+                data_t._lumen_wsh = wsh_t
+            desc.data._lumen_wt = (data_t, desc.scale.t().contiguous())
+        except (AssertionError, RuntimeError):
+            pass
+
+
 def _replace_forward(
     module,
     manager,
@@ -410,13 +502,19 @@ def _replace_forward(
             if w._fp8_desc.data.data_ptr() != w.data.data_ptr():
                 w._fp8_desc.invalidate_transpose()
                 return None
-            return (w._fp8_desc.data, 1.0 / w._fp8_desc.scale)
+            # blockwise/blockwise2d GEMM wants the DIRECT (2D) dequant scale; per-tensor
+            # (delayed/dynamic, scalar) wants the reciprocal.
+            _s = w._fp8_desc.scale
+            _gs = _s if (isinstance(_s, _torch.Tensor) and _s.numel() > 1) else 1.0 / _s
+            return (w._fp8_desc.data, _gs)
         if hasattr(w, "_fp8_scale") and w.dtype in (
             _torch.float8_e4m3fn,
             _torch.float8_e4m3fnuz,
             _torch.float8_e5m2,
         ):
-            return (w.data, 1.0 / w._fp8_scale)
+            _s = w._fp8_scale
+            _gs = _s if (isinstance(_s, _torch.Tensor) and _s.numel() > 1) else 1.0 / _s
+            return (w.data, _gs)
         return None
 
     _act_tensor_id = tensor_id.replace(".weight", ".activation")
@@ -424,9 +522,23 @@ def _replace_forward(
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
+            w = module.weight
+            _wcache = getattr(module, "_fp8_weight_data", None)
+            _wscale = getattr(module, "_fp8_weight_scale", None)
+            if isinstance(w, Blockwise2DFP8Gathered):
+                # FSDP2 all-gathered frozen FP8 base: feed its FP8 data + 2D scale
+                # straight to the GEMM (no per-step re-quant), reusing the verified
+                # blockwise2d cache backward path. Frozen → WGrad is skipped.
+                _wcache, _wscale = w._fp8, w._scale
+                w._lumen_frozen = True
+            elif getattr(module, "_lumen_frozen", False):
+                # thread the patch-time frozen fact onto the live weight tensor so the
+                # autograd Function can skip its WGrad (FSDP may swap the param view).
+                w._lumen_frozen = True
             return quantized_linear(
                 input_tensor,
-                module.weight,
+                w,
                 module.bias,
                 scaling_manager=manager,
                 backend=backend,
@@ -440,8 +552,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
-                fp8_weight_cache=getattr(module, "_fp8_weight_data", None),
-                fp8_weight_scale=getattr(module, "_fp8_weight_scale", None),
+                fp8_weight_cache=_wcache,
+                fp8_weight_scale=_wscale,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
             )
@@ -571,6 +683,81 @@ def store_weights_fp8(
         count += 1
 
     logger.info("store_weights_fp8: cached %d linear weights in %s", count, fp8_dtype)
+    return count
+
+
+def store_weights_fp8_blockwise2d(
+    model: nn.Module,
+    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    block_size: int = 128,
+) -> int:
+    """Store **frozen** blockwise2d base weights as FP8 in-place (param-storage).
+
+    For each patched, frozen ``nn.Linear`` whose dims are block-aligned, quantize
+    the weight ONCE to FP8 with a 2D (N/block, K/block) scale, replace
+    ``weight.data`` with the FP8 tensor (BF16 freed → ~half the param bytes), and
+    stash the FP8 data + 2D scale as ``_fp8_weight_data`` / ``_fp8_weight_scale``
+    buffers. The ``quant_forward`` path then feeds these straight to
+    ``QuantizedLinearFunction`` (correct blockwise2d fwd + backward, no per-step
+    weight re-quantization), and (under FSDP) the param all-gathers as FP8.
+
+    A state_dict pre/post hook dequantizes FP8→BF16 so checkpoints stay BF16.
+    Only blockwise2d; per-tensor uses :func:`store_weights_fp8`.
+
+    Returns: number of weights stored in FP8.
+    """
+    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+    count = 0
+    for _name, module in model.named_modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2:
+            continue
+        if w.requires_grad:           # only frozen base weights (LoRA recipe)
+            continue
+        if getattr(module, "_fp8_weight_data", None) is not None:
+            continue
+        if w.shape[0] % block_size or w.shape[1] % block_size:
+            continue
+        with torch.no_grad():
+            fp8, scale2d = _quant_blockwise2d_weight(w.data.contiguous(), fp8_dtype, block_size)
+            # Route through the (tested) fp8_weight_cache → QuantizedLinearFunction
+            # path (correct blockwise2d backward + skip-wgrad/DGrad-transpose), NOT
+            # FP8StoredLinearFunction (whose blockwise2d bwd falls back to per-tensor).
+            module.register_buffer("_fp8_weight_data", fp8, persistent=False)
+            module.register_buffer("_fp8_weight_scale", scale2d, persistent=False)
+            module._fp8_weight_dtype = fp8_dtype
+            module._lumen_frozen = True   # so WGrad is skipped (grad discarded)
+            w._fp8_original_dtype = w.dtype
+            w.data = fp8                   # free the BF16 master (param.data → FP8)
+            w._fp8_storage_scale = scale2d
+        count += 1
+
+    # state_dict: emit dequantized BF16 weight, keep FP8 at runtime.
+    def _pre_save(mod, prefix, keep_vars):
+        from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+        for p in mod._parameters.values():
+            if p is None or not hasattr(p, "_fp8_storage_scale"):
+                continue
+            p._sd_backup = p.data
+            p.data = _dequant_fp8_weight(
+                p.data, p._fp8_storage_scale, block_size
+            ).to(getattr(p, "_fp8_original_dtype", torch.bfloat16))
+
+    def _post_save(mod, state_dict, prefix, local_metadata):
+        for p in mod._parameters.values():
+            if p is not None and hasattr(p, "_sd_backup"):
+                p.data = p._sd_backup
+                del p._sd_backup
+
+    for mod in model.modules():
+        if any(p is not None and hasattr(p, "_fp8_storage_scale") for p in mod._parameters.values()):
+            mod.register_state_dict_pre_hook(_pre_save)
+            mod.register_state_dict_post_hook(_post_save)
+
+    logger.info("store_weights_fp8_blockwise2d: stored %d frozen weights in %s", count, fp8_dtype)
     return count
 
 

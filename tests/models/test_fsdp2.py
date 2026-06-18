@@ -147,6 +147,140 @@ _FP8_TRAIN_SCRIPT = textwrap.dedent(
 """
 )
 
+# Frozen blockwise2d FP8 base (Blockwise2DFP8Param, all-gathered as FP8) coexisting
+# with a trainable BF16 head in one fully_shard group — the mixed dtype/grad case.
+_FP8_PARAM_STORAGE_SCRIPT = textwrap.dedent(
+    """\
+    import argparse
+    import os
+    import torch
+    import torch.nn as nn
+    import torch.distributed as dist
+
+    dist.init_process_group("nccl")
+    rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(rank)
+    torch.manual_seed(42)
+
+    class Core(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc1 = nn.Linear(256, 256, bias=False)
+            self.fc2 = nn.Linear(256, 256, bias=False)
+        def forward(self, x):
+            return torch.relu(self.fc2(torch.relu(self.fc1(x))))
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.core = Core()
+            self.head = nn.Linear(256, 256, bias=False)   # trainable BF16
+        def forward(self, x):
+            return self.head(self.core(x))
+
+    net = Net().to(torch.bfloat16).cuda()
+    for p in net.core.parameters():
+        p.requires_grad_(False)               # frozen base (LoRA recipe)
+
+    from lumen.quantize import enable
+    from lumen.quantize.config import QuantConfig
+    enable(net.core, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128))
+
+    args = argparse.Namespace(
+        linear_fp8=True,
+        sharding_strategy="full_shard",
+        fsdp_fp8_param_storage=True,
+    )
+    from lumen.models.fsdp import apply_fsdp2
+    from lumen.quantize.comm_tensor import Blockwise2DFP8Param
+
+    # Base weights must be FP8-wrapped (pre-shard); the helper runs inside apply_fsdp2.
+    apply_fsdp2(net, args)
+
+    optimizer = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=1e-2)
+    x = torch.randn(8, 256, device="cuda", dtype=torch.bfloat16)
+    target = torch.randn(8, 256, device="cuda", dtype=torch.bfloat16)
+
+    try:
+        losses = []
+        for step in range(10):
+            out = net(x)
+            loss = (out.float() - target.float()).pow(2).mean()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            losses.append(loss.item())
+
+        if rank == 0:
+            assert all(l == l for l in losses), f"NaN loss: {losses}"
+            assert losses[-1] < losses[0], (
+                f"loss did not decrease: {losses[0]:.4f} -> {losses[-1]:.4f}"
+            )
+            print(f"PASS: FP8 param-storage loss {losses[0]:.4f} -> {losses[-1]:.4f}")
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
+"""
+)
+
+
+_FP8_PARAM_STORAGE_NUMERICS_SCRIPT = textwrap.dedent(
+    """\
+    import argparse
+    import os
+    import torch
+    import torch.nn as nn
+    import torch.distributed as dist
+
+    dist.init_process_group("nccl")
+    rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(rank)
+    torch.manual_seed(0)   # same weights + input on every rank (data-parallel)
+
+    N, K = 512, 256        # N % (128 * world_size) == 0 for world_size in {1,2,4}
+    lin = nn.Linear(K, N, bias=False).to(torch.bfloat16).cuda()
+    lin.weight.requires_grad_(False)
+    x = torch.randn(8, K, device="cuda", dtype=torch.bfloat16)
+
+    from lumen.quantize import enable
+    from lumen.quantize.config import QuantConfig, _get_float8_e4m3
+    enable(lin, config=QuantConfig.from_str(scaling="blockwise2d", block_size=128))
+
+    # Reference: dequantized FP8 weight @ x, computed from the SAME quant the
+    # storage path uses (bf16 activation, no activation quant) — a loose upper bound.
+    from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+    from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+    w_bf16 = lin.weight.data.float().clone()
+    fp8r, scaler = _quant_blockwise2d_weight(lin.weight.data.contiguous(), _get_float8_e4m3(), 128)
+    w_deq = _dequant_fp8_weight(fp8r, scaler, 128).float()
+    y_ref = (x.float() @ w_deq.t())
+
+    model = nn.Sequential(lin)
+    args = argparse.Namespace(
+        linear_fp8=True, sharding_strategy="full_shard", fsdp_fp8_param_storage=True,
+    )
+    from lumen.models.fsdp import apply_fsdp2
+    apply_fsdp2(model, args)
+
+    try:
+        with torch.no_grad():
+            y = model(x).float()
+        if rank == 0:
+            # Magnitude sanity: the scale-drop bug makes y ~thousands x too large.
+            r = (y.abs().mean() / y_ref.abs().mean().clamp(min=1e-9)).item()
+            assert 0.5 < r < 2.0, f"output magnitude off by {r:.1f}x (scale not applied?)"
+            # SNR vs dequant reference (FP8 weight GEMM + activation quant).
+            num = y_ref.pow(2).mean()
+            den = (y - y_ref).pow(2).mean().clamp(min=1e-12)
+            snr = 10 * torch.log10(num / den).item()
+            assert snr > 12, f"SNR too low: {snr:.1f} dB"
+            print(f"PASS: magnitude ratio {r:.3f}, SNR {snr:.1f} dB")
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
+"""
+)
+
 
 class TestFSDP2CLIArgs:
 
@@ -350,4 +484,21 @@ class TestFSDP2Integration:
         result = self._run_training_script(_FP8_TRAIN_SCRIPT)
         assert result.returncode == 0, (
             f"FP8 training failed (rc={result.returncode}):\n" f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+    def test_fp8_param_storage_fsdp2(self):
+        """2-GPU frozen blockwise2d FP8 base (all-gathered as FP8) + trainable head."""
+        result = self._run_training_script(_FP8_PARAM_STORAGE_SCRIPT)
+        assert result.returncode == 0, (
+            f"FP8 param-storage failed (rc={result.returncode}):\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+    def test_fp8_param_storage_numerics_fsdp2(self):
+        """2-GPU absolute-correctness: the all-gathered FP8 weight must apply its 2D
+        scale (the scale-drop bug inflated the output ~thousands x)."""
+        result = self._run_training_script(_FP8_PARAM_STORAGE_NUMERICS_SCRIPT)
+        assert result.returncode == 0, (
+            f"FP8 param-storage numerics failed (rc={result.returncode}):\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
