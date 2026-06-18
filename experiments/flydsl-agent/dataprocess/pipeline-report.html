@@ -83,7 +83,7 @@
   <!-- Key Metrics -->
   <div class="stat-strip">
     <div class="stat-card"><div class="value">1,967</div><div class="label">CPT Documents</div></div>
-    <div class="stat-card"><div class="value">3,072</div><div class="label">SFT Pairs</div></div>
+    <div class="stat-card success"><div class="value">3,180</div><div class="label">SFT Pairs (v2: 59% kernel)</div></div>
     <div class="stat-card"><div class="value">2,878</div><div class="label">RL Specs</div></div>
     <div class="stat-card success"><div class="value">7,917</div><div class="label">Total Records</div></div>
   </div>
@@ -114,8 +114,38 @@
 
   <div class="divider"></div>
 
+  <!-- SFT v2 Enhancement -->
+  <h2>SFT v2 Data Enhancement: 19% &rarr; 59% Kernel Code</h2>
+  <p style="color:var(--text-secondary);margin-bottom:16px">
+    SFT v1 experiment revealed that 82% of training data contained no FlyDSL kernel code,
+    causing the model to learn document QA instead of kernel generation. v2 adds 108 new
+    kernel pairs from CPT data and applies weighted resampling to triple the kernel code ratio.
+  </p>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">Kernel Code Rate: v1 vs v2 <span class="pill pill-success">3x improvement</span></div>
+      <div class="card-body"><div class="chart-container"><canvas id="chartSftV2"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">Enhancement Details</div>
+      <div class="card-body" style="font-size:0.85rem">
+        <p><strong>Step 1:</strong> Extract 54 FlyDSL kernel files from CPT data &rarr; 108 new SFT pairs (2 styles each)</p>
+        <p style="margin-top:8px"><strong>Step 2:</strong> Weighted resampling of 2,916 combined samples:</p>
+        <ul style="margin:8px 0 0 20px;color:var(--text-secondary)">
+          <li>augmentation_tile/pipeline: <strong>5.0x</strong> (75% kernel rate)</li>
+          <li>kernel_code_synthesis: <strong>high</strong> (100% kernel, new data)</li>
+          <li>documentation_qa: <strong>0.3x</strong> (8% kernel, downweight)</li>
+          <li>refusal_boundary: <strong>0.1x</strong> (0% kernel, minimal)</li>
+          <li>Kernel-containing samples: additional <strong>2.0x</strong> bonus</li>
+        </ul>
+        <p style="margin-top:12px;color:var(--success)"><strong>Result:</strong> 2,916 samples, 59% kernel code (was 2,808 / 19%)</p>
+      </div>
+    </div>
+  </div>
+  <div class="divider"></div>
+
   <!-- SFT Design -->
-  <h2>SFT 设计逻辑：15 种来源 + 拒答边界</h2>
+  <h2>SFT v1 Design: 15 Sources + Refusal Boundary</h2>
   <p class="mb-16" style="color:var(--text-secondary);font-size:0.9rem;">多种来源覆盖不同指令类型。拒答数据（4.8%）教模型拒绝规格提取，反例（0.4%）防过度拒答。</p>
 
   <div class="grid-2">
@@ -275,6 +305,19 @@ new Chart(document.getElementById('chartSft'),{
       backgroundColor:C.pal.map(c=>c+'99'),borderColor:C.pal,borderWidth:1,borderRadius:4}]},
   options:{responsive:true,indexAxis:'y',plugins:{legend:{display:false}},
     scales:{x:{grid:{color:'#2a2d3e44'}},y:{grid:{display:false}}}}
+});
+
+new Chart(document.getElementById('chartSftV2'),{
+  type:'bar',
+  data:{
+    labels:['@flyc.kernel','fx.* API','import flydsl','Kernel code'],
+    datasets:[
+      {label:'v1 (19% kernel)',data:[13,17,17,19],backgroundColor:'#6c8cff88',borderColor:'#6c8cff',borderWidth:1,borderRadius:4},
+      {label:'v2 (59% kernel)',data:[45,53,58,59],backgroundColor:'#3ecf8e88',borderColor:'#3ecf8e',borderWidth:1,borderRadius:4}
+    ]
+  },
+  options:{responsive:true,plugins:{legend:{position:'bottom'}},
+    scales:{x:{grid:{display:false}},y:{grid:{color:'#2a2d3e44'},beginAtZero:true,max:70,ticks:{callback:v=>v+'%'}}}}
 });
 
 new Chart(document.getElementById('chartRl'),{

@@ -79,6 +79,87 @@ FlyDSL + aiter + gpu-docs
 
 ---
 
+## 4b. SFT v2 数据增强 (enhance_sft_data.py)
+
+> SFT v1 实验发现：2,808 条训练数据中仅 18% 包含实际 FlyDSL kernel 代码
+> (`@flyc.kernel` 出现率 13%)，82% 是文档问答、拒绝回答等非代码内容。
+> 导致 SFT 模型在 L4-L5 级 kernel 生成上表现极差。
+
+### 问题诊断
+
+```
+SFT v1 训练数据 (2,808 samples):
+  含 @flyc.kernel:  354/2808 (13%) ← 太少
+  含 fx.* API:      471/2808 (17%)
+  实际 kernel 代码: 500/2808 (18%)
+  QA / 非代码:     2308/2808 (82%) ← 占比过高
+
+SFT v1 Benchmark 结果:
+  @flyc.kernel 使用率: 40% (目标 >80%)
+  Valid Python:        36% (目标 >70%)
+  L4-L5 级 API Score:  25-26% (目标 >50%)
+```
+
+### 两步增强
+
+**Step 1: 从 CPT 数据提取真实 kernel 代码生成 SFT 对**
+
+从 CPT 语料中提取 54 个 FlyDSL kernel 源文件（`content_type=kernel_impl`），
+每个生成 2 条 SFT 训练对（precise + natural 两种指令风格），共 108 条新数据。
+
+```python
+# 来源: CPT 中的 kernel_impl 文件
+# 输出: {"messages": [system, user_instruction, assistant_code], "source": "kernel_code_synthesis"}
+# 两种风格:
+#   precise: "Write a FlyDSL gemm kernel for AMD gfx950..."
+#   natural: "Implement a high-performance matrix multiplication targeting MI350X..."
+```
+
+**Step 2: 加权重采样**
+
+对 2,808 原始 + 108 新数据 = 2,916 条做加权随机采样：
+
+| 来源 | 采样权重 | 原因 |
+|------|---------|------|
+| augmentation_tile (75% kernel) | 5.0x | 最高质量 kernel 代码 |
+| augmentation_pipeline (75% kernel) | 5.0x | 最高质量 kernel 代码 |
+| docs/skill_direct_extraction (~70%) | 4.0x | 完整代码文档 |
+| kernel_code_synthesis (100% kernel) | 自带高权重 | 新增 kernel 数据 |
+| kernel_reverse_annotation | 2.0x | 代码→指令 |
+| documentation_qa (8% kernel) | 0.3x | 降低非代码 QA |
+| refusal_boundary (0% kernel) | 0.1x | 只保留少量拒答 |
+
+额外规则：assistant 回复包含 kernel 代码的样本再 ×2。
+
+### 结果
+
+```
+SFT v2 Dataset: 2,916 samples
+  Kernel code:   57% → 59%  [was 19%]
+  @flyc.kernel:  45%         [was 13%]
+  fx.* API:      53%         [was 17%]
+  import flydsl: 58%         [was 17%]
+```
+
+| 来源 | v1 占比 | v2 占比 | 变化 |
+|------|--------|--------|------|
+| augmentation_tile | 3.7% | 22.9% | ↑ 高质量 kernel 大幅上升 |
+| augmentation_pipeline | 2.6% | 14.9% | ↑ |
+| kernel_code_synthesis | 0% | 4.6% | 新增 |
+| documentation_qa | 23.8% | 4.1% | ↓ 非代码 QA 大幅下降 |
+| refusal_boundary | 4.8% | 0.2% | ↓ |
+
+### 产物
+
+| 文件 | 位置 |
+|------|------|
+| 增强后数据集 | `flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl` (2,916 samples) |
+| 原始备份 | `flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl.v1.bak` |
+| 新增 kernel 对 | `flydsl-agent-metadata/sft_v2_generated.jsonl` (108 pairs) |
+| 采样权重配置 | `flydsl-agent-metadata/sft_v2_weights.json` |
+
+---
+
 ## 5. RL 设计逻辑
 
 **核心思路**：只给任务规格，不给参考答案。模型生成 → GPU 编译+测试 → 奖励信号。
@@ -148,7 +229,8 @@ FlyDSL + aiter + gpu-docs
 | `rebuild_with_annotations.py` | 用 AI 标注结果重建数据集 |
 | `validate_dataset.py` | 格式/内容/去重/分布校验 |
 | `package_hf_dataset.py` | 打包为 HuggingFace 格式 |
+| `enhance_sft_data.py` | SFT v2: kernel 代码提取 + 加权重采样 |
 
 ---
 
-*v3.0 · 2026-06-16 · 遵循 [plan.md](../../plan.md) §4 + §13*
+*v3.1 · 2026-06-18 · 新增 SFT v2 数据增强 (§4b) · 遵循 [plan.md](../../plan.md) §4 + §13*

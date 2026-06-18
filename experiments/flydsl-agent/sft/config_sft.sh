@@ -17,21 +17,23 @@ export MODEL="${MODEL:-/dev/shm/qwen2.5-coder-32b}"
 export TRAIN_DATA="${TRAIN_DATA:-/data/data/sft/train-00000-of-00001.jsonl}"
 export VAL_DATA="${VAL_DATA:-/data/data/sft/validation-00000-of-00001.jsonl}"
 
-# ---- Training (plan.md §7.3) ------------------------------------------------
-# 2808 samples / GBS=16 ≈ 175 steps/epoch × 3 epochs = 527 steps
-export SEQ_LEN="${SEQ_LEN:-8192}"
-export MBS="${MBS:-1}"                    # micro batch per GPU (long sequences)
-export GRAD_ACCUM="${GRAD_ACCUM:-2}"      # GBS = 1 × 8 × 2 = 16
-export MAX_STEPS="${MAX_STEPS:-527}"
+# ---- Training ----------------------------------------------------------------
+# 2916 samples / GBS=8 ≈ 365 steps/epoch × 3 epochs = 1094 steps
+# seq_len=16384 to avoid 37.6% truncation at 8192 (kernel code is long)
+# MBS=1 + grad_accum=1 → GBS=8 (smaller batch for longer sequences)
+export SEQ_LEN="${SEQ_LEN:-16384}"
+export MBS="${MBS:-1}"                    # micro batch per GPU
+export GRAD_ACCUM="${GRAD_ACCUM:-1}"      # GBS = 1 × 8 × 1 = 8
+export MAX_STEPS="${MAX_STEPS:-1094}"
 export LR="${LR:-1e-5}"
 export MIN_LR="${MIN_LR:-0}"
-export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-26}"  # ~5% of 527
+export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-55}"  # ~5% of 1094
 export WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
 export MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 
-# ---- LoRA (plan.md §3: SFT uses r=32, more focused task) --------------------
-export LORA_RANK="${LORA_RANK:-32}"
-export LORA_ALPHA="${LORA_ALPHA:-64}"
+# ---- LoRA (r=64 for more capacity, validated in CPT sweep) -------------------
+export LORA_RANK="${LORA_RANK:-64}"
+export LORA_ALPHA="${LORA_ALPHA:-128}"
 export LORA_DROPOUT="${LORA_DROPOUT:-0.1}"   # regularization for small dataset
 
 # ---- Logging / checkpoints ---------------------------------------------------

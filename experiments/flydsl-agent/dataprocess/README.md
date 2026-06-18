@@ -64,6 +64,12 @@ FlyDSL + aiter + gpu-docs
 | `consensus_annotate.py` | 451 | Multi-model annotation + majority voting + manifest merge |
 | `rebuild_with_annotations.py` | 211 | Rebuild datasets with AI-enriched metadata |
 
+### SFT Data Enhancement (v2)
+
+| Script | Lines | Description |
+|--------|------:|-------------|
+| `enhance_sft_data.py` | 230 | SFT v2: kernel code extraction + weighted resampling (19% → 59% kernel) |
+
 ### Orchestration
 
 | Script | Lines | Description |
@@ -72,7 +78,7 @@ FlyDSL + aiter + gpu-docs
 | `run_consensus_pipeline.sh` | 150 | One-click 5-model annotation pipeline |
 | `Dockerfile` | 26 | Container image for the pipeline |
 
-**Total: 15 active files, ~4,250 lines**
+**Total: 16 active files, ~4,480 lines**
 
 > Archived v1 scripts (superseded by `process_all_v2.py`) are in `_archived_v1/`.
 
@@ -133,12 +139,23 @@ python3 validate_dataset.py
 python3 package_hf_dataset.py
 ```
 
+### SFT Data Enhancement
+
+```bash
+python3 enhance_sft_data.py \
+    --input  /home/danyzhan/flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl \
+    --rl-specs /home/danyzhan/flydsl-agent-dataset/data/rl/train-00000-of-00001.jsonl \
+    --cpt-data /home/danyzhan/flydsl-agent-dataset/data/cpt/train-00000-of-00001.jsonl \
+    --metadata-dir /home/danyzhan/flydsl-agent-metadata \
+    --output /home/danyzhan/flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl
+```
+
 ## Output: flydsl-agent-dataset/
 
 | Split | Train | Val | Format |
 |-------|------:|----:|--------|
 | CPT | 1,967 | — | `{text, meta}` |
-| SFT | 2,808 | 264 | `{messages, source, metadata}` |
+| SFT (v2) | 2,916 | 264 | `{messages, source, metadata}` — 59% kernel code (was 19%) |
 | RL | 2,591 | 287 | `{id, operator, hardware, params}` |
 
 ## Extending
