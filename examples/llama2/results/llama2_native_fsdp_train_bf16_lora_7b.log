@@ -1,0 +1,795 @@
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+[92mSuccessfully preprocessed all matching files.[0m
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+fused_indices_to_multihot has reached end of life. Please migrate to a non-experimental function.
+[W611 08:28:31.930494545 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+> Loading /model-hf ...
+[W611 08:28:31.939569295 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.941533441 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.943799099 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.944927398 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.948324353 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.948351558 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W611 08:28:31.948437018 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 0/291 [00:00<?, ?it/s]Loading weights:   0%|          | 1/291 [00:00<01:00,  4.82it/s]Loading weights:   0%|          | 1/291 [00:00<01:02,  4.68it/s]Loading weights:   0%|          | 1/291 [00:00<00:59,  4.87it/s]Loading weights:   0%|          | 1/291 [00:00<00:59,  4.86it/s]Loading weights:   0%|          | 1/291 [00:00<00:58,  4.97it/s]Loading weights:   0%|          | 1/291 [00:00<00:58,  4.98it/s]Loading weights:   0%|          | 1/291 [00:00<00:57,  5.01it/s]Loading weights:   0%|          | 1/291 [00:00<01:00,  4.78it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 73.94it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 73.08it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 74.73it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 74.32it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 75.56it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 74.60it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 75.60it/s]Loading weights:   7%|▋         | 20/291 [00:00<00:03, 75.86it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 78.56it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 79.09it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 78.29it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 77.48it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 79.28it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 79.09it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 78.02it/s]Loading weights:  10%|█         | 30/291 [00:00<00:03, 78.42it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.49it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.71it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 64.08it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.41it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.30it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.68it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 63.35it/s]Loading weights:  14%|█▎        | 40/291 [00:00<00:03, 62.92it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.55it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.05it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.54it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.76it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.23it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.52it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.45it/s]Loading weights:  17%|█▋        | 49/291 [00:00<00:03, 66.92it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.63it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.39it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.26it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.79it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.93it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.60it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 69.10it/s]Loading weights:  20%|█▉        | 58/291 [00:00<00:03, 66.27it/s]Loading weights:  23%|██▎       | 67/291 [00:01<00:03, 73.41it/s]Loading weights:  23%|██▎       | 67/291 [00:01<00:03, 73.31it/s]Loading weights:  23%|██▎       | 67/291 [00:00<00:03, 73.72it/s]Loading weights:  23%|██▎       | 67/291 [00:00<00:03, 73.59it/s]Loading weights:  23%|██▎       | 67/291 [00:00<00:03, 73.68it/s]Loading weights:  23%|██▎       | 67/291 [00:00<00:03, 73.25it/s]Loading weights:  23%|██▎       | 67/291 [00:01<00:03, 72.89it/s]Loading weights:  23%|██▎       | 68/291 [00:01<00:03, 68.61it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 71.59it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 71.09it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 70.96it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 70.43it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 69.72it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 69.87it/s]Loading weights:  26%|██▌       | 76/291 [00:01<00:03, 69.78it/s]Loading weights:  26%|██▋       | 77/291 [00:01<00:03, 70.81it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 70.86it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 70.76it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 70.40it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 72.85it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 69.97it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 70.44it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 69.92it/s]Loading weights:  29%|██▉       | 85/291 [00:01<00:02, 69.82it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 74.15it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 75.87it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 74.14it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 73.98it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 73.90it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 74.14it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 73.84it/s]Loading weights:  32%|███▏      | 94/291 [00:01<00:02, 73.61it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 70.94it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.91it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.59it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.89it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.91it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.70it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.45it/s]Loading weights:  35%|███▌      | 103/291 [00:01<00:02, 69.37it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.81it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.78it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.76it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.54it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.88it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 70.09it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 65.23it/s]Loading weights:  38%|███▊      | 112/291 [00:01<00:02, 65.41it/s]Loading weights:  42%|████▏     | 121/291 [00:01<00:02, 75.08it/s]Loading weights:  42%|████▏     | 122/291 [00:01<00:02, 77.41it/s]Loading weights:  42%|████▏     | 121/291 [00:01<00:02, 74.63it/s]Loading weights:  42%|████▏     | 121/291 [00:01<00:02, 74.58it/s]Loading weights:  42%|████▏     | 122/291 [00:01<00:02, 77.80it/s]Loading weights:  42%|████▏     | 121/291 [00:01<00:02, 71.43it/s]Loading weights:  44%|████▎     | 127/291 [00:01<00:01, 85.55it/s]Loading weights:  42%|████▏     | 123/291 [00:01<00:02, 74.16it/s]Loading weights:  45%|████▌     | 131/291 [00:01<00:01, 80.57it/s]Loading weights:  45%|████▌     | 131/291 [00:01<00:02, 77.86it/s]Loading weights:  45%|████▌     | 131/291 [00:01<00:02, 78.06it/s]Loading weights:  45%|████▌     | 131/291 [00:01<00:02, 77.27it/s]Loading weights:  45%|████▌     | 131/291 [00:01<00:02, 78.07it/s]Loading weights:  45%|████▌     | 132/291 [00:01<00:02, 79.48it/s]Loading weights:  47%|████▋     | 136/291 [00:01<00:01, 87.24it/s]Loading weights:  47%|████▋     | 137/291 [00:01<00:01, 82.15it/s]Loading weights:  48%|████▊     | 139/291 [00:01<00:02, 71.85it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 70.61it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 70.77it/s]Loading weights:  48%|████▊     | 139/291 [00:02<00:02, 69.19it/s]Loading weights:  48%|████▊     | 141/291 [00:02<00:02, 74.35it/s]Loading weights:  48%|████▊     | 140/291 [00:02<00:02, 70.63it/s]Loading weights:  50%|█████     | 146/291 [00:02<00:01, 79.42it/s]Loading weights:  50%|█████     | 146/291 [00:02<00:01, 81.22it/s]Loading weights:  51%|█████     | 148/291 [00:02<00:01, 75.20it/s]Loading weights:  52%|█████▏    | 150/291 [00:02<00:01, 78.30it/s]Loading weights:  52%|█████▏    | 150/291 [00:02<00:01, 77.83it/s]Loading weights:  51%|█████     | 148/291 [00:02<00:02, 68.06it/s]Loading weights:  51%|█████     | 148/291 [00:02<00:02, 68.15it/s]Loading weights:  52%|█████▏    | 150/291 [00:02<00:01, 71.05it/s]Loading weights:  53%|█████▎    | 155/291 [00:02<00:01, 78.57it/s]Loading weights:  53%|█████▎    | 155/291 [00:02<00:01, 76.85it/s]Loading weights:  54%|█████▍    | 157/291 [00:02<00:01, 74.94it/s]Loading weights:  55%|█████▍    | 159/291 [00:02<00:01, 78.02it/s]Loading weights:  54%|█████▍    | 158/291 [00:02<00:01, 74.14it/s]Loading weights:  56%|█████▌    | 163/291 [00:02<00:01, 83.13it/s]Loading weights:  56%|█████▌    | 163/291 [00:02<00:01, 82.35it/s]Loading weights:  56%|█████▌    | 163/291 [00:02<00:01, 82.32it/s]Loading weights:  56%|█████▌    | 163/291 [00:02<00:01, 75.26it/s]Loading weights:  56%|█████▋    | 164/291 [00:02<00:01, 74.33it/s]Loading weights:  57%|█████▋    | 166/291 [00:02<00:01, 74.78it/s]Loading weights:  57%|█████▋    | 166/291 [00:02<00:01, 72.86it/s]Loading weights:  57%|█████▋    | 167/291 [00:02<00:01, 70.41it/s]Loading weights:  59%|█████▉    | 171/291 [00:02<00:01, 70.82it/s]Loading weights:  59%|█████▉    | 172/291 [00:02<00:01, 78.22it/s]Loading weights:  59%|█████▉    | 172/291 [00:02<00:01, 73.20it/s]Loading weights:  59%|█████▉    | 172/291 [00:02<00:01, 75.63it/s]Loading weights:  59%|█████▉    | 172/291 [00:02<00:01, 76.16it/s]Loading weights:  60%|██████    | 175/291 [00:02<00:01, 66.55it/s]Loading weights:  60%|██████    | 175/291 [00:02<00:01, 66.94it/s]Loading weights:  60%|██████    | 175/291 [00:02<00:01, 66.19it/s]Loading weights:  62%|██████▏   | 179/291 [00:02<00:01, 67.34it/s]Loading weights:  62%|██████▏   | 180/291 [00:02<00:01, 72.58it/s]Loading weights:  62%|██████▏   | 180/291 [00:02<00:01, 68.17it/s]Loading weights:  62%|██████▏   | 180/291 [00:02<00:01, 71.03it/s]Loading weights:  62%|██████▏   | 180/291 [00:02<00:01, 69.48it/s]Loading weights:  63%|██████▎   | 184/291 [00:02<00:01, 71.11it/s]Loading weights:  63%|██████▎   | 184/291 [00:02<00:01, 71.01it/s]Loading weights:  63%|██████▎   | 184/291 [00:02<00:01, 71.18it/s]Loading weights:  64%|██████▍   | 186/291 [00:02<00:01, 65.29it/s]Loading weights:  65%|██████▍   | 188/291 [00:02<00:01, 71.49it/s]Loading weights:  64%|██████▍   | 187/291 [00:02<00:01, 67.72it/s]Loading weights:  65%|██████▍   | 188/291 [00:02<00:01, 68.27it/s]Loading weights:  65%|██████▍   | 188/291 [00:02<00:01, 67.46it/s]Loading weights:  66%|██████▋   | 193/291 [00:02<00:01, 69.43it/s]Loading weights:  66%|██████▋   | 193/291 [00:02<00:01, 69.61it/s]Loading weights:  66%|██████▋   | 193/291 [00:02<00:01, 65.92it/s]Loading weights:  66%|██████▋   | 193/291 [00:02<00:01, 69.44it/s]Loading weights:  67%|██████▋   | 194/291 [00:02<00:01, 65.87it/s]Loading weights:  67%|██████▋   | 196/291 [00:02<00:01, 69.15it/s]Loading weights:  67%|██████▋   | 195/291 [00:02<00:01, 67.26it/s]Loading weights:  67%|██████▋   | 195/291 [00:02<00:01, 67.45it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 67.24it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 67.08it/s]Loading weights:  70%|██████▉   | 203/291 [00:02<00:01, 65.13it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 66.59it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 64.73it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 62.30it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 64.70it/s]Loading weights:  69%|██████▉   | 202/291 [00:02<00:01, 61.47it/s]Loading weights:  73%|███████▎  | 213/291 [00:03<00:00, 78.33it/s]Loading weights:  73%|███████▎  | 213/291 [00:03<00:00, 78.23it/s]Loading weights:  74%|███████▍  | 216/291 [00:03<00:00, 81.31it/s]Loading weights:  75%|███████▍  | 217/291 [00:03<00:00, 84.61it/s]Loading weights:  73%|███████▎  | 212/291 [00:03<00:01, 69.71it/s]Loading weights:  75%|███████▍  | 218/291 [00:03<00:00, 85.08it/s]Loading weights:  75%|███████▍  | 218/291 [00:03<00:00, 83.83it/s]Loading weights:  73%|███████▎  | 213/291 [00:03<00:01, 73.59it/s]Loading weights:  76%|███████▋  | 222/291 [00:03<00:00, 80.12it/s]Loading weights:  77%|███████▋  | 225/291 [00:03<00:00, 81.78it/s]Loading weights:  76%|███████▋  | 222/291 [00:03<00:00, 77.91it/s]Loading weights:  78%|███████▊  | 226/291 [00:03<00:00, 82.82it/s]Loading weights:  78%|███████▊  | 226/291 [00:03<00:00, 87.12it/s]Loading weights:  78%|███████▊  | 226/291 [00:03<00:00, 84.13it/s]Loading weights:  78%|███████▊  | 227/291 [00:03<00:00, 81.42it/s]Loading weights:  78%|███████▊  | 227/291 [00:03<00:00, 79.01it/s]Loading weights:  80%|████████  | 234/291 [00:03<00:00, 76.08it/s]Loading weights:  79%|███████▉  | 230/291 [00:03<00:00, 69.22it/s]Loading weights:  81%|████████  | 235/291 [00:03<00:00, 80.40it/s]Loading weights:  81%|████████  | 235/291 [00:03<00:00, 76.51it/s]Loading weights:  81%|████████  | 236/291 [00:03<00:00, 78.54it/s]Loading weights:  79%|███████▉  | 231/291 [00:03<00:00, 67.68it/s]Loading weights:  81%|████████  | 236/291 [00:03<00:00, 79.16it/s]Loading weights:  81%|████████  | 236/291 [00:03<00:00, 73.71it/s]Loading weights:  83%|████████▎ | 242/291 [00:03<00:00, 76.57it/s]Loading weights:  84%|████████▎ | 243/291 [00:03<00:00, 77.17it/s]Loading weights:  84%|████████▍ | 245/291 [00:03<00:00, 82.60it/s]Loading weights:  84%|████████▍ | 245/291 [00:03<00:00, 79.06it/s]Loading weights:  82%|████████▏ | 239/291 [00:03<00:00, 67.84it/s]Loading weights:  82%|████████▏ | 240/291 [00:03<00:00, 69.93it/s]Loading weights:  84%|████████▍ | 245/291 [00:03<00:00, 78.23it/s]Loading weights:  84%|████████▍ | 244/291 [00:03<00:00, 75.09it/s]Loading weights:  86%|████████▌ | 250/291 [00:03<00:00, 74.66it/s]Loading weights:  87%|████████▋ | 254/291 [00:03<00:00, 81.77it/s]Loading weights:  86%|████████▋ | 251/291 [00:03<00:00, 73.05it/s]Loading weights:  87%|████████▋ | 254/291 [00:03<00:00, 79.31it/s]Loading weights:  87%|████████▋ | 254/291 [00:03<00:00, 87.38it/s]Loading weights:  87%|████████▋ | 252/291 [00:03<00:00, 74.44it/s]Loading weights:  88%|████████▊ | 256/291 [00:03<00:00, 77.19it/s]Loading weights:  88%|████████▊ | 256/291 [00:03<00:00, 82.65it/s]Loading weights:  89%|████████▉ | 259/291 [00:03<00:00, 72.16it/s]Loading weights:  90%|█████████ | 263/291 [00:03<00:00, 77.37it/s]Loading weights:  90%|█████████ | 263/291 [00:03<00:00, 81.30it/s]Loading weights:  91%|█████████ | 264/291 [00:03<00:00, 85.96it/s]Loading weights:  90%|█████████ | 263/291 [00:03<00:00, 76.56it/s]Loading weights:  89%|████████▊ | 258/291 [00:03<00:00, 65.71it/s]Loading weights:  91%|█████████ | 265/291 [00:03<00:00, 70.21it/s]Loading weights:  91%|█████████ | 265/291 [00:03<00:00, 73.89it/s]Loading weights:  92%|█████████▏| 267/291 [00:03<00:00, 62.38it/s]Loading weights:  92%|█████████▏| 267/291 [00:03<00:00, 62.86it/s]Loading weights:  93%|█████████▎| 272/291 [00:03<00:00, 72.59it/s]Loading weights:  93%|█████████▎| 271/291 [00:03<00:00, 67.97it/s]Loading weights:  93%|█████████▎| 271/291 [00:03<00:00, 67.38it/s]Loading weights:  94%|█████████▍| 273/291 [00:03<00:00, 75.70it/s]Loading weights:  94%|█████████▍| 274/291 [00:03<00:00, 69.44it/s]Loading weights:  96%|█████████▌| 279/291 [00:03<00:00, 76.28it/s]Loading weights:  94%|█████████▍| 274/291 [00:03<00:00, 65.89it/s]Loading weights:  96%|█████████▌| 279/291 [00:03<00:00, 70.61it/s]Loading weights:  97%|█████████▋| 281/291 [00:03<00:00, 76.07it/s]Loading weights:  97%|█████████▋| 281/291 [00:03<00:00, 74.58it/s]Loading weights:  97%|█████████▋| 281/291 [00:03<00:00, 75.94it/s]Loading weights:  97%|█████████▋| 281/291 [00:03<00:00, 78.68it/s]Loading weights: 100%|██████████| 291/291 [00:03<00:00, 72.99it/s]
+Loading weights: 100%|██████████| 291/291 [00:03<00:00, 73.05it/s]Loading weights: 100%|██████████| 291/291 [00:03<00:00, 72.90it/s]
+
+Loading weights:  97%|█████████▋| 283/291 [00:03<00:00, 70.83it/s]Loading weights:  97%|█████████▋| 283/291 [00:03<00:00, 67.03it/s]Loading weights: 100%|██████████| 291/291 [00:03<00:00, 72.89it/s]
+Loading weights: 100%|██████████| 291/291 [00:04<00:00, 72.58it/s]
+Loading weights:  99%|█████████▉| 288/291 [00:04<00:00, 75.65it/s]Loading weights: 100%|██████████| 291/291 [00:04<00:00, 72.65it/s]
+Loading weights:  99%|█████████▊| 287/291 [00:04<00:00, 67.45it/s]Loading weights: 100%|██████████| 291/291 [00:04<00:00, 72.47it/s]
+Loading weights: 100%|██████████| 291/291 [00:04<00:00, 72.33it/s]
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+> LoRA: trainable 39,976,960/6,778,392,576 (0.59%)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_init_utils.py:1021: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  param.data = param.to(device_from_device_id)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+> Native FSDP ready (world_size=8)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 3901 samples from /data/train.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 10000 samples from 3901 raw × 3 epochs (seed=1234)
+INFO:lumen.models.llama2.dataset:Loaded 173 samples from /data/validation.npy
+INFO:lumen.models.llama2.dataset:Built shuffled mapping: 500 samples from 173 raw × 3 epochs (seed=1234)
+RCCL version : 2.26.6-HEAD:17055da
+HIP version  : 7.0.51831-a3e329ad8
+ROCm version : 7.0.0.0-82-9428210
+Hostname     : hjbog-srdc-34
+Librccl path : /opt/rocm/lib/librccl.so.1
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:11:415 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:14:416 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:12:419 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:13:421 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:18:420 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:16:418 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:15:422 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 1 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-06-11 08:28:47] hjbog-srdc-34:17:417 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+[transformers] `use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:1204: UserWarning: Called FSDP.clip_grad_norm_() on rank 3 with no gradients -- returning the total norm in the default dtype torch.float32
+  warnings.warn(
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:1204: UserWarning: Called FSDP.clip_grad_norm_() on rank 5 with no gradients -- returning the total norm in the default dtype torch.float32
+  warnings.warn(
+  step 1/200 | loss 4.6638 | lr 4.00e-04
+  step 2/200 | loss 3.8662 | lr 4.00e-04
+  step 3/200 | loss 4.1275 | lr 4.00e-04
+  step 4/200 | loss 3.8127 | lr 4.00e-04
+  step 5/200 | loss 3.8202 | lr 3.99e-04
+  step 6/200 | loss 3.6688 | lr 3.99e-04
+  step 7/200 | loss 3.4291 | lr 3.99e-04
+  step 8/200 | loss 3.3694 | lr 3.98e-04
+  step 9/200 | loss 3.3247 | lr 3.98e-04
+  step 10/200 | loss 3.1981 | lr 3.98e-04
+  step 10/200 | val_loss 3.0883
+  step 11/200 | loss 3.1805 | lr 3.97e-04
+  step 12/200 | loss 3.2005 | lr 3.96e-04
+  step 13/200 | loss 2.8329 | lr 3.96e-04
+  step 14/200 | loss 2.9000 | lr 3.95e-04
+  step 15/200 | loss 2.7801 | lr 3.94e-04
+  step 16/200 | loss 2.7408 | lr 3.94e-04
+  step 17/200 | loss 2.7102 | lr 3.93e-04
+  step 18/200 | loss 2.6831 | lr 3.92e-04
+  step 19/200 | loss 2.5354 | lr 3.91e-04
+  step 20/200 | loss 2.6753 | lr 3.90e-04
+  step 20/200 | val_loss 2.3215
+  step 21/200 | loss 2.4822 | lr 3.89e-04
+  step 22/200 | loss 2.0919 | lr 3.88e-04
+  step 23/200 | loss 2.4147 | lr 3.87e-04
+  step 24/200 | loss 2.0954 | lr 3.86e-04
+  step 25/200 | loss 2.1932 | lr 3.85e-04
+  step 26/200 | loss 2.3073 | lr 3.84e-04
+  step 27/200 | loss 2.1336 | lr 3.82e-04
+  step 28/200 | loss 2.1674 | lr 3.81e-04
+  step 29/200 | loss 2.2175 | lr 3.80e-04
+  step 30/200 | loss 2.1650 | lr 3.78e-04
+  step 30/200 | val_loss 1.9193
+  step 31/200 | loss 1.8409 | lr 3.77e-04
+  step 32/200 | loss 2.0907 | lr 3.75e-04
+  step 33/200 | loss 2.2661 | lr 3.74e-04
+  step 34/200 | loss 1.9065 | lr 3.72e-04
+  step 35/200 | loss 1.9718 | lr 3.71e-04
+  step 36/200 | loss 1.7864 | lr 3.69e-04
+  step 37/200 | loss 1.9092 | lr 3.67e-04
+  step 38/200 | loss 2.0361 | lr 3.65e-04
+  step 39/200 | loss 1.6868 | lr 3.64e-04
+  step 40/200 | loss 1.6818 | lr 3.62e-04
+  step 40/200 | val_loss 1.6936
+  step 41/200 | loss 1.7263 | lr 3.60e-04
+  step 42/200 | loss 1.8009 | lr 3.58e-04
+  step 43/200 | loss 1.8349 | lr 3.56e-04
+  step 44/200 | loss 1.5714 | lr 3.54e-04
+  step 45/200 | loss 1.7136 | lr 3.52e-04
+  step 46/200 | loss 1.7330 | lr 3.50e-04
+  step 47/200 | loss 1.5604 | lr 3.48e-04
+  step 48/200 | loss 1.7495 | lr 3.46e-04
+  step 49/200 | loss 2.0577 | lr 3.44e-04
+  step 50/200 | loss 1.7498 | lr 3.41e-04
+  step 50/200 | val_loss 1.5825
+  step 51/200 | loss 1.6715 | lr 3.39e-04
+  step 52/200 | loss 1.6683 | lr 3.37e-04
+  step 53/200 | loss 1.3759 | lr 3.35e-04
+  step 54/200 | loss 1.7619 | lr 3.32e-04
+  step 55/200 | loss 1.6055 | lr 3.30e-04
+  step 56/200 | loss 1.5099 | lr 3.27e-04
+  step 57/200 | loss 1.4205 | lr 3.25e-04
+  step 58/200 | loss 1.7186 | lr 3.23e-04
+  step 59/200 | loss 1.5671 | lr 3.20e-04
+  step 60/200 | loss 1.6032 | lr 3.18e-04
+  step 60/200 | val_loss 1.5231
+  step 61/200 | loss 1.6606 | lr 3.15e-04
+  step 62/200 | loss 1.5664 | lr 3.12e-04
+  step 63/200 | loss 1.5504 | lr 3.10e-04
+  step 64/200 | loss 1.5510 | lr 3.07e-04
+  step 65/200 | loss 1.6272 | lr 3.04e-04
+  step 66/200 | loss 1.5850 | lr 3.02e-04
+  step 67/200 | loss 1.4834 | lr 2.99e-04
+  step 68/200 | loss 1.6586 | lr 2.96e-04
+  step 69/200 | loss 1.6892 | lr 2.94e-04
+  step 70/200 | loss 1.4633 | lr 2.91e-04
+  step 70/200 | val_loss 1.4905
+  step 71/200 | loss 1.5246 | lr 2.88e-04
+  step 72/200 | loss 1.5342 | lr 2.85e-04
+  step 73/200 | loss 1.4174 | lr 2.82e-04
+  step 74/200 | loss 1.4022 | lr 2.79e-04
+  step 75/200 | loss 1.5232 | lr 2.77e-04
+  step 76/200 | loss 1.4877 | lr 2.74e-04
+  step 77/200 | loss 1.5562 | lr 2.71e-04
+  step 78/200 | loss 1.7163 | lr 2.68e-04
+  step 79/200 | loss 1.6367 | lr 2.65e-04
+  step 80/200 | loss 1.7227 | lr 2.62e-04
+  step 80/200 | val_loss 1.4695
+  step 81/200 | loss 1.6977 | lr 2.59e-04
+  step 82/200 | loss 1.3354 | lr 2.56e-04
+  step 83/200 | loss 1.3858 | lr 2.53e-04
+  step 84/200 | loss 1.5694 | lr 2.50e-04
+  step 85/200 | loss 1.6583 | lr 2.47e-04
+  step 86/200 | loss 1.6434 | lr 2.44e-04
+  step 87/200 | loss 1.5592 | lr 2.41e-04
+  step 88/200 | loss 1.5917 | lr 2.37e-04
+  step 89/200 | loss 1.5146 | lr 2.34e-04
+  step 90/200 | loss 1.5691 | lr 2.31e-04
+  step 90/200 | val_loss 1.4561
+  step 91/200 | loss 1.5535 | lr 2.28e-04
+  step 92/200 | loss 1.2836 | lr 2.25e-04
+  step 93/200 | loss 1.7065 | lr 2.22e-04
+  step 94/200 | loss 1.5593 | lr 2.19e-04
+  step 95/200 | loss 1.3573 | lr 2.16e-04
+  step 96/200 | loss 1.3872 | lr 2.13e-04
+  step 97/200 | loss 1.6432 | lr 2.09e-04
+  step 98/200 | loss 1.7965 | lr 2.06e-04
+  step 99/200 | loss 1.4910 | lr 2.03e-04
+  step 100/200 | loss 1.4560 | lr 2.00e-04
+  step 100/200 | val_loss 1.4469
+  step 101/200 | loss 1.5037 | lr 1.97e-04
+  step 102/200 | loss 1.3493 | lr 1.94e-04
+  step 103/200 | loss 1.5226 | lr 1.91e-04
+  step 104/200 | loss 1.6568 | lr 1.87e-04
+  step 105/200 | loss 1.5406 | lr 1.84e-04
+  step 106/200 | loss 1.4518 | lr 1.81e-04
+  step 107/200 | loss 1.4769 | lr 1.78e-04
+  step 108/200 | loss 1.5475 | lr 1.75e-04
+  step 109/200 | loss 1.3996 | lr 1.72e-04
+  step 110/200 | loss 1.7014 | lr 1.69e-04
+  step 110/200 | val_loss 1.4394
+  step 111/200 | loss 1.4082 | lr 1.66e-04
+  step 112/200 | loss 1.3597 | lr 1.63e-04
+  step 113/200 | loss 1.5499 | lr 1.59e-04
+  step 114/200 | loss 1.5699 | lr 1.56e-04
+  step 115/200 | loss 1.5162 | lr 1.53e-04
+  step 116/200 | loss 1.2812 | lr 1.50e-04
+  step 117/200 | loss 1.6291 | lr 1.47e-04
+  step 118/200 | loss 1.5560 | lr 1.44e-04
+  step 119/200 | loss 1.6196 | lr 1.41e-04
+  step 120/200 | loss 1.5773 | lr 1.38e-04
+  step 120/200 | val_loss 1.4341
+  step 121/200 | loss 1.4575 | lr 1.35e-04
+  step 122/200 | loss 1.5816 | lr 1.32e-04
+  step 123/200 | loss 1.7351 | lr 1.29e-04
+  step 124/200 | loss 1.3546 | lr 1.26e-04
+  step 125/200 | loss 1.6724 | lr 1.23e-04
+  step 126/200 | loss 1.4831 | lr 1.21e-04
+  step 127/200 | loss 1.6254 | lr 1.18e-04
+  step 128/200 | loss 1.6286 | lr 1.15e-04
+  step 129/200 | loss 1.5943 | lr 1.12e-04
+  step 130/200 | loss 1.6231 | lr 1.09e-04
+  step 130/200 | val_loss 1.4310
+  step 131/200 | loss 1.5046 | lr 1.06e-04
+  step 132/200 | loss 1.5228 | lr 1.04e-04
+  step 133/200 | loss 1.5977 | lr 1.01e-04
+  step 134/200 | loss 1.5560 | lr 9.82e-05
+  step 135/200 | loss 1.6095 | lr 9.55e-05
+  step 136/200 | loss 1.3576 | lr 9.28e-05
+  step 137/200 | loss 1.3410 | lr 9.02e-05
+  step 138/200 | loss 1.5500 | lr 8.76e-05
+  step 139/200 | loss 1.3700 | lr 8.50e-05
+  step 140/200 | loss 1.3291 | lr 8.24e-05
+  step 140/200 | val_loss 1.4278
+  step 141/200 | loss 1.4627 | lr 7.99e-05
+  step 142/200 | loss 1.5622 | lr 7.74e-05
+  step 143/200 | loss 1.6007 | lr 7.50e-05
+  step 144/200 | loss 1.4592 | lr 7.25e-05
+  step 145/200 | loss 1.4247 | lr 7.01e-05
+  step 146/200 | loss 1.4963 | lr 6.77e-05
+  step 147/200 | loss 1.5572 | lr 6.54e-05
+  step 148/200 | loss 1.6403 | lr 6.31e-05
+  step 149/200 | loss 1.4701 | lr 6.08e-05
+  step 150/200 | loss 1.1741 | lr 5.86e-05
+  step 150/200 | val_loss 1.4259
+  step 151/200 | loss 1.5499 | lr 5.64e-05
+  step 152/200 | loss 1.5666 | lr 5.42e-05
+  step 153/200 | loss 1.5651 | lr 5.21e-05
+  step 154/200 | loss 1.5308 | lr 5.00e-05
+  step 155/200 | loss 1.4595 | lr 4.79e-05
+  step 156/200 | loss 1.3772 | lr 4.59e-05
+  step 157/200 | loss 1.4530 | lr 4.39e-05
+  step 158/200 | loss 1.4423 | lr 4.20e-05
+  step 159/200 | loss 1.4009 | lr 4.01e-05
+  step 160/200 | loss 1.3417 | lr 3.82e-05
+  step 160/200 | val_loss 1.4245
+  step 161/200 | loss 1.5990 | lr 3.64e-05
+  step 162/200 | loss 1.4109 | lr 3.46e-05
+  step 163/200 | loss 1.5185 | lr 3.28e-05
+  step 164/200 | loss 1.5265 | lr 3.11e-05
+  step 165/200 | loss 1.5601 | lr 2.95e-05
+  step 166/200 | loss 1.3018 | lr 2.79e-05
+  step 167/200 | loss 1.5944 | lr 2.63e-05
+  step 168/200 | loss 1.5371 | lr 2.47e-05
+  step 169/200 | loss 1.3816 | lr 2.32e-05
+  step 170/200 | loss 1.3679 | lr 2.18e-05
+  step 170/200 | val_loss 1.4236
+  step 171/200 | loss 1.3817 | lr 2.04e-05
+  step 172/200 | loss 1.6360 | lr 1.90e-05
+  step 173/200 | loss 1.6974 | lr 1.77e-05
+  step 174/200 | loss 1.2512 | lr 1.64e-05
+  step 175/200 | loss 1.3201 | lr 1.52e-05
+  step 176/200 | loss 1.5771 | lr 1.40e-05
+  step 177/200 | loss 1.3804 | lr 1.29e-05
+  step 178/200 | loss 1.4618 | lr 1.18e-05
+  step 179/200 | loss 1.6327 | lr 1.08e-05
+  step 180/200 | loss 1.6668 | lr 9.79e-06
+  step 180/200 | val_loss 1.4234
+  step 181/200 | loss 1.6588 | lr 8.84e-06
+  step 182/200 | loss 1.5854 | lr 7.94e-06
+  step 183/200 | loss 1.6543 | lr 7.09e-06
+  step 184/200 | loss 1.5871 | lr 6.28e-06
+  step 185/200 | loss 1.2659 | lr 5.53e-06
+  step 186/200 | loss 1.4042 | lr 4.82e-06
+  step 187/200 | loss 1.3141 | lr 4.16e-06
+  step 188/200 | loss 1.3603 | lr 3.54e-06
+  step 189/200 | loss 1.7546 | lr 2.98e-06
+  step 190/200 | loss 1.5128 | lr 2.46e-06
+  step 190/200 | val_loss 1.4233
+  step 191/200 | loss 1.3506 | lr 2.00e-06
+  step 192/200 | loss 1.5609 | lr 1.58e-06
+  step 193/200 | loss 1.6611 | lr 1.21e-06
+  step 194/200 | loss 1.5072 | lr 8.88e-07
+  step 195/200 | loss 1.5617 | lr 6.17e-07
+  step 196/200 | loss 1.4639 | lr 3.95e-07
+  step 197/200 | loss 1.8349 | lr 2.22e-07
+  step 198/200 | loss 1.4681 | lr 9.87e-08
+  step 199/200 | loss 1.5482 | lr 2.47e-08
+  step 200/200 | loss 1.6452 | lr 0.00e+00
+  step 200/200 | val_loss 1.4233
+> Native FSDP training complete.
+[rank0]:[W611 08:59:04.060371976 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())

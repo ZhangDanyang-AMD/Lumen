@@ -6,8 +6,9 @@ linear-quantization recipes (**delayed**, **blockwise2d**), on the gov_report da
 
 > This is the single living report — append new runs to the matrix (§1) and the results
 > tables (§7). **Read the data-comparability caveat (§8) before comparing val-loss across
-> rows:** only the Megatron 70B blockwise2d run uses the MLPerf **answer-only** loss mask;
-> all other rows report **all-token** loss and are NOT comparable to the MLPerf target 0.925.
+> rows:** only the Megatron 70B blockwise2d run (#6) and the FSDP2 70B FP8-param-storage run
+> (#8) use the MLPerf **answer-only** loss mask; all other rows report **all-token** loss and
+> are NOT comparable to the MLPerf target 0.925.
 
 ---
 
@@ -21,6 +22,8 @@ linear-quantization recipes (**delayed**, **blockwise2d**), on the gov_report da
 | 4 | FSDP | 70B | bf16 | 60 | ⏸ stopped (snapshot) | all-token |
 | 5 | FSDP | 70B | fp8_blockwise2d | 256 | ⚠ NCCL watchdog hang ~256 | all-token |
 | 6 | Megatron | 70B | fp8_blockwise2d | 192 (first eval) | ⚠ then early-stop desync (fixed) | **answer-only (MLPerf)** |
+| 7 | **native** PyTorch FSDP | 7B | bf16 | 200 (full) | ✅ complete | all-token | final val 1.4233, ~4.5 s/step (baseline; see §7) |
+| 8 | **FSDP2** | 70B | fp8_blockwise2d (**FP8 param-storage**) | 450 (**early-stop**) | ✅ **reached val 0.9235 < 0.925** | **answer-only (MLPerf)** |
 
 <!-- append new runs here -->
 
@@ -147,9 +150,56 @@ Faster than FSDP (TP1 + fp8 param-storage keeps weights resident, no per-step al
 0 NaN, mem ~97%. **val 0.951 @192 is the MLPerf answer-only metric** → directly comparable to
 0.925; trend matches the README reference (best 0.9223 @ step576).
 
+### 6.4 — 70B FSDP2 + FP8 param-storage (answer-only loss; **reached MLPerf target**)
+
+Best-performing FSDP recipe in the current tree: **FSDP2** (`fully_shard`) + **blockwise2d FP8
+param-storage** (frozen base weight all-gathered as FP8 via a custom `Blockwise2DFP8Param`
+all-gather extension, no per-step full-weight re-quant) + **on-the-fly B-preshuffle GEMM**
+(`LUMEN_BPRESHUFFLE_ONFLY=1`, ~2.4× blockscale GEMM) + **skip frozen-base WGrad**
+(`LUMEN_SKIP_FROZEN_WGRAD=1`). Answer-only data; **token-only** val normalization
+(`Σ masked_loss / Σ tokens` over the whole val set + all ranks).
+
+| Mode | step time | **val (answer-only, token-only)** | reached 0.925 | total |
+|---|---|---|---|---|
+| fp8_blockwise2d (FSDP2 param-storage) | **~32.5 s** | **0.9235 @450** (early-stop) | ✅ **yes** | ~5.4 h (19,454 s) |
+
+Validation-loss convergence (token-only):
+
+| step | 50 | 100 | 150 | 200 | 250 | 300 | 350 | 400 | **450** |
+|---|---|---|---|---|---|---|---|---|---|
+| val_loss | 1.0177 | 0.9655 | 0.9544 | 0.9451 | 0.9392 | 0.9360 | 0.9289 | 0.9255 | **0.9235** |
+
+→ **First FSDP run to hit the MLPerf target.** Two things made this possible vs the old FSDP
+blockwise2d run (#5, all-token, plateaued ~1.17): (a) the **answer-only** loss mask + **token-only**
+val normalization put the metric on the MLPerf 0.925 scale; (b) FSDP2 FP8 param-storage +
+bpreshuffle + skip-wgrad cut step time to **~32.5 s** (vs ~70 s for run #5, and ~36 s for FSDP1
+blockwise2d with the same GEMM/wgrad optimizations) so a full convergence run is practical.
+0 NaN, saving disabled (FSDP2+PEFT checkpoint save still broken, see §10).
+
 ---
 
-## 7. (reserved for new runs)
+## 7. Native PyTorch FSDP vs Lumen FSDP (7B, BF16)
+
+A pure-PyTorch-FSDP baseline (`examples/llama2/native_fsdp_baseline.py` — HF + torch FSDP +
+PEFT, **no `LumenConfig`**; only `LLaMA2SFTDataset` reused for identical inputs), same §3
+hyperparameters, same old all-token data, 200 steps.
+
+| | final val | step time (steady, no-eval) | data pipeline |
+|---|---|---|---|
+| Lumen FSDP bf16 (run #1) | 1.3866 | ~5.23 s | `shuffle=False` (`_pack_next` packing) |
+| native PyTorch FSDP bf16 | **1.4233** | **~4.5 s** | `shuffle=True` (per-row) |
+
+Val convergence (native): 3.09→1.69→1.47→1.43→**1.4233** (@10/40/80/120/200).
+
+⚠ **Comparison is confounded — not yet a clean Lumen-vs-native result.** The two runs used
+**different data pipelines**: the run-#1 Lumen-bf16 log predates the `shuffle=True` dataset
+change, so it used the old `_pack_next` streaming packer; the native baseline uses the new
+per-row + epoch-shuffle path. The +0.037 val gap is dominated by this data-path difference,
+not by Lumen-vs-native. Step time is more directly comparable: native is ~0.7 s/step faster
+(no `LumenConfig` wrap / ExperimentTracker per-step overhead).
+
+**TODO for a clean comparison:** re-run Lumen-bf16 with the current code (`shuffle=True`) so
+both share the identical per-row+shuffle pipeline; then only the framework differs.
 
 <!-- add result subsections for future experiments here -->
 
@@ -165,8 +215,14 @@ gov_report `.npy` was prepared two ways:
   Run #6.
 
 The MLPerf target **0.925 is an answer-only validation loss**. The all-token val numbers
-(7B ~1.39; 70B FSDP 1.17–1.24) are a *different metric* — do not compare to 0.925. Only run
-#6's 0.951 is on the MLPerf scale.
+(7B ~1.39; 70B FSDP 1.17–1.24) are a *different metric* — do not compare to 0.925. Runs **#6**
+(Megatron) and **#8** (FSDP2) are on the MLPerf answer-only scale.
+
+Normalization also matters: run #6 (Megatron `--sft`) averages **per-microbatch means** (NeMo
+`sample_weight=constant`); run #8 (FSDP2) uses **token-only** global `Σ loss / Σ tokens`
+(`FSDPTrainer._validate`). Both are answer-only and both clear 0.925, but they are not bit-for-bit
+the same statistic. The earlier FSDP `_validate` averaged per-batch means and capped at 10 batches —
+changed to token-only over the full val set for run #8.
 
 ---
 
@@ -200,11 +256,17 @@ The MLPerf target **0.925 is an answer-only validation loss**. The all-token val
 ## 11. Conclusions
 
 1. **Accuracy:** FP8 (delayed & blockwise2d) ≈ BF16 at 7B (Δval < 0.006); 70B blockwise2d
-   reaches answer-only val 0.951 @192, on-trend to MLPerf 0.925.
-2. **Throughput (70B):** Megatron (TP1 + fp8 param-storage, ~34 s/step) > FSDP (~49–70 s/step,
-   full-model all-gather every step). At 7B, FP8 is slower than BF16 (overhead-bound).
-3. **blockwise2d on Megatron needed new code** — fp8 param-storage now emits 2D block weight
-   scales (§9).
+   reaches answer-only val 0.951 @192 (Megatron) and **FSDP2 reaches 0.9235 @450 — clears the
+   MLPerf 0.925 target** (run #8, first FSDP run to do so).
+2. **Throughput (70B):** FSDP2 + FP8 param-storage + bpreshuffle + skip-wgrad is the fastest
+   FSDP recipe at **~32.5 s/step** (vs ~36 s FSDP1-blockwise2d-optimized, ~70 s un-optimized);
+   it now edges Megatron blockwise2d (~34 s/step; ~24 s with bpreshuffle added). At 7B, FP8 is
+   slower than BF16 (overhead-bound).
+3. **FSDP2 FP8 param-storage needed new code** — `Blockwise2DFP8Param` all-gather extension
+   (frozen base stored/communicated as FP8, quant deferred to `fsdp_pre_all_gather`); the
+   subclass must survive FSDP2 sharding (re-wrap all master-dtype `__torch_dispatch__` outputs)
+   and use `MixedPrecisionPolicy(param_dtype=None)`. blockwise2d on Megatron also needed 2D
+   block weight scales in fp8 param-storage (§9).
 4. **Collective early-stop is mandatory** — any per-rank stop on local loss desyncs DP → NCCL
    deadlock.
 
@@ -214,7 +276,10 @@ The MLPerf target **0.925 is an answer-only validation loss**. The all-token val
 
 - 7B FSDP: `llama2_fsdp_train_bf16_lora_7b.log`, `llama2_fsdp_train_fp8_delayed_lora_7b.log`,
   `llama2_fsdp_train_fp8_blockwise2d_lora_7b.log`
+- 7B native FSDP baseline: `llama2_native_fsdp_train_bf16_lora_7b.log` (script `native_fsdp_baseline.py`)
 - 70B FSDP: `llama2_fsdp_train_bf16_lora_70b.log` (→60),
   `llama2_fsdp_train_fp8_blockwise2d_lora_70b.log` (→256)
+- 70B FSDP2 + FP8 param-storage (**reaches 0.925**):
+  `llama2_fsdp2_paramstore_train_fp8_blockwise2d_lora_70b.log` (→450, early-stop @ val 0.9235)
 - 70B Megatron: `llama2_megatron_train_fp8_blockwise2d_70b.log` (iters 1–20 only);
   delayed reference (passes 0.925): `/mnt/raid0/leiwu/mlperf/logs/mlperf_70b_delayed*.log`

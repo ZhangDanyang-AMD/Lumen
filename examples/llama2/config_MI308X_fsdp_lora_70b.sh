@@ -11,6 +11,12 @@
 #   CONFIG=config_MI308X_fsdp_lora_70b.sh BACKEND=fsdp bash run_finetune.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Capture env overrides BEFORE sourcing the base config (which exports these
+# unconditionally and would otherwise clobber values passed via the launcher).
+_OV_SAVE_INTERVAL="${SAVE_INTERVAL:-}"
+_OV_EVAL_EVERY="${EVAL_EVERY:-}"
+_OV_VAL_SAMPLES="${VAL_SAMPLES:-}"
+_OV_TRAIN_STEPS="${TRAIN_STEPS:-}"
 # Inherit all FSDP launcher defaults (NCCL/ROCm perf env, arg plumbing).
 source "${SCRIPT_DIR}/config_MI355X_1x8x1.sh"
 
@@ -27,7 +33,7 @@ export TOKENIZER="${SCRIPT_DIR}/tokenizer"
 export TRAIN_DATA="/data/train.npy"
 export VALID_DATA="/data/validation.npy"
 export TRAIN_SAMPLES=10000
-export VAL_SAMPLES=500
+export VAL_SAMPLES="${VAL_SAMPLES:-500}"
 
 # ---- Training hyperparameters (MLPerf-aligned, see README) ------------------
 export SEQ_LEN=8192
@@ -96,8 +102,8 @@ export TARGET_LOG_PPL=0.0    # unused when VAL_LOSS_TARGET is set
 # ---- Logging / checkpoint / eval --------------------------------------------
 export LOG_INTERVAL=1
 export SAVE_DIR="/results/checkpoints"
-export SAVE_INTERVAL=256     # LoRA adapters are small
-export EVAL_EVERY=384        # eval cadence in sequences -> ~48 steps at GBS=8
+export SAVE_INTERVAL="${SAVE_INTERVAL:-256}"     # LoRA adapters are small; set 0 to disable (FSDP save_state_dict collective is broken)
+export EVAL_EVERY="${EVAL_EVERY:-384}"   # eval cadence in sequences -> ~48 steps at GBS=8
 export EVAL_INTERVAL=0       # let run_finetune.sh derive from EVAL_EVERY
 export START_EVAL_AT=0
 export NUM_WORKERS=4
@@ -114,3 +120,11 @@ export SAVE_CKPT=0
 export PYTORCH_TUNABLEOP_ENABLED=0
 
 export NCCL_DEBUG=WARN
+
+# Re-apply launcher env overrides captured before the base source above, so they
+# win over both the base config and this file's defaults.
+# Use if/fi (not `test && cmd`) so an empty override does not trip `set -e`.
+if [ -n "${_OV_SAVE_INTERVAL}" ]; then export SAVE_INTERVAL="${_OV_SAVE_INTERVAL}"; fi
+if [ -n "${_OV_EVAL_EVERY}" ];    then export EVAL_EVERY="${_OV_EVAL_EVERY}"; fi
+if [ -n "${_OV_VAL_SAMPLES}" ];   then export VAL_SAMPLES="${_OV_VAL_SAMPLES}"; fi
+if [ -n "${_OV_TRAIN_STEPS}" ];   then export TRAIN_STEPS="${_OV_TRAIN_STEPS}"; fi
