@@ -18,6 +18,15 @@ from lumen.ops.cross_entropy import parallel_cross_entropy as _parallel_ce
 __all__ = ["lumen_parallel_cross_entropy"]
 
 
+def _ce_chunk_rows_from_args() -> int:
+    """Return --lumen-ce-chunk-rows (0 = disabled) without hard-importing Megatron."""
+    try:
+        from megatron.training import get_args
+        return getattr(get_args(), "lumen_ce_chunk_rows", 0)
+    except Exception:
+        return 0
+
+
 def lumen_parallel_cross_entropy(
     logits: torch.Tensor,
     labels: torch.Tensor,
@@ -39,10 +48,11 @@ def lumen_parallel_cross_entropy(
     return _parallel_ce(
         logits,
         labels,
-        0.0,  # label_smoothing
+        0.0,   # label_smoothing
         False,  # reduce_loss
         tp_group,
         -100,  # ignore_idx
         is_cg_capturable,
         _use_sdma_from_args(),
+        _ce_chunk_rows_from_args(),
     )

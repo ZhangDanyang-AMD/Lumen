@@ -2114,6 +2114,19 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(
         lumen,
+        "--lumen-ce-chunk-rows",
+        type=int,
+        default=0,
+        help=(
+            "Row chunk size for chunked cross-entropy (0 = disabled). "
+            "Splits B*SQ into chunks of this size so each chunk's allgather "
+            "transfers chunk_rows*3 floats instead of B*SQ*3, reducing peak "
+            "activation memory. Effective only when --lumen-cross-entropy is set. "
+            "Typical value: 2048 (= 2 chunks for MBS=1 seq_len=4096)."
+        ),
+    )
+    safe_add_argument(
+        lumen,
         "--lumen-cpu-offload",
         action="store_true",
         default=False,

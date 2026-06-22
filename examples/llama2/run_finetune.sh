@@ -103,6 +103,13 @@ if [ "${LUMEN_MANUAL_GC:-0}" = "1" ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --manual-gc"
 fi
 
+if [ "${LUMEN_CROSS_ENTROPY:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-cross-entropy"
+    if [ -n "${LUMEN_CE_CHUNK_ROWS:-}" ] && [ "${LUMEN_CE_CHUNK_ROWS}" -gt 0 ]; then
+        CMD_SUFFIX="${CMD_SUFFIX} --lumen-ce-chunk-rows ${LUMEN_CE_CHUNK_ROWS}"
+    fi
+fi
+
 if [ -n "${LUMEN_LOG_INTERVAL:-}" ]; then
     LOG_INTERVAL="${LUMEN_LOG_INTERVAL}"
 fi
