@@ -33,15 +33,17 @@ LINEAR_IDS = [repr(c) for c in LINEAR_SHAPES]
 ALL_SCALING_TYPES = ["delayed", "dynamic", "per_token", "blockwise", "blockwise2d", "mxfp8", "none"]
 
 # Backward reuses forward's weight_scale after transposing weight_fp8.
-# Only per-tensor (scalar) scales survive transposition; per_token (N,1),
-# blockwise (N,K/bs), and mxfp8 block scales become misaligned with the
-# transposed layout, causing GEMM kernel crashes.
+# Only per-tensor (scalar) scales survive transposition; per_token (N,1) block
+# scales become misaligned with the transposed layout, so per_token stays on the
+# dequant→BF16 fallback.
 #
 # blockwise2d (Jet-RL §4.2) uses square 128×128 tiles whose scale grid IS
 # transpose-symmetric, so DGrad reuses the FProp kernel and WGrad runs a
 # (1×128)×(1×128) blockscale GEMM with X re-quantized along the token axis.
-# Requires M (token count) divisible by 128 — non-aligned M falls back to BF16.
-BWD_SCALING_TYPES = ["delayed", "dynamic", "blockwise2d", "none"]
+# blockwise(1D) reaches full FP8 DGrad/WGrad via a columnwise re-quant copy of
+# the weight (1×128 along N); WGrad is shared with blockwise2d.
+# Both require M (token count) divisible by 128 — non-aligned M falls back to BF16.
+BWD_SCALING_TYPES = ["delayed", "dynamic", "blockwise", "blockwise2d", "none"]
 
 # SNR floors per scaling type — coarser quantization ⇒ lower expected SNR.
 # mxfp8 uses E8M0 exponent-only scales; blockwise has block granularity.
@@ -316,6 +318,90 @@ def test_fp8_linear_weight_only(config, scaling_type):
     assert compute_snr(out_ref, out_lumen) > 10
     assert compute_snr(x_ref.grad, x.grad) > 6
     assert compute_snr(w_ref.grad, w.grad) > 6
+
+
+@pytest.mark.parametrize("config", LINEAR_SHAPES[:2], ids=LINEAR_IDS[:2])
+def test_fp8_stored_blockwise2d_dgrad(config):
+    """FP8-stored (frozen) weight blockwise2d DGrad runs as an FP8 blockscale
+    GEMM (no dequant->BF16 + weight.t().contiguous()). Only DGrad is produced;
+    the weight is frozen (no WGrad). Exercises FP8StoredLinearFunction."""
+    dtype = torch.bfloat16
+    M, K, N = config.M, config.K, config.N
+    if N % 128 or K % 128:
+        pytest.skip("blockwise2d FP8 DGrad path needs N, K divisible by 128")
+
+    fp8_dtype = linear_ops._get_float8_e4m3()
+    x = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(N, K, device="cuda", dtype=dtype) * 0.02
+    x.requires_grad_(True)
+
+    x_ref = x.detach().clone().requires_grad_(True)
+    w_ref = w.detach().clone()
+
+    out_ref = x_ref @ w_ref.T
+    out_ref.float().mean().backward()
+
+    # Pre-quantize weight to blockwise2d FP8 (128x128 tiles, 2D scale) and run
+    # through the FP8-stored path (pre_quantized_weight -> FP8StoredLinearFunction).
+    desc = linear_ops.quantize_input(w, "blockwise2d", fp8_dtype, 128, is_weight=True)
+    out = linear_ops.quantized_linear(
+        x, w, scaling_type="blockwise2d",
+        pre_quantized_weight=(desc.data, desc.scale),
+    )
+    torch.cuda.synchronize()
+    out.float().mean().backward()
+    torch.cuda.synchronize()
+
+    assert compute_snr(out_ref, out) > 8
+    assert x.grad is not None
+    assert compute_snr(x_ref.grad, x.grad) > 4
+
+
+@pytest.mark.parametrize("config", LINEAR_SHAPES[:2], ids=LINEAR_IDS[:2])
+def test_fp8_blockwise2d_wgrad_fp8_requant(config):
+    """WGrad FP8→FP8 requant kernel: activation (1×128 row) re-quantized to (128×1 col)
+    without BF16 roundtrip via requant_fp8_row_to_col.  Validates numerical accuracy
+    against the BF16-roundtrip reference (dequant→BF16→requant(axis=0))."""
+    from lumen.ops.quantize.ops import (
+        quant_fp8_blockwise_impl,
+        requant_fp8_row_to_col,
+    )
+    from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
+
+    dtype = torch.bfloat16
+    M, K, N = config.M, config.K, config.N
+    if M % 128 or K % 128:
+        pytest.skip("requant_fp8_row_to_col needs M, K divisible by 128")
+
+    fp8_dtype = linear_ops._get_float8_e4m3()
+
+    # Build a BF16 activation and row-wise quantize it (as done in forward).
+    x_bf16 = torch.randn(M, K, device="cuda", dtype=dtype) * 0.1
+    x_row, x_row_s = quant_fp8_blockwise_impl(x_bf16, fp8_dtype, axis=1, block_size=128)
+
+    # Reference: dequant → BF16 → col-wise requant (existing path).
+    x_dequant = _dequant_fp8_weight(x_row, x_row_s, 128).bfloat16()
+    x_col_ref, x_col_s_ref = quant_fp8_blockwise_impl(
+        x_dequant.contiguous(), fp8_dtype, axis=0, block_size=128,
+    )
+
+    # Candidate: direct FP8→FP8 requant kernel.
+    x_col, x_col_s = requant_fp8_row_to_col(x_row, x_row_s, fp8_dtype, 128)
+
+    # Dequant both and compare as float32.
+    x_col_f32_ref = _dequant_fp8_weight(x_col_ref, x_col_s_ref, 128).float()
+    x_col_f32 = _dequant_fp8_weight(x_col, x_col_s, 128).float()
+    snr = compute_snr(x_col_f32_ref, x_col_f32)
+    assert snr > 20, f"requant_fp8_row_to_col SNR vs BF16-roundtrip ref: {snr:.1f} dB"
+
+    # Secondary check: x_col dequanted should be close to the BF16-roundtrip version.
+    # This confirms the kernel's col scales are numerically consistent.
+    x_col_f32_ref2 = _dequant_fp8_weight(x_col_ref, x_col_s_ref, 128).float()
+    x_col_f32_2 = _dequant_fp8_weight(x_col, x_col_s, 128).float()
+    snr2 = compute_snr(x_col_f32_ref2, x_col_f32_2)
+    assert snr2 > _BWD_DW_SNR["blockwise2d"], (
+        f"requant_fp8_row_to_col col SNR vs BF16-roundtrip: {snr2:.1f} dB"
+    )
 
 
 # ===================================================================
