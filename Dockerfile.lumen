@@ -1,0 +1,22 @@
+FROM lumen/llama2:latest
+
+WORKDIR /workspace/Lumen
+
+# Lumen Python package and llama2 training scripts
+COPY lumen/           lumen/
+COPY examples/llama2/ examples/llama2/
+
+# aiter: only the 4 files Lumen actually changed on top of upstream aiter.
+# Copying more (e.g. the whole ops/ or aiter/) pulls in newer Python that
+# requires newer CK/csrc source not present in this image, breaking JIT build
+# of module_gemm_a8w8_blockscale_bpreshuffle at runtime.
+COPY third_party/aiter/aiter/ops/triton/cross_entropy.py \
+     third_party/aiter/aiter/ops/triton/cross_entropy.py
+COPY third_party/aiter/aiter/ops/triton/_triton_kernels/quant/quant_fp8_blockwise.py \
+     third_party/aiter/aiter/ops/triton/_triton_kernels/quant/quant_fp8_blockwise.py
+COPY third_party/aiter/aiter/jit/core.py \
+     third_party/aiter/aiter/jit/core.py
+COPY third_party/aiter/aiter/jit/module_gemm_common.so \
+     third_party/aiter/aiter/jit/module_gemm_common.so
+COPY third_party/aiter/aiter/configs/ \
+     third_party/aiter/aiter/configs/
