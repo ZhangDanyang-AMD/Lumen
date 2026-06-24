@@ -31,6 +31,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from torch.autograd.function import once_differentiable
 
 from lumen.core.grad_quant import quantize_grad_tensor
 from lumen.ops.dispatch import (
@@ -68,6 +69,12 @@ def _get_ck_rms_norm():
     from aiter.ops.rmsnorm import rms_norm
 
     return rms_norm
+
+
+def _get_ck_rmsnorm2d_fwd():
+    from aiter.ops.rmsnorm import rmsnorm2d_fwd
+
+    return rmsnorm2d_fwd
 
 
 def _get_ck_rmsnorm2d_fwd_with_dynamicquant():
@@ -110,6 +117,12 @@ def _get_ck_fused_add_rms_norm():
     from aiter.ops.rmsnorm import fused_add_rms_norm_cu
 
     return fused_add_rms_norm_cu
+
+
+def _get_ck_rmsnorm2d_fwd_with_add():
+    from aiter.ops.rmsnorm import rmsnorm2d_fwd_with_add
+
+    return rmsnorm2d_fwd_with_add
 
 
 def _get_triton_fused_add_rmsnorm_pad():
@@ -191,6 +204,41 @@ class _RMSNormGradQuant(torch.autograd.Function):
 
 
 # ---------------------------------------------------------------------------
+# Model-sensitive (T5-like) RMSNorm autograd Function (norm-patch only)
+# ---------------------------------------------------------------------------
+
+
+class _RMSNorm(torch.autograd.Function):
+    """Model-sensitive (T5-like) RMSNorm used only by the norm patch.
+
+    Forward uses the CK ``rmsnorm2d_fwd`` kernel with
+    ``use_model_sensitive_rmsnorm`` enabled; backward reuses the AITER
+    Triton ``_rmsnorm_backward`` against the cached ``rsigma``.
+    """
+
+    @staticmethod
+    def forward(ctx, x, weight, eps, use_model_sensitive):
+        ctx.eps = eps
+        x_2d = x.reshape(-1, x.shape[-1])
+        rsigma = torch.rsqrt(x_2d.float().pow(2).mean(dim=-1) + eps)
+        ctx.save_for_backward(x, weight, rsigma)
+        fn = _get_ck_rmsnorm2d_fwd()
+        y = fn(x_2d, weight, eps, use_model_sensitive_rmsnorm=use_model_sensitive)
+        return y.reshape(x.shape)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        x, weight, rsigma = ctx.saved_tensors
+        from aiter.ops.triton.normalization.rmsnorm import _rmsnorm_backward
+
+        x_2d = x.reshape(-1, x.shape[-1])
+        go_2d = grad_output.reshape(-1, grad_output.shape[-1])
+        dx, dw = _rmsnorm_backward(go_2d, x_2d, weight, rsigma)
+        return dx.reshape(x.shape), dw, None, None
+
+
+# ---------------------------------------------------------------------------
 # Public functional API — unquantized
 # ---------------------------------------------------------------------------
 
@@ -210,6 +258,7 @@ def rmsnorm(
     weight: torch.Tensor,
     eps: float = 1e-6,
     grad_quant_type: Optional[str] = None,
+    use_model_sensitive: int = 0,
 ) -> torch.Tensor:
     """Apply RMSNorm with automatic backend fallback (CK → Triton via AITER).
 
@@ -225,12 +274,26 @@ def rmsnorm(
         weight: Learnable scale ``(hidden_size,)``.
         eps: Epsilon for numerical stability.
         grad_quant_type: Gradient quantization format.
+        use_model_sensitive: When truthy, route through the model-sensitive
+            (T5-like) CK kernel. Only enabled by the norm patch; defaults to
+            ``0`` so the standard path is completely unchanged.
 
     Returns:
         Normalised tensor with same shape as *x*.
     """
     if grad_quant_type is not None:
         return _RMSNormGradQuant.apply(x, weight, eps, grad_quant_type)
+
+    if use_model_sensitive and _probe_aiter_ck_rmsnorm():
+        grad_active = torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad)
+        if grad_active:
+            if _probe_aiter_triton_rmsnorm():
+                return _RMSNorm.apply(x, weight, eps, use_model_sensitive)
+        else:
+            fn = _get_ck_rmsnorm2d_fwd()
+            x_2d = x.reshape(-1, x.shape[-1])
+            y = fn(x_2d, weight, eps, use_model_sensitive_rmsnorm=use_model_sensitive)
+            return y.reshape(x.shape)
 
     orig_shape = x.shape
     x_2d = x.reshape(-1, x.shape[-1])
@@ -254,6 +317,7 @@ def fused_add_rmsnorm(
     residual: torch.Tensor,
     weight: torch.Tensor,
     eps: float = 1e-6,
+    use_model_sensitive: int = 0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Fused residual add + RMSNorm: ``residual = x + residual; y = RMSNorm(residual)``.
 
@@ -266,6 +330,13 @@ def fused_add_rmsnorm(
         residual: Residual tensor (same shape as *x*).
         weight: RMSNorm scale ``(hidden_size,)``.
         eps: Epsilon for numerical stability.
+        use_model_sensitive: When truthy, route the no-grad path through the
+            model-sensitive (T5-like) CK ``rmsnorm2d_fwd_with_add`` kernel.
+            Defaults to ``0`` so the standard path is completely unchanged.
+            Because the fused add+RMSNorm kernels do not participate in
+            autograd, when grad is enabled this falls back to unfused
+            ``add`` + autograd-aware :func:`rmsnorm` (which itself honours
+            ``use_model_sensitive``).
 
     Returns:
         ``(normed, residual_out)`` — the normalised output and the
@@ -275,6 +346,33 @@ def fused_add_rmsnorm(
     x_2d = _to_2d(x)
     res_2d = _to_2d(residual)
     _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
+
+    if use_model_sensitive:
+        grad_active = torch.is_grad_enabled() and (
+            x.requires_grad or residual.requires_grad or weight.requires_grad
+        )
+        # Fused add+RMSNorm kernels bypass autograd → only safe with no grad.
+        if not grad_active and _probe_aiter_ck_rmsnorm():
+            try:
+                fn = _get_ck_rmsnorm2d_fwd_with_add()
+                out = torch.empty_like(x_2d)
+                res_out = torch.empty_like(res_2d)
+                fn(
+                    out,
+                    x_2d,
+                    res_2d,
+                    res_out,
+                    weight,
+                    eps,
+                    use_model_sensitive_rmsnorm=use_model_sensitive,
+                )
+                return out.reshape(orig_shape), res_out.reshape(orig_shape)
+            except _catchable as e:
+                logger.warning("fused_add_rmsnorm: model-sensitive CK failed (%s), falling back", e)
+        # grad-enabled or CK unavailable → autograd-aware unfused path.
+        res_out = x + residual
+        normed = rmsnorm(res_out, weight, eps, use_model_sensitive=use_model_sensitive)
+        return normed, res_out
 
     if _probe_aiter_fused_add_rms_norm():
         try:
@@ -600,6 +698,8 @@ class LumenRMSNorm(nn.Module):
         hidden_size: Last dimension of the input.
         eps: Epsilon for numerical stability.
         grad_quant_type: Gradient quantization format.
+        use_model_sensitive: When True, route through the model-sensitive
+            (T5-like) CK path. Only enabled by the norm patch.
 
     Example::
 
@@ -612,14 +712,22 @@ class LumenRMSNorm(nn.Module):
         hidden_size: int,
         eps: float = 1e-6,
         grad_quant_type: Optional[str] = None,
+        use_model_sensitive: bool = False,
     ):
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.grad_quant_type = grad_quant_type
+        self.use_model_sensitive = int(use_model_sensitive)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return rmsnorm(x, self.weight.to(x.dtype), self.eps, self.grad_quant_type)
+        return rmsnorm(
+            x,
+            self.weight.to(x.dtype),
+            self.eps,
+            self.grad_quant_type,
+            self.use_model_sensitive,
+        )
 
     def extra_repr(self) -> str:
         gq = f", grad_quant={self.grad_quant_type}" if self.grad_quant_type else ""

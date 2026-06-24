@@ -18,18 +18,47 @@ from typing import Optional, Tuple
 import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
-from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
-    quant_fp8_blockwise_for_act_grad_kernel,
-    quant_fp8_blockwise_kernel,
-    quant_fp8_blockwise_segment_m_kernel,
-)
-from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
-    _convert_from_mxfp8_kernel,
-    _convert_to_mxfp8_kernel,
-)
+try:
+    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+        quant_fp8_blockwise_for_act_grad_kernel,
+        quant_fp8_blockwise_kernel,
+        quant_fp8_blockwise_segment_m_kernel,
+    )
+    _BLOCKWISE_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    quant_fp8_blockwise_for_act_grad_kernel = None
+    quant_fp8_blockwise_kernel = None
+    quant_fp8_blockwise_segment_m_kernel = None
+    _BLOCKWISE_IMPORT_ERROR = exc
+try:
+    from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
+        _convert_from_mxfp8_kernel,
+        _convert_to_mxfp8_kernel,
+    )
+    _MXFP8_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    _convert_from_mxfp8_kernel = None
+    _convert_to_mxfp8_kernel = None
+    _MXFP8_IMPORT_ERROR = exc
 from torch.library import triton_op, wrap_triton
 
 logger = logging.getLogger(__name__)
+
+
+def _require_blockwise_kernel():
+    if _BLOCKWISE_IMPORT_ERROR is not None:
+        raise ModuleNotFoundError(
+            "Lumen blockwise FP8 kernels require "
+            "aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise"
+        ) from _BLOCKWISE_IMPORT_ERROR
+
+
+def _require_mxfp8_kernel():
+    if _MXFP8_IMPORT_ERROR is not None:
+        raise ModuleNotFoundError(
+            "Lumen MXFP8 kernels require "
+            "aiter.ops.triton._triton_kernels.quant.quant_mxfp8"
+        ) from _MXFP8_IMPORT_ERROR
 
 
 def is_cdna4():
@@ -77,6 +106,7 @@ def quant_fp8_blockwise_impl(
     scales_shape = (triton.cdiv(M, block_size), N) if axis == 0 else (M, triton.cdiv(N, block_size))
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
 
+    _require_blockwise_kernel()
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
     wrap_triton(quant_fp8_blockwise_kernel)[grid](
         x,
@@ -135,6 +165,7 @@ def quant_fp8_blockwise_dual_axis_impl(
     x_scales_row = torch.empty((M, triton.cdiv(N, block_size)), dtype=torch.float32, device=x.device)
     x_scales_col = torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device)
 
+    _require_blockwise_kernel()
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
     wrap_triton(quant_fp8_blockwise_for_act_grad_kernel)[grid](
         x,
@@ -181,6 +212,7 @@ def quant_fp8_blockwise_segment_m_impl(
 
     scales_shape = (triton.cdiv(M, block_size) + batch_size, N)
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
+    _require_blockwise_kernel()
     grid = (triton.cdiv(M, block_size) + seg_lens.shape[0], triton.cdiv(N, block_size))
     quant_fp8_blockwise_segment_m_kernel[grid](
         x,
@@ -255,6 +287,7 @@ def convert_to_mxfp8(
         philox_seed = random.randint(0, 2**31 - 2)
     if philox_offset is None:
         philox_offset = random.randint(0, 2**31 - 2)
+    _require_mxfp8_kernel()
     wrap_triton(_convert_to_mxfp8_kernel)[grid](
         data_hp,
         data_lp,
@@ -313,6 +346,7 @@ def convert_from_mxfp8(
 
     BLOCK_M = 64 if M >= 64 else M
     BLOCK_N = 64 if N >= 64 else N
+    _require_mxfp8_kernel()
     wrap_triton(_convert_from_mxfp8_kernel)[grid](
         data_lp,
         data_hp,

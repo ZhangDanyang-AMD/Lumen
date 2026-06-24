@@ -84,6 +84,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "lora_alpha": ("lora_alpha",),
     "lora_dropout": ("lora_dropout",),
     "use_8bit_adam": ("use_8bit_adam",),
+    "rollout": ("lumen_rollout",),
 }
 
 
@@ -151,6 +152,9 @@ class LumenConfig:
     hip_graphs: bool = False
     fp8_checkpoint: bool = False
 
+    # -- Rollout: forward-op alignment with inference engines --
+    rollout: str = ""  # "" = default Lumen ops, "ATOM" = align forward with ATOM inference
+
     # -- Tier 0: FP8 weight storage (applied before everything else) --
     fp8_param_manager: bool = False
 
@@ -205,7 +209,8 @@ class LumenConfig:
     def has_any_features(self) -> bool:
         """Return True if any Lumen feature is enabled."""
         return (
-            self.quant_config.is_quantized
+            bool(self.rollout)
+            or self.quant_config.is_quantized
             or self.lumen_norm
             or self.hf_attn_patch
             or self.lumen_linear
@@ -244,6 +249,15 @@ class LumenConfig:
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
         import torch
+
+        if self.rollout.upper() == "ATOM":
+            self._patch_norms(model, atom_mode=True)
+            self._patch_sdpa()
+            self._patch_linear(model, atom_mode=True)
+            self._patch_mlp_activation(model)
+            model._lumen_config = self
+            _rank0_print("> ATOM rollout mode: forward ops aligned with ATOM inference")
+            return None, model
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
@@ -359,9 +373,117 @@ class LumenConfig:
         )
         return model
 
-    def _patch_norms(self, model) -> None:
+    def _patch_norms(self, model, *, atom_mode: bool = False) -> None:
         import torch
-        from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
+
+        if atom_mode:
+            import os
+
+            if os.environ.get("ATOM_USE_TORCH_RMSNORM", "0") == "1":
+                _rank0_print("> ATOM rollout: ATOM_USE_TORCH_RMSNORM=1, keeping original RMSNorm")
+                return
+
+        from aiter import rmsnorm2d_fwd
+
+        class _ModelSensitiveRMSNormFn(torch.autograd.Function):
+            _logged_execution_path = False
+
+            @staticmethod
+            def forward(ctx, x, weight, eps):
+                if not _ModelSensitiveRMSNormFn._logged_execution_path:
+                    _ModelSensitiveRMSNormFn._logged_execution_path = True
+                    try:
+                        import json
+                        import os
+                        import time
+
+                        path = os.getenv("VERL_ATOM_AGENT_LOG") or os.getenv("VERL_MEMORY_AGENT_LOG")
+                        if path:
+                            os.makedirs(os.path.dirname(path), exist_ok=True)
+                            payload = {
+                                "tag": "ATOM_DIAG",
+                                "event": "rmsnorm_execution_path",
+                                "ts": time.time(),
+                                "pid": os.getpid(),
+                                "path": "lumen_model_sensitive_rmsnorm",
+                                "backend": "aiter.rmsnorm2d_fwd",
+                                "use_model_sensitive_rmsnorm": 1,
+                                "atom_mode": atom_mode,
+                                "input_dtype": str(x.dtype),
+                                "weight_dtype": str(weight.dtype),
+                                "hidden_size": int(x.shape[-1]),
+                            }
+                            with open(path, "a", encoding="utf-8") as file:
+                                file.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+                    except Exception:
+                        pass
+                ctx.eps = eps
+                x_2d = x.reshape(-1, x.shape[-1])
+                rsigma = torch.rsqrt(x_2d.float().pow(2).mean(dim=-1) + eps)
+                ctx.save_for_backward(x, weight, rsigma)
+                y = rmsnorm2d_fwd(
+                    x_2d, weight, eps, use_model_sensitive_rmsnorm=1
+                )
+                return y.reshape(x.shape)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight, rsigma = ctx.saved_tensors
+                from aiter.ops.triton.normalization.rmsnorm import _rmsnorm_backward
+
+                x_2d = x.reshape(-1, x.shape[-1])
+                go_2d = grad_output.reshape(-1, grad_output.shape[-1])
+                dx, dw = _rmsnorm_backward(go_2d, x_2d, weight, rsigma)
+                return dx.reshape(x.shape), dw, None
+
+        class _ModelSensitiveRMSNorm(torch.nn.Module):
+            def __init__(self, weight, eps):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight.data.clone())
+                self.eps = eps
+
+            def forward(self, x):
+                return _ModelSensitiveRMSNormFn.apply(x, self.weight, self.eps)
+
+        if atom_mode:
+            _ATOM_RMSNORM_CLASSES = (
+                "RMSNorm",
+                "LlamaRMSNorm",
+                "MistralRMSNorm",
+                "Qwen2RMSNorm",
+                "Qwen3RMSNorm",
+                "MegatronRMSNorm",
+                "TENorm",
+                "LumenRMSNorm",
+                "_MegatronCompatibleTLNorm",
+                "MegatronCompatibleTLNorm",
+                "_MegatronCompatibleTLRMSNorm",
+                "MegatronCompatibleTLRMSNorm",
+            )
+            count = 0
+            for _name, module in model.named_modules():
+                for attr_name, child in list(module.named_children()):
+                    cls_name = type(child).__name__
+                    if cls_name in _ATOM_RMSNORM_CLASSES:
+                        w = getattr(child, "weight", None)
+                        if w is None:
+                            w = getattr(getattr(child, "_norm", None), "weight", None)
+                        if w is None:
+                            continue
+                        eps = getattr(child, "eps", getattr(child, "variance_epsilon",
+                              getattr(child, "epsilon", 1e-6)))
+                        repl = _ModelSensitiveRMSNorm(w, eps)
+                        if w.is_meta:
+                            repl.to(device="meta")
+                        setattr(module, attr_name, repl)
+                        count += 1
+            if count:
+                _rank0_print(
+                    f"> Replaced {count} RMSNorm modules with model-sensitive aiter.rmsnorm2d_fwd"
+                )
+            return
+
+        from lumen.ops.normalization import LumenLayerNorm
 
         count = 0
         for _name, module in model.named_modules():
@@ -374,13 +496,8 @@ class LumenConfig:
                     "Qwen2RMSNorm",
                     "Qwen3RMSNorm",
                 ):
-                    hidden = child.weight.shape[0]
                     eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
-                    target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
-                    repl = LumenRMSNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
-                    if not child.weight.is_meta:
-                        repl.weight.data.copy_(child.weight.data)
-                    repl.to(target_dtype)
+                    repl = _ModelSensitiveRMSNorm(child.weight, eps)
                     if child.weight.is_meta:
                         repl.to(device="meta")
                     setattr(module, attr_name, repl)
@@ -406,7 +523,17 @@ class LumenConfig:
 
     def _patch_sdpa(self) -> None:
         """Monkey-patch ``F.scaled_dot_product_attention`` with AITER attention."""
-        from lumen.ops.attention.hf_patch import patch_sdpa
+        import os
+
+        if os.environ.get("LUMEN_ATOM_PATCH_SDPA", "1") in ("0", "false", "False", "FALSE", "no", "No", "NO"):
+            _rank0_print("> ATOM rollout: skipped SDPA patch because LUMEN_ATOM_PATCH_SDPA=0")
+            return
+
+        try:
+            from lumen.ops.attention.hf_patch import patch_sdpa
+        except ModuleNotFoundError as exc:
+            _rank0_print(f"> ATOM rollout: skipped SDPA patch because dependency is missing: {exc}")
+            return
 
         patch_sdpa()
 
@@ -420,14 +547,91 @@ class LumenConfig:
         """
         pass
 
-    def _patch_linear(self, model) -> None:
+    def _patch_linear(self, model, *, atom_mode: bool = False) -> None:
         """Replace ``nn.Linear`` forward with AITER GEMM (BF16, autograd-safe).
 
-        Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
-        configs exist, then patches forward with ``dispatch_gemm``.
+        When ``atom_mode=True``, uses ``TunedGemm().mm()`` (same as ATOM inference).
+        Otherwise uses ``dispatch_gemm`` (Lumen default dispatch).
         """
         import torch
         import torch.nn as nn
+
+        if atom_mode:
+            from aiter.tuned_gemm import TunedGemm
+
+            tgemm = TunedGemm()
+
+            class _AtomLinearFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, input, weight, bias):
+                    ctx.save_for_backward(input, weight)
+                    ctx.has_bias = bias is not None
+                    return tgemm.mm(input, weight, bias, otype=input.dtype)
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    input, weight = ctx.saved_tensors
+                    grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
+                    input_flat = input.reshape(-1, input.shape[-1])
+                    grad_input = grad_flat @ weight
+                    grad_input = grad_input.reshape(input.shape)
+                    grad_weight = grad_flat.t() @ input_flat
+                    grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
+                    return grad_input, grad_weight, grad_bias
+
+            # HF path: patch nn.Linear modules
+            count = 0
+            for _name, module in model.named_modules():
+                if isinstance(module, nn.Linear):
+
+                    def _make_atom_forward(mod):
+                        def _forward(input):
+                            return _AtomLinearFn.apply(input, mod.weight, mod.bias)
+                        return _forward
+
+                    module.forward = _make_atom_forward(module)
+                    count += 1
+
+            if count:
+                _rank0_print(f"> Replaced {count} nn.Linear forward with ATOM TunedGemm.mm()")
+
+            # Megatron path: patch _do_gemm only if model contains Lumen parallel linears
+            try:
+                from lumen.modules.parallel_linear import (
+                    LumenColumnParallelLinear,
+                    LumenRowParallelLinear,
+                )
+                has_parallel = any(
+                    isinstance(m, (LumenColumnParallelLinear, LumenRowParallelLinear))
+                    for m in model.modules()
+                )
+            except ImportError:
+                has_parallel = False
+
+            if has_parallel:
+                import lumen.modules.parallel_linear as _pl
+
+                _orig_do_gemm = _pl._do_gemm
+
+                def _atom_do_gemm(
+                    input_, weight, bias, scaling_manager, scaling_type,
+                    fp8_dtype, block_size, gradient_accumulation_fusion=False,
+                    delay_wgrad=False, deferred_wgrad=None,
+                    activation_tensor_id=None, pre_quantized_input=None,
+                ):
+                    if scaling_type != "none" or delay_wgrad:
+                        return _orig_do_gemm(
+                            input_, weight, bias, scaling_manager, scaling_type,
+                            fp8_dtype, block_size, gradient_accumulation_fusion,
+                            delay_wgrad, deferred_wgrad, activation_tensor_id,
+                            pre_quantized_input,
+                        )
+                    return tgemm.mm(input_, weight, bias, otype=input_.dtype)
+
+                _pl._do_gemm = _atom_do_gemm
+                _rank0_print("> ATOM rollout: patched parallel linear GEMM to use TunedGemm.mm()")
+
+            return
 
         self._auto_tune_bf16_gemm(model)
 
@@ -467,6 +671,84 @@ class LumenConfig:
 
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+
+    def _patch_mlp_activation(self, model) -> None:
+        """Replace HF MLP forward with ATOM's fused ``aiter.silu_and_mul``."""
+        import torch
+
+        from aiter import silu_and_mul
+
+        class _AtomSiluAndMulFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                out = torch.empty(
+                    [*x.shape[:-1], x.shape[-1] // 2],
+                    device=x.device, dtype=x.dtype,
+                )
+                silu_and_mul(out, x)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, = ctx.saved_tensors
+                d = x.shape[-1] // 2
+                gate, up = x[..., :d], x[..., d:]
+                sig = torch.sigmoid(gate)
+                d_gate = grad_output * up * (sig + gate * sig * (1.0 - sig))
+                d_up = grad_output * (gate * sig)
+                return torch.cat([d_gate, d_up], dim=-1)
+
+        # HF path: modules with gate_proj/up_proj/down_proj/act_fn (e.g. Qwen3MLP)
+        hf_count = 0
+        for _name, module in model.named_modules():
+            if (hasattr(module, 'gate_proj') and hasattr(module, 'up_proj')
+                    and hasattr(module, 'down_proj') and hasattr(module, 'act_fn')):
+
+                def _make_atom_mlp_forward(m):
+                    def _forward(x):
+                        gate = m.gate_proj(x)
+                        up = m.up_proj(x)
+                        gate_up = torch.cat([gate, up], dim=-1)
+                        hidden = _AtomSiluAndMulFn.apply(gate_up)
+                        return m.down_proj(hidden)
+                    return _forward
+
+                module.forward = _make_atom_mlp_forward(module)
+                hf_count += 1
+
+        if hf_count:
+            _rank0_print(f"> Replaced {hf_count} HF MLP forward with ATOM fused silu_and_mul")
+
+        # Megatron path: MLP with linear_fc1/linear_fc2 + gated_linear_unit
+        meg_count = 0
+        try:
+            from megatron.core.transformer.mlp import MLP as _MegatronMLP
+        except ImportError:
+            _MegatronMLP = None
+
+        if _MegatronMLP is not None:
+            for _name, module in model.named_modules():
+                if not isinstance(module, _MegatronMLP):
+                    continue
+                if not getattr(module.config, "gated_linear_unit", False):
+                    continue
+
+                def _make_atom_meg_mlp_forward(m):
+                    def _forward(hidden_states, per_token_scale=None):
+                        intermediate, bias = m.linear_fc1(hidden_states)
+                        if bias is not None:
+                            intermediate = intermediate + bias
+                        intermediate = _AtomSiluAndMulFn.apply(intermediate)
+                        output, output_bias = m.linear_fc2(intermediate)
+                        return output, output_bias
+                    return _forward
+
+                module.forward = _make_atom_meg_mlp_forward(module)
+                meg_count += 1
+
+        if meg_count:
+            _rank0_print(f"> Replaced {meg_count} Megatron MLP forward with ATOM fused silu_and_mul")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.

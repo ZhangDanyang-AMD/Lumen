@@ -53,15 +53,19 @@ class VerlLumenArgs:
     linear_fp8: bool = False
     linear_fp8_format: str = "fp8_e4m3"
     linear_fp8_scaling: str = "delayed"
+    linear_fp8_block_size: int = 128
     linear_fp8_activation: bool = True
     linear_fp8_wgrad: bool = True
     linear_fp8_reduce_amax: bool = False
 
     lumen_norm: bool = False
     lumen_fp8_attn: str = "none"
+    lumen_fp8_quant_type: str = "blockwise"
+    lumen_attn_backend: str = "auto"
     lumen_fp8_activation_store: bool = False
     lumen_fp8_param_gather: bool = False
     lumen_fp8_weight_cache: bool = False
+    lumen_rollout: str = ""
 
     fp8_param_manager: bool = False
     use_8bit_adam: bool = False
@@ -120,10 +124,11 @@ def from_verl_config(cfg: Any) -> VerlLumenArgs:
         kwargs["lora_alpha"] = lora_cfg.get("alpha", 32.0)
 
     for key in (
-        "linear_fp8", "linear_fp8_format", "linear_fp8_scaling",
-        "lumen_norm", "lumen_fp8_attn", "lumen_fp8_activation_store",
+        "linear_fp8", "linear_fp8_format", "linear_fp8_scaling", "linear_fp8_block_size",
+        "lumen_norm", "lumen_fp8_attn", "lumen_fp8_quant_type", "lumen_attn_backend",
+        "lumen_fp8_activation_store",
         "lumen_fp8_param_gather", "lumen_fp8_weight_cache",
-        "fp8_param_manager", "use_8bit_adam",
+        "lumen_rollout", "fp8_param_manager", "use_8bit_adam",
     ):
         if key in lumen_cfg:
             kwargs[key] = lumen_cfg[key]

@@ -24,8 +24,25 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _resolve_verl_fsdp_module():
+    """Return the VERL module that owns ``apply_fsdp2``.
+
+    VERL moved the FSDP2 helper from ``verl.workers.fsdp_workers`` to
+    ``verl.workers.engine.fsdp.transformer_impl``.  Support both layouts so
+    the Lumen entrypoint keeps working across the versions used in this repo.
+    """
+    try:
+        import verl.workers.fsdp_workers as fsdp_module
+
+        return fsdp_module
+    except ImportError:
+        from verl.workers.engine.fsdp import transformer_impl as fsdp_module
+
+        return fsdp_module
+
+
 def patch_verl_fsdp_workers(lumen_args):
-    """Monkey-patch verl.workers.fsdp_workers to inject Lumen optimizations.
+    """Monkey-patch VERL FSDP workers to inject Lumen optimizations.
 
     Hooks into apply_fsdp2 to inject Lumen FP8/norm/attn optimizations
     right before FSDP2 sharding is applied to the actor model.
@@ -33,7 +50,7 @@ def patch_verl_fsdp_workers(lumen_args):
     When fp8_weight_cache is enabled, also hooks into the optimizer
     creation to register post-step hooks that refresh FP8 weight caches.
     """
-    import verl.workers.fsdp_workers as fsdp_module
+    fsdp_module = _resolve_verl_fsdp_module()
 
     _original_apply_fsdp2 = fsdp_module.apply_fsdp2
 
@@ -181,13 +198,22 @@ def main():
     from lumen.rl.verl.config import VerlLumenArgs
 
     lumen_fp8 = os.environ.get("LUMEN_FP8", "0") == "1"
+    lumen_fp8_format = os.environ.get("LUMEN_FP8_FORMAT", "fp8_e4m3")
+    if lumen_fp8_format == "fp8":
+        lumen_fp8_format = "fp8_e4m3"
+    lumen_fp8_scaling = os.environ.get("LUMEN_FP8_SCALING", "delayed")
+    lumen_fp8_block_size = int(os.environ.get("LUMEN_FP8_BLOCK_SIZE", "128"))
     lumen_norm = os.environ.get("LUMEN_NORM", "0") == "1"
     lumen_fp8_attn = os.environ.get("LUMEN_FP8_ATTN", "none")
+    lumen_fp8_quant_type = os.environ.get("LUMEN_FP8_QUANT_TYPE", "blockwise")
+    lumen_attn_backend = os.environ.get("LUMEN_ATTN_BACKEND", "auto")
     lumen_fp8_weight_cache = os.environ.get("LUMEN_FP8_WEIGHT_CACHE", "0") == "1"
     lumen_fp8_activation_store = os.environ.get("LUMEN_FP8_ACTIVATION_STORE", "0") == "1"
     lumen_fp8_param_gather = os.environ.get("LUMEN_FP8_PARAM_GATHER", "0") == "1"
     fp8_param_manager = os.environ.get("FP8_PARAM_MANAGER", "0") == "1"
     use_8bit_adam = os.environ.get("USE_8BIT_ADAM", "0") == "1"
+    lumen_rollout = os.environ.get("LUMEN_ROLLOUT", "")
+    force_lumen_fsdp = os.environ.get("LUMEN_FORCE_FSDP", "0") == "1"
     model_path = os.environ.get("MODEL_NAME", "")
 
     lora_rank = int(os.environ.get("LORA_RANK", "0"))
@@ -198,17 +224,23 @@ def main():
         lumen_fp8 or lumen_norm or lumen_fp8_attn != "none"
         or lumen_fp8_weight_cache or lumen_fp8_activation_store
         or lumen_fp8_param_gather or fp8_param_manager
-        or lora_rank > 0
+        or bool(lumen_rollout) or force_lumen_fsdp or lora_rank > 0
     )
     if any_lumen:
         lumen_args = VerlLumenArgs(
             model_name_or_path=model_path,
             linear_fp8=lumen_fp8,
+            linear_fp8_format=lumen_fp8_format,
+            linear_fp8_scaling=lumen_fp8_scaling,
+            linear_fp8_block_size=lumen_fp8_block_size,
             lumen_norm=lumen_norm,
             lumen_fp8_attn=lumen_fp8_attn,
+            lumen_fp8_quant_type=lumen_fp8_quant_type,
+            lumen_attn_backend=lumen_attn_backend,
             lumen_fp8_weight_cache=lumen_fp8_weight_cache,
             lumen_fp8_activation_store=lumen_fp8_activation_store,
             lumen_fp8_param_gather=lumen_fp8_param_gather,
+            lumen_rollout=lumen_rollout,
             fp8_param_manager=fp8_param_manager,
             use_8bit_adam=use_8bit_adam,
         )
@@ -218,7 +250,17 @@ def main():
     if lora_rank > 0:
         _patch_megatron_lora(lora_rank, lora_alpha, lora_dropout)
 
-    from verl.trainer.main_ppo import main as verl_main
+    # Select the downstream VERL training entrypoint.  Default keeps the
+    # standard PPO trainer; ``LUMEN_VERL_MAIN=dapo`` delegates to
+    # ``recipe.dapo.main_dapo`` so DAPO dynamic sampling (filter_groups) is
+    # preserved while Lumen worker patches stay active.  The Lumen monkey-patch
+    # targets ``verl.workers`` which both trainers share, so it applies either way.
+    verl_main_target = os.environ.get("LUMEN_VERL_MAIN", "ppo").strip().lower()
+    if verl_main_target == "dapo":
+        logger.info("> Lumen entry: delegating to recipe.dapo.main_dapo (DAPO dynamic sampling)")
+        from recipe.dapo.main_dapo import main as verl_main
+    else:
+        from verl.trainer.main_ppo import main as verl_main
     verl_main()
 
 
