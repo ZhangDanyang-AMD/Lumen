@@ -24,10 +24,10 @@ export VAL_DATA="${VAL_DATA:-/data/data/sft/validation-00000-of-00001.jsonl}"
 export SEQ_LEN="${SEQ_LEN:-16384}"
 export MBS="${MBS:-1}"                    # micro batch per GPU
 export GRAD_ACCUM="${GRAD_ACCUM:-1}"      # GBS = 1 × 8 × 1 = 8
-export MAX_STEPS="${MAX_STEPS:-1094}"
+export MAX_STEPS="${MAX_STEPS:-1459}"       # 3889 / GBS=8 × 3 epochs (v5e: boosted correct kernels)
 export LR="${LR:-1e-5}"
 export MIN_LR="${MIN_LR:-0}"
-export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-55}"  # ~5% of 1094
+export LR_WARMUP_STEPS="${LR_WARMUP_STEPS:-73}"  # ~5% of 1459
 export WEIGHT_DECAY="${WEIGHT_DECAY:-0.01}"
 export MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 

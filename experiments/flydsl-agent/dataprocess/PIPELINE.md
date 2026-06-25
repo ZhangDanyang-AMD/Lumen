@@ -1,6 +1,6 @@
-# FlyDSL Agent Dataset Pipeline (v3.0)
+# FlyDSL Agent Dataset Pipeline (v5e)
 
-> 三源数据 → 5 阶段处理 → 三阶段训练数据 + 机密保护
+> 九轮 SFT 迭代 → Overall 74.1%, 沙箱编译 21.9% → 转入 RFT
 
 ## 1. 整体架构
 
@@ -9,228 +9,144 @@ FlyDSL + aiter + gpu-docs
          │
     ┌────┴────┐
     ▼         ▼
- manifest  gpu-docs (§13 机密)
+ manifest  gpu-docs (机密)
     │         │
     ▼         ▼
- CPT/SFT/RL  拒答 SFT (135 对)
+ CPT/SFT/RL  拒答 SFT
     │
-    ├── GPU benchmark → quality grades → CPT weights
-    └── 5-model AI consensus → +375 SFT, +2128 RL
+    ├── v2: kernel extraction + resampling
+    ├── v3: import correction
+    ├── v4: hw-feature cleanup
+    ├── v5/v5b: gfx950 kernels + import chains + API reference
+    ├── v5c/v5d: module structure digest + negative list
+    └── v5e: correct kernel boost (positive flooding)
+         │
+         ▼
+    SFT v5e (3,889 samples, 52% kernel, sandbox 21.9%)
+         │
+         ▼
+    RFT Stage A (100 specs × 16 candidates → verified → short SFT)
 ```
 
 | 产出 | 数量 | 说明 |
 |------|------|------|
-| CPT | 1,967 docs (8.5M tokens) | 领域预训练，加权采样 |
-| SFT | 2,808 train + 264 val | 指令跟随 + 拒答边界 |
-| RL | 2,878 specs | GRPO 任务规格 |
+| SFT v5e | 3,889 train + 264 val | 52% 正确 kernel 代码，Overall 74.1% |
+| RL specs | 2,563 train + 287 val | gfx950 213 个 spec |
+| Sandbox | 21.9% (42/192) | 11/12 算子通过 |
 
 ---
 
-## 2. 数据源与标注
+## 2. SFT 九轮迭代总结
 
-**三个源仓库**：FlyDSL（DSL框架+kernel）、aiter（Triton kernel+ops）、gpu-docs（AMD 硬件规格）
+### 数据质量问题与解决
 
-**标注分层**：
-- Layer 1（~80%）：`process_all_v2.py` 基于路径、正则、代码结构的确定性标注
-- Layer 2（~15%）：5 个 AI 模型并行标注 → 多数投票共识（`consensus_annotate.py`）
-- Layer 3（~5%）：模型分歧 → 标记 `needs_human_review`
+| 版本 | 发现的问题 | 解决方法 | 效果 |
+|------|-----------|---------|------|
+| v1→v2 | 82% 非代码数据 | kernel 提取 + 加权采样 | Overall 56%→72% |
+| v2→v3 | 81% import 幻觉 | 60 条 import 纠错 ×3 | val_loss 改善 |
+| v3→v4 | 76% hw-feature 错配 | 丢弃 gfx1250 特性 on gfx950 | 沙箱 0%→0.5% |
+| v4→v5 | 数据量减少致退化 | +156 真实 gfx950 kernel | Overall 60%→69% |
+| v5→v5b | 二级 API 幻觉 | import 链条导航 + API 参考 | 沙箱 0%→4.7% |
+| v5b→v5c | 模块结构未知 | 30 模块完整摘要 | 沙箱 4.7%→10.4% |
+| v5c→v5d | 新幻觉不断冒出 | 扩展负例 20→58 | 打地鼠失败 (9.9%) |
+| **v5d→v5e** | **负例无底洞** | **正例洪水：kernel 比例 35%→52%** | **沙箱 9.9%→21.9%** |
 
-**5-model 共识**：Rule-based + GPT-5.5 + Claude Sonnet + GPT Codex + Claude Opus → 69% operator 一致率
+### 关键教训
 
----
-
-## 3. CPT 设计逻辑
-
-**核心思路**：通过加权采样让模型多看高质量代码，少看低价值文件。
-
-| 内容类型 | 权重 | 依据 |
-|---------|------|------|
-| Claude expert skills | 7.5x | 信息密度最高 |
-| 知识图谱 CLAUDE.md | 6.0x | 仓库导航 |
-| Gold kernel（GPU 验证） | 5.4x | 生产级参考代码 |
-| FlyDSL 文档 | 4.5x | 官方 API |
-| 框架源码 | 3.0x | 编译器+运行时 |
-| Silver kernel | 2.0x | 算法参考 |
-| **gpu-docs 硬件规格** | **0.5x** | **内化但不过度记忆（§13.3）** |
-| 构建脚本 | 0.4x | 低优先级 |
-
-权重公式：`priority_weight × grade_weight × type_weight`
-
-**GPU benchmark grading**：8×MI350X 并行测试 → 755 tests pass → Gold(14)/Silver(80)/Bronze(16) 分级 → 反馈到 CPT 权重
+1. **正例 > 负例** — v5d 证明穷举 "does not exist" 是打地鼠（消灭 `flyc.kernel_context`，冒出 `flyc.load`）。v5e 用正确 kernel 代码洪水（247 ×3 + mini ×5）让沙箱编译率翻倍。
+2. **`from flydsl.expr import fx` 是 SFT 天花板** — 横跨 v5c/v5d/v5e 均为 17 次，模型从预训练继承的 Python 惯性模式，SFT 数据量级无法翻转。但已验证这 17 个候选即使修了 import 也全部因后续幻觉失败——说明不值得继续修。
+3. **错误数据比没有数据更有害** — v4 删除了 24% 数据，关键指标反而改善。
 
 ---
 
-## 4. SFT 设计逻辑
+## 3. v5e 数据组成
 
-**核心思路**：15 种来源覆盖不同指令类型，确保模型能处理各种 kernel 编写请求。
+### 来源分布
 
-| 来源 | 数量 | 逻辑 |
+| 来源 | 数量 | 说明 |
 |------|------|------|
-| augmentation_hardware | 766 | gfx942↔gfx950↔gfx1250 硬件适配变体 |
-| documentation_qa | 669 | 文档→问答对 |
-| kernel_reverse_annotation | 388 | 代码→指令（3种风格/kernel） |
-| ai_annotated_instruction | 375 | 5-model 共识生成的指令 |
-| **refusal_boundary** | **135** | **拒答规格提取，重定向到写 kernel（§13）** |
-| augmentation_tile/pipeline | 178 | tile size / pipeline 深度变体 |
-| 其他 | 297 | git history, test params, configs 等 |
-| **allowed_explanation** | **12** | **防过度拒答（合法的模糊解释）** |
+| augmentation_tile | ~266 | tile size 变体 |
+| augmentation_pipeline | ~195 | pipeline 深度变体 |
+| boost_correct_kernel | **741** | **247 去重正确 kernel ×3 prompt 变体 (v5e 新增)** |
+| module_digest_negative | 174 | 58 种幻觉 ×3 (v5d) |
+| import_fix_template/correction | ~120 | import 纠错 |
+| kernel_reverse_annotation | ~97 | 代码→指令 |
+| kernel_code_synthesis | ~79 | CPT 提取的 kernel |
+| boost_mini_kernel | **40** | **8 个精简模板 ×5 (v5e 新增)** |
+| module_digest_kernel/qa | ~57 | 模块摘要 kernel + QA |
+| 其他 | ~2120 | 文档QA、gfx950 kernel、Gluon 教程等 |
+| **总计** | **3,889** | |
 
-**拒答占比**：4.8%（目标 ~4%），确保安全边界而不损害正常能力。
+### 正确 import 模式覆盖
+
+```
+import flydsl.compiler as flyc    — ~1800 条 assistant 中包含
+import flydsl.expr as fx          — ~1800 条
+@flyc.kernel                      — ~1800 条
+@flyc.jit                         — ~1600 条
+from flydsl.expr import arith     — ~800 条
+SmemAllocator                     — ~600 条
+rocdl                             — ~700 条
+```
 
 ---
 
-## 4b. SFT v2 数据增强 (enhance_sft_data.py)
-
-> SFT v1 实验发现：2,808 条训练数据中仅 18% 包含实际 FlyDSL kernel 代码
-> (`@flyc.kernel` 出现率 13%)，82% 是文档问答、拒绝回答等非代码内容。
-> 导致 SFT 模型在 L4-L5 级 kernel 生成上表现极差。
-
-### 问题诊断
+## 4. 沙箱编译演进
 
 ```
-SFT v1 训练数据 (2,808 samples):
-  含 @flyc.kernel:  354/2808 (13%) ← 太少
-  含 fx.* API:      471/2808 (17%)
-  实际 kernel 代码: 500/2808 (18%)
-  QA / 非代码:     2308/2808 (82%) ← 占比过高
+v2:  0/208 = 0%      — 81% import 幻觉
+v4:  1/192 = 0.5%    — 首次突破
+v5b: 9/192 = 4.7%    — import 链条有效
+v5c: 20/192 = 10.4%  — 模块摘要翻倍 ✓ (>10% 目标)
+v5d: 19/192 = 9.9%   — 负例无效
+v5e: 42/192 = 21.9%  — 正例洪水再翻倍 ✓✓
 
-SFT v1 Benchmark 结果:
-  @flyc.kernel 使用率: 40% (目标 >80%)
-  Valid Python:        36% (目标 >70%)
-  L4-L5 级 API Score:  25-26% (目标 >50%)
+按算子 (v5e):
+  mla: 6, moe: 5, softmax: 5, rope: 5, custom: 5
+  gemm: 4, layernorm: 4, topk: 3, rmsnorm: 2
+  flash_attn: 2, quant: 1, paged_attn: 0
 ```
-
-### 两步增强
-
-**Step 1: 从 CPT 数据提取真实 kernel 代码生成 SFT 对**
-
-从 CPT 语料中提取 54 个 FlyDSL kernel 源文件（`content_type=kernel_impl`），
-每个生成 2 条 SFT 训练对（precise + natural 两种指令风格），共 108 条新数据。
-
-```python
-# 来源: CPT 中的 kernel_impl 文件
-# 输出: {"messages": [system, user_instruction, assistant_code], "source": "kernel_code_synthesis"}
-# 两种风格:
-#   precise: "Write a FlyDSL gemm kernel for AMD gfx950..."
-#   natural: "Implement a high-performance matrix multiplication targeting MI350X..."
-```
-
-**Step 2: 加权重采样**
-
-对 2,808 原始 + 108 新数据 = 2,916 条做加权随机采样：
-
-| 来源 | 采样权重 | 原因 |
-|------|---------|------|
-| augmentation_tile (75% kernel) | 5.0x | 最高质量 kernel 代码 |
-| augmentation_pipeline (75% kernel) | 5.0x | 最高质量 kernel 代码 |
-| docs/skill_direct_extraction (~70%) | 4.0x | 完整代码文档 |
-| kernel_code_synthesis (100% kernel) | 自带高权重 | 新增 kernel 数据 |
-| kernel_reverse_annotation | 2.0x | 代码→指令 |
-| documentation_qa (8% kernel) | 0.3x | 降低非代码 QA |
-| refusal_boundary (0% kernel) | 0.1x | 只保留少量拒答 |
-
-额外规则：assistant 回复包含 kernel 代码的样本再 ×2。
-
-### 结果
-
-```
-SFT v2 Dataset: 2,916 samples
-  Kernel code:   57% → 59%  [was 19%]
-  @flyc.kernel:  45%         [was 13%]
-  fx.* API:      53%         [was 17%]
-  import flydsl: 58%         [was 17%]
-```
-
-| 来源 | v1 占比 | v2 占比 | 变化 |
-|------|--------|--------|------|
-| augmentation_tile | 3.7% | 22.9% | ↑ 高质量 kernel 大幅上升 |
-| augmentation_pipeline | 2.6% | 14.9% | ↑ |
-| kernel_code_synthesis | 0% | 4.6% | 新增 |
-| documentation_qa | 23.8% | 4.1% | ↓ 非代码 QA 大幅下降 |
-| refusal_boundary | 4.8% | 0.2% | ↓ |
-
-### 产物
-
-| 文件 | 位置 |
-|------|------|
-| 增强后数据集 | `flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl` (2,916 samples) |
-| 原始备份 | `flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl.v1.bak` |
-| 新增 kernel 对 | `flydsl-agent-metadata/sft_v2_generated.jsonl` (108 pairs) |
-| 采样权重配置 | `flydsl-agent-metadata/sft_v2_weights.json` |
 
 ---
 
-## 5. RL 设计逻辑
-
-**核心思路**：只给任务规格，不给参考答案。模型生成 → GPU 编译+测试 → 奖励信号。
-
-奖励函数：`0.3 × compiles + 0.3 × correct + 0.4 × efficiency`
-
-4 个来源：AI annotation shapes（2,128）+ manifest（440）+ tuned configs（160）+ exploration（150）
-
----
-
-## 6. gpu-docs 机密保护（Plan §13）
-
-### 设计决策
-
-| 方案 | Kernel 质量 | 防泄露 | 选用 |
-|------|-----------|--------|------|
-| ~~加密训练数据~~ | 破坏（模型学不到） | ✅ | ❌ |
-| ~~重度蒸馏~~ | 降级 | ✅ (常量仍泄露) | ❌ |
-| **全精度 + 拒答 SFT** | **最优** | **行为+中间件** | **✅** |
-
-### 训练时
-
-- **CPT**：gpu-docs 全精度明文，weight 0.5x → 模型内化硬件知识，不过度记忆原文
-- **SFT**：135 对拒答数据覆盖 10 种攻击模式 × 15 个硬件主题（中英文、换措辞、分步、角色扮演、编码绕过）
-- **反例**：12 对合法模糊解释（"为什么用 xor16?" → 解释优化思路，不给精确数值）
-- **删除**：gpu_docs_qa 2,625 对（教模型回答规格问题 = 错误行为）
-
-### 推理时（4 层防御）
+## 5. RFT 阶段 (进行中)
 
 ```
-请求 → [A: Query Classifier] → [B: System Prompt] → [C: RAG 隔离] → 模型生成 → [D: Output Filter] → 返回
+v5e model (sandbox 21.9%)
+    │
+    ▼ generate_candidates.py (84 specs × 16 = 1344 candidates)
+    │
+    ▼ verify_candidates.py --use-sandbox (~290 pass)
+    │
+    ▼ build_rft_dataset.py (merge with v5e SFT data, ×2 repeat)
+    │
+    ▼ train_sft.py (1 epoch, lr=5e-6, on v5e merged model)
+    │
+    ▼ RFT v1 model → benchmark + sandbox eval
 ```
 
-- **A**：正则 + 语义分类，拦截规格查询/ISA 请求/prompt injection
-- **B**：每个会话注入安全约束（禁精确数值，允许代码常量和模糊解释）
-- **C**：gpu-docs 不入向量索引，检索永远不会命中
-- **D**：散文中精确数值替换为模糊描述，**代码块不动**
-
-### 能力边界
-
-| 威胁 | 能防？ | 机制 |
-|------|--------|------|
-| 逐字提取文档 | ✅ | 拒答训练 + classifier |
-| 当规格问答机 | ✅ | 拒答训练 + classifier |
-| RAG 泄露原文 | ✅ | 不在索引中 |
-| 从 kernel 常量反推参数 | ❌ (可接受) | 代码即知识，固有限制 |
-
-### 验收指标
-
-| 指标 | 目标 |
-|------|------|
-| 攻击拦截率 | ≥ 95% |
-| 合法请求误杀率 | ≤ 5% |
-| RAG 泄露 | 0 |
-| 散文数值泄露 | ≤ 2% |
+目标: 沙箱编译率 > 30%
 
 ---
 
-## 7. 脚本参考
+## 6. 脚本参考
 
-| 脚本 | 职责 |
-|------|------|
-| `process_all_v2.py` | 主管线：扫描→manifest→CPT/SFT/RL |
-| `benchmark_filter.py` | GPU 质量分级（编译→正确性→评级） |
-| `perf_benchmark.py` | 性能基准测试（延迟、TFLOPS、roofline） |
-| `consensus_annotate.py` | 5-model 标注 + 投票 + 合入 |
-| `rebuild_with_annotations.py` | 用 AI 标注结果重建数据集 |
-| `validate_dataset.py` | 格式/内容/去重/分布校验 |
-| `package_hf_dataset.py` | 打包为 HuggingFace 格式 |
-| `enhance_sft_data.py` | SFT v2: kernel 代码提取 + 加权重采样 |
+| 阶段 | 脚本 | 职责 |
+|------|------|------|
+| Base | `process_all_v2.py` | 主管线：扫描→manifest→CPT/SFT/RL |
+| v2 | `enhance_sft_data.py` | kernel 提取 + 加权采样 |
+| v3 | `fix_import_sft.py` | import 纠错对 |
+| v4 | `clean_hw_features.py` | hw-feature 错配清洗 |
+| v5 | `enhance_sft_v5.py` | gfx950 kernel + API 纠正 |
+| v5 | `add_gluon_tutorials.py` | Gluon GEMM 教程 |
+| v5b | `fix_import_chain.py` | import 链条导航数据 |
+| v5b | `fix_api_hallucination.py` | API 参考 + 幻觉纠错 |
+| v5c/d | `add_module_digest.py` | 30 模块结构摘要 + 负例列表 |
+| v5e | `boost_correct_kernels.py` | 正确 kernel 模式增强 |
+| RFT | `rft-stage1/generate_candidates.py` | 候选生成 |
+| RFT | `rft-stage1/verify_candidates.py` | 沙箱验证 |
+| RFT | `rft-stage1/build_rft_dataset.py` | 构建 RFT 数据集 |
 
 ---
 
-*v3.1 · 2026-06-18 · 新增 SFT v2 数据增强 (§4b) · 遵循 [plan.md](../../plan.md) §4 + §13*
+*v5e · 2026-06-25 · SFT 阶段完成，转入 RFT*

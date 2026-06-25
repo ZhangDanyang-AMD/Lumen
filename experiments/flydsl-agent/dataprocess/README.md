@@ -1,12 +1,14 @@
-# FlyDSL Agent Data Processing Pipeline (v3.0)
+# FlyDSL Agent Data Processing Pipeline (v5e)
 
 Processes [FlyDSL](https://github.com/ROCm/FlyDSL), [aiter](https://github.com/ROCm/aiter),
-and AMD GPU architecture docs (gpu-docs) to generate training data for the FlyDSL GPU kernel
-code generation agent. Produces three training splits:
+and AMD GPU docs to generate training data for the FlyDSL GPU kernel code generation agent.
 
-- **CPT** — domain corpus for continued pre-training
-- **SFT** — instruction-response pairs + refusal boundary training (§13)
-- **RL** — task specs for GRPO-based kernel quality optimization
+## Current Status
+
+| Stage | Model | Overall | Sandbox Compile | HuggingFace |
+|-------|-------|---------|-----------------|-------------|
+| **SFT v5e** | Qwen2.5-Coder-32B | **74.1%** | **21.9% (42/192)** | [Zhangdanyang/Qwen2.5-Coder-SFT-v5e](https://huggingface.co/Zhangdanyang/Qwen2.5-Coder-SFT-v5e) |
+| RFT v1 | (in progress) | — | — | — |
 
 ## Pipeline Architecture
 
@@ -14,152 +16,100 @@ code generation agent. Produces three training splits:
 FlyDSL + aiter + gpu-docs
          │
          ▼
-  process_all_v2.py ─────────────────── Main pipeline (manifest → CPT/SFT/RL)
+  process_all_v2.py ────── Base pipeline: manifest → CPT/SFT/RL raw data
          │
-    ┌────┼────────────────────┐
-    ▼    ▼                    ▼
-  CPT  SFT  RL           manifest.json
-    │    │    │                │
-    ▼    ▼    ▼                ▼
-  validate_dataset.py    benchmark_filter.py ─── GPU quality grading
-         │                     │
-         ▼                     ▼
-  package_hf_dataset.py   graded_manifest.json
-         │                     │
-         ▼                     ▼
-  flydsl-agent-dataset/   ai_annotate.py ──────── Prompt generation
-                               │
-                               ▼
-                          consensus_annotate.py ── 5-model voting
-                               │
-                               ▼
-                          rebuild_with_annotations.py
+         ├── enhance_sft_data.py ─────── v2: kernel extraction + resampling
+         ├── fix_import_sft.py ───────── v3: import correction pairs
+         ├── clean_hw_features.py ────── v4: hw-feature mismatch cleanup
+         ├── enhance_sft_v5.py ───────── v5: gfx950 kernels + API fixes
+         ├── add_gluon_tutorials.py ──── v5: Gluon GEMM optimization tutorials
+         ├── fix_import_chain.py ─────── v5b: import chain navigation
+         ├── fix_api_hallucination.py ── v5b: API reference + hallucination fixes
+         ├── add_module_digest.py ────── v5c/v5d: 30-module structure digest
+         └── boost_correct_kernels.py ── v5e: correct kernel pattern boost
+                  │
+                  ▼
+         SFT v5e dataset (3,889 samples, 52% correct kernel code)
+                  │
+                  ▼
+         RFT pipeline (rft-stage1/)
+           generate_candidates.py → verify_candidates.py → build_rft_dataset.py
 ```
 
 ## Scripts
 
-### Core Pipeline
+### Core Pipeline (v1-v2 era)
 
-| Script | Lines | Description |
-|--------|------:|-------------|
-| `process_all_v2.py` | 1,410 | **Main pipeline**: dual-repo scan → manifest → CPT/SFT/RL generation (sources A-I) |
-| `validate_dataset.py` | 315 | Format, content, dedup, distribution, and consistency checks |
-| `package_hf_dataset.py` | 345 | Package into HuggingFace dataset repo with README card |
-| `taxonomy.yaml` | 66 | Label taxonomy: operators, hardware, features, complexity |
+| Script | Description |
+|--------|-------------|
+| `process_all_v2.py` | Main pipeline: dual-repo scan → manifest → CPT/SFT/RL |
+| `validate_dataset.py` | Format, content, dedup, distribution checks |
+| `package_hf_dataset.py` | Package into HuggingFace dataset repo |
+| `taxonomy.yaml` | Label taxonomy: operators, hardware, features |
 
 ### GPU Benchmarking
 
-| Script | Lines | Description |
-|--------|------:|-------------|
-| `benchmark_filter.py` | 270 | 3-gate quality filter: compile → correctness → grade assignment |
-| `perf_benchmark.py` | 298 | Performance benchmarks: latency, TFLOPS, roofline efficiency |
-| `update_manifest_perf.py` | 168 | Merge benchmark results into manifest |
+| Script | Description |
+|--------|-------------|
+| `benchmark_filter.py` | 3-gate quality filter: compile → correctness → grade |
+| `perf_benchmark.py` | Performance benchmarks: latency, TFLOPS, roofline |
+| `update_manifest_perf.py` | Merge benchmark results into manifest |
 
 ### Multi-Model AI Annotation
 
-| Script | Lines | Description |
-|--------|------:|-------------|
-| `ai_annotate.py` | 218 | Generate structured annotation prompts from manifest |
-| `batch_annotate_cursor.py` | 246 | Rule-based expert annotator (Model 0) |
-| `consensus_annotate.py` | 451 | Multi-model annotation + majority voting + manifest merge |
-| `rebuild_with_annotations.py` | 211 | Rebuild datasets with AI-enriched metadata |
+| Script | Description |
+|--------|-------------|
+| `ai_annotate.py` | Generate annotation prompts from manifest |
+| `batch_annotate_cursor.py` | Rule-based expert annotator |
+| `consensus_annotate.py` | Multi-model annotation + majority voting |
+| `rebuild_with_annotations.py` | Rebuild datasets with AI-enriched metadata |
 
-### SFT Data Enhancement (v2)
+### SFT Data Enhancement (v2 → v5e)
 
-| Script | Lines | Description |
-|--------|------:|-------------|
-| `enhance_sft_data.py` | 230 | SFT v2: kernel code extraction + weighted resampling (19% → 59% kernel) |
+| Script | Version | Description |
+|--------|---------|-------------|
+| `enhance_sft_data.py` | v2 | Kernel extraction + weighted resampling (18% → 59% kernel) |
+| `fix_import_sft.py` | v3 | 60 import correction pairs (81% import hallucination fix) |
+| `clean_hw_features.py` | v4 | Remove gfx1250 features (wmma/tdm/mxfp4) from gfx950 samples |
+| `enhance_sft_v5.py` | v5 | +156 real gfx950 kernels, no-markdown templates, API type fixes |
+| `add_gluon_tutorials.py` | v5 | Gluon GEMM v0→v9 progressive optimization tutorials |
+| `fix_import_chain.py` | v5b | Import chain navigation: "need X → which module → how to import" |
+| `fix_api_hallucination.py` | v5b | Module API reference + hallucination correction pairs |
+| `add_module_digest.py` | v5c/v5d | Complete 30-module structure digest + exhaustive "does not exist" list |
+| `boost_correct_kernels.py` | v5e | 247 correct kernels ×3 prompts + 8 mini-kernels ×5 + flyc boundary QA |
 
 ### Orchestration
 
-| Script | Lines | Description |
-|--------|------:|-------------|
-| `run_in_docker.sh` | 73 | Docker orchestrator: LLVM → FlyDSL → benchmark |
-| `run_consensus_pipeline.sh` | 150 | One-click 5-model annotation pipeline |
-| `Dockerfile` | 26 | Container image for the pipeline |
+| Script | Description |
+|--------|-------------|
+| `run_in_docker.sh` | Docker orchestrator for base pipeline |
+| `run_consensus_pipeline.sh` | One-click 5-model annotation pipeline |
+| `Dockerfile` | Container image for the pipeline |
 
-**Total: 16 active files, ~4,480 lines**
+## SFT Version History
 
-> Archived v1 scripts (superseded by `process_all_v2.py`) are in `_archived_v1/`.
+| Version | Samples | Kernel% | Overall | Sandbox | Key Change |
+|---------|---------|---------|---------|---------|------------|
+| v1 | 2,808 | 18% | 56% | — | Baseline |
+| v2 | 2,916 | 59% | 72% | 0% | Kernel extraction + resampling |
+| v3 | 3,096 | 60% | — | 0% | Import correction pairs |
+| v4 | 2,344 | 55% | 60% | 0.5% | hw-feature mismatch cleanup |
+| v5 | 2,596 | 58% | 69% | 0% | Real gfx950 kernels |
+| v5b | 2,792 | 60% | 76.5% | 4.7% | Import chains + API reference |
+| v5c | 2,943 | 62% | 73.6% | 10.4% | 30-module structure digest |
+| v5d | 3,102 | 63% | — | 9.9% | Expanded negative list (whack-a-mole failed) |
+| **v5e** | **3,889** | **52%** | **74.1%** | **21.9%** | **Correct kernel boost (positive flooding)** |
 
-## Quick Start
+## Key Lessons
 
-### Full Pipeline (one command)
-
-```bash
-python3 process_all_v2.py
-```
-
-Environment variables:
-- `FLYDSL_ROOT` — path to FlyDSL repo (default: `/home/danyzhan/FlyDSL`)
-- `AITER_ROOT` — path to aiter repo (default: `/home/danyzhan/aiter`)
-- `OUTPUT_DIR` — output directory (default: `/home/danyzhan`)
-
-### Full Pipeline (Docker)
-
-```bash
-bash run_in_docker.sh
-```
-
-### GPU Benchmark Grading (requires MI350X)
-
-```bash
-python3 benchmark_filter.py \
-    --manifest manifest.json \
-    --output graded_manifest.json
-```
-
-### Multi-Model AI Annotation
-
-```bash
-bash run_consensus_pipeline.sh
-```
-
-Or step by step:
-
-```bash
-# Generate prompts
-python3 ai_annotate.py --manifest graded_manifest.json
-
-# Run 5-model annotation
-python3 consensus_annotate.py annotate --prompts prompts.jsonl ...
-
-# Consensus voting
-python3 consensus_annotate.py consensus --responses resp_*.jsonl --output consensus.jsonl
-
-# Apply + rebuild
-python3 consensus_annotate.py apply --manifest graded.json --consensus consensus.jsonl
-python3 rebuild_with_annotations.py --manifest annotated.json --output-dir data/ --merge-existing
-```
-
-### Validate & Package
-
-```bash
-python3 validate_dataset.py
-python3 package_hf_dataset.py
-```
-
-### SFT Data Enhancement
-
-```bash
-python3 enhance_sft_data.py \
-    --input  /home/danyzhan/flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl \
-    --rl-specs /home/danyzhan/flydsl-agent-dataset/data/rl/train-00000-of-00001.jsonl \
-    --cpt-data /home/danyzhan/flydsl-agent-dataset/data/cpt/train-00000-of-00001.jsonl \
-    --metadata-dir /home/danyzhan/flydsl-agent-metadata \
-    --output /home/danyzhan/flydsl-agent-dataset/data/sft/train-00000-of-00001.jsonl
-```
+1. **Positive examples beat negative examples** — v5d showed that adding "does not exist" entries is whack-a-mole (fix one hallucination, model invents another). v5e's positive flooding (kernel ratio 35%→52%) doubled sandbox compile rate.
+2. **Data quality > data quantity** — v4 removed 24% of data (hw-feature mismatches) and the model improved on the key metric (sandbox compilation).
+3. **Hallucinations are layered** — v3 fixed top-level imports, v5 discovered second-level API hallucinations, v5c/v5d found the long tail never ends.
+4. **Post-processing matters** — 66% of "syntax errors" were special token leakage, fixed in code without retraining.
 
 ## Output: flydsl-agent-dataset/
 
 | Split | Train | Val | Format |
 |-------|------:|----:|--------|
-| CPT | 1,967 | — | `{text, meta}` |
-| SFT (v2) | 2,916 | 264 | `{messages, source, metadata}` — 59% kernel code (was 19%) |
-| RL | 2,591 | 287 | `{id, operator, hardware, params}` |
-
-## Extending
-
-1. Add new taxonomy labels → `taxonomy.yaml`
-2. Add new SFT source → `process_all_v2.py` (add `source_X_*` function)
-3. Add new validation → `validate_dataset.py`
+| SFT (v5e) | 3,889 | 264 | `{messages, source, metadata}` — 52% correct kernel |
+| RL | 2,563 | 287 | `{id, operator, hardware, params}` |

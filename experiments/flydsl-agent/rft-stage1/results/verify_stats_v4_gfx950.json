@@ -1,0 +1,69 @@
+{
+  "total_specs": 12,
+  "total_candidates": 192,
+  "passed_static": 20,
+  "passed_sandbox": 1,
+  "passed_diversity": 1,
+  "by_operator": {
+    "moe": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "layernorm": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "gemm": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "rmsnorm": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "mla": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "softmax": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "quant": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "flash_attn": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "topk": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "custom": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    },
+    "paged_attn": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 1
+    },
+    "rope": {
+      "specs": 1,
+      "candidates": 16,
+      "verified": 0
+    }
+  }
+}
