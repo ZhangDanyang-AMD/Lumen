@@ -65,6 +65,9 @@ def _to_2d(x: torch.Tensor) -> torch.Tensor:
 _PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
 _FAST_QUANT_DISPATCH = os.environ.get("LUMEN_FAST_QUANT_DISPATCH", "1") == "1"
 _FP8_DGRAD_OUTPUT = os.environ.get("LUMEN_FP8_DGRAD_OUTPUT", "0") == "1"
+# gfx942/304CU: gemm_a8w8_blockscale CK intrawave_v3 kernel triggers async GPU fault.
+# Set LUMEN_CK_BLOCKSCALE=0 to skip the CK path and fall through to Triton.
+_CK_BLOCKSCALE_ENABLED = os.environ.get("LUMEN_CK_BLOCKSCALE", "1") == "1"
 
 # ---------------------------------------------------------------------------
 # Tuned hipBLASLt GEMM solutions
@@ -314,6 +317,9 @@ def _quant_blockwise2d_weight(w, dtype, block_size=128):
     )
     orig_shape = w.shape
     flat = _to_2d(w)
+    # per_token_quant_hip kernel does not support fp32; cast to bf16 first.
+    if flat.dtype == torch.float32:
+        flat = flat.bfloat16()
     M, N = flat.shape
     assert M % block_size == 0 and N % block_size == 0, (
         f"shape ({M}, {N}) not divisible by block_size={block_size}"
@@ -662,6 +668,19 @@ def gemm_per_tensor_mixed(a_fp8, w_fp8, scale_a, scale_w):
     The hipBLASLt workspace must be pre-allocated (via
     :func:`ensure_hipblaslt_ready`) before model loading to avoid OOM.
     """
+    # Some hipBLASLt builds (e.g. this platform's hipb_mm) reject mixed FP8
+    # dtypes (E5M2 grad x E4M3 weight) — they require both operands to share a
+    # dtype. When the operands differ, dequant to BF16 for a correct dgrad
+    # (same pattern as the per_token path). Same-dtype FP8 keeps the fast path.
+    if a_fp8.dtype != w_fp8.dtype:
+        sa = _scale_to_f32_1x1(scale_a, a_fp8.device).to(torch.bfloat16)
+        sw = _scale_to_f32_1x1(scale_w, w_fp8.device).to(torch.bfloat16)
+        a_bf16 = a_fp8.to(torch.bfloat16) * sa
+        w_bf16 = w_fp8.to(torch.bfloat16) * sw
+        # dispatch_gemm("none") -> F.linear(inp, w) computes inp @ w^T.
+        # w_fp8 arrives as (N, K); dgrad needs inp(M,N) @ w(N,K) = (M,K),
+        # so pass w_bf16.t() as (K,N) and let F.linear transpose it to (N,K).
+        return dispatch_gemm(a_bf16, w_bf16.t().contiguous(), None, None, "none")
     if _FAST_GEMM_DISPATCH:
         fn = _get_fast_gemm_fn("gemm_per_tensor_mixed")
         if fn is not None:
@@ -682,6 +701,13 @@ def gemm_per_tensor_mixed_fp8out(a_fp8, w_fp8, scale_a, scale_w, fp8_out_dtype, 
     Returns ``(fp8_output, amax_d)`` where *amax_d* is a scalar tensor
     containing ``max(|output_before_scaling|)``.
     """
+    if a_fp8.dtype != w_fp8.dtype:
+        # hipBLASLt FP8-output epilogue requires matching operand dtypes; raise so
+        # the caller's try/except skips the epilogue and uses the BF16 dgrad instead.
+        raise RuntimeError(
+            f"gemm_per_tensor_mixed_fp8out: mixed FP8 dtypes not supported "
+            f"({a_fp8.dtype} vs {w_fp8.dtype})"
+        )
     from aiter.ops.gradlib import hipb_mm
 
     ensure_hipblaslt_ready()
@@ -817,10 +843,12 @@ def gemm_blockscale(a_fp8, w_fp8, scale_a, scale_w):
     if w_sh is not None:
         try:
             return _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w)
-        except (RuntimeError, AssertionError) as e:
+        # IndexError/ValueError: scale_a layout mismatch (e.g. a 1D per-tensor
+        # scale reaching this blockscale path) — fall back rather than crash the run.
+        except (RuntimeError, AssertionError, IndexError, ValueError) as e:
             _logger.warning("gemm_blockscale: bpreshuffle failed (%s); CK/Triton fallback", e)
     backends = []
-    if _probe_aiter_ck_gemm():
+    if _probe_aiter_ck_gemm() and _CK_BLOCKSCALE_ENABLED:
         backends.append((Backend.CK, lambda: _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w)))
@@ -1098,6 +1126,12 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         input_2d = _to_2d(input)
 
+        if pre_quantized_input is not None:
+            _pqi_fp8, _pqi_scale = pre_quantized_input
+            # blockwise2d expects a 2D (M, K/block) scale; fused SwiGLU quant
+            # produces a per-tensor 1D scale — discard and re-quantize correctly.
+            if scaling_type in ("blockwise", "blockwise2d") and _pqi_scale.dim() < 2:
+                pre_quantized_input = None
         if pre_quantized_input is not None:
             from lumen.quantize.descriptor import FP8Descriptor
             input_fp8, input_scale = pre_quantized_input
@@ -1673,7 +1707,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
             grad_weight = None
         else:
             if _use_fp8_wgrad:
-                if _hipblas_ok and bwd_scaling in ("delayed", "dynamic"):
+                if _hipblas_ok and bwd_scaling in ("delayed", "dynamic") \
+                        and grad_fp8.dtype == input_data.dtype:
                     grad_weight = gemm_wgrad_fp8(
                         grad_fp8, input_data, grad_scale, input_scale,
                     )
