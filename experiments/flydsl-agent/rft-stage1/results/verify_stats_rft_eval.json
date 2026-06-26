@@ -1,69 +1,69 @@
 {
   "total_specs": 12,
   "total_candidates": 192,
-  "passed_static": 20,
-  "passed_sandbox": 1,
-  "passed_diversity": 1,
+  "passed_static": 144,
+  "passed_sandbox": 59,
+  "passed_diversity": 59,
   "by_operator": {
     "moe": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 4
     },
     "layernorm": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 9
     },
     "gemm": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 6
     },
     "rmsnorm": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 6
     },
     "mla": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 4
     },
     "softmax": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 5
     },
     "quant": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 3
     },
     "flash_attn": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 2
     },
     "topk": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 4
     },
     "custom": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 5
     },
     "paged_attn": {
       "specs": 1,
       "candidates": 16,
-      "verified": 1
+      "verified": 5
     },
     "rope": {
       "specs": 1,
       "candidates": 16,
-      "verified": 0
+      "verified": 6
     }
   }
 }
