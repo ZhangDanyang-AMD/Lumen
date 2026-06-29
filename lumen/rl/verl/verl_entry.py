@@ -52,17 +52,6 @@ def patch_verl_fsdp_workers(lumen_args):
     """
     fsdp_module = _resolve_verl_fsdp_module()
 
-    _original_apply_fsdp2 = fsdp_module.apply_fsdp2
-
-    def _patched_apply_fsdp2(model, fsdp_kwargs, fsdp_config):
-        from lumen.config import LumenConfig
-        logger.info("> Applying Lumen optimizations before FSDP2 wrapping")
-        cfg = LumenConfig.from_args(lumen_args)
-        cfg.enable(model)
-        return _original_apply_fsdp2(model, fsdp_kwargs, fsdp_config)
-
-    fsdp_module.apply_fsdp2 = _patched_apply_fsdp2
-
     if getattr(lumen_args, "lumen_fp8_weight_cache", False):
         _patch_optimizer_for_weight_cache(fsdp_module)
 
