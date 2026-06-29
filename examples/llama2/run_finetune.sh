@@ -83,6 +83,10 @@ if [ "${FP8_PARAM_STORAGE:-0}" -gt 0 ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --fp8-param-storage"
 fi
 
+if [ "${FP8_CACHE_FROZEN:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --linear-fp8-cache-frozen-weight"
+fi
+
 if [ "${FP8_ACT_STORE:-0}" = "1" ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --lumen-fp8-activation-store"
 fi
@@ -101,6 +105,13 @@ fi
 
 if [ "${LUMEN_MANUAL_GC:-0}" = "1" ]; then
     CMD_SUFFIX="${CMD_SUFFIX} --manual-gc"
+fi
+
+if [ "${LUMEN_CROSS_ENTROPY:-0}" = "1" ]; then
+    CMD_SUFFIX="${CMD_SUFFIX} --lumen-cross-entropy"
+    if [ -n "${LUMEN_CE_CHUNK_ROWS:-}" ] && [ "${LUMEN_CE_CHUNK_ROWS}" -gt 0 ]; then
+        CMD_SUFFIX="${CMD_SUFFIX} --lumen-ce-chunk-rows ${LUMEN_CE_CHUNK_ROWS}"
+    fi
 fi
 
 if [ -n "${LUMEN_LOG_INTERVAL:-}" ]; then

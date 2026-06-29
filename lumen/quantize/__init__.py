@@ -569,6 +569,12 @@ def _replace_forward(
             seq_parallel = getattr(module, "sequence_parallel", False)
             tp_group = getattr(module, "tp_group", None)
 
+            # Cache frozen base weight FP8 quant on first call (blockwise2d avoids
+            # 896 MiB re-allocation on every forward + gradient-checkpoint recompute).
+            _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
+            _wcache = getattr(module, "_fp8_weight_data", None)
+            _wscale = getattr(module, "_fp8_weight_scale", None)
+
             pre_quant = _pop_pre_quantized_activation()
 
             if seq_parallel and not is_row_parallel:
@@ -598,6 +604,8 @@ def _replace_forward(
                 delay_wgrad=_delay_wgrad,
                 deferred_wgrad=_deferred_wgrad,
                 fp8_activation_store=_fp8_act_store,
+                fp8_weight_cache=_wcache,
+                fp8_weight_scale=_wscale,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
                 pre_quantized_input=pre_quant,
@@ -770,13 +778,23 @@ def register_fp8_weight_optimizer_hooks(
     After ``optimizer.step()`` updates the BF16 master weights, this hook
     re-quantizes each patched layer's weight to FP8 and writes it into the
     ``_fp8_weight_data`` buffer so the next forward uses fresh cached data.
+
+    **Must be called after at least one forward pass** (or after explicitly
+    calling :func:`store_weights_fp8` / :func:`store_weights_fp8_blockwise2d`)
+    so that ``_fp8_weight_data`` is already present on each module. The hook
+    snapshots which modules have the cache at registration time; layers whose
+    cache is built lazily on the first forward will not be tracked if this
+    function is called before any forward has run.
     """
     modules_with_cache = [
         m for m in model.modules() if hasattr(m, "_fp8_weight_data") and hasattr(m, "_fp8_weight_scale")
     ]
 
     if not modules_with_cache:
-        logger.warning("register_fp8_weight_optimizer_hooks: no FP8 cached modules found")
+        logger.warning(
+            "register_fp8_weight_optimizer_hooks: no FP8 cached modules found — "
+            "call this function after at least one forward pass or after store_weights_fp8()"
+        )
         return
 
     logger.info(

@@ -1,0 +1,15 @@
+.git/
+.github/
+third_party/aiter/csrc/ck_gemm*/
+third_party/aiter/csrc/ck_batched*/
+third_party/aiter/csrc/py_itfs_cu/
+third_party/aiter/csrc/hsa/
+third_party/aiter/aiter/jit/build/
+third_party/aiter/op_tests/
+third_party/aiter/benchmarks/
+third_party/aiter/docker/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+.claude/
+*.log

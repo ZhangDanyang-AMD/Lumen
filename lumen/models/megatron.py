@@ -763,6 +763,13 @@ def enable_fp8_for_parallel_linear(
 
         fp8_dtype = _get_float8_e4m3()
 
+    # Tell the fused SwiGLU quant bridge (LUMEN_FUSED_SWIGLU_QUANT) the global
+    # activation scale granularity so its cached scale layout matches the fc2
+    # GEMM that consumes it (blockwise2d needs a 2D 1×block scale, not 1D).
+    from lumen.models._swiglu_fp8_fuse import set_fused_swiglu_scaling
+
+    set_fused_swiglu_scaling(scaling_type, block_size)
+
     count = 0
     for module in model.modules():
         if isinstance(
@@ -2114,6 +2121,19 @@ def add_common_megatron_args(parser):
     )
     safe_add_argument(
         lumen,
+        "--lumen-ce-chunk-rows",
+        type=int,
+        default=0,
+        help=(
+            "Row chunk size for chunked cross-entropy (0 = disabled). "
+            "Splits B*SQ into chunks of this size so each chunk's allgather "
+            "transfers chunk_rows*3 floats instead of B*SQ*3, reducing peak "
+            "activation memory. Effective only when --lumen-cross-entropy is set. "
+            "Typical value: 2048 (= 2 chunks for MBS=1 seq_len=4096)."
+        ),
+    )
+    safe_add_argument(
+        lumen,
         "--lumen-cpu-offload",
         action="store_true",
         default=False,
@@ -2298,6 +2318,14 @@ def add_common_megatron_args(parser):
         dest="linear_fp8_wgrad",
         action="store_false",
         help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
+    )
+    safe_add_argument(
+        lfp8,
+        "--linear-fp8-cache-frozen-weight",
+        dest="linear_fp8_cache_frozen_weight",
+        action="store_true",
+        default=False,
+        help="Cache FP8-quantised frozen base weights to avoid re-quantisation on every forward/recompute.",
     )
     safe_add_argument(
         lfp8,

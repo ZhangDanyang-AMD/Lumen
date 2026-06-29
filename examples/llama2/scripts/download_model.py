@@ -5,7 +5,7 @@
 Thin CLI wrapper around :func:`lumen.models.utils.download_hf_model`.
 
 Usage:
-    python download_model.py --model_name meta-llama/Llama-2-70b-hf --output_dir /data/model
+    python download_model.py --model_name NousResearch/Llama-2-70b-hf --output_dir /data/model
     python download_model.py --output_dir /data/model --verify
 """
 
@@ -22,14 +22,14 @@ def main():
     parser.add_argument(
         "--model_name",
         type=str,
-        default="meta-llama/Llama-2-70b-hf",
-        help="HuggingFace model name (e.g. meta-llama/Llama-2-7b-hf, "
-        "meta-llama/Llama-2-13b-hf, meta-llama/Llama-2-70b-hf)",
+        default="NousResearch/Llama-2-70b-hf",
+        help="HuggingFace model name (e.g. NousResearch/Llama-2-7b-hf, "
+        "NousResearch/Llama-2-13b-hf, NousResearch/Llama-2-70b-hf)",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="/data/model",
+        default="/nvme",
         help="Directory to save the downloaded model",
     )
     parser.add_argument(
