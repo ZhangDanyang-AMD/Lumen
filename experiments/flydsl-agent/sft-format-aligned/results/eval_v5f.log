@@ -1,0 +1,190 @@
+2026-07-04 00:28:13,328 [INFO] ============================================================
+2026-07-04 00:28:13,328 [INFO] Part A: API Score — Format-Aligned Model
+2026-07-04 00:28:13,328 [INFO] ============================================================
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:01<00:18,  1.45s/it]Loading checkpoint shards:  14%|█▍        | 2/14 [00:02<00:16,  1.39s/it]Loading checkpoint shards:  21%|██▏       | 3/14 [00:04<00:14,  1.36s/it]Loading checkpoint shards:  29%|██▊       | 4/14 [00:05<00:13,  1.30s/it]Loading checkpoint shards:  36%|███▌      | 5/14 [00:06<00:11,  1.27s/it]Loading checkpoint shards:  43%|████▎     | 6/14 [00:07<00:10,  1.26s/it]Loading checkpoint shards:  50%|█████     | 7/14 [00:09<00:08,  1.25s/it]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:10<00:07,  1.24s/it]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:11<00:06,  1.23s/it]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:12<00:04,  1.23s/it]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:13<00:03,  1.23s/it]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:15<00:02,  1.22s/it]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:16<00:01,  1.23s/it]Loading checkpoint shards: 100%|██████████| 14/14 [00:17<00:00,  1.07s/it]Loading checkpoint shards: 100%|██████████| 14/14 [00:17<00:00,  1.22s/it]
+2026-07-04 00:28:30,655 [INFO]   [L1] L1_vec_add ...
+The attention mask is not set and cannot be inferred from input because pad token is same as eos token. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+2026-07-04 00:29:33,161 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:29:33,161 [INFO]   [L1] L1_relu ...
+2026-07-04 00:30:33,902 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:30:33,902 [INFO]   [L1] L1_scale ...
+2026-07-04 00:31:34,623 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:31:34,623 [INFO]   [L1] L1_copy ...
+2026-07-04 00:32:35,287 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'buffer_ops': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:32:35,287 [INFO]   [L1] L1_reduce ...
+2026-07-04 00:33:35,924 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'syncthreads': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:33:35,924 [INFO]   [L2] L2_softmax ...
+2026-07-04 00:34:37,094 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:34:37,094 [INFO]   [L2] L2_rmsnorm ...
+2026-07-04 00:35:38,495 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:35:38,495 [INFO]   [L2] L2_layernorm ...
+2026-07-04 00:36:39,214 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'syncthreads': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:36:39,214 [INFO]   [L2] L2_silu ...
+2026-07-04 00:37:39,884 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:37:39,884 [INFO]   [L2] L2_rope ...
+2026-07-04 00:38:40,457 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:38:40,457 [INFO]   [L3] L3_gemm_naive ...
+2026-07-04 00:39:41,241 [INFO]     score=1.00 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'fx_layout': True, 'smem_alloc': True, 'mfma': True, 'swizzle': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:39:41,241 [INFO]   [L3] L3_topk ...
+2026-07-04 00:40:41,888 [INFO]     score=0.60 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'syncthreads': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:40:41,888 [INFO]   [L3] L3_fused_bias_relu ...
+2026-07-04 00:41:42,560 [INFO]     score=0.60 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:41:42,560 [INFO]   [L3] L3_gemv ...
+2026-07-04 00:42:43,279 [INFO]     score=0.80 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'fx_layout': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:42:43,279 [INFO]   [L3] L3_concat ...
+2026-07-04 00:43:43,921 [INFO]     score=0.60 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:43:43,921 [INFO]   [L4] L4_fp8_gemm ...
+2026-07-04 00:44:44,703 [INFO]     score=0.57 fmt=OK | {'flyc_kernel': True, 'smem_alloc': True, 'swizzle': True, 'pipeline': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:44:44,703 [INFO]   [L4] L4_flash_attn ...
+2026-07-04 00:45:45,509 [INFO]     score=0.43 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:45:45,509 [INFO]   [L4] L4_paged_attn ...
+2026-07-04 00:46:46,253 [INFO]     score=0.43 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:46:46,253 [INFO]   [L4] L4_gemm_splitk ...
+2026-07-04 00:47:47,096 [INFO]     score=0.43 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:47:47,096 [INFO]   [L4] L4_fused_norm_quant ...
+2026-07-04 00:48:47,954 [INFO]     score=0.43 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'swizzle': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:48:47,954 [INFO]   [L5] L5_preshuffle_gemm ...
+2026-07-04 00:49:49,003 [INFO]     score=0.62 fmt=FAIL | {'fx_api': True, 'smem_alloc': True, 'swizzle': True, 'pipeline': True, 'zipped_divide': True, 'composition': True, 'import_flyc': True}
+2026-07-04 00:49:49,003 [INFO]   [L5] L5_moe_2stage ...
+2026-07-04 00:50:49,876 [INFO]     score=0.50 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'pipeline': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:50:49,876 [INFO]   [L5] L5_mla_decode ...
+2026-07-04 00:51:50,767 [INFO]     score=0.50 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'mfma': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:51:50,767 [INFO]   [L5] L5_blockscale_gemm ...
+2026-07-04 00:52:51,672 [INFO]     score=0.50 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'swizzle': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:52:51,672 [INFO]   [L5] L5_allreduce ...
+2026-07-04 00:53:52,534 [INFO]     score=0.38 fmt=OK | {'flyc_kernel': True, 'fx_api': True, 'import_flyc': True, 'valid_python': True}
+2026-07-04 00:53:52,617 [INFO] ============================================================
+2026-07-04 00:53:52,617 [INFO] Part A2: API Score — v5e Baseline
+2026-07-04 00:53:52,617 [INFO] ============================================================
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:01<00:14,  1.10s/it]Loading checkpoint shards:  14%|█▍        | 2/14 [00:02<00:14,  1.19s/it]Loading checkpoint shards:  21%|██▏       | 3/14 [00:03<00:13,  1.20s/it]Loading checkpoint shards:  29%|██▊       | 4/14 [00:04<00:11,  1.20s/it]Loading checkpoint shards:  36%|███▌      | 5/14 [00:06<00:11,  1.23s/it]Loading checkpoint shards:  43%|████▎     | 6/14 [00:07<00:09,  1.23s/it]Loading checkpoint shards:  50%|█████     | 7/14 [00:08<00:08,  1.22s/it]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:09<00:07,  1.21s/it]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:10<00:06,  1.21s/it]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:12<00:04,  1.22s/it]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:13<00:03,  1.21s/it]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:14<00:02,  1.22s/it]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:15<00:01,  1.24s/it]Loading checkpoint shards: 100%|██████████| 14/14 [00:16<00:00,  1.08s/it]Loading checkpoint shards: 100%|██████████| 14/14 [00:16<00:00,  1.18s/it]
+2026-07-04 00:54:09,247 [INFO]   [L1] L1_vec_add ...
+2026-07-04 00:55:10,463 [INFO]     score=1.00
+2026-07-04 00:55:10,463 [INFO]   [L1] L1_relu ...
+2026-07-04 00:56:11,314 [INFO]     score=1.00
+2026-07-04 00:56:11,314 [INFO]   [L1] L1_scale ...
+2026-07-04 00:57:12,224 [INFO]     score=1.00
+2026-07-04 00:57:12,224 [INFO]   [L1] L1_copy ...
+2026-07-04 00:58:13,087 [INFO]     score=1.00
+2026-07-04 00:58:13,087 [INFO]   [L1] L1_reduce ...
+2026-07-04 00:59:13,879 [INFO]     score=1.00
+2026-07-04 00:59:13,879 [INFO]   [L2] L2_softmax ...
+2026-07-04 01:00:15,421 [INFO]     score=1.00
+2026-07-04 01:00:15,421 [INFO]   [L2] L2_rmsnorm ...
+2026-07-04 01:01:16,986 [INFO]     score=1.00
+2026-07-04 01:01:16,986 [INFO]   [L2] L2_layernorm ...
+2026-07-04 01:02:18,642 [INFO]     score=1.00
+2026-07-04 01:02:18,642 [INFO]   [L2] L2_silu ...
+2026-07-04 01:03:20,220 [INFO]     score=1.00
+2026-07-04 01:03:20,220 [INFO]   [L2] L2_rope ...
+2026-07-04 01:04:21,773 [INFO]     score=1.00
+2026-07-04 01:04:21,773 [INFO]   [L3] L3_gemm_naive ...
+2026-07-04 01:05:23,440 [INFO]     score=1.00
+2026-07-04 01:05:23,440 [INFO]   [L3] L3_topk ...
+2026-07-04 01:06:24,833 [INFO]     score=0.60
+2026-07-04 01:06:24,833 [INFO]   [L3] L3_fused_bias_relu ...
+2026-07-04 01:07:26,385 [INFO]     score=0.60
+2026-07-04 01:07:26,385 [INFO]   [L3] L3_gemv ...
+2026-07-04 01:08:27,928 [INFO]     score=0.80
+2026-07-04 01:08:27,928 [INFO]   [L3] L3_concat ...
+2026-07-04 01:09:28,873 [INFO]     score=0.60
+2026-07-04 01:09:28,874 [INFO]   [L4] L4_fp8_gemm ...
+2026-07-04 01:10:29,811 [INFO]     score=0.71
+2026-07-04 01:10:29,811 [INFO]   [L4] L4_flash_attn ...
+2026-07-04 01:11:30,667 [INFO]     score=0.43
+2026-07-04 01:11:30,667 [INFO]   [L4] L4_paged_attn ...
+2026-07-04 01:12:31,446 [INFO]     score=0.43
+2026-07-04 01:12:31,446 [INFO]   [L4] L4_gemm_splitk ...
+2026-07-04 01:13:32,252 [INFO]     score=0.43
+2026-07-04 01:13:32,252 [INFO]   [L4] L4_fused_norm_quant ...
+2026-07-04 01:14:33,097 [INFO]     score=0.43
+2026-07-04 01:14:33,097 [INFO]   [L5] L5_preshuffle_gemm ...
+2026-07-04 01:15:34,128 [INFO]     score=0.75
+2026-07-04 01:15:34,129 [INFO]   [L5] L5_moe_2stage ...
+2026-07-04 01:16:34,803 [INFO]     score=0.50
+2026-07-04 01:16:34,803 [INFO]   [L5] L5_mla_decode ...
+2026-07-04 01:17:35,443 [INFO]     score=0.62
+2026-07-04 01:17:35,443 [INFO]   [L5] L5_blockscale_gemm ...
+2026-07-04 01:18:36,185 [INFO]     score=0.25
+2026-07-04 01:18:36,185 [INFO]   [L5] L5_allreduce ...
+2026-07-04 01:19:36,843 [INFO]     score=0.38
+2026-07-04 01:19:36,922 [INFO] ============================================================
+2026-07-04 01:19:36,923 [INFO] Part B: Format Compliance
+2026-07-04 01:19:36,923 [INFO] ============================================================
+2026-07-04 01:19:36,923 [INFO]   Compliance rate: 24/25 = 96%
+2026-07-04 01:19:36,923 [INFO] ============================================================
+2026-07-04 01:19:36,923 [INFO] Part C: Sandbox Compilation Tests
+2026-07-04 01:19:36,923 [INFO] ============================================================
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:01<00:13,  1.05s/it]Loading checkpoint shards:  14%|█▍        | 2/14 [00:02<00:13,  1.11s/it]Loading checkpoint shards:  21%|██▏       | 3/14 [00:03<00:12,  1.13s/it]Loading checkpoint shards:  29%|██▊       | 4/14 [00:04<00:11,  1.12s/it]Loading checkpoint shards:  36%|███▌      | 5/14 [00:05<00:10,  1.14s/it]Loading checkpoint shards:  43%|████▎     | 6/14 [00:06<00:09,  1.15s/it]Loading checkpoint shards:  50%|█████     | 7/14 [00:07<00:08,  1.16s/it]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:09<00:06,  1.16s/it]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:10<00:05,  1.15s/it]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:11<00:04,  1.14s/it]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:12<00:03,  1.13s/it]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:13<00:02,  1.13s/it]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:14<00:01,  1.13s/it]Loading checkpoint shards: 100%|██████████| 14/14 [00:15<00:00,  1.01it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:15<00:00,  1.10s/it]
+2026-07-04 01:19:52,471 [INFO]   [sandbox] L1_vec_add ...
+2026-07-04 01:20:54,621 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:20:54,621 [INFO]   [sandbox] L1_relu ...
+2026-07-04 01:21:56,832 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:21:56,832 [INFO]   [sandbox] L1_scale ...
+2026-07-04 01:22:58,808 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:22:58,808 [INFO]   [sandbox] L1_copy ...
+2026-07-04 01:24:00,878 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:24:00,878 [INFO]   [sandbox] L1_reduce ...
+2026-07-04 01:25:02,127 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:25:02,127 [INFO]   [sandbox] L2_softmax ...
+2026-07-04 01:26:03,455 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:26:03,455 [INFO]   [sandbox] L2_rmsnorm ...
+2026-07-04 01:27:05,463 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:27:05,463 [INFO]   [sandbox] L2_layernorm ...
+2026-07-04 01:28:07,557 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:28:07,557 [INFO]   [sandbox] L2_silu ...
+2026-07-04 01:29:09,171 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:29:09,171 [INFO]   [sandbox] L2_rope ...
+2026-07-04 01:30:11,260 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:30:11,261 [INFO]   [sandbox/code-tag] CT_vec_mul ...
+2026-07-04 01:31:12,136 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:31:12,136 [INFO]   [sandbox/code-tag] CT_softmax ...
+2026-07-04 01:32:12,953 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:32:12,953 [INFO]   [sandbox/code-tag] CT_gemm ...
+2026-07-04 01:33:13,919 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:33:13,919 [INFO]   [sandbox/code-tag] CT_rmsnorm ...
+2026-07-04 01:34:14,690 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:34:14,691 [INFO]   [sandbox/code-tag] CT_silu ...
+2026-07-04 01:35:15,535 [INFO]     PASS | syntax=True import=True
+2026-07-04 01:35:15,615 [INFO] Results saved to /sft-results/benchmark_v5f.json
+
+======================================================================
+  FORMAT-ALIGNED SFT EVALUATION REPORT
+======================================================================
+
+  Part A: API Score (Format-Aligned)
+    Level 1: 100%
+    Level 2: 100%
+    Level 3: 72%
+    Level 4: 46%
+    Level 5: 50%
+    Overall: 74%
+
+  v5e Baseline: 74%
+  Delta: -1%
+  Regression test: PASS (threshold: ≥ 70%)
+
+  Part B: Format Compliance
+    Rate: 96% (target ≥90%)
+    Verdict: PASS
+
+  Part C: Sandbox Compilation
+    Standard prompts: 100%
+    <code> tag prompts: 100%
+    Overall: 100% (target ≥80%)
+      PASS L1_vec_add [standard]
+      PASS L1_relu [standard]
+      PASS L1_scale [standard]
+      PASS L1_copy [standard]
+      PASS L1_reduce [standard]
+      PASS L2_softmax [standard]
+      PASS L2_rmsnorm [standard]
+      PASS L2_layernorm [standard]
+      PASS L2_silu [standard]
+      PASS L2_rope [standard]
+      PASS CT_vec_mul [code_tag]
+      PASS CT_softmax [code_tag]
+      PASS CT_gemm [code_tag]
+      PASS CT_rmsnorm [code_tag]
+      PASS CT_silu [code_tag]
+======================================================================

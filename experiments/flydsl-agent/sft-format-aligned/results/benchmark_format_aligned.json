@@ -1,0 +1,1620 @@
+{
+  "format_aligned_results": [
+    {
+      "id": "L1_vec_add",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6249,
+      "code_len": 241,
+      "response_preview": "<plan>\n  1. Problem analysis: Element-wise vector addition C = A + B for float32 vectors of length N.\n  2. Tiling decisions: No tiling needed for vector addition.\n  3. Memory layout: Use linear memory layout for vectors A, B, C.\n  4. Optimization choices: None needed for this simple operation.\n</plan>\n<code>\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef vector_add_kerne"
+    },
+    {
+      "id": "L1_relu",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": true,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7588,
+      "code_len": 429,
+      "response_preview": "<plan>\n  1. Problem analysis: ReLU activation is a simple element-wise operation that sets negative values to 0. We need to parallelize across the tensor elements.\n  2. Tiling decisions: No tiling needed for element-wise operation. Parallelize directly over tensor elements.\n  3. Memory layout: Use a 1D block-stride layout for simplicity. No need for complex memory access patterns.\n  4. Optimizatio"
+    },
+    {
+      "id": "L1_scale",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6675,
+      "code_len": 338,
+      "response_preview": "<plan>\n  1. Problem analysis: Element-wise scaling of a vector by a scalar.\n  2. Tiling: No tiling needed for a simple vector operation.\n  3. Memory layout: Use a single buffer for input and output.\n  4. Optimization: Use vectorized loads/stores for coalesced memory access.\n</plan>\n<code>\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef scale_vector_kernel(\n    X: fx.Tenso"
+    },
+    {
+      "id": "L1_copy",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7107,
+      "code_len": 330,
+      "response_preview": "<plan>\n  1. Problem analysis: Copy data from one buffer to another.\n  2. Tiling decisions: No tiling needed for a simple copy.\n  3. Memory layout: Use the same layout for both buffers.\n  4. Optimization choices: None needed for a simple copy.\n</plan>\n<code>\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\nfrom flydsl.expr import buffer_ops\n\n@flyc.kernel\ndef copy_kernel(\n    src: fx.Tensor,\n"
+    },
+    {
+      "id": "L1_reduce",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 8863,
+      "code_len": 948,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - Sum reduction of a float32 vector\n     - Use shared memory for efficient data access\n     - Synchronize threads using fx.syncthreads\n\n  2. Tiling decisions and why\n     - No tiling needed for this simple reduction\n\n  3. Memory layout and pipeline strategy\n     - Load vector into shared memory\n     - Perform reduction in shared memory\n   "
+    },
+    {
+      "id": "L2_softmax",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7590,
+      "code_len": 605,
+      "response_preview": "<plan>\n  1. Problem analysis: Row-wise softmax on a 2D BF16 tensor. Numerical stability via max subtraction.\n  2. Tiling: Tile by rows, compute softmax per row. No inner tiling needed.\n  3. Memory: Load row, compute max, subtract max, exp, sum, normalize. Use local memory for row.\n  4. Optimizations: None needed for this simple kernel.\n</plan>\n<code>\nimport flydsl.compiler as flyc\nimport flydsl.ex"
+    },
+    {
+      "id": "L2_rmsnorm",
+      "level": 2,
+      "api_score": 0.0,
+      "analysis": {
+        "flyc_kernel": false,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": false,
+        "valid_python": false
+      },
+      "format": {
+        "has_plan": false,
+        "has_code": false,
+        "plan_before_code": true,
+        "compliant": false
+      },
+      "response_len": 6096,
+      "code_len": 6096,
+      "response_preview": "<plan>\n  1. Problem analysis: RMSNorm computes RMS = sqrt(mean(x^2) + eps) and normalizes input. Key constraints: 16B model, 128 hidden size, 128 threads per block, 128 elements per thread, 128 elements per warp, 128 elements per wavefront, 128 elements per subwave, 128 elements per subsubwave, 128 elements per subsubsubwave, 128 elements per subsubsubsubwave, 128 elements per subsubsubsubsubwave,"
+    },
+    {
+      "id": "L2_layernorm",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6898,
+      "code_len": 1911,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - LayerNorm computes (x - mean) / sqrt(var + eps) * gamma + beta\n     - Shared memory for mean/variance to reduce global memory traffic\n     - Tile to fit in shared memory and maximize occupancy\n  2. Tiling decisions and why\n     - Tile by block size (e.g., 256) to fit in shared memory\n     - Use 1D tiling for simplicity\n  3. Memory layout"
+    },
+    {
+      "id": "L2_silu",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6876,
+      "code_len": 955,
+      "response_preview": "<plan>\n  1. Problem analysis: SiLU activation on BF16 tensors, element-wise operation\n  2. Tiling: 128x128 tiles, 8x8 sub-tiles, 16x16 vector loads/stores\n  3. Memory layout: BF16, row-major, 16-byte aligned\n  4. Optimization: BF16 arithmetic, vectorized loads/stores\n</plan>\n<code>\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef silu_kernel(\n    x: fx.Tensor,\n    y: fx.Te"
+    },
+    {
+      "id": "L2_rope",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 9773,
+      "code_len": 1044,
+      "response_preview": "<plan>\n  1. Problem analysis: RoPE applies cached cos/sin frequencies to query/key tensors. Hardware constraints: 64-bit float support, LDS for shared memory.\n  2. Tiling: Tile query/key tensors by block size (e.g., 128 elements) for efficient LDS usage.\n  3. Memory layout: Use LDS for cos/sin frequencies, global memory for query/key tensors. Pipeline strategy: Load frequencies into LDS, then appl"
+    },
+    {
+      "id": "L3_gemm_naive",
+      "level": 3,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": true,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": true,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6731,
+      "code_len": 1304,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - Compute C = A @ B for BF16 matrices\n     - Use tiled computation with fx.make_layout\n     - Use SmemAllocator for shared memory\n     - Use MFMA instructions via rocdl.mfma_f32_32x32x16_bf16\n     - Target AMD Instinct GPUs\n\n  2. Tiling decisions and why\n     - Tile size: 32x32x16 (MFMA instruction size)\n     - Tile layout: 2D (rows x cols"
+    },
+    {
+      "id": "L3_topk",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 9068,
+      "code_len": 2418,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - Input: 2D tensor (MxN)\n     - Output: Top-K elements and their indices\n     - Constraints: Shared memory size, thread block size\n  2. Tiling decisions and why\n     - Tile size: 128 elements (fits in shared memory)\n     - Tile layout: Row-major for coalesced access\n  3. Memory layout and pipeline strategy\n     - Shared memory: Partial sor"
+    },
+    {
+      "id": "L3_fused_bias_relu",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6702,
+      "code_len": 1076,
+      "response_preview": "<plan>\n  1. Problem analysis: Elementwise bias addition and ReLU activation. No data dependencies between elements.\n  2. Tiling: Tile by block size (64x64) to fit in LDS. No need for sub-tiles.\n  3. Memory: Load X and bias into LDS, compute in registers, store Y.\n  4. Optimizations: Swizzle X and bias loads for coalesced access. Unroll inner loop.\n</plan>\n<code>\nimport torch\nimport flydsl.compiler"
+    },
+    {
+      "id": "L3_gemv",
+      "level": 3,
+      "api_score": 0.8,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": true,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6679,
+      "code_len": 672,
+      "response_preview": "<plan>\n  1. Problem analysis: Matrix-vector multiplication Y = A @ x with A (M,K) BF16 and x (K,) BF16.\n     Hardware constraints: AMD Instinct GPUs, FlyDSL kernel programming.\n  2. Tiling decisions: Tile A into (M, K) blocks, x into (K,) vectors.\n  3. Memory layout: Use fx.make_layout for tiling, swizzle for coalesced access.\n  4. Optimization choices: Swizzle for coalesced access, vectorized loa"
+    },
+    {
+      "id": "L3_concat",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": true,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 8014,
+      "code_len": 2951,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - Concatenation along a given dimension\n     - Proper layout handling using fx.make_layout and fx.make_shape\n     - Efficient memory access patterns\n     - Utilize vectorized loads and stores for better performance\n\n  2. Tiling decisions and why\n     - Tile along the concatenation dimension to minimize memory access overhead\n     - Use a t"
+    },
+    {
+      "id": "L4_fp8_gemm",
+      "level": 4,
+      "api_score": 0.5714285714285714,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6375,
+      "code_len": 2644,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - FP8 GEMM on gfx950 (RDNA3) with 2-stage pipeline\n     - Swizzle_xor16 for LDS bank conflict avoidance\n     - Preshuffle data layout for better coalescing\n     - Use @flyc.kernel with SmemAllocator and lds_stage=2\n\n  2. Tiling decisions and why\n     - Block size: 128x128 (64x64 per wave)\n     - Wave size: 64x64\n     - Tile size: 64x64 (32"
+    },
+    {
+      "id": "L4_flash_attn",
+      "level": 4,
+      "api_score": 0.14285714285714285,
+      "analysis": {
+        "flyc_kernel": false,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": false,
+        "valid_python": false
+      },
+      "format": {
+        "has_plan": false,
+        "has_code": false,
+        "plan_before_code": true,
+        "compliant": false
+      },
+      "response_len": 5502,
+      "code_len": 5502,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - FlashAttention: Q@K^T, softmax, score@V\n     - BF16: 16-bit precision\n     - gfx950: RDNA3 architecture, 64 wavefronts, 64 threads/wave, 16 banks per wave\n     - Hardware constraints: 16 banks per wave, 64 threads/wave, 64 wavefronts\n  2. Tiling decisions and why\n     - Tile Q@K^T: 16x16 (64 threads)\n     - Tile softmax: 16x16 (64 thread"
+    },
+    {
+      "id": "L4_paged_attn",
+      "level": 4,
+      "api_score": 0.5714285714285714,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7847,
+      "code_len": 1239,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - KV-cache serving with block_table lookup\n     - Variable-length sequences\n     - Page size = 16\n     - AMD Instinct GPUs\n  2. Tiling decisions and why\n     - Tile by page_size (16) for efficient cache access\n     - Tile by sequence length for variable-length support\n  3. Memory layout and pipeline strategy\n     - Use block_table for effi"
+    },
+    {
+      "id": "L4_gemm_splitk",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6936,
+      "code_len": 1392,
+      "response_preview": "<plan>\n  1. Problem analysis: split-K GEMM requires partitioning K across workgroups, atomic reduction for accumulation.\n  2. Tiling: tile M, N, K dimensions to fit in LDS, use split-K for K partitioning.\n  3. Memory layout: row-major for A, column-major for B, row-major for C.\n  4. Optimization: use atomic add for reduction, ensure LDS usage is efficient.\n</plan>\n<code>\nimport flydsl.compiler as "
+    },
+    {
+      "id": "L4_fused_norm_quant",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7809,
+      "code_len": 1936,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - RMSNorm: compute mean of squared input, then divide input by sqrt(mean + epsilon)\n     - FP8 quantization: per-tensor scaling, fp8_e4m3fnuz format\n     - Hardware: Instinct GPUs, FlyDSL kernel programming\n\n  2. Tiling decisions and why\n     - Tile by block size (e.g., 256 elements) for efficient vectorization\n     - Use shared memory for"
+    },
+    {
+      "id": "L5_preshuffle_gemm",
+      "level": 5,
+      "api_score": 0.75,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": true,
+        "composition": true,
+        "import_flyc": true,
+        "valid_python": false
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": false,
+        "plan_before_code": true,
+        "compliant": false
+      },
+      "response_len": 7082,
+      "code_len": 7082,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - gfx950: 64KB LDS, 16B FP8, 128B cache line\n     - FP8: 2x bandwidth, 4x arithmetic vs FP16\n     - 128x128x256 tile: 16KB LDS, fits in 64KB\n     - 4 waves per workgroup: 256 threads, 16KB LDS per wave\n     - double-buffered LDS pipeline: 2 stages, 32KB per stage\n     - swizzle_xor16: 16B cache line, 16B LDS bank\n     - epilogue fusion: bi"
+    },
+    {
+      "id": "L5_moe_2stage",
+      "level": 5,
+      "api_score": 0.0,
+      "analysis": {
+        "flyc_kernel": false,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": false,
+        "valid_python": false
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 8691,
+      "code_len": 39,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n  2. Tiling decisions and why\n  3. Memory layout and pipeline strategy\n  4. Optimization choices (swizzle, etc.)\n</plan>\n<code>\n  Complete, compilable FlyDSL kernel code\n</code>\n\nThe <plan> section should explain your reasoning in natural language. The <code> section should contain ONLY the Python code, no markdown blocks.<|repo_name|>\n<|repo_n"
+    },
+    {
+      "id": "L5_mla_decode",
+      "level": 5,
+      "api_score": 0.5,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 7296,
+      "code_len": 2597,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - MLA decode involves QKV matmuls, KV cache updates, and output projection.\n     - Compressed KV with latent_dim=576 and head_dim=128 requires efficient memory access.\n     - BF16 matmuls should use MFMA instructions for performance.\n     - Hardware: AMD Instinct GPUs, 64KB LDS, 16MB scratch, 16MB HBM.\n\n  2. Tiling decisions and why\n     -"
+    },
+    {
+      "id": "L5_blockscale_gemm",
+      "level": 5,
+      "api_score": 0.625,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": true,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 6149,
+      "code_len": 2861,
+      "response_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - gfx950: 64-wide wavefronts, 16 banks, 4-way vector ALU\n     - FP8: 128x128x128 tile, 16x16x16 micro-tile, 8x8x16 vector ops\n     - Preshuffle: 16x16x16 micro-tile, 4x4x16 vector ops\n     - 3-stage pipeline: 16x16x16 micro-tile, 4x4x16 vector ops\n     - Swizzle_xor16: 16x16x16 micro-tile, 4x4x16 vector ops\n  2. Tiling decisions and why\n  "
+    },
+    {
+      "id": "L5_allreduce",
+      "level": 5,
+      "api_score": 0.375,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      },
+      "format": {
+        "has_plan": true,
+        "has_code": true,
+        "plan_before_code": true,
+        "compliant": true
+      },
+      "response_len": 8510,
+      "code_len": 472,
+      "response_preview": "<plan>\n  1. Problem analysis: Implement a custom all-reduce kernel for multi-GPU ring reduction using DPP instructions. Support BF16 with warp-level shuffles and cross-workgroup synchronization.\n  2. Tiling decisions: Tile the input tensor into smaller chunks that fit within the GPU's shared memory. Use a 2D tiling strategy to maximize parallelism.\n  3. Memory layout: Use a row-major layout for th"
+    }
+  ],
+  "v5e_baseline_results": [
+    {
+      "id": "L1_vec_add",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L1_relu",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": true,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L1_scale",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L1_copy",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L1_reduce",
+      "level": 1,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": true,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L2_softmax",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L2_rmsnorm",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L2_layernorm",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L2_silu",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": true
+      }
+    },
+    {
+      "id": "L2_rope",
+      "level": 2,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L3_gemm_naive",
+      "level": 3,
+      "api_score": 1.0,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": true,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": true,
+        "syncthreads": true,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L3_topk",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L3_fused_bias_relu",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L3_gemv",
+      "level": 3,
+      "api_score": 0.8,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": true,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L3_concat",
+      "level": 3,
+      "api_score": 0.6,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L4_fp8_gemm",
+      "level": 4,
+      "api_score": 0.7142857142857143,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L4_flash_attn",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L4_paged_attn",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L4_gemm_splitk",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L4_fused_norm_quant",
+      "level": 4,
+      "api_score": 0.42857142857142855,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L5_preshuffle_gemm",
+      "level": 5,
+      "api_score": 0.75,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": true,
+        "pipeline": true,
+        "zipped_divide": true,
+        "composition": true,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L5_moe_2stage",
+      "level": 5,
+      "api_score": 0.5,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": true,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L5_mla_decode",
+      "level": 5,
+      "api_score": 0.625,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": true,
+        "mfma": true,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L5_blockscale_gemm",
+      "level": 5,
+      "api_score": 0.25,
+      "analysis": {
+        "flyc_kernel": false,
+        "fx_api": false,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": true,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    },
+    {
+      "id": "L5_allreduce",
+      "level": 5,
+      "api_score": 0.375,
+      "analysis": {
+        "flyc_kernel": true,
+        "fx_api": true,
+        "fx_gpu": false,
+        "fx_layout": false,
+        "smem_alloc": false,
+        "buffer_ops": false,
+        "mfma": false,
+        "syncthreads": false,
+        "swizzle": false,
+        "pipeline": false,
+        "zipped_divide": false,
+        "composition": false,
+        "import_flyc": true,
+        "valid_python": false
+      }
+    }
+  ],
+  "format_checks": [
+    {
+      "id": "L1_vec_add",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L1_relu",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L1_scale",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L1_copy",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L1_reduce",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L2_softmax",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L2_rmsnorm",
+      "has_plan": false,
+      "has_code": false,
+      "plan_before_code": true,
+      "compliant": false
+    },
+    {
+      "id": "L2_layernorm",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L2_silu",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L2_rope",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L3_gemm_naive",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L3_topk",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L3_fused_bias_relu",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L3_gemv",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L3_concat",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L4_fp8_gemm",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L4_flash_attn",
+      "has_plan": false,
+      "has_code": false,
+      "plan_before_code": true,
+      "compliant": false
+    },
+    {
+      "id": "L4_paged_attn",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L4_gemm_splitk",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L4_fused_norm_quant",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L5_preshuffle_gemm",
+      "has_plan": true,
+      "has_code": false,
+      "plan_before_code": true,
+      "compliant": false
+    },
+    {
+      "id": "L5_moe_2stage",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L5_mla_decode",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L5_blockscale_gemm",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    },
+    {
+      "id": "L5_allreduce",
+      "has_plan": true,
+      "has_code": true,
+      "plan_before_code": true,
+      "compliant": true
+    }
+  ],
+  "sandbox_results": [
+    {
+      "id": "L1_vec_add",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef vector_add_kernel(\n    A: fx.Tensor,\n    B: fx.Tensor,\n    C: fx.Tensor,\n    N: fx.Int32,\n):\n    tid = fx.thread_idx.x\n    if tid < N:\n        C[tid] = A[tid] + B[tid]"
+    },
+    {
+      "id": "L1_relu",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef relu_kernel(\n    input: fx.Tensor,\n    output: fx.Tensor,\n):\n    tid = fx.gpu.thread_idx.x\n    if tid < input.numel():\n        output[tid] = fx.bf16.max(input[tid], fx.Const(0, dtype=fx.BF16))\n\ndef launch_relu(input, output):\n"
+    },
+    {
+      "id": "L1_scale",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef scale_vector_kernel(\n    X: fx.Tensor,\n    Y: fx.Tensor,\n    alpha: fx.Float32,\n    N: fx.Int32,\n):\n    tid = fx.thread_idx.x\n    bid = fx.block_idx.x\n    block_size = fx.block_dim.x\n    idx = bid * block_size + tid\n\n    if id"
+    },
+    {
+      "id": "L1_copy",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\nfrom flydsl.expr import buffer_ops\n\n@flyc.kernel\ndef copy_kernel(\n    src: fx.Tensor,\n    dst: fx.Tensor,\n    N: fx.Constexpr[int],\n):\n    tid = fx.thread_idx.x\n    if tid < N:\n        value = buffer_ops.buffer_load(src, tid)\n        buffer_ops"
+    },
+    {
+      "id": "L1_reduce",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import torch\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef sum_reduction_kernel(\n    vec: fx.Tensor,\n    result: fx.Tensor,\n    N: fx.Constexpr[int],\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n    lane_id = tid % 32\n\n    shared_mem = fx.SharedMemory(float, 32)\n"
+    },
+    {
+      "id": "L2_softmax",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef row_softmax_kernel(\n    input: fx.Tensor,\n    output: fx.Tensor,\n    rows: fx.Constexpr[int],\n    cols: fx.Constexpr[int],\n):\n    row = fx.thread_idx.x\n    if row < rows:\n        local_row = fx.LocalTensor(cols, fx.BFloat16)\n "
+    },
+    {
+      "id": "L2_rmsnorm",
+      "prompt_type": "standard",
+      "syntax_valid": false,
+      "has_import": false,
+      "has_kernel": false,
+      "issues": [
+        "SyntaxError: invalid decimal literal (<sandbox>, line 2)"
+      ],
+      "pass": false,
+      "code_preview": "<plan>\n  1. Problem analysis: RMSNorm computes RMS = sqrt(mean(x^2) + eps) and normalizes input. Key constraints: 16B model, 128 hidden size, 128 threads per block, 128 elements per thread, 128 elements per warp, 128 elements per wavefront, 128 elements per subwave, 128 elements per subsubwave, 128 "
+    },
+    {
+      "id": "L2_layernorm",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import torch\nimport flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef layernorm_kernel(\n    x: fx.Tensor,\n    gamma: fx.Tensor,\n    beta: fx.Tensor,\n    y: fx.Tensor,\n    N: fx.Int32,\n    C: fx.Int32,\n    block_size: fx.Int32,\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n  "
+    },
+    {
+      "id": "L2_silu",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef silu_kernel(\n    x: fx.Tensor,\n    y: fx.Tensor,\n    N: fx.Constexpr[int],\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n    tile_size = 128\n    sub_tile_size = 8\n    vec_size = 16\n\n    for i in range(0, N, tile_size):"
+    },
+    {
+      "id": "L2_rope",
+      "prompt_type": "standard",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef rope_kernel(\n    query: fx.Tensor,\n    key: fx.Tensor,\n    cos: fx.Tensor,\n    sin: fx.Tensor,\n    block_size: fx.Constexpr[int],\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n    block_offset = bid * block_size\n    th"
+    },
+    {
+      "id": "CT_vec_mul",
+      "prompt_type": "code_tag",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef vec_mul_kernel(A: fx.Tensor, B: fx.Tensor, C: fx.Tensor):\n    i = fx.thread_idx.x\n    C[i] = A[i] * B[i]"
+    },
+    {
+      "id": "CT_softmax",
+      "prompt_type": "code_tag",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef row_wise_softmax_bf16(\n    input: fx.Tensor,\n    output: fx.Tensor,\n    num_rows: fx.Int32,\n    num_cols: fx.Int32,\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n    row = bid * 16 + tid // 64\n    col = tid % 64\n\n    i"
+    },
+    {
+      "id": "CT_gemm",
+      "prompt_type": "code_tag",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef gemm_bf16(\n    A: fx.Tensor,\n    B: fx.Tensor,\n    C: fx.Tensor,\n    M: fx.Int32,\n    N: fx.Int32,\n    K: fx.Int32,\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n\n    tile_m = 128\n    tile_n = 128\n    sub_tile_m = 32\n "
+    },
+    {
+      "id": "CT_rmsnorm",
+      "prompt_type": "code_tag",
+      "syntax_valid": false,
+      "has_import": false,
+      "has_kernel": false,
+      "issues": [
+        "SyntaxError: invalid decimal literal (<sandbox>, line 4)"
+      ],
+      "pass": false,
+      "code_preview": "<plan>\n  1. Problem analysis and hardware constraints\n     - RMSNorm is a normalization technique that scales the input by the root mean square (RMS) of its elements.\n     - The kernel will operate on a 2D tensor of shape (N, C), where N is the batch size and C is the channel size.\n     - The kernel"
+    },
+    {
+      "id": "CT_silu",
+      "prompt_type": "code_tag",
+      "syntax_valid": true,
+      "has_import": true,
+      "has_kernel": true,
+      "issues": [],
+      "pass": true,
+      "code_preview": "import flydsl.compiler as flyc\nimport flydsl.expr as fx\n\n@flyc.kernel\ndef silu_bf16_kernel(\n    input: fx.Tensor,\n    output: fx.Tensor,\n    N: fx.Constexpr[int],\n):\n    bid = fx.block_idx.x\n    tid = fx.thread_idx.x\n    lane_id = fx.lane_id()\n\n    TILE_SIZE = 64\n    tile_start = bid * TILE_SIZE\n   "
+    }
+  ],
+  "summary": {
+    "api_score_fa": 0.6797142857142856,
+    "api_score_v5e": 0.7411428571428571,
+    "format_compliance_rate": 88.0,
+    "sandbox_pass_rate": 86.66666666666667
+  }
+}
