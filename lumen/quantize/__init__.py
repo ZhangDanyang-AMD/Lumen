@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 
 @functools.lru_cache(maxsize=1)
 def is_aiter_available() -> bool:
-    """Return True if the AITER package (CK attention backend) is importable."""
+    """Return True if the AITER package is importable."""
     try:
         import aiter  # noqa: F401
 
@@ -328,7 +328,7 @@ def _patch_linear_layers(
                 getattr(config, "cache_frozen_weight", False) and module._lumen_frozen
             )
             # bpreshuffle GEMM only makes sense with the frozen-weight cache (the
-            # shuffle is amortized once); it is bit-identical to the CK blockscale.
+            # shuffle is amortized once).
             module._lumen_bpreshuffle = (
                 getattr(config, "bpreshuffle_gemm", False) and module._lumen_cache_frozen
             )
@@ -433,31 +433,22 @@ def _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size):
     # skip the whole WGrad (dequant→requant + transpose + GEMM). Attached to the
     # (stable) cache tensor so the forward threads it onto ctx.
     desc.data._lumen_skip_wgrad = True
-    # Optionally pre-shuffle the (frozen) FP8 weight into the B-preshuffle layout
-    # so the blockscale GEMM uses the ~2.5x-faster bpreshuffle kernel. One-time
-    # (frozen), bit-identical to the CK path. Attached to the cache tensor so
-    # gemm_blockscale picks it up automatically.
-    def _shuffle(t):
-        if not getattr(module, "_lumen_bpreshuffle", False):
-            return None
+    # Pre-shuffle frozen weight into (N//16, K*16) layout for the Triton preshuffle
+    # GEMM kernel.  One-time cost amortized over all forwards.
+    if getattr(module, "_lumen_bpreshuffle", False) and scaling_type in ("blockwise", "blockwise2d"):
         try:
             from aiter.ops.shuffle import shuffle_weight
-            return shuffle_weight(t, layout=(16, 16))
-        except (ImportError, RuntimeError, AssertionError) as e:
-            logger.warning("bpreshuffle: shuffle_weight failed (%s); using CK blockscale", e)
-            return None
-    wsh = _shuffle(desc.data)
-    if wsh is not None:
-        desc.data._lumen_wsh = wsh
+            N_w, K_w = desc.data.shape
+            wsh = shuffle_weight(desc.data, layout=(16, 16)).reshape(N_w // 16, K_w * 16)
+            desc.data._lumen_wsh = wsh
+        except Exception as e:
+            logger.warning("preshuffle cache failed (%s); will use standard blockscale", e)
     # Also cache the transposed FP8 weight + scale (frozen → constant) so the
     # blockwise2d DGrad reuses it instead of doing weight_data.t().contiguous()
     # (~7.6 GB/step of copies) every backward.
     if scaling_type == "blockwise2d":
         try:
             data_t = desc.data.t().contiguous()
-            wsh_t = _shuffle(data_t)
-            if wsh_t is not None:
-                data_t._lumen_wsh = wsh_t
             desc.data._lumen_wt = (data_t, desc.scale.t().contiguous())
         except (AssertionError, RuntimeError):
             pass

@@ -5,7 +5,7 @@
 ###############################################################################
 
 """Quantized linear forward + backward with explicit autograd and
-multi-backend ASM → CK → Triton fallback.
+multi-backend ASM → Triton fallback.
 
 All backends are AITER implementations — no torch.nn.functional fallbacks.
 
@@ -22,8 +22,6 @@ Supports all 7 scaling modes:
     - ``none``         — BF16 passthrough (no quantization)
 
 GEMM backends are selected automatically:
-    - **ASM**: ``gemm_a8w8_asm``, ``gemm_a8w8_blockscale_bpreshuffle_asm``
-    - **CK**: ``gemm_a8w8_ck``, ``gemm_a8w8_blockscale_ck``
     - **Triton**: ``gemm_a8w8`` (per-tensor), ``gemm_a8w8_blockscale``,
       ``gemm_a8w8_per_token_scale``, ``gemm_a16w16`` (BF16),
       ``gemm_mxfp8`` (MXFP8 with E8M0 scales)
@@ -41,7 +39,6 @@ from torch.autograd.function import once_differentiable
 
 from lumen.ops.dispatch import (
     Backend,
-    _probe_aiter_ck_gemm,
     _probe_aiter_hipblas,
     _probe_aiter_quant,
     _probe_aiter_triton_gemm,
@@ -65,9 +62,6 @@ def _to_2d(x: torch.Tensor) -> torch.Tensor:
 _PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
 _FAST_QUANT_DISPATCH = os.environ.get("LUMEN_FAST_QUANT_DISPATCH", "1") == "1"
 _FP8_DGRAD_OUTPUT = os.environ.get("LUMEN_FP8_DGRAD_OUTPUT", "0") == "1"
-# gfx942/304CU: gemm_a8w8_blockscale CK intrawave_v3 kernel triggers async GPU fault.
-# Set LUMEN_CK_BLOCKSCALE=0 to skip the CK path and fall through to Triton.
-_CK_BLOCKSCALE_ENABLED = os.environ.get("LUMEN_CK_BLOCKSCALE", "1") == "1"
 
 # ---------------------------------------------------------------------------
 # Tuned hipBLASLt GEMM solutions
@@ -415,8 +409,6 @@ def quantize_input(
                 return FP8Descriptor(data=result[0], scale=result[1], fp8_dtype=fp8_dtype)
             return result
         backends = []
-        if _probe_aiter_quant() and not _is_e5m2(fp8_dtype):
-            backends.append((Backend.CK, lambda: _quant_per_tensor_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
         x_fp8, x_scale = try_backends(backends, op_name="quant_delayed_per_tensor")
@@ -424,8 +416,6 @@ def quantize_input(
 
     if scaling_type == "dynamic":
         backends = []
-        if _probe_aiter_quant() and not _is_e5m2(fp8_dtype):
-            backends.append((Backend.CK, lambda: _quant_per_tensor_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_tensor_triton(x_2d, fp8_dtype)))
         x_fp8, x_scale = try_backends(backends, op_name="quant_per_tensor")
@@ -433,8 +423,6 @@ def quantize_input(
 
     if scaling_type == "per_token":
         backends = []
-        if _probe_aiter_quant():
-            backends.append((Backend.CK, lambda: _quant_per_token_hip(x_2d, fp8_dtype)))
         if _probe_aiter_triton_quant():
             backends.append((Backend.TRITON, lambda: _quant_per_token_triton(x_2d, fp8_dtype)))
         x_fp8, x_scale = try_backends(backends, op_name="quant_per_token")
@@ -574,25 +562,12 @@ def _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, 
 def _expand_per_tensor_scale(scale, size):
     """Broadcast a per-tensor scale (1,) to a contiguous per-row vector.
 
-    AITER's gemm_a8w8 kernels (CK and Triton) index into scales with
-    per-row offsets.  A (1,)-shaped tensor causes out-of-bounds reads.
+    AITER's gemm_a8w8 Triton kernels index into scales with per-row offsets.
+    A (1,)-shaped tensor causes out-of-bounds reads.
     """
     if scale.dtype == torch.float32 and scale.ndim == 1 and scale.numel() == 1:
         return scale.expand(size).contiguous()
     return scale.float().reshape(1).expand(size).contiguous()
-
-
-def _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
-    # w_transposed is hipBLASLt-only (CK computes Y = A @ W^T directly); ignored here.
-    from aiter.ops.gemm_op_a8w8 import gemm_a8w8_CK
-
-    M, N = a_fp8.shape[0], w_fp8.shape[0]
-    sa = _expand_per_tensor_scale(scale_a, M).unsqueeze(1)
-    sw = _expand_per_tensor_scale(scale_w, N).unsqueeze(1)
-    out = gemm_a8w8_CK(a_fp8, w_fp8, sa, sw)
-    if bias is not None:
-        out = out + bias
-    return out
 
 
 def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
@@ -609,14 +584,7 @@ def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, b
 
 
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
-    """Per-tensor FP8 GEMM: Y = X @ W^T. All AITER backends.
-
-    When ``LUMEN_PREFER_HIPBLASLT=1``, hipBLASLt is tried first to match TE's
-    GEMM backend (AMD MLPerf reference uses ``NVTE_USE_HIPBLASLT=1``).
-
-    Otherwise hipBLASLt is tried last because ``hipb_create_extension`` /
-    ``hipb_mm`` can SIGSEGV in ``mp.spawn`` child processes (known multi-GPU
-    issue in the gradlib C++ globals).  CK and Triton are safe to run first.
+    """Per-tensor FP8 GEMM: Y = X @ W^T. Triton first, hipBLASLt as fallback.
 
     ``w_transposed`` is an optional pre-computed ``(K, N)`` contiguous
     transpose of ``w_fp8``, used by hipBLASLt to skip ``.t().contiguous()``.
@@ -629,13 +597,9 @@ def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None
         if fn is not None:
             return fn(a_fp8, w_fp8, scale_a, scale_w, w_transposed, bias)
     backends = []
-    if _PREFER_HIPBLASLT and _probe_aiter_hipblas():
-        backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed, bias)))
-    if _probe_aiter_ck_gemm():
-        backends.append((Backend.CK, lambda: _gemm_per_tensor_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w)))
-    if not _PREFER_HIPBLASLT and _probe_aiter_hipblas():
+    if _probe_aiter_hipblas():
         backends.append((Backend.HIPBLAS, lambda: _gemm_per_tensor_hipblas(a_fp8, w_fp8, scale_a, scale_w, w_transposed, bias)))
     return try_backends(backends, op_name="gemm_per_tensor")
 
@@ -788,34 +752,10 @@ def gemm_per_token(a_fp8, w_fp8, scale_a, scale_w):
     return try_backends(backends, op_name="gemm_per_token")
 
 
-def _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w):
-    from aiter.ops.gemm_op_a8w8 import gemm_a8w8_blockscale
-
-    return gemm_a8w8_blockscale(a_fp8, w_fp8, scale_a, scale_w)
-
-
 def _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import gemm_a8w8_blockscale
 
     return gemm_a8w8_blockscale(a_fp8, w_fp8, scale_a, scale_w)
-
-
-def _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w):
-    """Blockscale FP8 GEMM with a pre-shuffled weight (B-preshuffle layout).
-
-    Numerically identical to ``gemm_a8w8_blockscale`` but ~2.5x faster on gfx942:
-    the weight is reordered once (``shuffle_weight(w, (16,16))``, cached for frozen
-    weights) and the activation scale is supplied in the kernel's transposed layout.
-    """
-    import aiter
-    # bpreshuffle wants the (M, K/blk) activation scale in transposed memory order.
-    scale_a_t = scale_a.transpose(0, 1).contiguous().view(*scale_a.shape)
-    return aiter.gemm_a8w8_blockscale_bpreshuffle(a_fp8, w_sh, scale_a_t, scale_w, torch.bfloat16)
-
-
-@functools.lru_cache(maxsize=1)
-def _bpreshuffle_onfly_enabled():
-    return os.environ.get("LUMEN_BPRESHUFFLE_ONFLY", "0") == "1"
 
 
 @functools.lru_cache(maxsize=1)
@@ -824,32 +764,23 @@ def _skip_frozen_wgrad_enabled():
 
 
 def gemm_blockscale(a_fp8, w_fp8, scale_a, scale_w):
-    """Blockwise FP8 GEMM: Y = X @ W^T via AITER CK → Triton.
-
-    Two ways to use the ~2.5x-faster B-preshuffle kernel (bit-identical to CK):
-      - cached: the weight carries a pre-shuffled copy ``_lumen_wsh`` (frozen-weight
-        cache, set by ``_maybe_cache_frozen_weight``);
-      - on-the-fly: ``LUMEN_BPRESHUFFLE_ONFLY=1`` shuffles the weight per call. The
-        shuffle is ~6% of the GEMM, so it still wins ~2.4x even uncached — used for
-        large models (e.g. 70B FSDP) where caching the full FP8 weight would OOM.
-    """
+    """Blockwise FP8 GEMM: Y = X @ W^T via Triton."""
+    # Preshuffle fast path: frozen weight pre-cached as (N//16, K*16) layout
     w_sh = getattr(w_fp8, "_lumen_wsh", None)
-    if w_sh is None and _bpreshuffle_onfly_enabled():
+    if w_sh is not None and _probe_aiter_triton_gemm():
         try:
-            from aiter.ops.shuffle import shuffle_weight
-            w_sh = shuffle_weight(w_fp8, layout=(16, 16))
-        except (ImportError, RuntimeError, AssertionError):
-            w_sh = None
-    if w_sh is not None:
-        try:
-            return _gemm_blockscale_bpreshuffle(a_fp8, w_sh, scale_a, scale_w)
-        # IndexError/ValueError: scale_a layout mismatch (e.g. a 1D per-tensor
-        # scale reaching this blockscale path) — fall back rather than crash the run.
-        except (RuntimeError, AssertionError, IndexError, ValueError) as e:
-            _logger.warning("gemm_blockscale: bpreshuffle failed (%s); CK/Triton fallback", e)
+            from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import (
+                gemm_a8w8_blockscale_preshuffle as _triton_preshuffle,
+            )
+            N_orig = w_fp8.shape[0]
+            y = torch.empty(a_fp8.shape[0], N_orig, device=a_fp8.device, dtype=torch.bfloat16)
+            # x_scale is (M, K//128) — not transposed; tell the kernel explicitly.
+            return _triton_preshuffle(a_fp8, w_sh, scale_a, scale_w,
+                                      dtype=torch.bfloat16, y=y, is_x_scale_tranposed=False)
+        except Exception as e:
+            _logger.warning("preshuffle GEMM failed (%s); falling back to Triton blockscale", e)
+
     backends = []
-    if _probe_aiter_ck_gemm() and _CK_BLOCKSCALE_ENABLED:
-        backends.append((Backend.CK, lambda: _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w)))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w)))
     return try_backends(backends, op_name="gemm_blockscale")
@@ -868,14 +799,12 @@ def _gemm_blockscale_fused_bias(a_fp8, w_fp8, scale_a, scale_w, bias):
 
 
 def gemm_blockscale_with_bias(a_fp8, w_fp8, scale_a, scale_w, bias):
-    """Blockwise FP8 GEMM + bias: tries fused epilogue, falls back to separate add."""
+    """Blockwise FP8 GEMM + bias: tries Triton fused epilogue, falls back to Triton + separate add."""
     from lumen.ops.dispatch import _probe_aiter_fused_gemm_blockscale_mul_add
 
     backends = []
     if _probe_aiter_fused_gemm_blockscale_mul_add():
         backends.append((Backend.TRITON, lambda: _gemm_blockscale_fused_bias(a_fp8, w_fp8, scale_a, scale_w, bias)))
-    if _probe_aiter_ck_gemm():
-        backends.append((Backend.CK, lambda: _gemm_blockscale_ck(a_fp8, w_fp8, scale_a, scale_w) + bias))
     if _probe_aiter_triton_gemm():
         backends.append((Backend.TRITON, lambda: _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w) + bias))
     return try_backends(backends, op_name="gemm_blockscale_fused_bias")
@@ -917,11 +846,7 @@ def _get_fast_gemm_fn(op_name):
         return fn
     fn = None
     if op_name == "gemm_per_tensor":
-        if _PREFER_HIPBLASLT and _probe_aiter_hipblas():
-            fn = _gemm_per_tensor_hipblas
-        elif _probe_aiter_ck_gemm():
-            fn = _gemm_per_tensor_ck
-        elif _probe_aiter_triton_gemm():
+        if _probe_aiter_triton_gemm():
             fn = _gemm_per_tensor_triton
         elif _probe_aiter_hipblas():
             fn = _gemm_per_tensor_hipblas
@@ -946,7 +871,7 @@ def gemm_bf16(a, w, bias=None):
             return fn(a, w, bias)
     backends = []
     if _probe_aiter_tuned_gemm_bf16():
-        backends.append((Backend.CK, lambda: _gemm_bf16_tuned(a, w, bias)))
+        backends.append((Backend.ASM, lambda: _gemm_bf16_tuned(a, w, bias)))
     return try_backends(backends, op_name="gemm_bf16")
 
 
@@ -1033,7 +958,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
     """FP8 quantized linear: quant -> GEMM -> dequant, for both fwd and bwd.
 
     Supports all 7 scaling modes via ``scaling_type`` parameter.
-    Backend selection uses ASM → CK → Triton fallback automatically.
+    Backend selection uses ASM → Triton fallback automatically.
     All backends are AITER implementations.
 
     When ``delay_wgrad=True``, the backward pass computes only dgrad
@@ -1639,7 +1564,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
 
         # wgrad: dW = grad^T @ input
         #
-        # CK/Triton dispatch_gemm crashes (SIGABRT) on transposed wgrad
+        # Triton dispatch_gemm crashes (SIGABRT) on transposed wgrad
         # tensors in delayed/dynamic mode.  hipBLASLt handles NN layout
         # natively via gemm_wgrad_fp8, so use it when available.  This
         # also matches TE's fp8_wgrad=True behavior (FP8 GEMM for wgrad).

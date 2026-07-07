@@ -4,7 +4,7 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Backend dispatcher with automatic ASM → CK → Triton fallback.
+"""Backend dispatcher with automatic ASM → Triton fallback.
 
 All backends are AITER implementations. No torch.nn.functional fallbacks.
 Each operator registers its available backends via :func:`try_backends`.
@@ -49,38 +49,16 @@ logger = logging.getLogger(__name__)
 
 class Backend(Enum):
     ASM = "asm"
-    CK = "ck"
     TRITON = "triton"
     HIPBLAS = "hipblas"
 
 
-FALLBACK_ORDER = [Backend.ASM, Backend.CK, Backend.TRITON]
+FALLBACK_ORDER = [Backend.ASM, Backend.TRITON]
 
 
 # ---------------------------------------------------------------------------
 # Lazy import helpers — detect available AITER sub-packages once
 # ---------------------------------------------------------------------------
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_ck_norm():
-    """Check if AITER CK norm ops are available."""
-    try:
-        from aiter.ops.norm import layernorm2d_fwd as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_ck_rmsnorm():
-    try:
-        from aiter.ops.rmsnorm import rmsnorm2d_fwd_ck as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
 
 
 @functools.lru_cache(maxsize=1)
@@ -97,16 +75,6 @@ def _probe_aiter_triton_norm():
 def _probe_aiter_triton_rmsnorm():
     try:
         from aiter.ops.triton.normalization.rmsnorm import rms_norm as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_ck_gemm():
-    try:
-        from aiter.ops.gemm_op_a8w8 import gemm_a8w8 as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
@@ -155,7 +123,7 @@ def _probe_aiter_asm_norm():
 
 @functools.lru_cache(maxsize=1)
 def _probe_aiter_quant():
-    """Check if AITER CK/HIP quant ops are available."""
+    """Check if AITER HIP quant ops are available."""
     try:
         from aiter.ops.quant import per_tensor_quant_hip as _  # noqa: F401
 
@@ -434,17 +402,6 @@ def _probe_aiter_fast_transpose():
     """Check if AITER Triton fast 2D transpose kernel is available."""
     try:
         from aiter.ops.triton.quant.fast_transpose import fast_transpose_2d as _  # noqa: F401
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_fused_add_rms_norm():
-    """Check if AITER CK fused add+RMSNorm (residual + norm in one kernel) is available."""
-    try:
-        from aiter.ops.rmsnorm import fused_add_rms_norm_cu as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
