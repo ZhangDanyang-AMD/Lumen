@@ -4,16 +4,15 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""LayerNorm with multi-backend (ASM → CK → Triton) auto-fallback
-and fused quantization for all 6 scaling modes.
+"""LayerNorm with Triton auto-fallback and fused quantization for all 6 scaling modes.
 
 All backends are AITER implementations — no torch.nn.functional fallbacks.
 
 Supported quantization modes (fused into norm forward where possible):
     - ``delayed``    — norm then per-tensor static quant (unfused)
-    - ``dynamic``    — fused per-token dynamic quant (CK / Triton)
+    - ``dynamic``    — fused per-token dynamic quant (Triton)
     - ``blockwise``  — norm then blockwise quant (unfused)
-    - ``per_token``  — fused per-token dynamic quant (CK / Triton)
+    - ``per_token``  — fused per-token dynamic quant (Triton)
     - ``mxfp8``      — norm then standalone MXFP8 conversion (unfused)
     - ``none``       — no quantization
 
@@ -34,7 +33,6 @@ import torch.nn as nn
 from lumen.core.grad_quant import quantize_grad_tensor
 from lumen.ops.dispatch import (
     Backend,
-    _probe_aiter_ck_norm,
     _probe_aiter_triton_norm,
     build_fallback_chain,
     try_backends,
@@ -64,12 +62,6 @@ def _get_zero_bias(weight: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 
-def _get_ck_layer_norm():
-    from aiter.ops.norm import layer_norm
-
-    return layer_norm
-
-
 def _get_triton_layer_norm():
     from aiter.ops.triton.normalization.norm import layer_norm
 
@@ -95,13 +87,8 @@ def _get_triton_per_token_quant():
 
 
 # ---------------------------------------------------------------------------
-# Unquantized LayerNorm with fallback (CK → Triton, all via AITER)
+# Unquantized LayerNorm with fallback (Triton via AITER)
 # ---------------------------------------------------------------------------
-
-
-def _layernorm_ck(x_2d, weight, bias, eps):
-    fn = _get_ck_layer_norm()
-    return fn(x_2d, weight, bias, eps)
 
 
 def _layernorm_triton(x_2d, weight, bias, eps):
@@ -116,8 +103,6 @@ def _get_layernorm_chain():
     global _layernorm_chain
     if _layernorm_chain is None:
         candidates = {}
-        if _probe_aiter_ck_norm():
-            candidates[Backend.CK] = _layernorm_ck
         if _probe_aiter_triton_norm():
             candidates[Backend.TRITON] = _layernorm_triton
         _layernorm_chain = build_fallback_chain(candidates)
@@ -176,11 +161,10 @@ def layernorm(
     eps: float = 1e-5,
     grad_quant_type: Optional[str] = None,
 ) -> torch.Tensor:
-    """Apply LayerNorm with automatic backend fallback (CK → Triton via AITER).
+    """Apply LayerNorm with automatic backend fallback (Triton via AITER).
 
     When any input requires grad, the Triton backend is preferred because
-    its ``_LayerNorm`` autograd.Function provides forward+backward support,
-    whereas CK kernels do not participate in the autograd graph.
+    its ``_LayerNorm`` autograd.Function provides forward+backward support.
 
     Args:
         x: Input tensor ``(*, hidden_size)``.
@@ -424,7 +408,7 @@ def layernorm_with_quant(
 
 
 class LumenLayerNorm(nn.Module):
-    """LayerNorm backed by AITER (CK → Triton).
+    """LayerNorm backed by AITER Triton kernels.
 
     LayerNorm implementation backed by AITER kernels.
 

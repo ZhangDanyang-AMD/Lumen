@@ -63,6 +63,7 @@ docker run --rm --init \
     --cap-add=SYS_PTRACE \
     -v "${HOST_LUMEN}/lumen:/workspace/Lumen/lumen" \
     -v "${HOST_LUMEN}/examples:/workspace/Lumen/examples" \
+    -v "${HOST_LUMEN}/third_party/aiter/aiter/ops/triton/configs:/workspace/Lumen/third_party/aiter/aiter/ops/triton/configs" \
     -v "${HOST_MODEL}:/model-qwen3:ro" \
     -v "${HOST_DATA}:/data:ro" \
     -v "${HOST_RESULTS}:/results" \

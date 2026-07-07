@@ -4,16 +4,15 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""RMSNorm with multi-backend (ASM → CK → Triton) auto-fallback
-and fused quantization for all 6 scaling modes.
+"""RMSNorm with Triton auto-fallback and fused quantization for all 6 scaling modes.
 
 All backends are AITER implementations — no torch.nn.functional fallbacks.
 
 Supported quantization modes (fused into norm forward where possible):
     - ``delayed``    — fused per-tensor static quant (Triton)
-    - ``dynamic``    — fused per-token dynamic quant (CK / Triton)
+    - ``dynamic``    — fused per-token dynamic quant (Triton)
     - ``blockwise``  — fused per-block group quant (Triton)
-    - ``per_token``  — fused per-token dynamic quant (CK / Triton)
+    - ``per_token``  — fused per-token dynamic quant (Triton)
     - ``mxfp8``      — norm then standalone MXFP8 conversion (unfused)
     - ``none``       — no quantization
 
@@ -35,8 +34,6 @@ import torch.nn as nn
 from lumen.core.grad_quant import quantize_grad_tensor
 from lumen.ops.dispatch import (
     Backend,
-    _probe_aiter_ck_rmsnorm,
-    _probe_aiter_fused_add_rms_norm,
     _probe_aiter_fused_add_rmsnorm_pad,
     _probe_aiter_fused_quant,
     _probe_aiter_triton_rmsnorm,
@@ -62,18 +59,6 @@ def _get_triton_rms_norm():
     from aiter.ops.triton.normalization.rmsnorm import rms_norm
 
     return rms_norm
-
-
-def _get_ck_rms_norm():
-    from aiter.ops.rmsnorm import rms_norm
-
-    return rms_norm
-
-
-def _get_ck_rmsnorm2d_fwd_with_dynamicquant():
-    from aiter.ops.rmsnorm import rmsnorm2d_fwd_with_dynamicquant
-
-    return rmsnorm2d_fwd_with_dynamicquant
 
 
 def _get_triton_rmsnorm2d_fwd_with_dynamicquant():
@@ -106,12 +91,6 @@ def _get_triton_per_token_quant():
     return pertoken_quant
 
 
-def _get_ck_fused_add_rms_norm():
-    from aiter.ops.rmsnorm import fused_add_rms_norm_cu
-
-    return fused_add_rms_norm_cu
-
-
 def _get_triton_fused_add_rmsnorm_pad():
     from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import fused_add_rmsnorm_pad
 
@@ -119,13 +98,8 @@ def _get_triton_fused_add_rmsnorm_pad():
 
 
 # ---------------------------------------------------------------------------
-# Unquantized RMSNorm with fallback (CK → Triton, all via AITER)
+# Unquantized RMSNorm with fallback (Triton via AITER)
 # ---------------------------------------------------------------------------
-
-
-def _rmsnorm_ck(x_2d, weight, eps):
-    fn = _get_ck_rms_norm()
-    return fn(x_2d, weight, eps)
 
 
 def _rmsnorm_triton(x_2d, weight, eps):
@@ -135,8 +109,6 @@ def _rmsnorm_triton(x_2d, weight, eps):
 
 def _build_rmsnorm_chain():
     candidates = {}
-    if _probe_aiter_ck_rmsnorm():
-        candidates[Backend.CK] = _rmsnorm_ck
     if _probe_aiter_triton_rmsnorm():
         candidates[Backend.TRITON] = _rmsnorm_triton
     return build_fallback_chain(candidates)
@@ -211,11 +183,10 @@ def rmsnorm(
     eps: float = 1e-6,
     grad_quant_type: Optional[str] = None,
 ) -> torch.Tensor:
-    """Apply RMSNorm with automatic backend fallback (CK → Triton via AITER).
+    """Apply RMSNorm with automatic backend fallback (Triton via AITER).
 
     When any input requires grad, the Triton backend is preferred because
-    its ``_RMSNorm`` autograd.Function provides forward+backward support,
-    whereas CK kernels do not participate in the autograd graph.
+    its ``_RMSNorm`` autograd.Function provides forward+backward support.
 
     Set ``LUMEN_USE_APEX_RMSNORM=1`` to use apex's ``fused_rms_norm_affine``
     instead of AITER, matching the AMD MLPerf reference (TE + apex).
@@ -245,7 +216,7 @@ def rmsnorm(
 
 
 # ---------------------------------------------------------------------------
-# Fused residual-add + RMSNorm  (CK → Triton → unfused fallback)
+# Fused residual-add + RMSNorm  (Triton → unfused fallback)
 # ---------------------------------------------------------------------------
 
 
@@ -257,9 +228,8 @@ def fused_add_rmsnorm(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Fused residual add + RMSNorm: ``residual = x + residual; y = RMSNorm(residual)``.
 
-    Dispatches to AITER CK ``fused_add_rms_norm_cu`` (in-place) or Triton
-    ``fused_add_rmsnorm_pad`` (allocates output) when probes succeed, then
-    falls back to unfused ``add`` + :func:`rmsnorm`.
+    Dispatches to AITER Triton ``fused_add_rmsnorm_pad`` (allocates output)
+    when the probe succeeds, then falls back to unfused ``add`` + :func:`rmsnorm`.
 
     Args:
         x: Input tensor ``(*, hidden_size)``.
@@ -275,14 +245,6 @@ def fused_add_rmsnorm(
     x_2d = _to_2d(x)
     res_2d = _to_2d(residual)
     _catchable = (RuntimeError, NotImplementedError, TypeError, ValueError)
-
-    if _probe_aiter_fused_add_rms_norm():
-        try:
-            fn = _get_ck_fused_add_rms_norm()
-            fn(x_2d, res_2d, weight, eps)
-            return x_2d.reshape(orig_shape), res_2d.reshape(orig_shape)
-        except _catchable as e:
-            logger.warning("fused_add_rmsnorm: CK failed (%s), trying Triton", e)
 
     if _probe_aiter_fused_add_rmsnorm_pad():
         try:
@@ -410,14 +372,7 @@ def rmsnorm_current_per_tensor(
     yscale = torch.empty(M, 1, dtype=torch.float32, device=x.device)
 
     fused = False
-    if _probe_aiter_ck_rmsnorm():
-        try:
-            fn = _get_ck_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out_fp8, x_2d, yscale, weight, eps)
-            fused = True
-        except (RuntimeError, NotImplementedError):
-            pass
-    if not fused and _probe_aiter_triton_rmsnorm():
+    if _probe_aiter_triton_rmsnorm():
         try:
             fn = _get_triton_rmsnorm2d_fwd_with_dynamicquant()
             fn(out_fp8, x_2d, yscale, weight, eps)
@@ -442,7 +397,7 @@ def rmsnorm_per_token(
     eps: float,
     fp8_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """RMSNorm + per-token (per-row) FP8 dynamic quant (fused CK / Triton).
+    """RMSNorm + per-token (per-row) FP8 dynamic quant (fused Triton).
 
     Returns:
         ``(x_fp8, yscale)`` where yscale is ``[M, 1]``.
@@ -455,14 +410,6 @@ def rmsnorm_per_token(
     yscale = torch.empty(M, 1, dtype=torch.float32, device=x.device)
 
     backends = []
-    if _probe_aiter_ck_rmsnorm():
-
-        def _ck(out, inp, ys, w, e):
-            fn = _get_ck_rmsnorm2d_fwd_with_dynamicquant()
-            fn(out, inp, ys, w, e)
-            return out, ys
-
-        backends.append((Backend.CK, lambda: _ck(out_fp8, x_2d, yscale, weight, eps)))
     if _probe_aiter_triton_rmsnorm():
 
         def _tri(out, inp, ys, w, e):
@@ -592,7 +539,7 @@ def rmsnorm_with_quant(
 
 
 class LumenRMSNorm(nn.Module):
-    """RMSNorm backed by AITER (CK → Triton).
+    """RMSNorm backed by AITER Triton kernels.
 
     RMSNorm implementation backed by AITER kernels.
 

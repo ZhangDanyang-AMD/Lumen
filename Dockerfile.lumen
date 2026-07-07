@@ -16,7 +16,9 @@ COPY third_party/aiter/aiter/ops/triton/_triton_kernels/quant/quant_fp8_blockwis
      third_party/aiter/aiter/ops/triton/_triton_kernels/quant/quant_fp8_blockwise.py
 COPY third_party/aiter/aiter/jit/core.py \
      third_party/aiter/aiter/jit/core.py
-COPY third_party/aiter/aiter/jit/module_gemm_common.so \
-     third_party/aiter/aiter/jit/module_gemm_common.so
+COPY third_party/aiter/aiter/ops/triton/utils/gemm_config_utils.py \
+     third_party/aiter/aiter/ops/triton/utils/gemm_config_utils.py
+COPY third_party/aiter/aiter/ops/triton/configs/ \
+     third_party/aiter/aiter/ops/triton/configs/
 COPY third_party/aiter/aiter/configs/ \
      third_party/aiter/aiter/configs/
