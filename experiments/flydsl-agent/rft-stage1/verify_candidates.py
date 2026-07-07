@@ -36,7 +36,7 @@ DOCKER_OPTS = [
 VERIFY_TIMEOUT = 120  # seconds
 
 
-def verify_in_sandbox(code, spec=None):
+def verify_in_sandbox(code, spec=None, skip_runtime=False):
     """Run verify.py in Docker sandbox. Returns dict with results."""
     code = clean_code(code)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -52,6 +52,8 @@ def verify_in_sandbox(code, spec=None):
             "python3", "/workspace/verify.py", "/tmp/kernel.py",
             "--spec", spec_json,
         ]
+        if skip_runtime:
+            cmd.append("--skip-runtime")
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=VERIFY_TIMEOUT,
         )
@@ -169,6 +171,9 @@ def main():
         "total_candidates": 0,
         "passed_static": 0,
         "passed_sandbox": 0,
+        "passed_runtime": 0,
+        "passed_correctness": 0,
+        "correctness_skipped": 0,
         "passed_diversity": 0,
         "by_operator": {},
     }
@@ -192,14 +197,22 @@ def main():
             stats["passed_static"] += 1
 
             if args.use_sandbox:
-                # Real compilation in Docker sandbox
                 sandbox_result = verify_in_sandbox(raw_code, {
                     "operator": op,
                     "hardware": rec.get("hardware", "generic"),
+                    **rec.get("params", {}),
                 })
                 if not sandbox_result.get("compiles", False):
                     continue
                 stats["passed_sandbox"] += 1
+
+                if sandbox_result.get("runs") is True:
+                    stats["passed_runtime"] += 1
+                if sandbox_result.get("correct") is True:
+                    stats["passed_correctness"] += 1
+                elif sandbox_result.get("correct") is None and sandbox_result.get("runs") is not False:
+                    stats["correctness_skipped"] += 1
+
                 cand["sandbox_result"] = sandbox_result
             else:
                 stats["passed_sandbox"] += 1
@@ -208,6 +221,7 @@ def main():
                 "code": code,
                 "style": cand.get("style", "unknown"),
                 "static_analysis": static,
+                "sandbox_result": cand.get("sandbox_result", {}),
             })
 
         # Diversity filter
@@ -226,10 +240,19 @@ def main():
             })
 
         if op not in stats["by_operator"]:
-            stats["by_operator"][op] = {"specs": 0, "candidates": 0, "verified": 0}
+            stats["by_operator"][op] = {
+                "specs": 0, "candidates": 0, "verified": 0,
+                "runtime": 0, "correct": 0,
+            }
         stats["by_operator"][op]["specs"] += 1
         stats["by_operator"][op]["candidates"] += len(candidates)
         stats["by_operator"][op]["verified"] += len(diverse)
+        for v in verified:
+            sr = v.get("sandbox_result", {}) if isinstance(v, dict) else {}
+            if sr.get("runs") is True:
+                stats["by_operator"][op]["runtime"] += 1
+            if sr.get("correct") is True:
+                stats["by_operator"][op]["correct"] += 1
 
         if (i + 1) % 20 == 0:
             logger.info("  [%d/%d] %d verified so far", i + 1, len(records), stats["passed_diversity"])
@@ -245,9 +268,10 @@ def main():
 
     logger.info("=== Verification Summary ===")
     logger.info("  Specs: %d → %d with verified candidates", len(records), len(results))
-    logger.info("  Candidates: %d → static %d → sandbox %d → diverse %d",
+    logger.info("  Candidates: %d → static %d → sandbox %d → runtime %d → correct %d → diverse %d",
                 stats["total_candidates"], stats["passed_static"],
-                stats["passed_sandbox"], stats["passed_diversity"])
+                stats["passed_sandbox"], stats["passed_runtime"],
+                stats["passed_correctness"], stats["passed_diversity"])
     logger.info("  Pass rate: %.1f%%", stats["passed_diversity"] / max(stats["total_candidates"], 1) * 100)
     logger.info("  Output: %s", args.output)
 

@@ -1,176 +1,167 @@
 # RFT Stage A — Diversity-Preserving Rejection Fine-Tuning
 
-基于 SFT v5e 模型，大规模生成候选 kernel → FlyDSL-Gym 沙箱验证 → 保留所有编译通过实现 → 短 SFT 训练。
+基于 SFT v5f 模型，大规模生成候选 kernel → FlyDSL-Gym 沙箱验证 (编译+运行+正确性) → 保留所有编译通过实现 → 1 epoch 训练。
 
 ## 结果
 
-| 指标 | SFT v5e (baseline) | **RFT v1** | Target |
-|------|-------------------|-----------|--------|
-| Overall API Score | 74.1% | **74.6%** | >60% ✅ |
-| Sandbox Compile | 21.9% (42/192) | **30.7% (59/192)** | >10% ✅ |
-| L4 (Advanced) | 49% | **54%** | >50% ✅ |
-| Operator Coverage | 11/12 | **12/12** | ✅ |
+| 指标 | v5e | v5f SFT | **RFT v5f** | Target |
+|------|-----|---------|-------------|--------|
+| Overall API Score | 74% | 74% | **75%** | >60% |
+| L5 (Expert) | 50% | 50% | **57%** | >20% |
+| Format Compliance | — | 96% | **96%** | >90% |
+| Sandbox Compile (122 specs) | 22% | 38% | **53%** | — |
 
-HuggingFace: [Zhangdanyang/Qwen2.5-Coder-RFT-v1](https://huggingface.co/Zhangdanyang/Qwen2.5-Coder-RFT-v1)
+**三层验证** (1952 candidates from RFT model):
 
-## 训练流程
+| Level | Passed | Rate |
+|-------|--------|------|
+| Compilation | 944 | 48% |
+| Runtime | 211 | 11% |
+| Correctness | 0 | 0% |
+
+Correctness 0% 说明 kernel 内部计算逻辑是错的 — 这是 RL Stage B/C 的目标。
+
+HuggingFace: [Zhangdanyang/Qwen2.5-Coder-RFT-v5f](https://huggingface.co/Zhangdanyang/Qwen2.5-Coder-RFT-v5f)
+
+详细分析见 [REPORT.md](REPORT.md)。
+
+## 运行
 
 ### 前置条件
 
-- SFT v5e 已完成，merged model 在 `/home/danyzhan/sft-results/Qwen2.5-Coder-SFT-v5e`
-- FlyDSL-Gym 沙箱镜像 `flydsl-gym:latest` 已构建
-- RL spec 在 `/home/danyzhan/flydsl-agent-dataset/data/rl/train-00000-of-00001.jsonl`
+- SFT v5f model 在 `/home/danyzhan/sft-results/Qwen2.5-Coder-SFT-v5f`
+- FlyDSL-Gym 沙箱镜像 `flydsl-gym:latest`
+- Docker image `lumen/flydsl-cpt:latest`
+- RL specs 在 `/home/danyzhan/flydsl-agent-dataset/data/rl/train-00000-of-00001.jsonl`
+- 8x AMD MI350X GPUs
 
-### Step 1: 候选生成 (~17h)
+### 全自动 Pipeline
 
-用 v5e 模型对 gfx950 spec 生成候选 kernel 代码。
+一键执行全部 7 步 (生成→验证→构建数据→训练→导出→评估)：
+
+```bash
+cd /home/danyzhan/Lumen/experiments/flydsl-agent/rft-stage1
+bash run_rft.sh
+```
+
+总耗时约 26h (生成 23h + 验证 0.5h + 训练 2h + 导出+评估 1h)。
+
+可通过环境变量自定义：
+
+```bash
+SFT_MODEL=/path/to/model \
+MAX_SPECS=50 \
+N_CANDIDATES=8 \
+HARDWARE=gfx942 \
+bash run_rft.sh
+```
+
+### 分步执行
+
+#### Step 1: 候选生成 (~23h)
 
 ```bash
 docker run --rm --init \
     --device /dev/dri --device /dev/kfd \
     --group-add video --group-add render \
     --ipc=host --network=host \
-    -v /path/to/experiments:/workspace/experiments \
+    -v experiments:/workspace/experiments \
     -v /path/to/sft-model:/model:ro \
     -v /path/to/dataset:/data:ro \
     -v /path/to/rft-results:/results \
     lumen/flydsl-cpt:latest \
-    python3 /workspace/experiments/rft-stage1/generate_candidates.py \
+    python3 /workspace/experiments/flydsl-agent/rft-stage1/generate_candidates.py \
         --model /model \
         --specs /data/data/rl/train-00000-of-00001.jsonl \
-        --output /results/candidates_rft_full.jsonl \
-        --n-candidates 16 --max-specs 100 --hardware gfx950 --device cuda:0
+        --output /results/candidates_v5f_gfx950.jsonl \
+        --n-candidates 16 --max-specs 213 --hardware gfx950 --device cuda:0
 ```
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| `--max-specs` | 100 | 从 213 个 gfx950 spec 中按算子均匀采样 |
+| `--max-specs` | 213 | 全部 gfx950 spec (实际采样 122 个) |
 | `--n-candidates` | 16 | 每 spec 生成 16 个候选 |
-| `--hardware` | gfx950 | 只用 gfx950 spec |
+| `--hardware` | gfx950 | 目标硬件 |
 | temperature | 0.8 | 鼓励多样性 |
-| top_p | 0.95 | |
 | 3 种 prompt 风格 | precise / natural / optimization | 轮换使用 |
 
-实际采样 84 个 spec → 1,344 个候选。
+#### Step 2-3: 沙箱验证 (~30min)
 
-### Step 2: 沙箱验证 (~20min)
-
-对全部候选做静态检查 + Docker 沙箱编译验证。
+三层验证：静态检查 → Docker 沙箱编译 → 运行时执行 + 正确性检查
 
 ```bash
 python3 verify_candidates.py \
-    --input /path/to/candidates_rft_full.jsonl \
-    --output /path/to/verified_rft_full.jsonl \
-    --metadata /path/to/verify_stats_rft_full.json \
+    --input /path/to/candidates_v5f_gfx950.jsonl \
+    --output /path/to/verified_v5f_gfx950.jsonl \
+    --metadata /path/to/verify_stats_v5f_gfx950.json \
     --use-sandbox
 ```
 
-三级过滤：
-1. **语法检查** — `compile(code, 'exec')` + FlyDSL pattern + 非平凡 (>15 行)
-2. **沙箱编译** — Docker 容器中真实 FlyDSL 编译
-3. **多样性** — edit distance ratio < 0.9 去重
+验证统计输出 (`verify_stats_*.json`) 包含：
+- `passed_static` — 语法 + FlyDSL pattern + ≥15 行
+- `passed_sandbox` — FlyDSL JIT 编译通过
+- `passed_runtime` — entry point 调用成功
+- `passed_correctness` — 输出与 PyTorch reference 匹配
+- `by_operator` — 每个算子的分项统计
 
-结果：1,344 → 922 静态通过 → **326 沙箱通过** (24.3%)
-
-### Step 3: 构建 RFT 数据集
-
-将沙箱验证通过的候选转为 ChatML 格式，与 v5e SFT 数据合并。
+#### Step 4: 构建 RFT 数据集
 
 ```bash
 python3 build_rft_dataset.py \
-    --verified /path/to/verified_rft_full.jsonl \
-    --sft-data /path/to/sft/train-00000-of-00001.jsonl \
-    --output /path/to/rft_train.jsonl \
+    --verified /path/to/verified_v5f_gfx950.jsonl \
+    --sft-data /path/to/format_aligned/train.jsonl \
+    --output /path/to/rft_v5f_train.jsonl \
     --rft-repeat 2
 ```
 
-| 数据 | 数量 |
-|------|------|
-| SFT v5e 原始数据 | 3,889 |
-| RFT 验证通过 ×2 | 652 |
-| **合并总数** | **4,541** |
-| RFT 占比 | 14.4% |
-
 关键设计：**Diversity-preserving** — 保留所有通过编译的实现，不取 top-K。
-同一 spec 可能有多种不同实现（不同 tiling / pipeline / import 模式），全部保留。
 
-### Step 4: RFT 训练 (~1.2h)
+#### Step 5: RFT 训练 (~2h)
 
-在 v5e merged model 上做 1 epoch 短训练。
+在 v5f merged model 上 1 epoch 训练。使用 `config_rft.sh` 超参。
 
-```bash
-# 用环境变量覆盖超参，复用 SFT trainer
-source config_rft.sh
-# 训练脚本与 SFT 相同 (train_sft.py)，只是 base model 和数据不同
-```
+| 参数 | 值 |
+|------|-----|
+| Base model | Qwen2.5-Coder-SFT-v5f (merged) |
+| LR | 5e-6 |
+| Epochs | 1 |
+| LoRA | r=64, alpha=128, dropout=0.05 |
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| Base model | Qwen2.5-Coder-SFT-v5e | merged model，非 base |
-| LR | 5e-6 | 比 SFT (1e-5) 低，保护已有能力 |
-| Epochs | 1 | 短训练，避免过拟合到 RFT 数据 |
-| MAX_STEPS | 568 | 4541 / GBS=8 × 1 epoch |
-| LoRA | r=64, alpha=128 | 与 SFT 相同 |
-| Dropout | 0.05 | 比 SFT (0.1) 低 |
-| val_loss | 0.970 → 0.967 | 轻微改善 |
+#### Step 6-7: 导出 + 评估
 
-### Step 5: 导出 + 评估
-
-```bash
-# 导出 HF
-python3 export_hf.py \
-    --base-model /path/to/Qwen2.5-Coder-SFT-v5e \
-    --dcp-path /path/to/rft-results/final/final \
-    --output /path/to/Qwen2.5-Coder-RFT-v1 \
-    --lora-rank 64 --lora-alpha 128
-
-# Benchmark (25 题 API Score)
-python3 eval_sft.py \
-    --base-model /path/to/base \
-    --sft-model /path/to/Qwen2.5-Coder-RFT-v1 \
-    --output benchmark_rft_v1.json
-
-# 沙箱评估 (20 spec × 16 候选)
-python3 generate_candidates.py --model /path/to/RFT-v1 --max-specs 20 ...
-python3 verify_candidates.py --use-sandbox ...
-```
-
-## 全自动 Pipeline
-
-一键执行全部步骤：
-
-```bash
-bash /home/danyzhan/rft-results/run_rft_pipeline.sh
-# 日志: /home/danyzhan/rft-results/rft_pipeline.log
-```
-
-总耗时约 20h（生成 17h + 验证 0.5h + 训练 1.2h + 评估 3h）。
+自动导出 HF 模型并运行 benchmark (API Score + format compliance + sandbox compilation)。
 
 ## 文件清单
 
 ```
 rft-stage1/
 ├── README.md                  # 本文件
-├── REPORT.md                  # 实验报告（详细结果分析）
-├── generate_candidates.py     # 候选生成器
-├── verify_candidates.py       # 静态 + 沙箱验证
+├── REPORT.md                  # 详细实验报告
+├── generate_candidates.py     # 候选生成器 (N=16, 3 种 prompt 风格)
+├── verify_candidates.py       # 静态 + 沙箱编译 + 运行时 + 正确性验证
 ├── build_rft_dataset.py       # verified → ChatML + 合并
-├── config_rft.sh              # 训练超参
-├── run_rft.sh                 # (旧) 单步脚本
-└── results/
-    ├── benchmark_rft_v1.json          # 25 题 benchmark
-    ├── verify_stats_rft_full.json     # 1344 候选沙箱统计
-    ├── verify_stats_rft_eval.json     # RFT 模型 192 候选评估
-    ├── candidates_v5e_gfx950.jsonl    # v5e 评估候选
-    └── rft_pipeline.log               # 完整 pipeline 日志
+├── config_rft.sh              # 训练超参 (lr=5e-6, 1 epoch)
+└── run_rft.sh                 # 全自动 7 步 pipeline
 ```
 
 ## 关键数据路径
 
 | 数据 | 路径 |
 |------|------|
-| 大规模候选 (84 specs) | `/home/danyzhan/rft-results/candidates_rft_full.jsonl` |
-| 沙箱通过候选 | `/home/danyzhan/rft-results/verified_rft_full.jsonl` |
-| RFT 训练数据 | `/home/danyzhan/rft-results/rft_train.jsonl` |
-| RFT 模型 (merged) | `/home/danyzhan/rft-results/Qwen2.5-Coder-RFT-v1` |
-| DCP checkpoint | `/home/danyzhan/rft-results/final/` |
+| v5f 候选 (122 specs) | `rft-results/candidates_v5f_gfx950.jsonl` |
+| RFT 候选 (122 specs, RFT model) | `rft-results/candidates_rft_v5f_gfx950.jsonl` |
+| 沙箱验证统计 (编译级) | `rft-results/verify_stats_rft_v5f_gfx950.json` |
+| 三层验证统计 (含运行+正确性) | `rft-results/verify_stats_rft_v5f_runtime.json` |
+| RFT 训练数据 | `rft-results/rft_v5f_train.jsonl` (8,275 条) |
+| RFT 模型 (merged) | `rft-results/Qwen2.5-Coder-RFT-v5f` |
+| Benchmark | `rft-results/benchmark_rft_v5f.json` |
+
+## 沙箱验证器 (`sandbox/verify.py`)
+
+三层验证：
+
+1. **编译** — `importlib.util.spec_from_file_location` + `exec_module` 触发 FlyDSL JIT
+2. **运行** — 检测 `@flyc.jit` / `launch_*` / `forward` 等 entry point，构造 operator-specific 输入，调用 kernel
+3. **正确性** — 输出与 PyTorch reference 比较 (`torch.allclose`)
+
+支持 12 个算子类型的输入构造和 reference 计算：gemm, softmax, rmsnorm, layernorm, rope, topk, quant, flash_attn, moe, mla, paged_attn, custom。

@@ -155,6 +155,138 @@ L5_allreduce             0.38  0.38  +0.00   OK
 
 ---
 
+## v5f RFT Sandbox Results (2026-07-05)
+
+122 gfx950 specs × 16 candidates = 1952 total candidates.
+
+| Metric | v5e (12 specs) | v5f (122 specs) | Improvement |
+|--------|---------------|----------------|-------------|
+| Specs tested | 12 | **122** | 10x |
+| Total candidates | 192 | **1952** | 10x |
+| Passed static | 134 (70%) | **1369 (70%)** | same rate |
+| **Passed sandbox** | **42 (22%)** | **733 (38%)** | **+16pp, 17x** |
+
+Per-operator sandbox pass rates:
+
+| Operator | v5e verified | v5f verified | v5f rate |
+|----------|-------------|-------------|----------|
+| softmax | 5 | 71 | 49% |
+| custom | 5 | 120 | 44% |
+| topk | 3 | 48 | 43% |
+| rmsnorm | 2 | 41 | 43% |
+| moe | 5 | 60 | 42% |
+| layernorm | 4 | 31 | 39% |
+| mla | 6 | 43 | 38% |
+| quant | 1 | 100 | 37% |
+| gemm | 4 | 96 | 35% |
+| rope | 5 | 34 | 35% |
+| paged_attn | 0 | 26 | 32% |
+| flash_attn | 2 | 63 | 23% |
+
+Results: `rft-results/verify_stats_v5f_gfx950.json`, `rft-results/candidates_v5f_gfx950.jsonl`
+
+---
+
+## RFT Stage A Results (2026-07-06)
+
+### Training
+
+| Parameter | Value |
+|-----------|-------|
+| Base model | Qwen2.5-Coder-SFT-v5f (merged) |
+| Data | 8275 samples (v5f 6809 + 733 verified × 2) |
+| Method | LoRA r=64, alpha=128, lr 5e-6 |
+| Epochs | 1 |
+| Steps | 1035 |
+| Val loss | 0.9615 → 0.9533 |
+| Training time | ~2h (8xMI350X) |
+| Model | `rft-results/Qwen2.5-Coder-RFT-v5f` |
+
+### Benchmark (RFT vs v5f vs v5e)
+
+| Level | RFT | v5f | v5e | Delta (RFT-v5f) |
+|-------|-----|-----|-----|-----------------|
+| L1 (Basic) | 100% | 100% | 100% | 0% |
+| L2 (Elementary) | 100% | 100% | 100% | 0% |
+| L3 (Intermediate) | 68% | 72% | 72% | -4% |
+| L4 (Advanced) | **49%** | 46% | 49% | **+3%** |
+| L5 (Expert) | **57%** | 50% | 50% | **+7%** |
+| **Overall** | **75%** | 74% | 74% | **+1%** |
+
+| Metric | RFT | v5f | Target | Status |
+|--------|-----|-----|--------|--------|
+| Format compliance | 96% | 96% | >= 90% | PASS |
+| Sandbox compilation | 100% | 100% | >= 80% | PASS |
+
+### Per-Prompt Detail
+
+```
+ID                        RFT   v5f   Delta  Note
+─────────────────────────────────────────────────
+L5_blockscale_gemm       0.75  0.50  +0.25   +++  (RFT boost)
+L5_moe_2stage            0.62  0.50  +0.12   +++  (RFT boost)
+L5_preshuffle_gemm       0.75  0.62  +0.12   +++  (RFT boost)
+L4_fp8_gemm              0.71  0.71  +0.00
+L3_concat                0.60  0.80  -0.20   (minor regression)
+L5_mla_decode            0.38  0.62  -0.25   (regression)
+```
+
+Key takeaway: RFT sandbox-verified data significantly improved L5 Expert-level
+kernel generation (+7pp), particularly for complex GEMM variants (blockscale,
+preshuffle, MoE). Overall API Score 75% exceeds v5e baseline (74%).
+
+### Full gfx950 Sandbox Evaluation (2026-07-07)
+
+122 specs × 16 candidates = 1952 total. Compared against v5f SFT model (pre-RFT).
+
+| Metric | v5e (12 specs) | v5f SFT (122 specs) | **RFT** (122 specs) | RFT vs v5f |
+|--------|---------------|--------------------|--------------------|------------|
+| Passed sandbox | 42 (22%) | 733 (38%) | **1026 (53%)** | **+15pp** |
+
+Per-operator sandbox pass rates:
+
+| Operator | v5e | v5f SFT | **RFT** | Delta |
+|----------|-----|---------|---------|-------|
+| rmsnorm | 2 | 41 (43%) | **57 (59%)** | +17pp |
+| quant | 1 | 100 (37%) | **158 (58%)** | +21pp |
+| softmax | 5 | 71 (49%) | **84 (58%)** | +9pp |
+| layernorm | 4 | 31 (39%) | **45 (56%)** | +18pp |
+| custom | 5 | 120 (44%) | **150 (55%)** | +11pp |
+| topk | 3 | 48 (43%) | **58 (52%)** | +9pp |
+| gemm | 4 | 96 (35%) | **137 (50%)** | +15pp |
+| rope | 5 | 34 (35%) | **48 (50%)** | +15pp |
+| paged_attn | 0 | 26 (32%) | **40 (50%)** | +18pp |
+| mla | 6 | 43 (38%) | **55 (49%)** | +11pp |
+| moe | 5 | 60 (42%) | **69 (48%)** | +6pp |
+| flash_attn | 2 | 63 (23%) | **125 (46%)** | +23pp |
+
+Every operator improved. flash_attn had the largest gain (+23pp).
+
+HuggingFace: [Zhangdanyang/Qwen2.5-Coder-RFT-v5f](https://huggingface.co/Zhangdanyang/Qwen2.5-Coder-RFT-v5f)
+
+### Three-Level Verification (2026-07-07)
+
+Added runtime execution and correctness checking to sandbox verification.
+
+| Level | Count | Rate | Description |
+|-------|-------|------|-------------|
+| Static | 1598 | 82% | Python syntax + FlyDSL patterns |
+| **Compilation** | 944 | **48%** | FlyDSL JIT import succeeds |
+| **Runtime** | 211 | **11%** | Entry point callable without crash |
+| **Correctness** | 0 | **0%** | Output matches PyTorch reference |
+
+Runtime breakdown by reason:
+- quant: 149 INCORRECT (wrong quantization logic)
+- topk: 51 shape mismatch (wrong output dimensions)
+- quant/gemm/topk/rmsnorm: 11 returned None (in-place but unverifiable)
+
+**Key insight**: The model has learned FlyDSL API syntax (48% compile) and partial
+host-side structure (11% run), but kernel compute logic is entirely wrong (0% correct).
+This is expected — SFT+RFT only trained on compilation pass/fail, not on correctness.
+**Runtime correctness requires RL Stage B/C with correctness reward.**
+
+---
+
 # Format-Aligned SFT v1 Results (archived)
 
 ## Training Summary

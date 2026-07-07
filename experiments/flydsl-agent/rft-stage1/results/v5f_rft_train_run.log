@@ -1,0 +1,866 @@
+================================================================
+[Mon Jul  6 01:55:47 AM UTC 2026] RFT Stage A Training (v5f base)
+  Base Model:  /home/danyzhan/sft-results/Qwen2.5-Coder-SFT-v5f
+  RFT Data:    /home/danyzhan/rft-results/rft_v5f_train.jsonl
+  Samples:     8275 (v5f SFT + 733 verified × 2)
+  GPUs:        8
+  GBS:         8
+  LoRA:        r=64, alpha=128
+  LR:          5e-6
+  Steps:       1035 (1 epoch), warmup 51
+================================================================
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] start build [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_enum
+[aiter] [32mfinish build [module_aiter_enum], cost 8.2s [0m
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_enum.so
+[W706 01:55:59.253199599 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.673419088 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.783284115 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.847348490 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.863012774 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.864022448 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.906536549 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+[W706 01:55:59.921486030 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.24it/s]Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]2026-07-06 01:56:00,498 [INFO] lumen.models.fsdp: > Loading model from /model ...
+Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.72it/s]Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.93it/s]Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.08it/s]Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.25it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:01,  5.04it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:02,  4.35it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.27it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.19it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.52it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.05it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:03,  4.17it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.64it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.82it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.68it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.66it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:01,  4.88it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.73it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.51it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:02,  4.62it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.88it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.37it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  5.04it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.90it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:02,  4.86it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.70it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.73it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:02,  4.85it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  5.85it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:01,  5.00it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:02,  4.91it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:01,  5.03it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:01,  4.84it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.20it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:02,  4.86it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:02,  4.56it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:02,  4.89it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:00<00:01,  5.25it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:00<00:01,  5.29it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.39it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.46it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:01,  5.04it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:01,  5.12it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:01,  5.07it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.50it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.79it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  5.84it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:01<00:02,  4.38it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.65it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.55it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.63it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  5.58it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  6.18it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.19it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  5.51it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.79it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  5.97it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  6.01it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:01<00:01,  4.50it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  5.99it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.46it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.46it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.89it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:01,  5.80it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.28it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.30it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:00,  6.30it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.67it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.65it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.96it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.51it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:01<00:01,  4.39it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.00it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.52it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  6.52it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.82it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.80it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  7.05it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.08it/s]
+Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.67it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.67it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.21it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:01<00:01,  4.71it/s]2026-07-06 01:56:02,436 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  6.69it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.93it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.90it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.79it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.78it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.36it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  6.81it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  5.00it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:01<00:00,  7.00it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.97it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.89it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.86it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.31it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  6.90it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  7.05it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:02<00:00,  5.24it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.97it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.02it/s]
+Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.95it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.86it/s]2026-07-06 01:56:02,848 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.46it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  6.96it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.92it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.22it/s]
+Loading checkpoint shards:  79%|███████▊  | 11/14 [00:02<00:00,  5.44it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.93it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.10it/s]
+2026-07-06 01:56:02,972 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.87it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.05it/s]
+2026-07-06 01:56:02,987 [INFO] lumen.models.fsdp: > Gradient checkpointing enabled
+Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.61it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  5.84it/s]
+2026-07-06 01:56:03,020 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.92it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  6.09it/s]
+2026-07-06 01:56:03,043 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+2026-07-06 01:56:03,067 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+2026-07-06 01:56:03,093 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+Loading checkpoint shards:  86%|████████▌ | 12/14 [00:02<00:00,  5.60it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:02<00:00,  5.72it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  5.85it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:02<00:00,  5.09it/s]
+2026-07-06 01:56:03,500 [WARNING] torchao: Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+2026-07-06 01:56:05,537 [INFO] lumen.config: > LoRA applied (rank=64, alpha=128.0) — trainable: 536,870,912 / 33,300,747,264 (1.61%)
+2026-07-06 01:56:05,537 [INFO] lumen.config: > LumenConfig enabled (format=fp8_e4m3, scaling=none, lora_rank=64)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+/opt/venv/lib/python3.10/site-packages/torch/distributed/fsdp/_fully_shard/_fsdp_init.py:242: UserWarning: expandable_segments not supported on this platform (Triggered internally at /pytorch/c10/hip/HIPAllocatorConfig.h:36.)
+  tensor.data = tensor.to(device)
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:56:22,795 [INFO] lumen.models.fsdp: > FSDP2 applied (fully_shard, 64 layers, reshard=True, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, output_dtype=None, cast_forward_inputs=True))
+2026-07-06 01:56:22,795 [INFO] lumen.models.fsdp: > FSDP2 ready (world_size=8)
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (46928 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:34,442 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:34,939 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+2026-07-06 01:58:35,133 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:35,414 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:36,027 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+2026-07-06 01:58:36,147 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:36,971 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:37,493 [INFO] dataset: SFTDataset: 8275 samples from /rft-data/rft_v5f_train.jsonl (0 skipped)
+Token indices sequence length is longer than the specified maximum sequence length for this model (34542 > 32768). Running this sequence through the model will result in indexing errors
+2026-07-06 01:58:38,338 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:38,968 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:39,059 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:39,333 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:39,948 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:40,010 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:40,962 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+2026-07-06 01:58:40,973 [INFO] lumen.models.fsdp: > Training: max_steps=1035, GBS=8, seq_len=16384, lr=5e-06, lora_rank=64
+2026-07-06 01:58:41,443 [INFO] dataset: SFTDataset: 264 samples from /data/data/sft/validation-00000-of-00001.jsonl (0 skipped)
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:11:11 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:11:11 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:11:11 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:11:11 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+RCCL version : 2.26.6-HEAD:17055da
+HIP version  : 7.0.51831-a3e329ad8
+ROCm version : 7.0.0.0-82-9428210
+Hostname     : cv350-odcdh2-c11-2
+Librccl path : /opt/rocm/lib/librccl.so.1
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:14:14 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:15:15 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:14:14 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:15:15 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:13:13 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:16:16 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:13:13 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:16:16 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:18:18 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:18:18 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:12:12 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:41] cv350-odcdh2-c11-2:12:12 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:42] cv350-odcdh2-c11-2:17:17 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-07-06 01:58:42] cv350-odcdh2-c11-2:17:17 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:12:607 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:16:605 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:13:602 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:18:606 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:11:601 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:15:603 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:17:608 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-07-06 01:58:45] cv350-odcdh2-c11-2:14:604 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`.
+2026-07-06 01:59:18,687 [INFO] lumen.models.fsdp:   step 5/1035 | loss 0.8114 | lr 4.90e-07
+2026-07-06 01:59:48,797 [INFO] lumen.models.fsdp:   step 10/1035 | loss 1.1001 | lr 9.80e-07
+2026-07-06 02:00:26,124 [INFO] lumen.models.fsdp:   step 15/1035 | loss 0.3290 | lr 1.47e-06
+2026-07-06 02:01:00,887 [INFO] lumen.models.fsdp:   step 20/1035 | loss 1.2163 | lr 1.96e-06
+2026-07-06 02:01:35,430 [INFO] lumen.models.fsdp:   step 25/1035 | loss 0.6138 | lr 2.45e-06
+2026-07-06 02:02:04,468 [INFO] lumen.models.fsdp:   step 30/1035 | loss 0.2127 | lr 2.94e-06
+2026-07-06 02:02:41,739 [INFO] lumen.models.fsdp:   step 35/1035 | loss 0.8257 | lr 3.43e-06
+2026-07-06 02:03:13,844 [INFO] lumen.models.fsdp:   step 40/1035 | loss 0.7300 | lr 3.92e-06
+2026-07-06 02:03:46,779 [INFO] lumen.models.fsdp:   step 45/1035 | loss 1.9978 | lr 4.41e-06
+2026-07-06 02:04:19,536 [INFO] lumen.models.fsdp:   step 50/1035 | loss 0.5253 | lr 4.90e-06
+2026-07-06 02:04:54,367 [INFO] lumen.models.fsdp:   step 50/1035 | val_loss 0.9615
+2026-07-06 02:05:29,023 [INFO] lumen.models.fsdp:   step 55/1035 | loss 0.6198 | lr 5.00e-06
+2026-07-06 02:06:02,680 [INFO] lumen.models.fsdp:   step 60/1035 | loss 0.4746 | lr 5.00e-06
+2026-07-06 02:06:39,697 [INFO] lumen.models.fsdp:   step 65/1035 | loss 0.5560 | lr 5.00e-06
+2026-07-06 02:07:15,422 [INFO] lumen.models.fsdp:   step 70/1035 | loss 0.3739 | lr 5.00e-06
+2026-07-06 02:07:47,386 [INFO] lumen.models.fsdp:   step 75/1035 | loss 0.4674 | lr 4.99e-06
+2026-07-06 02:08:21,524 [INFO] lumen.models.fsdp:   step 80/1035 | loss 1.2410 | lr 4.99e-06
+2026-07-06 02:08:51,690 [INFO] lumen.models.fsdp:   step 85/1035 | loss 0.3504 | lr 4.99e-06
+2026-07-06 02:09:18,743 [INFO] lumen.models.fsdp:   step 90/1035 | loss 0.6851 | lr 4.98e-06
+2026-07-06 02:09:53,303 [INFO] lumen.models.fsdp:   step 95/1035 | loss 0.4900 | lr 4.98e-06
+2026-07-06 02:10:25,344 [INFO] lumen.models.fsdp:   step 100/1035 | loss 0.4619 | lr 4.97e-06
+2026-07-06 02:11:00,017 [INFO] lumen.models.fsdp:   step 100/1035 | val_loss 0.9603
+2026-07-06 02:11:31,438 [INFO] lumen.models.fsdp:   step 105/1035 | loss 0.3667 | lr 4.96e-06
+2026-07-06 02:11:58,939 [INFO] lumen.models.fsdp:   step 110/1035 | loss 0.4509 | lr 4.96e-06
+2026-07-06 02:12:34,726 [INFO] lumen.models.fsdp:   step 115/1035 | loss 0.6866 | lr 4.95e-06
+2026-07-06 02:13:06,774 [INFO] lumen.models.fsdp:   step 120/1035 | loss 0.7522 | lr 4.94e-06
+2026-07-06 02:13:44,458 [INFO] lumen.models.fsdp:   step 125/1035 | loss 0.6585 | lr 4.93e-06
+2026-07-06 02:14:22,017 [INFO] lumen.models.fsdp:   step 130/1035 | loss 0.6171 | lr 4.92e-06
+2026-07-06 02:14:58,274 [INFO] lumen.models.fsdp:   step 135/1035 | loss 0.1987 | lr 4.91e-06
+2026-07-06 02:15:29,335 [INFO] lumen.models.fsdp:   step 140/1035 | loss 0.5094 | lr 4.90e-06
+2026-07-06 02:15:59,255 [INFO] lumen.models.fsdp:   step 145/1035 | loss 0.7118 | lr 4.89e-06
+2026-07-06 02:16:21,350 [INFO] lumen.models.fsdp:   step 150/1035 | loss 0.7535 | lr 4.88e-06
+2026-07-06 02:16:56,088 [INFO] lumen.models.fsdp:   step 150/1035 | val_loss 0.9594
+2026-07-06 02:17:33,467 [INFO] lumen.models.fsdp:   step 155/1035 | loss 0.6400 | lr 4.86e-06
+2026-07-06 02:18:00,391 [INFO] lumen.models.fsdp:   step 160/1035 | loss 0.3356 | lr 4.85e-06
+2026-07-06 02:18:34,895 [INFO] lumen.models.fsdp:   step 165/1035 | loss 0.5914 | lr 4.84e-06
+2026-07-06 02:19:01,842 [INFO] lumen.models.fsdp:   step 170/1035 | loss 1.2142 | lr 4.82e-06
+2026-07-06 02:19:30,342 [INFO] lumen.models.fsdp:   step 175/1035 | loss 0.2009 | lr 4.81e-06
+2026-07-06 02:20:06,659 [INFO] lumen.models.fsdp:   step 180/1035 | loss 1.2982 | lr 4.79e-06
+2026-07-06 02:20:24,681 [INFO] lumen.models.fsdp:   step 185/1035 | loss 0.8104 | lr 4.77e-06
+2026-07-06 02:20:47,488 [INFO] lumen.models.fsdp:   step 190/1035 | loss 1.3658 | lr 4.76e-06
+2026-07-06 02:21:25,067 [INFO] lumen.models.fsdp:   step 195/1035 | loss 0.4670 | lr 4.74e-06
+2026-07-06 02:21:59,014 [INFO] lumen.models.fsdp:   step 200/1035 | loss 0.2776 | lr 4.72e-06
+2026-07-06 02:22:33,773 [INFO] lumen.models.fsdp:   step 200/1035 | val_loss 0.9598
+2026-07-06 02:22:58,605 [INFO] lumen.models.fsdp:   step 205/1035 | loss 0.8331 | lr 4.70e-06
+2026-07-06 02:23:32,795 [INFO] lumen.models.fsdp:   step 210/1035 | loss 0.4584 | lr 4.68e-06
+2026-07-06 02:24:05,602 [INFO] lumen.models.fsdp:   step 215/1035 | loss 1.3103 | lr 4.67e-06
+2026-07-06 02:24:37,184 [INFO] lumen.models.fsdp:   step 220/1035 | loss 0.0208 | lr 4.64e-06
+2026-07-06 02:25:11,753 [INFO] lumen.models.fsdp:   step 225/1035 | loss 0.6039 | lr 4.62e-06
+2026-07-06 02:25:48,788 [INFO] lumen.models.fsdp:   step 230/1035 | loss 0.7981 | lr 4.60e-06
+2026-07-06 02:26:20,840 [INFO] lumen.models.fsdp:   step 235/1035 | loss 0.1594 | lr 4.58e-06
+2026-07-06 02:26:51,786 [INFO] lumen.models.fsdp:   step 240/1035 | loss 0.2864 | lr 4.56e-06
+2026-07-06 02:27:28,403 [INFO] lumen.models.fsdp:   step 245/1035 | loss 0.5537 | lr 4.54e-06
+2026-07-06 02:27:56,901 [INFO] lumen.models.fsdp:   step 250/1035 | loss 0.3076 | lr 4.51e-06
+2026-07-06 02:28:31,612 [INFO] lumen.models.fsdp:   step 250/1035 | val_loss 0.9588
+2026-07-06 02:29:04,145 [INFO] lumen.models.fsdp:   step 255/1035 | loss 0.4355 | lr 4.49e-06
+2026-07-06 02:29:42,376 [INFO] lumen.models.fsdp:   step 260/1035 | loss 0.5628 | lr 4.46e-06
+2026-07-06 02:30:19,023 [INFO] lumen.models.fsdp:   step 265/1035 | loss 0.3144 | lr 4.44e-06
+2026-07-06 02:30:47,635 [INFO] lumen.models.fsdp:   step 270/1035 | loss 0.2289 | lr 4.41e-06
+2026-07-06 02:31:17,971 [INFO] lumen.models.fsdp:   step 275/1035 | loss 0.5822 | lr 4.39e-06
+2026-07-06 02:31:51,608 [INFO] lumen.models.fsdp:   step 280/1035 | loss 0.7132 | lr 4.36e-06
+2026-07-06 02:32:29,680 [INFO] lumen.models.fsdp:   step 285/1035 | loss 1.2494 | lr 4.33e-06
+2026-07-06 02:33:00,841 [INFO] lumen.models.fsdp:   step 290/1035 | loss 0.7192 | lr 4.31e-06
+2026-07-06 02:33:38,515 [INFO] lumen.models.fsdp:   step 295/1035 | loss 0.6963 | lr 4.28e-06
+2026-07-06 02:34:10,213 [INFO] lumen.models.fsdp:   step 300/1035 | loss 0.8111 | lr 4.25e-06
+2026-07-06 02:34:44,948 [INFO] lumen.models.fsdp:   step 300/1035 | val_loss 0.9578
+2026-07-06 02:35:21,586 [INFO] lumen.models.fsdp:   step 305/1035 | loss 0.3120 | lr 4.22e-06
+2026-07-06 02:35:54,123 [INFO] lumen.models.fsdp:   step 310/1035 | loss 0.7298 | lr 4.19e-06
+2026-07-06 02:36:23,986 [INFO] lumen.models.fsdp:   step 315/1035 | loss 0.7899 | lr 4.16e-06
+2026-07-06 02:37:01,984 [INFO] lumen.models.fsdp:   step 320/1035 | loss 0.4989 | lr 4.13e-06
+2026-07-06 02:37:27,084 [INFO] lumen.models.fsdp:   step 325/1035 | loss 0.2169 | lr 4.10e-06
+2026-07-06 02:38:01,247 [INFO] lumen.models.fsdp:   step 330/1035 | loss 0.2548 | lr 4.07e-06
+2026-07-06 02:38:32,916 [INFO] lumen.models.fsdp:   step 335/1035 | loss 0.7656 | lr 4.04e-06
+2026-07-06 02:39:05,663 [INFO] lumen.models.fsdp:   step 340/1035 | loss 1.4160 | lr 4.01e-06
+2026-07-06 02:39:43,232 [INFO] lumen.models.fsdp:   step 345/1035 | loss 0.6100 | lr 3.98e-06
+2026-07-06 02:40:14,805 [INFO] lumen.models.fsdp:   step 350/1035 | loss 1.3398 | lr 3.94e-06
+2026-07-06 02:40:49,661 [INFO] lumen.models.fsdp:   step 350/1035 | val_loss 0.9568
+2026-07-06 02:41:27,739 [INFO] lumen.models.fsdp:   step 355/1035 | loss 0.0912 | lr 3.91e-06
+2026-07-06 02:42:05,645 [INFO] lumen.models.fsdp:   step 360/1035 | loss 1.5476 | lr 3.88e-06
+2026-07-06 02:42:43,113 [INFO] lumen.models.fsdp:   step 365/1035 | loss 0.2385 | lr 3.85e-06
+2026-07-06 02:43:21,010 [INFO] lumen.models.fsdp:   step 370/1035 | loss 0.3216 | lr 3.81e-06
+2026-07-06 02:43:49,458 [INFO] lumen.models.fsdp:   step 375/1035 | loss 0.3964 | lr 3.78e-06
+2026-07-06 02:44:20,869 [INFO] lumen.models.fsdp:   step 380/1035 | loss 0.2213 | lr 3.74e-06
+2026-07-06 02:44:56,487 [INFO] lumen.models.fsdp:   step 385/1035 | loss 0.4200 | lr 3.71e-06
+2026-07-06 02:45:25,120 [INFO] lumen.models.fsdp:   step 390/1035 | loss 0.2595 | lr 3.67e-06
+2026-07-06 02:46:02,780 [INFO] lumen.models.fsdp:   step 395/1035 | loss 0.2106 | lr 3.64e-06
+2026-07-06 02:46:37,231 [INFO] lumen.models.fsdp:   step 400/1035 | loss 0.7606 | lr 3.60e-06
+2026-07-06 02:47:11,968 [INFO] lumen.models.fsdp:   step 400/1035 | val_loss 0.9560
+2026-07-06 02:47:47,437 [INFO] lumen.models.fsdp:   step 405/1035 | loss 0.2388 | lr 3.57e-06
+2026-07-06 02:48:22,373 [INFO] lumen.models.fsdp:   step 410/1035 | loss 0.3270 | lr 3.53e-06
+2026-07-06 02:48:50,313 [INFO] lumen.models.fsdp:   step 415/1035 | loss 0.4636 | lr 3.49e-06
+2026-07-06 02:49:28,004 [INFO] lumen.models.fsdp:   step 420/1035 | loss 0.6030 | lr 3.46e-06
+2026-07-06 02:49:55,331 [INFO] lumen.models.fsdp:   step 425/1035 | loss 0.2475 | lr 3.42e-06
+2026-07-06 02:50:26,312 [INFO] lumen.models.fsdp:   step 430/1035 | loss 0.6756 | lr 3.38e-06
+2026-07-06 02:50:55,521 [INFO] lumen.models.fsdp:   step 435/1035 | loss 0.3501 | lr 3.35e-06
+2026-07-06 02:51:25,309 [INFO] lumen.models.fsdp:   step 440/1035 | loss 0.3986 | lr 3.31e-06
+2026-07-06 02:51:56,650 [INFO] lumen.models.fsdp:   step 445/1035 | loss 0.2721 | lr 3.27e-06
+2026-07-06 02:52:34,637 [INFO] lumen.models.fsdp:   step 450/1035 | loss 0.4238 | lr 3.23e-06
+2026-07-06 02:53:09,276 [INFO] lumen.models.fsdp:   step 450/1035 | val_loss 0.9551
+2026-07-06 02:53:41,884 [INFO] lumen.models.fsdp:   step 455/1035 | loss 0.5315 | lr 3.19e-06
+2026-07-06 02:54:19,619 [INFO] lumen.models.fsdp:   step 460/1035 | loss 0.5328 | lr 3.15e-06
+2026-07-06 02:54:54,522 [INFO] lumen.models.fsdp:   step 465/1035 | loss 0.1086 | lr 3.12e-06
+2026-07-06 02:55:24,915 [INFO] lumen.models.fsdp:   step 470/1035 | loss 0.7874 | lr 3.08e-06
+2026-07-06 02:55:58,884 [INFO] lumen.models.fsdp:   step 475/1035 | loss 0.5897 | lr 3.04e-06
+2026-07-06 02:56:32,996 [INFO] lumen.models.fsdp:   step 480/1035 | loss 0.0881 | lr 3.00e-06
+2026-07-06 02:57:10,559 [INFO] lumen.models.fsdp:   step 485/1035 | loss 0.7187 | lr 2.96e-06
+2026-07-06 02:57:38,193 [INFO] lumen.models.fsdp:   step 490/1035 | loss 0.2995 | lr 2.92e-06
+2026-07-06 02:58:09,117 [INFO] lumen.models.fsdp:   step 495/1035 | loss 0.4091 | lr 2.88e-06
+2026-07-06 02:58:39,524 [INFO] lumen.models.fsdp:   step 500/1035 | loss 0.3935 | lr 2.84e-06
+2026-07-06 02:59:14,234 [INFO] lumen.models.fsdp:   step 500/1035 | val_loss 0.9548
+2026-07-06 02:59:47,666 [INFO] lumen.models.fsdp:   step 505/1035 | loss 1.1708 | lr 2.80e-06
+2026-07-06 03:00:21,512 [INFO] lumen.models.fsdp:   step 510/1035 | loss 1.5744 | lr 2.76e-06
+2026-07-06 03:00:54,576 [INFO] lumen.models.fsdp:   step 515/1035 | loss 1.5209 | lr 2.72e-06
+2026-07-06 03:01:27,960 [INFO] lumen.models.fsdp:   step 520/1035 | loss 1.1304 | lr 2.68e-06
+2026-07-06 03:02:05,088 [INFO] lumen.models.fsdp:   step 525/1035 | loss 1.2201 | lr 2.64e-06
+2026-07-06 03:02:37,014 [INFO] lumen.models.fsdp:   step 530/1035 | loss 0.4058 | lr 2.60e-06
+2026-07-06 03:03:13,814 [INFO] lumen.models.fsdp:   step 535/1035 | loss 0.2835 | lr 2.56e-06
+2026-07-06 03:03:47,076 [INFO] lumen.models.fsdp:   step 540/1035 | loss 1.3410 | lr 2.52e-06
+2026-07-06 03:04:19,530 [INFO] lumen.models.fsdp:   step 545/1035 | loss 0.5787 | lr 2.48e-06
+2026-07-06 03:04:46,700 [INFO] lumen.models.fsdp:   step 550/1035 | loss 0.8280 | lr 2.44e-06
+2026-07-06 03:05:21,417 [INFO] lumen.models.fsdp:   step 550/1035 | val_loss 0.9545
+2026-07-06 03:05:54,367 [INFO] lumen.models.fsdp:   step 555/1035 | loss 0.7117 | lr 2.40e-06
+2026-07-06 03:06:22,008 [INFO] lumen.models.fsdp:   step 560/1035 | loss 0.2469 | lr 2.36e-06
+2026-07-06 03:06:59,769 [INFO] lumen.models.fsdp:   step 565/1035 | loss 0.3662 | lr 2.32e-06
+2026-07-06 03:07:37,696 [INFO] lumen.models.fsdp:   step 570/1035 | loss 0.8563 | lr 2.28e-06
+2026-07-06 03:08:08,532 [INFO] lumen.models.fsdp:   step 575/1035 | loss 0.5321 | lr 2.25e-06
+2026-07-06 03:08:42,844 [INFO] lumen.models.fsdp:   step 580/1035 | loss 0.2570 | lr 2.21e-06
+2026-07-06 03:09:05,417 [INFO] lumen.models.fsdp:   step 585/1035 | loss 0.1291 | lr 2.17e-06
+2026-07-06 03:09:41,284 [INFO] lumen.models.fsdp:   step 590/1035 | loss 2.2995 | lr 2.13e-06
+2026-07-06 03:10:03,492 [INFO] lumen.models.fsdp:   step 595/1035 | loss 0.5880 | lr 2.09e-06
+2026-07-06 03:10:38,120 [INFO] lumen.models.fsdp:   step 600/1035 | loss 0.1982 | lr 2.05e-06
+2026-07-06 03:11:12,876 [INFO] lumen.models.fsdp:   step 600/1035 | val_loss 0.9540
+2026-07-06 03:11:50,321 [INFO] lumen.models.fsdp:   step 605/1035 | loss 1.9617 | lr 2.01e-06
+2026-07-06 03:12:21,397 [INFO] lumen.models.fsdp:   step 610/1035 | loss 0.3753 | lr 1.97e-06
+2026-07-06 03:12:58,623 [INFO] lumen.models.fsdp:   step 615/1035 | loss 1.1618 | lr 1.93e-06
+2026-07-06 03:13:30,178 [INFO] lumen.models.fsdp:   step 620/1035 | loss 0.7143 | lr 1.89e-06
+2026-07-06 03:14:07,982 [INFO] lumen.models.fsdp:   step 625/1035 | loss 0.3761 | lr 1.85e-06
+2026-07-06 03:14:39,587 [INFO] lumen.models.fsdp:   step 630/1035 | loss 0.4851 | lr 1.81e-06
+2026-07-06 03:15:17,232 [INFO] lumen.models.fsdp:   step 635/1035 | loss 0.7915 | lr 1.78e-06
+2026-07-06 03:15:55,258 [INFO] lumen.models.fsdp:   step 640/1035 | loss 0.3108 | lr 1.74e-06
+2026-07-06 03:16:28,865 [INFO] lumen.models.fsdp:   step 645/1035 | loss 0.3155 | lr 1.70e-06
+2026-07-06 03:17:06,477 [INFO] lumen.models.fsdp:   step 650/1035 | loss 0.5549 | lr 1.66e-06
+2026-07-06 03:17:41,139 [INFO] lumen.models.fsdp:   step 650/1035 | val_loss 0.9539
+2026-07-06 03:18:04,212 [INFO] lumen.models.fsdp:   step 655/1035 | loss 0.5221 | lr 1.62e-06
+2026-07-06 03:18:33,582 [INFO] lumen.models.fsdp:   step 660/1035 | loss 0.3577 | lr 1.59e-06
+2026-07-06 03:19:10,940 [INFO] lumen.models.fsdp:   step 665/1035 | loss 1.1775 | lr 1.55e-06
+2026-07-06 03:19:35,555 [INFO] lumen.models.fsdp:   step 670/1035 | loss 0.2763 | lr 1.51e-06
+2026-07-06 03:20:05,982 [INFO] lumen.models.fsdp:   step 675/1035 | loss 0.3839 | lr 1.48e-06
+2026-07-06 03:20:38,910 [INFO] lumen.models.fsdp:   step 680/1035 | loss 0.7102 | lr 1.44e-06
+2026-07-06 03:21:05,254 [INFO] lumen.models.fsdp:   step 685/1035 | loss 0.2761 | lr 1.41e-06
+2026-07-06 03:21:35,194 [INFO] lumen.models.fsdp:   step 690/1035 | loss 0.4204 | lr 1.37e-06
+2026-07-06 03:22:09,675 [INFO] lumen.models.fsdp:   step 695/1035 | loss 0.1763 | lr 1.33e-06
+2026-07-06 03:22:46,917 [INFO] lumen.models.fsdp:   step 700/1035 | loss 0.6914 | lr 1.30e-06
+2026-07-06 03:23:21,631 [INFO] lumen.models.fsdp:   step 700/1035 | val_loss 0.9537
+2026-07-06 03:23:58,950 [INFO] lumen.models.fsdp:   step 705/1035 | loss 0.4746 | lr 1.26e-06
+2026-07-06 03:24:36,961 [INFO] lumen.models.fsdp:   step 710/1035 | loss 0.2213 | lr 1.23e-06
+2026-07-06 03:25:09,744 [INFO] lumen.models.fsdp:   step 715/1035 | loss 0.3795 | lr 1.20e-06
+2026-07-06 03:25:42,197 [INFO] lumen.models.fsdp:   step 720/1035 | loss 0.2557 | lr 1.16e-06
+2026-07-06 03:26:19,453 [INFO] lumen.models.fsdp:   step 725/1035 | loss 0.2124 | lr 1.13e-06
+2026-07-06 03:26:57,375 [INFO] lumen.models.fsdp:   step 730/1035 | loss 0.7815 | lr 1.09e-06
+2026-07-06 03:27:35,508 [INFO] lumen.models.fsdp:   step 735/1035 | loss 0.7825 | lr 1.06e-06
+2026-07-06 03:28:12,419 [INFO] lumen.models.fsdp:   step 740/1035 | loss 0.3370 | lr 1.03e-06
+2026-07-06 03:28:49,990 [INFO] lumen.models.fsdp:   step 745/1035 | loss 0.5822 | lr 9.97e-07
+2026-07-06 03:29:24,687 [INFO] lumen.models.fsdp:   step 750/1035 | loss 1.2818 | lr 9.65e-07
+2026-07-06 03:29:59,351 [INFO] lumen.models.fsdp:   step 750/1035 | val_loss 0.9536
+2026-07-06 03:30:28,065 [INFO] lumen.models.fsdp:   step 755/1035 | loss 0.2755 | lr 9.34e-07
+2026-07-06 03:31:05,171 [INFO] lumen.models.fsdp:   step 760/1035 | loss 0.5781 | lr 9.03e-07
+2026-07-06 03:31:35,619 [INFO] lumen.models.fsdp:   step 765/1035 | loss 0.4330 | lr 8.73e-07
+2026-07-06 03:32:04,028 [INFO] lumen.models.fsdp:   step 770/1035 | loss 0.0205 | lr 8.43e-07
+2026-07-06 03:32:33,575 [INFO] lumen.models.fsdp:   step 775/1035 | loss 0.3137 | lr 8.13e-07
+2026-07-06 03:33:07,077 [INFO] lumen.models.fsdp:   step 780/1035 | loss 0.4160 | lr 7.84e-07
+2026-07-06 03:33:34,054 [INFO] lumen.models.fsdp:   step 785/1035 | loss 1.3991 | lr 7.55e-07
+2026-07-06 03:34:11,366 [INFO] lumen.models.fsdp:   step 790/1035 | loss 0.4191 | lr 7.27e-07
+2026-07-06 03:34:43,038 [INFO] lumen.models.fsdp:   step 795/1035 | loss 0.8007 | lr 6.99e-07
+2026-07-06 03:35:14,601 [INFO] lumen.models.fsdp:   step 800/1035 | loss 0.0178 | lr 6.71e-07
+2026-07-06 03:35:49,242 [INFO] lumen.models.fsdp:   step 800/1035 | val_loss 0.9535
+2026-07-06 03:36:21,641 [INFO] lumen.models.fsdp:   step 805/1035 | loss 3.9712 | lr 6.44e-07
+2026-07-06 03:36:38,965 [INFO] lumen.models.fsdp:   step 810/1035 | loss 0.5013 | lr 6.18e-07
+2026-07-06 03:37:16,958 [INFO] lumen.models.fsdp:   step 815/1035 | loss 0.3799 | lr 5.92e-07
+2026-07-06 03:37:53,962 [INFO] lumen.models.fsdp:   step 820/1035 | loss 0.3392 | lr 5.66e-07
+2026-07-06 03:38:26,697 [INFO] lumen.models.fsdp:   step 825/1035 | loss 0.5361 | lr 5.41e-07
+2026-07-06 03:39:03,805 [INFO] lumen.models.fsdp:   step 830/1035 | loss 0.7769 | lr 5.17e-07
+2026-07-06 03:39:41,654 [INFO] lumen.models.fsdp:   step 835/1035 | loss 0.1978 | lr 4.93e-07
+2026-07-06 03:40:06,588 [INFO] lumen.models.fsdp:   step 840/1035 | loss 0.4497 | lr 4.69e-07
+2026-07-06 03:40:43,946 [INFO] lumen.models.fsdp:   step 845/1035 | loss 1.0503 | lr 4.46e-07
+2026-07-06 03:41:16,462 [INFO] lumen.models.fsdp:   step 850/1035 | loss 1.4357 | lr 4.24e-07
+2026-07-06 03:41:51,145 [INFO] lumen.models.fsdp:   step 850/1035 | val_loss 0.9537
+2026-07-06 03:42:22,293 [INFO] lumen.models.fsdp:   step 855/1035 | loss 0.8174 | lr 4.02e-07
+2026-07-06 03:42:55,406 [INFO] lumen.models.fsdp:   step 860/1035 | loss 0.5292 | lr 3.80e-07
+2026-07-06 03:43:26,320 [INFO] lumen.models.fsdp:   step 865/1035 | loss 0.7569 | lr 3.59e-07
+2026-07-06 03:43:57,516 [INFO] lumen.models.fsdp:   step 870/1035 | loss 0.3747 | lr 3.39e-07
+2026-07-06 03:44:28,196 [INFO] lumen.models.fsdp:   step 875/1035 | loss 1.5926 | lr 3.19e-07
+2026-07-06 03:45:04,436 [INFO] lumen.models.fsdp:   step 880/1035 | loss 0.4186 | lr 3.00e-07
+2026-07-06 03:45:38,098 [INFO] lumen.models.fsdp:   step 885/1035 | loss 0.2747 | lr 2.81e-07
+2026-07-06 03:46:12,195 [INFO] lumen.models.fsdp:   step 890/1035 | loss 0.6424 | lr 2.63e-07
+2026-07-06 03:46:43,173 [INFO] lumen.models.fsdp:   step 895/1035 | loss 0.3556 | lr 2.46e-07
+2026-07-06 03:47:14,785 [INFO] lumen.models.fsdp:   step 900/1035 | loss 0.4351 | lr 2.29e-07
+2026-07-06 03:47:49,456 [INFO] lumen.models.fsdp:   step 900/1035 | val_loss 0.9533
+2026-07-06 03:48:17,045 [INFO] lumen.models.fsdp:   step 905/1035 | loss 0.1582 | lr 2.12e-07
+2026-07-06 03:48:47,869 [INFO] lumen.models.fsdp:   step 910/1035 | loss 0.2974 | lr 1.96e-07
+2026-07-06 03:49:20,447 [INFO] lumen.models.fsdp:   step 915/1035 | loss 0.8993 | lr 1.81e-07
+2026-07-06 03:49:57,985 [INFO] lumen.models.fsdp:   step 920/1035 | loss 0.3980 | lr 1.67e-07
+2026-07-06 03:50:31,853 [INFO] lumen.models.fsdp:   step 925/1035 | loss 0.6929 | lr 1.53e-07
+2026-07-06 03:51:09,697 [INFO] lumen.models.fsdp:   step 930/1035 | loss 0.2503 | lr 1.39e-07
+2026-07-06 03:51:47,424 [INFO] lumen.models.fsdp:   step 935/1035 | loss 0.3626 | lr 1.26e-07
+2026-07-06 03:52:25,246 [INFO] lumen.models.fsdp:   step 940/1035 | loss 0.1978 | lr 1.14e-07
+2026-07-06 03:53:02,751 [INFO] lumen.models.fsdp:   step 945/1035 | loss 0.6045 | lr 1.02e-07
+2026-07-06 03:53:31,605 [INFO] lumen.models.fsdp:   step 950/1035 | loss 0.9558 | lr 9.15e-08
+2026-07-06 03:54:06,284 [INFO] lumen.models.fsdp:   step 950/1035 | val_loss 0.9536
+2026-07-06 03:54:42,730 [INFO] lumen.models.fsdp:   step 955/1035 | loss 0.3143 | lr 8.11e-08
+2026-07-06 03:55:15,759 [INFO] lumen.models.fsdp:   step 960/1035 | loss 0.7110 | lr 7.13e-08
+2026-07-06 03:55:50,333 [INFO] lumen.models.fsdp:   step 965/1035 | loss 0.3771 | lr 6.22e-08
+2026-07-06 03:56:18,669 [INFO] lumen.models.fsdp:   step 970/1035 | loss 0.2552 | lr 5.36e-08
+2026-07-06 03:56:56,396 [INFO] lumen.models.fsdp:   step 975/1035 | loss 1.6003 | lr 4.57e-08
+2026-07-06 03:57:28,623 [INFO] lumen.models.fsdp:   step 980/1035 | loss 0.3163 | lr 3.84e-08
+2026-07-06 03:58:03,197 [INFO] lumen.models.fsdp:   step 985/1035 | loss 0.3067 | lr 3.18e-08
+2026-07-06 03:58:35,368 [INFO] lumen.models.fsdp:   step 990/1035 | loss 0.7568 | lr 2.58e-08
+2026-07-06 03:59:04,392 [INFO] lumen.models.fsdp:   step 995/1035 | loss 0.4298 | lr 2.04e-08
+2026-07-06 03:59:41,085 [INFO] lumen.models.fsdp:   step 1000/1035 | loss 0.4908 | lr 1.56e-08
+2026-07-06 04:00:15,934 [INFO] lumen.models.fsdp:   step 1000/1035 | val_loss 0.9536
+2026-07-06 04:00:52,663 [INFO] lumen.models.fsdp:   step 1005/1035 | loss 1.0954 | lr 1.15e-08
+2026-07-06 04:01:21,050 [INFO] lumen.models.fsdp:   step 1010/1035 | loss 0.1145 | lr 7.96e-09
+2026-07-06 04:01:58,473 [INFO] lumen.models.fsdp:   step 1015/1035 | loss 1.1475 | lr 5.09e-09
+2026-07-06 04:02:31,703 [INFO] lumen.models.fsdp:   step 1020/1035 | loss 0.6411 | lr 2.87e-09
+2026-07-06 04:03:03,862 [INFO] lumen.models.fsdp:   step 1025/1035 | loss 0.9241 | lr 1.27e-09
+2026-07-06 04:03:41,315 [INFO] lumen.models.fsdp:   step 1030/1035 | loss 0.5087 | lr 3.19e-10
+2026-07-06 04:04:10,155 [INFO] lumen.models.fsdp:   step 1035/1035 | loss 0.0453 | lr 0.00e+00
+2026-07-06 04:04:31,052 [INFO] lumen.models.fsdp: > DCP checkpoint saved to /results/v5f_rft_ckpt/final
+2026-07-06 04:04:50,760 [INFO] lumen.models.fsdp: > DCP checkpoint saved to /results/v5f_rft_final/final
+2026-07-06 04:04:50,760 [INFO] lumen.models.fsdp: > SFT training complete after 1035 steps.
+[rank0]:[W706 04:04:51.852655883 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[Mon Jul  6 04:04:55 AM UTC 2026] RFT training done.
+
+[Mon Jul  6 04:04:55 AM UTC 2026] Exporting RFT model...
+2026-07-06 04:04:55,914 [INFO] Converting DCP shards ...
+2026-07-06 04:06:18,625 [INFO] DCP state dict: 1667 keys, 896 lora keys
+2026-07-06 04:06:18,625 [INFO] Building PEFT model from /model ...
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/14 [00:00<?, ?it/s]Loading checkpoint shards:   7%|▋         | 1/14 [00:00<00:01,  8.59it/s]Loading checkpoint shards:  14%|█▍        | 2/14 [00:00<00:01,  8.68it/s]Loading checkpoint shards:  21%|██▏       | 3/14 [00:00<00:01,  8.79it/s]Loading checkpoint shards:  29%|██▊       | 4/14 [00:00<00:01,  8.88it/s]Loading checkpoint shards:  36%|███▌      | 5/14 [00:00<00:01,  8.89it/s]Loading checkpoint shards:  43%|████▎     | 6/14 [00:00<00:00,  8.92it/s]Loading checkpoint shards:  50%|█████     | 7/14 [00:00<00:00,  8.95it/s]Loading checkpoint shards:  57%|█████▋    | 8/14 [00:00<00:00,  8.93it/s]Loading checkpoint shards:  64%|██████▍   | 9/14 [00:01<00:00,  8.89it/s]Loading checkpoint shards:  71%|███████▏  | 10/14 [00:01<00:00,  8.87it/s]Loading checkpoint shards:  79%|███████▊  | 11/14 [00:01<00:00,  8.80it/s]Loading checkpoint shards:  86%|████████▌ | 12/14 [00:01<00:00,  8.80it/s]Loading checkpoint shards:  93%|█████████▎| 13/14 [00:01<00:00,  8.86it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:01<00:00,  9.01it/s]Loading checkpoint shards: 100%|██████████| 14/14 [00:01<00:00,  8.89it/s]
+2026-07-06 04:06:22,816 [WARNING] Skipping import of cpp extensions due to incompatible torch version. Please upgrade to torch >= 2.11.0 (found 2.8.0.dev20251001+rocm7.0.0.git64359f59).
+2026-07-06 04:06:25,583 [INFO] Matched 1667 / 1667 keys (skipped 0)
+2026-07-06 04:06:25,661 [INFO] LoRA_A non-zero: 448 / 448
+2026-07-06 04:06:43,565 [INFO] Merging LoRA ...
+2026-07-06 04:08:09,241 [INFO] Saving to /results/Qwen2.5-Coder-RFT-v5f ...
+2026-07-06 04:08:35,197 [INFO] Done! 14 files, 61.0 GB
+[Mon Jul  6 04:08:47 AM UTC 2026] Export done: /home/danyzhan/rft-results/Qwen2.5-Coder-RFT-v5f

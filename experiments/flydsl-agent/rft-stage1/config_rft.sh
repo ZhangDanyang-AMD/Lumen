@@ -6,7 +6,7 @@
 # ---- Hardware ----------------------------------------------------------------
 export NGPU="${NGPU:-8}"
 
-# ---- Model (v5e merged, not base) -------------------------------------------
+# ---- Model (SFT merged model, e.g. v5f) -------------------------------------
 export MODEL="${MODEL:-/sft-model}"
 
 # ---- Data (RFT merged: SFT + verified candidates) ---------------------------
@@ -45,7 +45,7 @@ export NCCL_NVLS_ENABLE=0
 export TORCH_NCCL_AVOID_RECORD_STREAMS=1
 export HSA_ENABLE_SDMA=0
 export NCCL_IB_DISABLE=1
-export NCCL_SOCKET_IFNAME=lo
+export NCCL_SOCKET_IFNAME=ens12f0np0
 export NCCL_DEBUG=WARN
 
 export USE_HIPBLASLT=1

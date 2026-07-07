@@ -6,7 +6,7 @@ prompting styles. Saves raw generations for sandbox verification.
 Usage::
 
     python generate_candidates.py \
-        --model /home/danyzhan/sft-results/Qwen2.5-Coder-SFT-v2 \
+        --model /home/danyzhan/sft-results/Qwen2.5-Coder-SFT-v5f \
         --specs /home/danyzhan/flydsl-agent-dataset/data/rl/train-00000-of-00001.jsonl \
         --output /home/danyzhan/rft-results/candidates.jsonl \
         --n-candidates 16 --max-specs 200 --device cuda:0
