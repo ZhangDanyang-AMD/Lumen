@@ -199,6 +199,19 @@ def _get_megatron_linear_types():
 
 _LAYER_INDEX_RE = re.compile(r"layers\.(\d+)\b")
 
+# Module leaf names of the vocab-projection (output) layer across HF / Megatron.
+_OUTPUT_LAYER_NAMES = ("lm_head", "output_layer")
+
+
+def _is_output_layer(name: str) -> bool:
+    """True if *name* is the model's output/vocab-projection layer.
+
+    Matched by the module path's leaf (``...lm_head`` or ``...output_layer``)
+    so both HuggingFace (``lm_head``) and Megatron (``output_layer``) hit.
+    """
+    leaf = name.rsplit(".", 1)[-1]
+    return leaf in _OUTPUT_LAYER_NAMES
+
 
 def _build_bf16_skip_prefixes(
     model: nn.Module,
@@ -299,6 +312,13 @@ def _patch_linear_layers(
     for name, module in model.named_modules():
         if isinstance(module, quantizable_types):
             if bf16_prefixes and any(name.startswith(p) for p in bf16_prefixes):
+                skipped += 1
+                continue
+
+            # Keep the output/vocab-projection layer in BF16 unless explicitly
+            # opted in: its M×N output overflows int32 pointer arithmetic in the
+            # Triton FP8 GEMM kernels for large vocab × long sequence (page fault).
+            if not config.quantize_output_layer and _is_output_layer(name):
                 skipped += 1
                 continue
 

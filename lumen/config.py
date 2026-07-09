@@ -58,6 +58,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "cache_frozen_weight": ("linear_fp8_cache_frozen_weight",),
     "bpreshuffle_gemm": ("linear_fp8_bpreshuffle",),
     "quantize_grad": ("grad_quant_type",),
+    "quantize_output_layer": ("linear_fp8_quantize_output_layer", "quantize_output_layer"),
     "first_last_layers_bf16": ("first_last_layers_bf16",),
     "num_layers_at_start_in_bf16": ("num_layers_at_start_in_bf16",),
     "num_layers_at_end_in_bf16": ("num_layers_at_end_in_bf16",),
@@ -120,6 +121,7 @@ class LumenConfig:
     cache_frozen_weight: bool = False
     bpreshuffle_gemm: bool = False
     quantize_grad: Optional[str] = None
+    quantize_output_layer: bool = False
     first_last_layers_bf16: bool = False
     num_layers_at_start_in_bf16: int = 1
     num_layers_at_end_in_bf16: int = 1
@@ -190,6 +192,7 @@ class LumenConfig:
             cache_frozen_weight=self.cache_frozen_weight,
             bpreshuffle_gemm=self.bpreshuffle_gemm,
             quantize_grad=self.quantize_grad,
+            quantize_output_layer=self.quantize_output_layer,
             first_last_layers_bf16=self.first_last_layers_bf16,
             num_layers_at_start_in_bf16=self.num_layers_at_start_in_bf16,
             num_layers_at_end_in_bf16=self.num_layers_at_end_in_bf16,
