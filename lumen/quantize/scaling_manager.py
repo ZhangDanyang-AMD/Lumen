@@ -482,7 +482,7 @@ class ScalingManager:
 
     def update_amax_value(self, tensor_id: str, amax: torch.Tensor):
         """Record a pre-computed amax value, skipping the abs().amax() pass."""
-        self.amax_history[tensor_id].append(amax.detach())
+        self.amax_history[tensor_id].append(amax.detach().squeeze())
         self._batch_scales_valid = False
 
     def quantize(self, tensor_id: str, tensor: torch.Tensor, *, backward: bool = False):
@@ -904,7 +904,7 @@ class ScalingManager:
                 scale,
                 dtype,
             )
-            self.amax_history[tensor_id].append(amax)
+            self.amax_history[tensor_id].append(amax.squeeze())
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -927,7 +927,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(amax)
+            self.amax_history[tensor_id].append(amax.squeeze())
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -955,7 +955,7 @@ class ScalingManager:
                     dtype,
                     clamp_max=float(fp8_max),
                 )
-                self.amax_history[tensor_id].append(amax)
+                self.amax_history[tensor_id].append(amax.squeeze())
                 return FP8Descriptor(
                     data=fp8_data.view(tensor.shape),
                     scale=scale,
@@ -999,7 +999,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(amax)
+            self.amax_history[tensor_id].append(amax.squeeze())
             desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
             return self._eager_transpose(desc) if not backward else desc
 
