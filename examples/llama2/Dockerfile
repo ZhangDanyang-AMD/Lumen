@@ -16,13 +16,10 @@ RUN cd /workspace/Lumen/third_party/aiter && \
     PREBUILD_KERNELS=1 pip install -e .
 
 # mori — SDMA communication library (editable from third_party).
-# Nested submodules (msgpack-c, spdlog) are already checked out on the host
-# and copied via COPY, so no git submodule update needed inside the container.
-# SETUPTOOLS_SCM_PRETEND_VERSION_FOR_MORI is required because there is no
-# .git directory in the image build context.
 RUN cd /workspace/Lumen/third_party/mori && \
+    git submodule update --init --recursive && \
     pip install setuptools-scm && \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_MORI=0.1.0 pip install -e .
+    pip install -e .
 
 # torchao (quantization reference).
 RUN pip install torchao>=0.8

@@ -42,11 +42,7 @@ _orig_init_env = MegatronCheckpointSaverBase.initialize_megatron_env
 
 def _patched_init_env(self):
     _orig_init_env(self)
-    # megatron.core.mpu was renamed to megatron.core.parallel_state in newer versions
-    try:
-        mpu = importlib.import_module("megatron.core.mpu")
-    except ModuleNotFoundError:
-        mpu = importlib.import_module("megatron.core.parallel_state")
+    mpu = importlib.import_module("megatron.core.mpu")
 
     fake_dp = _ConverterFakeProcessGroup(size=1)
     mpu._DATA_PARALLEL_GROUP = fake_dp
@@ -71,10 +67,6 @@ def _patched_load_ckpt_args(self, margs):
         if getattr(margs, "padded_vocab_size", None) != recalc:
             print(f"[convert] Fixing padded_vocab_size: {margs.padded_vocab_size} -> {recalc}")
             margs.padded_vocab_size = recalc
-    # TE is not installed; force local spec so gpt_builder uses get_gpt_layer_local_spec().
-    # The checkpoint args may carry transformer_impl="transformer_engine" which would crash.
-    margs.transformer_impl = "local"
-    print("[convert] Forced transformer_impl=local in checkpoint args")
     return margs
 
 
@@ -131,13 +123,9 @@ _orig_validate = _mega_args.validate_args
 def _patched_validate(args, defaults={}):
     saved_sp = args.sequence_parallel
     args.sequence_parallel = True
-    # Force local (non-TE) transformer spec so model building uses get_gpt_layer_local_spec().
-    # TE is not installed in this container; using local spec avoids TESpecProvider entirely.
-    args.transformer_impl = "local"
     result = _orig_validate(args, defaults)
     target = result if result is not None else args
     target.sequence_parallel = saved_sp
-    target.transformer_impl = "local"
     return target
 
 
