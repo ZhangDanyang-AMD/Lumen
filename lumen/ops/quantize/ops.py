@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
+<<<<<<< HEAD
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         quant_fp8_blockwise_for_act_grad_kernel,
@@ -31,14 +32,6 @@ except ModuleNotFoundError as exc:
     quant_fp8_blockwise_segment_m_kernel = None
     _BLOCKWISE_IMPORT_ERROR = exc
 try:
-    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
-        requant_fp8_row_to_col_kernel,
-    )
-    _HAVE_REQUANT_ROW_TO_COL = True
-except ImportError:
-    requant_fp8_row_to_col_kernel = None  # type: ignore[assignment]
-    _HAVE_REQUANT_ROW_TO_COL = False
-try:
     from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
         _convert_from_mxfp8_kernel,
         _convert_to_mxfp8_kernel,
@@ -48,6 +41,25 @@ except ModuleNotFoundError as exc:
     _convert_from_mxfp8_kernel = None
     _convert_to_mxfp8_kernel = None
     _MXFP8_IMPORT_ERROR = exc
+=======
+from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+    quant_fp8_blockwise_for_act_grad_kernel,
+    quant_fp8_blockwise_kernel,
+    quant_fp8_blockwise_segment_m_kernel,
+)
+try:
+    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+        requant_fp8_row_to_col_kernel,
+    )
+    _HAVE_REQUANT_ROW_TO_COL = True
+except ImportError:
+    requant_fp8_row_to_col_kernel = None  # type: ignore[assignment]
+    _HAVE_REQUANT_ROW_TO_COL = False
+from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
+    _convert_from_mxfp8_kernel,
+    _convert_to_mxfp8_kernel,
+)
+>>>>>>> 8073d12 (perf(ops): add FP8 dgrad/wgrad kernels and chunked cross-entropy)
 from torch.library import triton_op, wrap_triton
 
 logger = logging.getLogger(__name__)
