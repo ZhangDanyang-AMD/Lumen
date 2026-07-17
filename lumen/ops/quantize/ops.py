@@ -18,7 +18,6 @@ from typing import Optional, Tuple
 import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
-<<<<<<< HEAD
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         quant_fp8_blockwise_for_act_grad_kernel,
@@ -41,18 +40,6 @@ except ModuleNotFoundError as exc:
     _convert_from_mxfp8_kernel = None
     _convert_to_mxfp8_kernel = None
     _MXFP8_IMPORT_ERROR = exc
-=======
-from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
-    quant_fp8_blockwise_for_act_grad_kernel,
-    quant_fp8_blockwise_kernel,
-    quant_fp8_blockwise_segment_m_kernel,
-    requant_fp8_row_to_col_kernel,
-)
-from aiter.ops.triton._triton_kernels.quant.quant_mxfp8 import (
-    _convert_from_mxfp8_kernel,
-    _convert_to_mxfp8_kernel,
-)
->>>>>>> 8073d12 (perf(ops): add FP8 dgrad/wgrad kernels and chunked cross-entropy)
 from torch.library import triton_op, wrap_triton
 
 logger = logging.getLogger(__name__)
@@ -207,46 +194,6 @@ def quant_fp8_blockwise_dual_axis_impl_meta(
         torch.empty((M, triton.cdiv(N, block_size)), dtype=torch.float32, device=x.device),
         torch.empty((M, N), dtype=dtype, device=x.device),
         torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device),
-    )
-
-
-@triton_op("lumen::requant_fp8_row_to_col", mutates_args=())
-def requant_fp8_row_to_col(
-    x_fp8: torch.Tensor,
-    x_scales: torch.Tensor,
-    dtype: torch.dtype,
-    block_size: int = 128,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Re-quantize FP8 (row-wise 1×block) → FP8 (col-wise block×1) without BF16 roundtrip.
-
-    ``x_fp8`` is (M, K) FP8 with row-wise 1×block_size scales ``x_scales`` (M, K//block_size).
-    Returns ``(y_fp8, y_scales)`` where ``y_fp8`` is (M, K) FP8 and ``y_scales`` is
-    (M//block_size, K) float32 col-wise dequant scales.  Used in the blockwise/blockwise2d
-    WGrad backward to avoid a BF16 intermediate activation copy.
-    """
-    assert x_fp8.is_contiguous() and x_fp8.dim() == 2, "x_fp8 must be 2D and contiguous"
-    M, K = x_fp8.shape
-    y_fp8 = torch.empty((M, K), dtype=dtype, device=x_fp8.device)
-    y_scales = torch.empty((triton.cdiv(M, block_size), K), dtype=torch.float32, device=x_fp8.device)
-    grid = (triton.cdiv(M, block_size), triton.cdiv(K, block_size))
-    wrap_triton(requant_fp8_row_to_col_kernel)[grid](
-        x_fp8, x_scales, y_fp8, y_scales, M, K, block_size, torch.finfo(dtype).max,
-    )
-    return y_fp8, y_scales
-
-
-@requant_fp8_row_to_col.register_fake
-def requant_fp8_row_to_col_meta(
-    x_fp8: torch.Tensor,
-    x_scales: torch.Tensor,
-    dtype: torch.dtype,
-    block_size: int = 128,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert x_fp8.dim() == 2, "x_fp8 must be 2D"
-    M, K = x_fp8.shape
-    return (
-        torch.empty((M, K), dtype=dtype, device=x_fp8.device),
-        torch.empty((triton.cdiv(M, block_size), K), dtype=torch.float32, device=x_fp8.device),
     )
 
 
