@@ -1,5 +1,5 @@
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
-"""Qwen3-30B-A3B MoE SFT — FSDP2 (fully_shard) + 2D Parallelism (DP×EP).
+"""Qwen3-30B-A3B MoE Training — FSDP2 (fully_shard) + 2D Parallelism (DP×EP).
 
 2D parallelism layout (world_size = dp_size × ep_size):
   - EP groups: ranks sharing the same DP rank form an EP group (size=ep_size).
@@ -356,7 +356,7 @@ class AlpacaDataset(Dataset):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Qwen3-30B-A3B MoE SFT — FSDP2 + 2D Parallelism (DP×EP)")
+        description="Qwen3-30B-A3B MoE Training — FSDP2 + 2D Parallelism (DP×EP)")
     p.add_argument("--model-name-or-path", required=True)
     p.add_argument("--tokenizer-name-or-path", default=None)
     p.add_argument("--mode", choices=["bf16", "fp8_blockwise2d"], default="bf16")
@@ -366,14 +366,16 @@ def main():
     p.add_argument("--micro-batch-size", type=int, default=1)
     p.add_argument("--gradient-accumulation-steps", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=100)
-    p.add_argument("--lr", type=float, default=4e-4)
+    p.add_argument("--lr", type=float, default=1e-6)
     p.add_argument("--min-lr", type=float, default=0.0)
-    p.add_argument("--lr-warmup-steps", type=int, default=10)
-    p.add_argument("--weight-decay", type=float, default=1e-4)
+    p.add_argument("--lr-warmup-steps", type=int, default=0)
+    p.add_argument("--lr-decay-style", choices=["cosine", "constant"],
+                   default="constant")
+    p.add_argument("--weight-decay", type=float, default=0.1)
     p.add_argument("--max-grad-norm", type=float, default=1.0)
-    p.add_argument("--lora-rank", type=int, default=16)
-    p.add_argument("--lora-alpha", type=float, default=32.0)
-    p.add_argument("--lora-dropout", type=float, default=0.1)
+    p.add_argument("--adam-beta1", type=float, default=0.9)
+    p.add_argument("--adam-beta2", type=float, default=0.98)
+    p.add_argument("--adam-eps", type=float, default=1e-5)
     p.add_argument("--ep-size", type=int, default=8,
                    help="Expert parallelism size (must divide num_experts=128)")
     p.add_argument("--dp-size", type=int, default=2,
@@ -387,12 +389,8 @@ def main():
                    action="store_false")
     p.add_argument("--fp8-scaling", choices=["blockwise2d", "delayed", "dynamic"],
                    default="blockwise2d")
-    p.add_argument("--cache-frozen-weight", action="store_true",
-                   help="Cache frozen base weight FP8 quant (skip per-fwd re-quant)")
-    p.add_argument("--bpreshuffle", action="store_true",
-                   help="B-preshuffle blockscale GEMM (needs --cache-frozen-weight)")
     p.add_argument("--fsdp-fp8-param-storage", action="store_true",
-                   help="Store frozen base weights as FP8 in FSDP2 shard "
+                   help="Store weights as FP8 in FSDP2 shard "
                         "(all-gather FP8 instead of BF16)")
     p.add_argument("--aiter-attn", action="store_true",
                    help="Route SDPA via AITER CK FMHA")
@@ -458,7 +456,7 @@ def main():
             gradient_checkpointing_kwargs={"use_reentrant": False})
         _rank0_print("> Gradient checkpointing enabled")
 
-    # ---- Lumen FP8 + LoRA ----
+    # ---- Precision mode: FP8 (optional) or BF16 (default) ----
     use_fp8 = args.mode == "fp8_blockwise2d"
     if use_fp8:
         from lumen.config import LumenConfig
@@ -468,33 +466,17 @@ def main():
             linear_fp8_block_size=128, linear_fp8_amax_algo="max",
             linear_fp8_amax_history=16, linear_fp8_reduce_amax=False,
             linear_fp8_activation=True, linear_fp8_wgrad=True,
-            linear_fp8_cache_frozen_weight=args.cache_frozen_weight,
-            linear_fp8_bpreshuffle=args.bpreshuffle,
+            linear_fp8_cache_frozen_weight=False,
+            linear_fp8_bpreshuffle=False,
             grad_quant_type=None, first_last_layers_bf16=False,
             lumen_norm=args.lumen_norm,
             hf_attn_patch=args.aiter_attn,
-            lora_rank=args.lora_rank, lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
+            lora_rank=0, lora_alpha=0, lora_dropout=0.0,
         ))
         _manager, model = cfg.enable(model)
-        for nme, prm in model.named_parameters():
-            if "lora_" in nme and prm.dtype == torch.float32:
-                prm.data = prm.data.to(torch.bfloat16)
-        _rank0_print("> Lumen FP8 blockwise2d + LoRA enabled")
+        _rank0_print("> Lumen FP8 blockwise2d enabled (full-param)")
     else:
-        from peft import LoraConfig, get_peft_model
-        lora_cfg = LoraConfig(
-            r=args.lora_rank, lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj"],
-            bias="none", task_type="CAUSAL_LM",
-        )
-        model = get_peft_model(model, lora_cfg)
-        for nme, prm in model.named_parameters():
-            if "lora_" in nme and prm.dtype == torch.float32:
-                prm.data = prm.data.to(torch.bfloat16)
-        _rank0_print(f"> LoRA (BF16) enabled, rank={args.lora_rank}")
+        _rank0_print("> BF16 full-param training")
 
     # ---- FSDP2: shard shared params across DP group via fully_shard ----
     model = apply_fsdp2_dp(model, args, dp_group, args.dp_size)
@@ -508,14 +490,16 @@ def main():
     # ---- Optimizer ----
     opt = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
-        lr=args.lr, betas=(0.9, 0.95), eps=1e-5,
-        weight_decay=args.weight_decay)
+        lr=args.lr, betas=(args.adam_beta1, args.adam_beta2),
+        eps=args.adam_eps, weight_decay=args.weight_decay)
 
     def lr_lambda(step):
         w, T = args.lr_warmup_steps, args.max_steps
         mx, mn = args.lr, args.min_lr
         if step < w:
             return float(step) / max(w, 1)
+        if args.lr_decay_style == "constant":
+            return 1.0
         prog = float(step - w) / max(T - w, 1)
         ratio = mn / mx if mx > 0 else 0.0
         return ratio + (1 - ratio) * 0.5 * (1 + math.cos(math.pi * prog))

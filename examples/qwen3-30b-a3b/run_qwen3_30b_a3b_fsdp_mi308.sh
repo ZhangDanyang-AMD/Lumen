@@ -1,7 +1,7 @@
 #!/bin/bash
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #
-# Qwen3-30B-A3B MoE SFT — 2×MI308X nodes (16 GPUs), FSDP2 + DP=2 × EP=8.
+# Qwen3-30B-A3B MoE Training — 2×MI308X nodes (16 GPUs), FSDP2 + DP=2 × EP=8.
 #
 # Launches the lumen/llama2 container, overlays the host Lumen package and
 # examples, mounts the model + dataset, and runs the FSDP2 DP×EP training
@@ -32,7 +32,7 @@
 #     bash run_qwen3_30b_a3b_fsdp_mi308.sh
 #
 # Fastest config (memory permitting):
-#   MODE=fp8_blockwise2d CACHE_FROZEN_WEIGHT=1 BPRESHUFFLE=1 \
+#   MODE=fp8_blockwise2d \
 #   SHARDING=shard_grad_op GRAD_CKPT=0 \
 #   AITER_ATTN=1 LUMEN_NORM=1 FUSE_ROPE=1 \
 #     bash run_qwen3_30b_a3b_fsdp_mi308.sh
@@ -62,14 +62,11 @@ MAX_STEPS="${MAX_STEPS:-100}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
 EP_SIZE="${EP_SIZE:-8}"
 DP_SIZE="${DP_SIZE:-2}"
-LORA_RANK="${LORA_RANK:-16}"
 SHARDING="${SHARDING:-full_shard}"      # full_shard | shard_grad_op
 GRAD_CKPT="${GRAD_CKPT:-1}"
 FP8_SCALING="${FP8_SCALING:-blockwise2d}"
 
 # ---- Optimization flags ----
-CACHE_FROZEN_WEIGHT="${CACHE_FROZEN_WEIGHT:-}"
-BPRESHUFFLE="${BPRESHUFFLE:-}"
 FSDP_FP8_PARAM_STORAGE="${FSDP_FP8_PARAM_STORAGE:-}"
 AITER_ATTN="${AITER_ATTN:-}"
 LUMEN_NORM="${LUMEN_NORM:-}"
@@ -94,7 +91,7 @@ echo "  Mode:        ${MODE}"
 echo "  Sharding:    ${SHARDING} (FSDP2 fully_shard)"
 echo "  Steps:       ${MAX_STEPS}"
 echo "  SeqLen:      ${SEQ_LENGTH}"
-echo "  LoRA:        rank=${LORA_RANK}"
+echo "  Training:    full-param BF16"
 echo "  Nodes:       ${NNODES} (node_rank=${NODE_RANK})"
 echo "  GPUs/node:   ${NPROC_PER_NODE}"
 echo "  Master:      ${MASTER_ADDR}:${MASTER_PORT}"
@@ -126,8 +123,6 @@ cd /workspace/Lumen/examples/qwen3-30b-a3b
 
 EXTRA=""
 # Optimization flags
-[[ -n "'"${CACHE_FROZEN_WEIGHT}"'" ]] && EXTRA="${EXTRA} --cache-frozen-weight"
-[[ -n "'"${BPRESHUFFLE}"'" ]]         && EXTRA="${EXTRA} --bpreshuffle"
 [[ -n "'"${FSDP_FP8_PARAM_STORAGE}"'" ]] && EXTRA="${EXTRA} --fsdp-fp8-param-storage"
 [[ -n "'"${AITER_ATTN}"'" ]]          && EXTRA="${EXTRA} --aiter-attn"
 [[ -n "'"${LUMEN_NORM}"'" ]]          && EXTRA="${EXTRA} --lumen-norm"
@@ -148,7 +143,6 @@ torchrun \
     --ep-size '"${EP_SIZE}"' \
     --dp-size '"${DP_SIZE}"' \
     --sharding '"${SHARDING}"' \
-    --lora-rank '"${LORA_RANK}"' \
     --fp8-scaling '"${FP8_SCALING}"' \
     --seq-length '"${SEQ_LENGTH}"' \
     --max-steps '"${MAX_STEPS}"' \

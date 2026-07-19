@@ -1,5 +1,7 @@
 #!/bin/bash
-# Qwen3-30B-A3B Primus baseline — pull image, run BF16 + FP8 pretraining.
+# Qwen3-30B-A3B Primus baseline — full-param BF16 training.
+# Hyperparams aligned with Miles RL framework defaults:
+#   lr=1e-6, constant lr, weight_decay=0.1, adam_beta2=0.98
 # Produces loss logs for comparison with Lumen FSDP EP=8 runs.
 set -euo pipefail
 
@@ -8,10 +10,22 @@ RESULTS_DIR="${SCRIPT_DIR}/results"
 PRIMUS_IMAGE="${PRIMUS_IMAGE:-rocm/primus:v26.4}"
 CONTAINER_NAME="primus_qwen3_30b_baseline"
 
+# ---- Miles-aligned training hyperparams ----
+LR="${LR:-1e-6}"
+LR_DECAY_STYLE="${LR_DECAY_STYLE:-constant}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-0.1}"
+ADAM_BETA1="${ADAM_BETA1:-0.9}"
+ADAM_BETA2="${ADAM_BETA2:-0.98}"
+ADAM_EPS="${ADAM_EPS:-1e-5}"
+
 mkdir -p "${RESULTS_DIR}"
 
-echo "=== Phase 1: Primus Baseline ==="
-echo "  Image: ${PRIMUS_IMAGE}"
+echo "=== Primus Baseline: Full-Param BF16 ==="
+echo "  Image:        ${PRIMUS_IMAGE}"
+echo "  lr:           ${LR}"
+echo "  lr_decay:     ${LR_DECAY_STYLE}"
+echo "  weight_decay: ${WEIGHT_DECAY}"
+echo "  adam_beta2:   ${ADAM_BETA2}"
 echo ""
 
 # Pull image if not present
@@ -22,8 +36,8 @@ fi
 
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
-# --- BF16 Baseline ---
-echo "> Running BF16 baseline ..."
+# --- BF16 Full-Param Baseline ---
+echo "> Running BF16 full-param baseline ..."
 docker run --rm --init \
     --name "${CONTAINER_NAME}" \
     --device /dev/dri --device /dev/kfd \
@@ -48,11 +62,17 @@ ls examples/megatron/configs/MI300X/ 2>/dev/null
 
 CONFIG="examples/megatron/configs/MI300X/qwen3_30B_A3B-BF16-pretrain.yaml"
 if [[ -f "${CONFIG}" ]]; then
-    echo "--- Running BF16 pretrain ---"
+    echo "--- Running BF16 full-param training ---"
     bash runner/primus-cli direct \
         --log_file /results/primus_bf16_baseline.log \
-        -- train pretrain --config "${CONFIG}"
-    echo "--- BF16 baseline done ---"
+        -- train pretrain --config "${CONFIG}" \
+        --override lr='"${LR}"' \
+        --override lr_decay_style='"${LR_DECAY_STYLE}"' \
+        --override weight_decay='"${WEIGHT_DECAY}"' \
+        --override adam_beta1='"${ADAM_BETA1}"' \
+        --override adam_beta2='"${ADAM_BETA2}"' \
+        --override adam_eps='"${ADAM_EPS}"'
+    echo "--- BF16 full-param baseline done ---"
     grep -E "step.*loss|iteration" /results/primus_bf16_baseline.log | tail -20 \
         > /results/primus_bf16_baseline_loss.txt
 else
@@ -64,6 +84,6 @@ fi
 '
 
 echo ""
-echo "=== Primus BF16 baseline complete ==="
+echo "=== Primus BF16 full-param baseline complete ==="
 echo "  Log:  ${RESULTS_DIR}/primus_bf16_baseline.log"
 echo "  Loss: ${RESULTS_DIR}/primus_bf16_baseline_loss.txt"
