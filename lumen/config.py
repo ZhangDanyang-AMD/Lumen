@@ -794,14 +794,21 @@ class LumenConfig:
 
             router_logits = gate(hidden_flat)
 
-            if has_topk:
+            if has_topk and not torch.is_grad_enabled():
                 topk_weights, topk_indices = aiter_fused_topk(
                     router_logits, top_k, softmax_first=True,
                 )
                 topk_weights = topk_weights.to(hidden_flat.dtype)
             else:
-                routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-                topk_weights, topk_indices = torch.topk(routing_weights, top_k, dim=-1)
+                if has_topk:
+                    _, topk_indices = aiter_fused_topk(
+                        router_logits, top_k, softmax_first=True,
+                    )
+                    routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+                    topk_weights = routing_weights.gather(1, topk_indices)
+                else:
+                    routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+                    topk_weights, topk_indices = torch.topk(routing_weights, top_k, dim=-1)
                 if norm_topk_prob:
                     topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
                 topk_weights = topk_weights.to(hidden_flat.dtype)
@@ -815,7 +822,7 @@ class LumenConfig:
                     hidden_flat, topk_indices, topk_weights,
                     w_gate, w_up, w_down,
                 )
-                return output.view(batch_size, seq_len, hidden_dim), router_logits
+                return output.view(batch_size, seq_len, hidden_dim)
             else:
                 return original_forward(hidden_states)
 
