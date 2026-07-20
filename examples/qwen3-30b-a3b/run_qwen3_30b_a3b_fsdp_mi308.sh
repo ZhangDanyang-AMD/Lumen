@@ -31,7 +31,11 @@
 #   TRAIN_FILE=train.jsonl VAL_FILE=test.jsonl \
 #     bash run_qwen3_30b_a3b_fsdp_mi308.sh
 #
-# Fastest config (memory permitting):
+# Fastest BF16 config:
+#   AITER_ATTN=1 LUMEN_NORM=1 LUMEN_LINEAR=1 FUSED_MOE=1 FUSE_ROPE=1 \
+#     bash run_qwen3_30b_a3b_fsdp_mi308.sh
+#
+# Fastest FP8 config (memory permitting):
 #   MODE=fp8_blockwise2d \
 #   SHARDING=shard_grad_op GRAD_CKPT=0 \
 #   AITER_ATTN=1 LUMEN_NORM=1 FUSE_ROPE=1 \
@@ -70,6 +74,8 @@ FP8_SCALING="${FP8_SCALING:-blockwise2d}"
 FSDP_FP8_PARAM_STORAGE="${FSDP_FP8_PARAM_STORAGE:-}"
 AITER_ATTN="${AITER_ATTN:-}"
 LUMEN_NORM="${LUMEN_NORM:-}"
+LUMEN_LINEAR="${LUMEN_LINEAR:-}"
+FUSED_MOE="${FUSED_MOE:-}"
 FUSE_ROPE="${FUSE_ROPE:-}"
 
 IMAGE="${IMAGE:-lumen/llama2:latest}"
@@ -126,6 +132,8 @@ EXTRA=""
 [[ -n "'"${FSDP_FP8_PARAM_STORAGE}"'" ]] && EXTRA="${EXTRA} --fsdp-fp8-param-storage"
 [[ -n "'"${AITER_ATTN}"'" ]]          && EXTRA="${EXTRA} --aiter-attn"
 [[ -n "'"${LUMEN_NORM}"'" ]]          && EXTRA="${EXTRA} --lumen-norm"
+[[ -n "'"${LUMEN_LINEAR}"'" ]]        && EXTRA="${EXTRA} --lumen-linear"
+[[ -n "'"${FUSED_MOE}"'" ]]           && EXTRA="${EXTRA} --fused-moe"
 [[ -n "'"${FUSE_ROPE}"'" ]]           && EXTRA="${EXTRA} --fuse-rope"
 [[ "'"${GRAD_CKPT}"'" == "0" ]]       && EXTRA="${EXTRA} --no-grad-checkpointing"
 

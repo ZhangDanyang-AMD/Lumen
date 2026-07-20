@@ -77,6 +77,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "fp8_param_gather": ("lumen_fp8_param_gather",),
     "fp8_weight_cache": ("lumen_fp8_weight_cache",),
     "fused_rope": ("lumen_fused_rope",),
+    "fused_moe": ("lumen_fused_moe",),
     "hip_graphs": ("lumen_hip_graphs",),
     "fp8_checkpoint": ("lumen_fp8_checkpoint",),
     "fp8_param_manager": ("fp8_param_manager",),
@@ -148,6 +149,7 @@ class LumenConfig:
     fp8_param_gather: bool = False
     fp8_weight_cache: bool = False
     fused_rope: bool = False
+    fused_moe: bool = False
     hip_graphs: bool = False
     fp8_checkpoint: bool = False
 
@@ -218,26 +220,43 @@ class LumenConfig:
             or self.fp8_weight_cache
             or self.fp8_checkpoint
             or self.fused_rope
+            or self.fused_moe
             or self.hip_graphs
             or self.delay_wgrad
             or self.gradient_accumulation_fusion
         )
 
-    def enable(self, model, *, dp_group=None, backend: str = "auto"):
+    def enable(self, model, *, dp_group=None, ep_group=None,
+               ep_size: int = 1, ep_rank: int = 0,
+               backend: str = "auto"):
         """Apply all Lumen features to *model* in the correct order.
 
         Orchestration:
           0a. FP8ParamManager — quantize linear weights to FP8 storage
           0b. LoRA (PEFT) — wrap linears with trainable adapters
-          1.  Norm patching (before quant so new norm modules get patched)
-          2.  Pre-quant module flags (delay_wgrad, grad-accum fusion, etc.)
-          3.  ``quant.enable()`` — FP8 linear patching
-          4.  Post-quant features (fp8_checkpoint, fp8_param_gather)
-          5.  Attach config to model for downstream reads
+          1.  Fused RoPE (module-level monkey-patch, before EP sharding)
+          1a. Norm patching (before quant so new norm modules get patched)
+          1b. Attention patching
+          1c. Linear GEMM patching (BF16 AITER)
+          2.  EP sharding (replaces MoE blocks with EPShardedMoeBlock)
+          2a. Fused MoE (patches EPShardedMoeBlock local expert compute)
+          3.  Pre-quant module flags (delay_wgrad, grad-accum fusion, etc.)
+          4.  ``quant.enable()`` — FP8 linear patching
+          5.  Post-quant features (fp8_checkpoint, fp8_param_gather)
+          6.  Attach config to model for downstream reads
 
         FP8ParamManager runs **before** LoRA so that only base ``nn.Linear``
         weights are quantized; the LoRA adapter weights (``lora_A``, ``lora_B``)
         created afterwards stay in BF16 and remain trainable.
+
+        Args:
+            model: The model to patch.
+            dp_group: DP process group for FSDP reduce_amax.
+            ep_group: EP process group for expert parallelism.  When provided
+                with ``ep_size > 1``, MoE blocks are sharded across the group.
+            ep_size: Number of GPUs in the EP group (default 1 = no EP).
+            ep_rank: This GPU's rank within the EP group.
+            backend: GEMM backend selection.
 
         Returns:
             ``(manager, model)`` — the :class:`~lumen.quantize.ScalingManager`
@@ -254,7 +273,11 @@ class LumenConfig:
         if self.lora_rank > 0:
             model = self._apply_lora(model)
 
-        # 1. Norm patching
+        # 1. Fused RoPE (module-level patch, before EP sharding)
+        if self.fused_rope:
+            self._patch_fused_rope(model)
+
+        # 1a. Norm patching
         if self.lumen_norm:
             self._patch_norms(model)
 
@@ -265,6 +288,16 @@ class LumenConfig:
         # 1c. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
+
+        # 2. EP sharding (replaces HF MoE blocks with EPShardedMoeBlock)
+        if ep_size > 1 and ep_group is not None:
+            from lumen.modules.ep_moe import shard_experts_ep
+
+            model = shard_experts_ep(model, ep_size, ep_rank, ep_group)
+
+        # 2a. Fused MoE local-expert compute (AITER Triton fused GEMM)
+        if self.fused_moe:
+            self._patch_fused_moe(model)
 
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
@@ -411,6 +444,42 @@ class LumenConfig:
         patch_sdpa()
 
     @staticmethod
+    def _patch_fused_rope(model) -> None:
+        """Monkey-patch HuggingFace ``apply_rotary_pos_emb`` with AITER fused RoPE.
+
+        Detects the model's architecture and patches the corresponding
+        HF modeling module's ``apply_rotary_pos_emb`` function.
+        """
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        arch = getattr(model.config, "model_type", "")
+        _module_map = {
+            "qwen3_moe": "transformers.models.qwen3_moe.modeling_qwen3_moe",
+            "qwen2_moe": "transformers.models.qwen2_moe.modeling_qwen2_moe",
+            "qwen2": "transformers.models.qwen2.modeling_qwen2",
+            "llama": "transformers.models.llama.modeling_llama",
+            "mistral": "transformers.models.mistral.modeling_mistral",
+        }
+        mod_name = _module_map.get(arch)
+        if mod_name is None:
+            _rank0_print(f"> fused_rope: unsupported architecture '{arch}', skipping")
+            return
+
+        import importlib
+
+        try:
+            hf_mod = importlib.import_module(mod_name)
+        except ImportError:
+            _rank0_print(f"> fused_rope: could not import {mod_name}, skipping")
+            return
+
+        def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+            return apply_rotary_qk_autograd(q, k, cos, sin)
+
+        hf_mod.apply_rotary_pos_emb = _lumen_rope
+        _rank0_print(f"> Fused RoPE: {mod_name}.apply_rotary_pos_emb -> AITER autograd RoPE")
+
+    @staticmethod
     def _auto_tune_bf16_gemm(model) -> None:
         """Placeholder — BF16 GEMM uses torch.mm fallback (safe on MI350).
 
@@ -446,9 +515,18 @@ class LumenConfig:
                 input, weight = ctx.saved_tensors
                 grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
                 input_flat = input.reshape(-1, input.shape[-1])
-                grad_input = grad_flat @ weight
-                grad_input = grad_input.reshape(input.shape)
-                grad_weight = grad_flat.t() @ input_flat
+                # dispatch_gemm computes A @ W^T (TN layout).
+                # grad_input = grad @ W where W is (N,K).
+                # Pass W^T so dispatch_gemm computes grad @ (W^T)^T = grad @ W.
+                grad_input = dispatch_gemm(
+                    grad_flat, weight.t().contiguous(), scaling_type="none"
+                ).reshape(input.shape)
+                # grad_weight = grad^T @ input = (N,M)@(M,K)
+                grad_weight = dispatch_gemm(
+                    grad_flat.t().contiguous(),
+                    input_flat.t().contiguous(),
+                    scaling_type="none",
+                )
                 grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
                 return grad_input, grad_weight, grad_bias
 
@@ -467,6 +545,351 @@ class LumenConfig:
 
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+
+    def _patch_fused_moe(self, model) -> None:
+        """Replace sequential per-expert loops with AITER fused MoE kernels.
+
+        Targets HuggingFace Qwen3 MoE blocks (``Qwen3MoeSparseMoeBlock``)
+        and EP-sharded wrappers.  Replaces the Python-level expert-by-expert
+        loop with AITER's ``fused_topk`` (ASM fused softmax+topk) and
+        ``fused_moe_triton`` (Triton fused token-sort + grouped GEMM).
+
+        Gate routing stays on the original ``nn.Linear`` gate; only the
+        expert compute is fused.
+        """
+        from lumen.ops.dispatch import (
+            _probe_aiter_moe_topk_softmax,
+            _probe_aiter_triton_fused_moe,
+            _probe_aiter_triton_moe_align,
+        )
+
+        has_topk = _probe_aiter_moe_topk_softmax()
+        has_fused = _probe_aiter_triton_fused_moe() and _probe_aiter_triton_moe_align()
+
+        if not has_topk:
+            _rank0_print("> fused_moe: AITER topk_softmax not available, skipping fused routing")
+        if not has_fused:
+            _rank0_print("> fused_moe: AITER fused_moe triton not available, skipping fused expert GEMM")
+
+        if not has_topk and not has_fused:
+            return
+
+        hf_count = 0
+        ep_count = 0
+        for _name, module in model.named_modules():
+            cls_name = type(module).__name__
+            if cls_name == "Qwen3MoeSparseMoeBlock":
+                self._patch_hf_moe_block(module, has_topk, has_fused)
+                hf_count += 1
+            elif cls_name == "EPShardedMoeBlock":
+                self._patch_ep_moe_block(module, has_fused)
+                ep_count += 1
+
+        total = hf_count + ep_count
+        if total:
+            features = []
+            if has_topk and hf_count:
+                features.append("fused_topk")
+            if has_fused:
+                features.append("fused_expert_gemm")
+            label = (
+                f"{hf_count} HF + {ep_count} EP-sharded"
+                if hf_count and ep_count
+                else f"{ep_count} EP-sharded" if ep_count
+                else f"{hf_count} HF"
+            )
+            _rank0_print(
+                f"> Fused MoE: patched {label} MoE blocks "
+                f"({', '.join(features)})"
+            )
+        else:
+            _rank0_print("> fused_moe: no MoE blocks found to patch")
+
+    @staticmethod
+    def _patch_hf_moe_block(moe_block, has_topk, has_fused) -> None:
+        """Patch a single HuggingFace MoE block with fused kernels.
+
+        Forward uses AITER ``fused_moe_triton`` for all three expert GEMMs.
+        Backward computes gradients per-expert using ``torch.mm`` so that
+        gradients flow to the original expert parameters.
+        """
+        import torch
+        import torch.nn.functional as F
+
+        original_forward = moe_block.forward
+        gate = moe_block.gate
+        experts = moe_block.experts
+        num_experts = moe_block.num_experts
+        top_k = moe_block.top_k
+        norm_topk_prob = moe_block.norm_topk_prob
+
+        if has_topk:
+            from lumen.ops.moe.fused_routing import fused_topk as aiter_fused_topk
+
+        if has_fused:
+            from lumen.ops.moe.fused_moe import fused_moe_triton
+
+            class _FusedHFExpertsFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, hidden_flat, topk_indices, topk_weights,
+                            w_gate, w_up, w_down):
+                    topk_ids_i32 = topk_indices.to(torch.int32)
+                    topk_w_f32 = topk_weights.float()
+
+                    gate_out = fused_moe_triton(
+                        hidden_flat, w_gate, topk_ids_i32, topk_w_f32,
+                        num_experts, top_k, mul_routed_weight=False,
+                    )
+                    up_out = fused_moe_triton(
+                        hidden_flat, w_up, topk_ids_i32, topk_w_f32,
+                        num_experts, top_k, mul_routed_weight=False,
+                    )
+                    silu_gate = F.silu(gate_out)
+                    act_out = silu_gate * up_out
+
+                    down_out = fused_moe_triton(
+                        act_out.reshape(-1, act_out.shape[-1]),
+                        w_down,
+                        topk_ids_i32.unsqueeze(-1).expand(-1, -1, 1).reshape(-1, 1),
+                        torch.ones(topk_ids_i32.numel(), 1,
+                                   dtype=torch.float32, device=hidden_flat.device),
+                        num_experts, 1, mul_routed_weight=False,
+                    ).reshape(hidden_flat.shape[0], top_k, -1)
+
+                    output = (down_out * topk_weights.unsqueeze(-1)).sum(dim=1)
+
+                    ctx.save_for_backward(
+                        hidden_flat, topk_indices, topk_weights,
+                        w_gate, w_up, w_down,
+                        gate_out, up_out, silu_gate, act_out,
+                    )
+                    return output
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    (hidden_flat, topk_indices, topk_weights,
+                     w_gate, w_up, w_down,
+                     gate_out, up_out, silu_gate, act_out) = ctx.saved_tensors
+
+                    grad_hidden = torch.zeros_like(hidden_flat)
+                    grad_w_gate = torch.zeros_like(w_gate)
+                    grad_w_up = torch.zeros_like(w_up)
+                    grad_w_down = torch.zeros_like(w_down)
+
+                    for e in range(num_experts):
+                        masks = []
+                        grad_downs = []
+                        acts = []
+                        silu_gs = []
+                        g_raws = []
+                        u_outs = []
+                        hiddens = []
+                        for k in range(top_k):
+                            mask = topk_indices[:, k] == e
+                            if not mask.any():
+                                continue
+                            masks.append((k, mask))
+                            w_k = topk_weights[mask, k]
+                            grad_downs.append(grad_output[mask] * w_k.unsqueeze(-1))
+                            acts.append(act_out[mask, k, :])
+                            silu_gs.append(silu_gate[mask, k, :])
+                            g_raws.append(gate_out[mask, k, :])
+                            u_outs.append(up_out[mask, k, :])
+                            hiddens.append(hidden_flat[mask])
+
+                        if not masks:
+                            continue
+
+                        gd = torch.cat(grad_downs)
+                        ao = torch.cat(acts)
+                        sg = torch.cat(silu_gs)
+                        gr = torch.cat(g_raws)
+                        uo = torch.cat(u_outs)
+                        rh = torch.cat(hiddens)
+
+                        grad_act = gd @ w_down[e]
+                        grad_w_down[e] = gd.t() @ ao
+
+                        grad_up_e = grad_act * sg
+                        grad_silu = grad_act * uo
+                        sig = torch.sigmoid(gr)
+                        grad_gate_e = grad_silu * sig * (1.0 + gr * (1.0 - sig))
+
+                        grad_h_e = grad_gate_e @ w_gate[e] + grad_up_e @ w_up[e]
+                        grad_w_gate[e] = grad_gate_e.t() @ rh
+                        grad_w_up[e] = grad_up_e.t() @ rh
+
+                        offset = 0
+                        for k, mask in masks:
+                            n = mask.sum().item()
+                            grad_hidden[mask] += grad_h_e[offset:offset + n]
+                            offset += n
+
+                    return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
+
+        def _fused_forward(hidden_states):
+            batch_size, seq_len, hidden_dim = hidden_states.shape
+            hidden_flat = hidden_states.view(-1, hidden_dim)
+
+            router_logits = gate(hidden_flat)
+
+            if has_topk:
+                topk_weights, topk_indices = aiter_fused_topk(
+                    router_logits, top_k, softmax_first=True,
+                )
+                topk_weights = topk_weights.to(hidden_flat.dtype)
+            else:
+                routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+                topk_weights, topk_indices = torch.topk(routing_weights, top_k, dim=-1)
+                if norm_topk_prob:
+                    topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+                topk_weights = topk_weights.to(hidden_flat.dtype)
+
+            if has_fused:
+                w_gate = torch.stack([e.gate_proj.weight for e in experts])
+                w_up = torch.stack([e.up_proj.weight for e in experts])
+                w_down = torch.stack([e.down_proj.weight for e in experts])
+
+                output = _FusedHFExpertsFn.apply(
+                    hidden_flat, topk_indices, topk_weights,
+                    w_gate, w_up, w_down,
+                )
+                return output.view(batch_size, seq_len, hidden_dim), router_logits
+            else:
+                return original_forward(hidden_states)
+
+        moe_block.forward = _fused_forward
+
+    @staticmethod
+    def _patch_ep_moe_block(ep_block, has_fused) -> None:
+        """Replace ``EPShardedMoeBlock._compute_local_experts`` with fused kernels.
+
+        Forward uses AITER ``fused_moe_triton`` for the three expert GEMMs
+        (gate, up, down).  Backward computes gradients per-expert using
+        standard ``torch.mm`` so that gradients flow to the original
+        parameters for training.
+        """
+        if not has_fused:
+            return
+
+        import torch
+        import torch.nn.functional as F
+
+        from lumen.ops.moe.fused_moe import fused_moe_triton
+
+        experts_per_gpu = ep_block.experts_per_gpu
+        has_module_list = ep_block.local_experts is not None
+
+        class _FusedEPExpertsFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, recv_hidden, recv_expert_ids, recv_weights,
+                        w_gate, w_up, w_down):
+                topk_ids = recv_expert_ids.unsqueeze(1).to(torch.int32)
+                ones = torch.ones(
+                    recv_hidden.shape[0], 1,
+                    dtype=torch.float32, device=recv_hidden.device,
+                )
+
+                gate_out = fused_moe_triton(
+                    recv_hidden, w_gate, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
+                up_out = fused_moe_triton(
+                    recv_hidden, w_up, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
+
+                silu_gate = F.silu(gate_out)
+                act_out = silu_gate * up_out
+
+                down_out = fused_moe_triton(
+                    act_out, w_down, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
+
+                output = down_out * recv_weights.unsqueeze(-1)
+
+                ctx.save_for_backward(
+                    recv_hidden, recv_expert_ids, recv_weights,
+                    w_gate, w_up, w_down,
+                    gate_out, up_out, silu_gate, act_out,
+                )
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (recv_hidden, recv_expert_ids, recv_weights,
+                 w_gate, w_up, w_down,
+                 gate_out, up_out, silu_gate, act_out) = ctx.saved_tensors
+
+                grad_hidden = torch.zeros_like(recv_hidden)
+                grad_w_gate = torch.zeros_like(w_gate)
+                grad_w_up = torch.zeros_like(w_up)
+                grad_w_down = torch.zeros_like(w_down)
+
+                for e in range(experts_per_gpu):
+                    mask = recv_expert_ids == e
+                    if not mask.any():
+                        continue
+
+                    go = grad_output[mask]
+                    rw = recv_weights[mask]
+                    rh = recv_hidden[mask]
+                    ao = act_out[mask]
+                    sg = silu_gate[mask]
+                    g_raw = gate_out[mask]
+                    uo = up_out[mask]
+
+                    # output = down_raw * recv_weights
+                    grad_down = go * rw.unsqueeze(-1)
+
+                    # down_raw = act_out @ w_down[e].T
+                    grad_act = grad_down @ w_down[e]
+                    grad_w_down[e] = grad_down.t() @ ao
+
+                    # act_out = silu(gate) * up
+                    grad_up_e = grad_act * sg
+                    grad_silu = grad_act * uo
+                    # silu'(x) = sigmoid(x) * (1 + x - silu(x))
+                    sig = torch.sigmoid(g_raw)
+                    grad_gate_e = grad_silu * sig * (1.0 + g_raw * (1.0 - sig))
+
+                    # gate = hidden @ w_gate[e].T
+                    grad_hidden[mask] += grad_gate_e @ w_gate[e]
+                    grad_w_gate[e] = grad_gate_e.t() @ rh
+
+                    # up = hidden @ w_up[e].T
+                    grad_hidden[mask] += grad_up_e @ w_up[e]
+                    grad_w_up[e] = grad_up_e.t() @ rh
+
+                return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
+
+        def _fused_compute_local_experts(self, recv_hidden, recv_expert_ids, recv_weights):
+            if recv_hidden.shape[0] == 0:
+                return torch.zeros_like(recv_hidden)
+
+            # Build weight tensors from live parameters each forward call
+            # so that autograd can track gradients back to the originals.
+            if has_module_list:
+                w_gate = torch.stack([e.gate_proj.weight for e in self.local_experts])
+                w_up = torch.stack([e.up_proj.weight for e in self.local_experts])
+                w_down = torch.stack([e.down_proj.weight for e in self.local_experts])
+            else:
+                half = self.local_gate_up_proj.shape[1] // 2
+                w_gate = self.local_gate_up_proj[:, :half, :].contiguous()
+                w_up = self.local_gate_up_proj[:, half:, :].contiguous()
+                w_down = self.local_down_proj
+
+            return _FusedEPExpertsFn.apply(
+                recv_hidden, recv_expert_ids, recv_weights,
+                w_gate, w_up, w_down,
+            )
+
+        import types
+
+        ep_block._compute_local_experts = types.MethodType(
+            _fused_compute_local_experts, ep_block
+        )
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
@@ -616,6 +1039,7 @@ class LumenConfig:
             name
             for name in (
                 "fused_mlp",
+                "fused_moe",
                 "cpu_offload",
                 "delay_wgrad",
                 "gradient_accumulation_fusion",

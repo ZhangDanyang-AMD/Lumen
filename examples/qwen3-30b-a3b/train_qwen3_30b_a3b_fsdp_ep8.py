@@ -84,148 +84,7 @@ def create_2d_process_groups(world_size, ep_size):
     return ep_group, dp_group, ep_rank, dp_rank
 
 
-# ---------------------------------------------------------------------------
-# Expert Parallelism: shard MoE experts across EP group
-# ---------------------------------------------------------------------------
-
-class EPShardedMoeBlock(nn.Module):
-    """Wraps Qwen3MoeSparseMoeBlock with expert-parallel sharding.
-
-    Each GPU keeps only its local experts (128 / ep_size).
-    Forward: route tokens via all-to-all within ep_group, compute local experts,
-    all-to-all back.
-    """
-
-    def __init__(self, original_moe_block, ep_rank, ep_size, ep_group):
-        super().__init__()
-        self.num_experts = original_moe_block.num_experts
-        self.top_k = original_moe_block.top_k
-        self.norm_topk_prob = original_moe_block.norm_topk_prob
-        self.gate = original_moe_block.gate
-        self.ep_size = ep_size
-        self.ep_rank = ep_rank
-        self.ep_group = ep_group
-
-        experts_per_gpu = self.num_experts // ep_size
-        start = ep_rank * experts_per_gpu
-        end = start + experts_per_gpu
-        self.local_expert_start = start
-        self.local_expert_end = end
-        self.experts_per_gpu = experts_per_gpu
-
-        self.local_experts = nn.ModuleList(
-            [original_moe_block.experts[i] for i in range(start, end)]
-        )
-        del original_moe_block.experts
-
-    def forward(self, hidden_states: torch.Tensor):
-        batch_size, seq_len, hidden_dim = hidden_states.shape
-        hidden_flat = hidden_states.view(-1, hidden_dim)
-        num_tokens = hidden_flat.shape[0]
-
-        # --- Routing ---
-        router_logits = self.gate(hidden_flat)
-        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        topk_weights, topk_indices = torch.topk(routing_weights, self.top_k, dim=-1)
-        if self.norm_topk_prob:
-            topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-        topk_weights = topk_weights.to(hidden_flat.dtype)
-
-        # --- Map expert indices to target GPU within EP group ---
-        target_gpus = topk_indices // self.experts_per_gpu
-        local_expert_ids = topk_indices % self.experts_per_gpu
-
-        # --- Count tokens per (source_gpu -> dest_gpu) within EP group ---
-        send_counts = torch.zeros(self.ep_size, dtype=torch.long, device=hidden_flat.device)
-        for dest in range(self.ep_size):
-            send_counts[dest] = (target_gpus == dest).sum()
-
-        recv_counts = torch.zeros(self.ep_size, dtype=torch.long, device=hidden_flat.device)
-        dist.all_to_all_single(recv_counts, send_counts, group=self.ep_group)
-
-        # --- Prepare send buffers: sort tokens by destination GPU ---
-        send_indices = []
-        send_expert_ids = []
-        send_weights_list = []
-        for dest in range(self.ep_size):
-            mask = (target_gpus == dest)
-            token_idx, slot_idx = torch.where(mask)
-            send_indices.append(token_idx)
-            send_expert_ids.append(local_expert_ids[token_idx, slot_idx])
-            send_weights_list.append(topk_weights[token_idx, slot_idx])
-
-        send_indices = torch.cat(send_indices)
-        send_expert_ids_cat = torch.cat(send_expert_ids)
-        send_weights_cat = torch.cat(send_weights_list)
-        send_hidden = hidden_flat[send_indices]
-
-        # --- All-to-all within EP group: exchange hidden states ---
-        send_counts_list = send_counts.tolist()
-        recv_counts_list = recv_counts.tolist()
-        total_recv = sum(recv_counts_list)
-
-        recv_hidden = torch.empty(total_recv, hidden_dim,
-                                  dtype=hidden_flat.dtype, device=hidden_flat.device)
-        send_splits = [c * hidden_dim for c in send_counts_list]
-        recv_splits = [c * hidden_dim for c in recv_counts_list]
-        send_list = list(send_hidden.contiguous().view(-1).split(send_splits))
-        recv_list = list(recv_hidden.view(-1).split(recv_splits))
-        dist.all_to_all(recv_list, send_list, group=self.ep_group)
-        recv_hidden = torch.cat(recv_list).view(-1, hidden_dim)
-
-        # All-to-all for expert IDs
-        recv_expert_ids = torch.empty(total_recv, dtype=send_expert_ids_cat.dtype,
-                                      device=hidden_flat.device)
-        send_eid_list = list(send_expert_ids_cat.split(send_counts_list))
-        recv_eid_list = list(recv_expert_ids.split(recv_counts_list))
-        dist.all_to_all(recv_eid_list, send_eid_list, group=self.ep_group)
-        recv_expert_ids = torch.cat(recv_eid_list)
-
-        # All-to-all for weights
-        recv_weights = torch.empty(total_recv, dtype=send_weights_cat.dtype,
-                                   device=hidden_flat.device)
-        send_w_list = list(send_weights_cat.split(send_counts_list))
-        recv_w_list = list(recv_weights.split(recv_counts_list))
-        dist.all_to_all(recv_w_list, send_w_list, group=self.ep_group)
-        recv_weights = torch.cat(recv_w_list)
-
-        # --- Compute local experts ---
-        output_hidden = torch.zeros_like(recv_hidden)
-        for local_idx in range(self.experts_per_gpu):
-            mask = (recv_expert_ids == local_idx)
-            if mask.any():
-                expert_input = recv_hidden[mask]
-                expert_output = self.local_experts[local_idx](expert_input)
-                output_hidden[mask] = expert_output * recv_weights[mask].unsqueeze(-1)
-
-        # --- All-to-all back within EP group ---
-        return_hidden = torch.empty(send_hidden.shape[0], hidden_dim,
-                                    dtype=hidden_flat.dtype, device=hidden_flat.device)
-        send_back_splits = [c * hidden_dim for c in recv_counts_list]
-        recv_back_splits = [c * hidden_dim for c in send_counts_list]
-        send_back_list = list(output_hidden.contiguous().view(-1).split(send_back_splits))
-        recv_back_list = list(return_hidden.view(-1).split(recv_back_splits))
-        dist.all_to_all(recv_back_list, send_back_list, group=self.ep_group)
-        return_hidden = torch.cat(recv_back_list).view(-1, hidden_dim)
-
-        # --- Scatter-add results back to original token positions ---
-        final_output = torch.zeros(num_tokens, hidden_dim,
-                                   dtype=hidden_flat.dtype, device=hidden_flat.device)
-        final_output.index_add_(0, send_indices, return_hidden)
-
-        return final_output.view(batch_size, seq_len, hidden_dim), router_logits
-
-
-def shard_experts_ep(model, ep_size, ep_rank, ep_group):
-    """Replace every Qwen3MoeSparseMoeBlock with EPShardedMoeBlock."""
-    count = 0
-    for layer in model.model.layers:
-        if hasattr(layer, 'mlp') and hasattr(layer.mlp, 'experts'):
-            layer.mlp = EPShardedMoeBlock(layer.mlp, ep_rank, ep_size, ep_group)
-            count += 1
-    _rank0_print(f"> EP sharding: replaced {count} MoE blocks, "
-                 f"{128 // ep_size} local experts/layer on ep_rank {ep_rank}")
-    return model
+from lumen.modules.ep_moe import shard_experts_ep
 
 
 # ---------------------------------------------------------------------------
@@ -242,11 +101,14 @@ def apply_fsdp2_dp(model, args, dp_group, dp_size):
     The DeviceMesh spans only the DP group (size=dp_size), so all-gather and
     reduce-scatter happen only between DP peers (same EP rank, different data).
     """
-    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.device_mesh import DeviceMesh
     from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 
-    dp_ranks = dist.get_process_group_ranks(dp_group)
-    mesh = init_device_mesh("cuda", (dp_size,), mesh_dim_names=("dp",))
+    # Build mesh directly from the pre-created DP process group.
+    # This avoids assuming a contiguous global-rank mesh shape.
+    mesh = DeviceMesh.from_group(
+        dp_group, "cuda", mesh_dim_names=("dp",)
+    )
 
     mp_policy = MixedPrecisionPolicy(
         param_dtype=torch.bfloat16,
@@ -396,6 +258,10 @@ def main():
                    help="Route SDPA via AITER CK FMHA")
     p.add_argument("--lumen-norm", action="store_true",
                    help="Replace Qwen3MoeRMSNorm with Lumen fused RMSNorm")
+    p.add_argument("--lumen-linear", action="store_true",
+                   help="Replace nn.Linear forward with AITER BF16 GEMM")
+    p.add_argument("--fused-moe", action="store_true",
+                   help="Replace per-expert loop with AITER fused MoE kernels")
     p.add_argument("--fuse-rope", action="store_true",
                    help="Replace HF rotary with AITER autograd RoPE")
     p.add_argument("--num-workers", type=int, default=4)
@@ -439,44 +305,45 @@ def main():
         attn_implementation="sdpa",
     )
 
-    # ---- Fused ops (before EP sharding, operates on HF module names) ----
-    if args.fuse_rope:
-        import transformers.models.qwen3_moe.modeling_qwen3_moe as _q3m
-        from lumen.ops.rope import apply_rotary_qk_autograd
-        def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
-            return apply_rotary_qk_autograd(q, k, cos, sin)
-        _q3m.apply_rotary_pos_emb = _lumen_rope
-        _rank0_print("> Fused RoPE: HF apply_rotary_pos_emb -> AITER autograd RoPE")
-
-    # ---- EP sharding: distribute experts across EP group ----
-    model = shard_experts_ep(model, args.ep_size, ep_rank, ep_group)
-
     if args.grad_checkpointing:
         model.gradient_checkpointing_enable(
             gradient_checkpointing_kwargs={"use_reentrant": False})
         _rank0_print("> Gradient checkpointing enabled")
 
-    # ---- Precision mode: FP8 (optional) or BF16 (default) ----
-    use_fp8 = args.mode == "fp8_blockwise2d"
-    if use_fp8:
+    # ---- Lumen: EP sharding + optimizations (RoPE, norm, attn, linear, MoE) ----
+    use_lumen = (args.mode == "fp8_blockwise2d"
+                 or args.lumen_norm or args.aiter_attn
+                 or args.lumen_linear or args.fused_moe
+                 or args.fuse_rope or args.ep_size > 1)
+
+    if use_lumen:
         from lumen.config import LumenConfig
+
+        use_fp8 = args.mode == "fp8_blockwise2d"
         cfg = LumenConfig.from_args(Namespace(
-            linear_fp8=True, linear_fp8_format="fp8_e4m3",
-            linear_fp8_scaling=args.fp8_scaling,
+            linear_fp8=use_fp8,
+            linear_fp8_format="fp8_e4m3" if use_fp8 else None,
+            linear_fp8_scaling=args.fp8_scaling if use_fp8 else None,
             linear_fp8_block_size=128, linear_fp8_amax_algo="max",
             linear_fp8_amax_history=16, linear_fp8_reduce_amax=False,
-            linear_fp8_activation=True, linear_fp8_wgrad=True,
+            linear_fp8_activation=use_fp8, linear_fp8_wgrad=use_fp8,
             linear_fp8_cache_frozen_weight=False,
             linear_fp8_bpreshuffle=False,
             grad_quant_type=None, first_last_layers_bf16=False,
             lumen_norm=args.lumen_norm,
             hf_attn_patch=args.aiter_attn,
+            lumen_linear=args.lumen_linear,
+            lumen_fused_moe=args.fused_moe,
+            lumen_fused_rope=args.fuse_rope,
             lora_rank=0, lora_alpha=0, lora_dropout=0.0,
         ))
-        _manager, model = cfg.enable(model)
-        _rank0_print("> Lumen FP8 blockwise2d enabled (full-param)")
+        _manager, model = cfg.enable(
+            model,
+            ep_group=ep_group, ep_size=args.ep_size, ep_rank=ep_rank,
+        )
     else:
-        _rank0_print("> BF16 full-param training")
+        model = shard_experts_ep(model, args.ep_size, ep_rank, ep_group)
+        _rank0_print("> BF16 full-param training (no Lumen optimizations)")
 
     # ---- FSDP2: shard shared params across DP group via fully_shard ----
     model = apply_fsdp2_dp(model, args, dp_group, args.dp_size)
