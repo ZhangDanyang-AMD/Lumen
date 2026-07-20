@@ -160,35 +160,35 @@ class EPShardedMoeBlock(nn.Module):
         send_weights_cat = topk_weights.reshape(-1)[sorted_order]
         send_hidden = hidden_flat[send_indices]
 
-        # --- All-to-all within EP group: exchange hidden states ---
+        # --- All-to-all within EP group: pack hidden + expert_ids + weights
+        #     into one buffer [total, hidden_dim+2] for a single all-to-all ---
         send_counts_list = send_counts.tolist()
         recv_counts_list = recv_counts.tolist()
         total_recv = sum(recv_counts_list)
+        packed_dim = hidden_dim + 2
 
-        recv_hidden = torch.empty(total_recv, hidden_dim,
-                                  dtype=hidden_flat.dtype, device=hidden_flat.device)
-        send_splits = [c * hidden_dim for c in send_counts_list]
-        recv_splits = [c * hidden_dim for c in recv_counts_list]
-        send_list = list(send_hidden.contiguous().view(-1).split(send_splits))
-        recv_list = list(recv_hidden.view(-1).split(recv_splits))
+        send_packed = torch.empty(
+            send_hidden.shape[0], packed_dim,
+            dtype=hidden_flat.dtype, device=hidden_flat.device,
+        )
+        send_packed[:, :hidden_dim] = send_hidden
+        send_packed[:, hidden_dim] = send_expert_ids_cat.to(hidden_flat.dtype)
+        send_packed[:, hidden_dim + 1] = send_weights_cat
+
+        recv_packed = torch.empty(
+            total_recv, packed_dim,
+            dtype=hidden_flat.dtype, device=hidden_flat.device,
+        )
+        send_splits = [c * packed_dim for c in send_counts_list]
+        recv_splits = [c * packed_dim for c in recv_counts_list]
+        send_list = list(send_packed.contiguous().view(-1).split(send_splits))
+        recv_list = list(recv_packed.view(-1).split(recv_splits))
         dist.all_to_all(recv_list, send_list, group=self.ep_group)
-        recv_hidden = torch.cat(recv_list).view(-1, hidden_dim)
+        recv_packed = torch.cat(recv_list).view(-1, packed_dim)
 
-        # All-to-all for expert IDs
-        recv_expert_ids = torch.empty(total_recv, dtype=send_expert_ids_cat.dtype,
-                                      device=hidden_flat.device)
-        send_eid_list = list(send_expert_ids_cat.split(send_counts_list))
-        recv_eid_list = list(recv_expert_ids.split(recv_counts_list))
-        dist.all_to_all(recv_eid_list, send_eid_list, group=self.ep_group)
-        recv_expert_ids = torch.cat(recv_eid_list)
-
-        # All-to-all for weights
-        recv_weights = torch.empty(total_recv, dtype=send_weights_cat.dtype,
-                                   device=hidden_flat.device)
-        send_w_list = list(send_weights_cat.split(send_counts_list))
-        recv_w_list = list(recv_weights.split(recv_counts_list))
-        dist.all_to_all(recv_w_list, send_w_list, group=self.ep_group)
-        recv_weights = torch.cat(recv_w_list)
+        recv_hidden = recv_packed[:, :hidden_dim].contiguous()
+        recv_expert_ids = recv_packed[:, hidden_dim].to(torch.long)
+        recv_weights = recv_packed[:, hidden_dim + 1]
 
         # --- Compute local experts (replaceable by fused_moe patch) ---
         output_hidden = self._compute_local_experts(

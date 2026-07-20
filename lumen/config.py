@@ -515,24 +515,24 @@ class LumenConfig:
                 input, weight = ctx.saved_tensors
                 grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
                 input_flat = input.reshape(-1, input.shape[-1])
-                # dispatch_gemm computes A @ W^T (TN layout).
-                # grad_input = grad @ W where W is (N,K).
-                # Pass W^T so dispatch_gemm computes grad @ (W^T)^T = grad @ W.
-                grad_input = dispatch_gemm(
-                    grad_flat, weight.t().contiguous(), scaling_type="none"
-                ).reshape(input.shape)
-                # grad_weight = grad^T @ input = (N,M)@(M,K)
-                grad_weight = dispatch_gemm(
-                    grad_flat.t().contiguous(),
-                    input_flat.t().contiguous(),
-                    scaling_type="none",
-                )
+                # grad_input = grad @ W  (NN layout — torch.mm handles this natively)
+                grad_input = torch.mm(grad_flat, weight).reshape(input.shape)
+                # grad_weight = grad^T @ input  (NN layout)
+                grad_weight = torch.mm(grad_flat.t(), input_flat)
                 grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
                 return grad_input, grad_weight, grad_bias
 
+        skip_ids = set()
+        if self.fused_moe:
+            for _name, module in model.named_modules():
+                cls_name = type(module).__name__
+                if cls_name in ("Qwen3MoeSparseMoeBlock", "EPShardedMoeBlock"):
+                    for _sub_name, sub in module.named_modules():
+                        skip_ids.add(id(sub))
+
         count = 0
         for _name, module in model.named_modules():
-            if isinstance(module, nn.Linear):
+            if isinstance(module, nn.Linear) and id(module) not in skip_ids:
 
                 def _make_aiter_forward(mod):
                     def _aiter_forward(input):
@@ -658,10 +658,11 @@ class LumenConfig:
 
                     output = (down_out * topk_weights.unsqueeze(-1)).sum(dim=1)
 
+                    # Save only gate_out and up_out; recompute silu/act in backward.
                     ctx.save_for_backward(
                         hidden_flat, topk_indices, topk_weights,
                         w_gate, w_up, w_down,
-                        gate_out, up_out, silu_gate, act_out,
+                        gate_out, up_out,
                     )
                     return output
 
@@ -669,61 +670,109 @@ class LumenConfig:
                 def backward(ctx, grad_output):
                     (hidden_flat, topk_indices, topk_weights,
                      w_gate, w_up, w_down,
-                     gate_out, up_out, silu_gate, act_out) = ctx.saved_tensors
+                     gate_out, up_out) = ctx.saved_tensors
 
-                    grad_hidden = torch.zeros_like(hidden_flat)
-                    grad_w_gate = torch.zeros_like(w_gate)
-                    grad_w_up = torch.zeros_like(w_up)
-                    grad_w_down = torch.zeros_like(w_down)
+                    T = hidden_flat.shape[0]
+                    hidden_dim = hidden_flat.shape[1]
+                    inter_dim = gate_out.shape[-1]
 
-                    for e in range(num_experts):
-                        masks = []
-                        grad_downs = []
-                        acts = []
-                        silu_gs = []
-                        g_raws = []
-                        u_outs = []
-                        hiddens = []
-                        for k in range(top_k):
-                            mask = topk_indices[:, k] == e
-                            if not mask.any():
-                                continue
-                            masks.append((k, mask))
-                            w_k = topk_weights[mask, k]
-                            grad_downs.append(grad_output[mask] * w_k.unsqueeze(-1))
-                            acts.append(act_out[mask, k, :])
-                            silu_gs.append(silu_gate[mask, k, :])
-                            g_raws.append(gate_out[mask, k, :])
-                            u_outs.append(up_out[mask, k, :])
-                            hiddens.append(hidden_flat[mask])
+                    # Flatten (T, K) → (T*K) so all tokens are uniform
+                    flat_ids = topk_indices.reshape(-1)
+                    flat_hidden = hidden_flat.unsqueeze(1).expand(
+                        -1, top_k, -1).reshape(-1, hidden_dim)
+                    flat_gate = gate_out.reshape(-1, inter_dim)
+                    flat_up = up_out.reshape(-1, inter_dim)
 
-                        if not masks:
-                            continue
+                    # output = sum_k(down_out[:,k,:] * topk_weights[:,k])
+                    flat_grad_down = (
+                        grad_output.unsqueeze(1) * topk_weights.unsqueeze(-1)
+                    ).reshape(-1, hidden_dim)
 
-                        gd = torch.cat(grad_downs)
-                        ao = torch.cat(acts)
-                        sg = torch.cat(silu_gs)
-                        gr = torch.cat(g_raws)
-                        uo = torch.cat(u_outs)
-                        rh = torch.cat(hiddens)
+                    # --- Input grads via fused_moe_triton (replaces per-expert loop) ---
+                    fused_ids = flat_ids.unsqueeze(1).to(torch.int32)
+                    ones = torch.ones(
+                        flat_ids.shape[0], 1,
+                        dtype=torch.float32, device=hidden_flat.device,
+                    )
 
-                        grad_act = gd @ w_down[e]
-                        grad_w_down[e] = gd.t() @ ao
+                    # grad_act = grad_down @ w_down[e]
+                    # fused_moe does A @ W.T, so pass w_down transposed
+                    w_down_t = w_down.transpose(1, 2).contiguous()
+                    flat_grad_act = fused_moe_triton(
+                        flat_grad_down, w_down_t, fused_ids, ones,
+                        num_experts, 1, mul_routed_weight=False,
+                    ).squeeze(1)
 
-                        grad_up_e = grad_act * sg
-                        grad_silu = grad_act * uo
-                        sig = torch.sigmoid(gr)
-                        grad_gate_e = grad_silu * sig * (1.0 + gr * (1.0 - sig))
+                    # SwiGLU backward (vectorized, no per-expert loop)
+                    sg = F.silu(flat_gate)
+                    flat_grad_up = flat_grad_act * sg
+                    flat_grad_silu = flat_grad_act * flat_up
+                    sig = torch.sigmoid(flat_gate)
+                    flat_grad_gate = flat_grad_silu * sig * (
+                        1.0 + flat_gate * (1.0 - sig))
 
-                        grad_h_e = grad_gate_e @ w_gate[e] + grad_up_e @ w_up[e]
-                        grad_w_gate[e] = grad_gate_e.t() @ rh
-                        grad_w_up[e] = grad_up_e.t() @ rh
+                    # grad_hidden = grad_gate @ w_gate[e] + grad_up @ w_up[e]
+                    w_gate_t = w_gate.transpose(1, 2).contiguous()
+                    w_up_t = w_up.transpose(1, 2).contiguous()
+                    flat_grad_h = fused_moe_triton(
+                        flat_grad_gate, w_gate_t, fused_ids, ones,
+                        num_experts, 1, mul_routed_weight=False,
+                    ).squeeze(1)
+                    flat_grad_h += fused_moe_triton(
+                        flat_grad_up, w_up_t, fused_ids, ones,
+                        num_experts, 1, mul_routed_weight=False,
+                    ).squeeze(1)
 
-                        offset = 0
-                        for k, mask in masks:
-                            n = mask.sum().item()
-                            grad_hidden[mask] += grad_h_e[offset:offset + n]
-                            offset += n
+                    # Sum over top_k slots back to per-token grad
+                    grad_hidden = flat_grad_h.reshape(T, top_k, hidden_dim).sum(dim=1)
+
+                    # --- Weight grads via sort + segment slicing ---
+                    flat_ao = sg * flat_up
+                    sorted_ids, sort_order = flat_ids.sort()
+                    s_gd = flat_grad_down[sort_order]
+                    s_gg = flat_grad_gate[sort_order]
+                    s_gu = flat_grad_up[sort_order]
+                    s_h = flat_hidden[sort_order]
+                    s_ao = flat_ao[sort_order]
+
+                    counts = torch.bincount(sorted_ids, minlength=num_experts)
+                    offsets = torch.zeros(
+                        num_experts + 1, dtype=torch.long,
+                        device=hidden_flat.device,
+                    )
+                    offsets[1:] = counts.cumsum(0)
+                    max_c = counts.max().item()
+
+                    if max_c == 0:
+                        return (grad_hidden, None, None,
+                                torch.zeros_like(w_gate),
+                                torch.zeros_like(w_up),
+                                torch.zeros_like(w_down))
+
+                    # Within-expert position for vectorized scatter
+                    pos = torch.arange(
+                        sorted_ids.shape[0], device=hidden_flat.device,
+                    ) - offsets[sorted_ids]
+
+                    # grad_w_down = s_gd.T @ s_ao  per expert via bmm
+                    pad_gd = s_gd.new_zeros(num_experts, max_c, s_gd.shape[1])
+                    pad_gd[sorted_ids, pos] = s_gd
+                    pad_ao = s_ao.new_zeros(num_experts, max_c, s_ao.shape[1])
+                    pad_ao[sorted_ids, pos] = s_ao
+                    grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
+                    del pad_gd, pad_ao
+
+                    # grad_w_gate = s_gg.T @ s_h,  grad_w_up = s_gu.T @ s_h
+                    pad_h = s_h.new_zeros(num_experts, max_c, s_h.shape[1])
+                    pad_h[sorted_ids, pos] = s_h
+                    pad_gg = s_gg.new_zeros(num_experts, max_c, s_gg.shape[1])
+                    pad_gg[sorted_ids, pos] = s_gg
+                    grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
+                    del pad_gg
+                    pad_gu = s_gu.new_zeros(num_experts, max_c, s_gu.shape[1])
+                    pad_gu[sorted_ids, pos] = s_gu
+                    grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
+                    del pad_gu, pad_h
 
                     return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
 
@@ -809,10 +858,12 @@ class LumenConfig:
 
                 output = down_out * recv_weights.unsqueeze(-1)
 
+                # Save only gate_out and up_out; recompute silu_gate/act_out
+                # in backward to save 2 intermediate tensors of memory.
                 ctx.save_for_backward(
                     recv_hidden, recv_expert_ids, recv_weights,
                     w_gate, w_up, w_down,
-                    gate_out, up_out, silu_gate, act_out,
+                    gate_out, up_out,
                 )
                 return output
 
@@ -820,47 +871,90 @@ class LumenConfig:
             def backward(ctx, grad_output):
                 (recv_hidden, recv_expert_ids, recv_weights,
                  w_gate, w_up, w_down,
-                 gate_out, up_out, silu_gate, act_out) = ctx.saved_tensors
+                 gate_out, up_out) = ctx.saved_tensors
 
-                grad_hidden = torch.zeros_like(recv_hidden)
-                grad_w_gate = torch.zeros_like(w_gate)
-                grad_w_up = torch.zeros_like(w_up)
-                grad_w_down = torch.zeros_like(w_down)
+                topk_ids = recv_expert_ids.unsqueeze(1).to(torch.int32)
+                ones = torch.ones(
+                    recv_hidden.shape[0], 1,
+                    dtype=torch.float32, device=recv_hidden.device,
+                )
 
-                for e in range(experts_per_gpu):
-                    mask = recv_expert_ids == e
-                    if not mask.any():
-                        continue
+                grad_down = grad_output * recv_weights.unsqueeze(-1)
 
-                    go = grad_output[mask]
-                    rw = recv_weights[mask]
-                    rh = recv_hidden[mask]
-                    ao = act_out[mask]
-                    sg = silu_gate[mask]
-                    g_raw = gate_out[mask]
-                    uo = up_out[mask]
+                # --- Input grads via fused_moe_triton ---
+                # grad_act = grad_down @ w_down[e] → fused with transposed weights
+                w_down_t = w_down.transpose(1, 2).contiguous()
+                grad_act = fused_moe_triton(
+                    grad_down, w_down_t, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
 
-                    # output = down_raw * recv_weights
-                    grad_down = go * rw.unsqueeze(-1)
+                # SwiGLU backward (vectorized)
+                sg = F.silu(gate_out)
+                grad_up_all = grad_act * sg
+                grad_silu = grad_act * up_out
+                sig = torch.sigmoid(gate_out)
+                grad_gate_all = grad_silu * sig * (1.0 + gate_out * (1.0 - sig))
 
-                    # down_raw = act_out @ w_down[e].T
-                    grad_act = grad_down @ w_down[e]
-                    grad_w_down[e] = grad_down.t() @ ao
+                # grad_hidden = grad_gate @ w_gate[e] + grad_up @ w_up[e]
+                w_gate_t = w_gate.transpose(1, 2).contiguous()
+                w_up_t = w_up.transpose(1, 2).contiguous()
+                grad_hidden = fused_moe_triton(
+                    grad_gate_all, w_gate_t, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
+                grad_hidden += fused_moe_triton(
+                    grad_up_all, w_up_t, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
 
-                    # act_out = silu(gate) * up
-                    grad_up_e = grad_act * sg
-                    grad_silu = grad_act * uo
-                    # silu'(x) = sigmoid(x) * (1 + x - silu(x))
-                    sig = torch.sigmoid(g_raw)
-                    grad_gate_e = grad_silu * sig * (1.0 + g_raw * (1.0 - sig))
+                # --- Weight grads via sort + segment slicing ---
+                ao = sg * up_out
+                sorted_ids, sort_order = recv_expert_ids.sort()
+                s_gd = grad_down[sort_order]
+                s_gg = grad_gate_all[sort_order]
+                s_gu = grad_up_all[sort_order]
+                s_h = recv_hidden[sort_order]
+                s_ao = ao[sort_order]
 
-                    # gate = hidden @ w_gate[e].T
-                    grad_hidden[mask] += grad_gate_e @ w_gate[e]
-                    grad_w_gate[e] = grad_gate_e.t() @ rh
+                counts = torch.bincount(sorted_ids, minlength=experts_per_gpu)
+                offsets = torch.zeros(
+                    experts_per_gpu + 1, dtype=torch.long,
+                    device=recv_hidden.device,
+                )
+                offsets[1:] = counts.cumsum(0)
+                max_c = counts.max().item()
 
-                    # up = hidden @ w_up[e].T
-                    grad_hidden[mask] += grad_up_e @ w_up[e]
-                    grad_w_up[e] = grad_up_e.t() @ rh
+                if max_c == 0:
+                    return (grad_hidden, None, None,
+                            torch.zeros_like(w_gate),
+                            torch.zeros_like(w_up),
+                            torch.zeros_like(w_down))
+
+                # Within-expert position for vectorized scatter
+                pos = torch.arange(
+                    sorted_ids.shape[0], device=recv_hidden.device,
+                ) - offsets[sorted_ids]
+
+                # grad_w_down = s_gd.T @ s_ao  per expert via bmm
+                pad_gd = s_gd.new_zeros(experts_per_gpu, max_c, s_gd.shape[1])
+                pad_gd[sorted_ids, pos] = s_gd
+                pad_ao = s_ao.new_zeros(experts_per_gpu, max_c, s_ao.shape[1])
+                pad_ao[sorted_ids, pos] = s_ao
+                grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
+                del pad_gd, pad_ao
+
+                # grad_w_gate = s_gg.T @ s_h,  grad_w_up = s_gu.T @ s_h
+                pad_h = s_h.new_zeros(experts_per_gpu, max_c, s_h.shape[1])
+                pad_h[sorted_ids, pos] = s_h
+                pad_gg = s_gg.new_zeros(experts_per_gpu, max_c, s_gg.shape[1])
+                pad_gg[sorted_ids, pos] = s_gg
+                grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
+                del pad_gg
+                pad_gu = s_gu.new_zeros(experts_per_gpu, max_c, s_gu.shape[1])
+                pad_gu[sorted_ids, pos] = s_gu
+                grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
+                del pad_gu, pad_h
 
                 return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
 
