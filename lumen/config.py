@@ -726,8 +726,19 @@ class LumenConfig:
                     # Sum over top_k slots back to per-token grad
                     grad_hidden = flat_grad_h.reshape(T, top_k, hidden_dim).sum(dim=1)
 
-                    # --- Weight grads via sort + segment slicing ---
+                    # --- grad_topk_weights: d(loss)/d(w_k) ---
+                    # output = sum_k(down_out[:,k,:] * w_k)
+                    # → grad_w_k = (grad_output * down_out[:,k,:]).sum(dim=-1)
+                    # Recompute down_out from act_out (sg * up) + w_down.
                     flat_ao = sg * flat_up
+                    flat_down_out = fused_moe_triton(
+                        flat_ao, w_down, fused_ids, ones,
+                        num_experts, 1, mul_routed_weight=False,
+                    ).squeeze(1)
+                    grad_topk_weights = (
+                        grad_output.unsqueeze(1)
+                        * flat_down_out.reshape(T, top_k, hidden_dim)
+                    ).sum(dim=-1)
                     sorted_ids, sort_order = flat_ids.sort()
                     s_gd = flat_grad_down[sort_order]
                     s_gg = flat_grad_gate[sort_order]
@@ -744,7 +755,7 @@ class LumenConfig:
                     max_c = counts.max().item()
 
                     if max_c == 0:
-                        return (grad_hidden, None, None,
+                        return (grad_hidden, None, grad_topk_weights,
                                 torch.zeros_like(w_gate),
                                 torch.zeros_like(w_up),
                                 torch.zeros_like(w_down))
@@ -774,7 +785,8 @@ class LumenConfig:
                     grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
                     del pad_gu, pad_h
 
-                    return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
+                    return (grad_hidden, None, grad_topk_weights,
+                            grad_w_gate, grad_w_up, grad_w_down)
 
         def _fused_forward(hidden_states):
             batch_size, seq_len, hidden_dim = hidden_states.shape
@@ -908,8 +920,16 @@ class LumenConfig:
                     experts_per_gpu, 1, mul_routed_weight=False,
                 ).squeeze(1)
 
-                # --- Weight grads via sort + segment slicing ---
+                # --- grad_recv_weights: d(loss)/d(w) ---
+                # output = down_out * w  →  grad_w = (grad_output * down_out).sum(-1)
                 ao = sg * up_out
+                down_out = fused_moe_triton(
+                    ao, w_down, topk_ids, ones,
+                    experts_per_gpu, 1, mul_routed_weight=False,
+                ).squeeze(1)
+                grad_recv_weights = (grad_output * down_out).sum(dim=-1)
+
+                # --- Weight grads via sort + segment slicing ---
                 sorted_ids, sort_order = recv_expert_ids.sort()
                 s_gd = grad_down[sort_order]
                 s_gg = grad_gate_all[sort_order]
@@ -926,7 +946,7 @@ class LumenConfig:
                 max_c = counts.max().item()
 
                 if max_c == 0:
-                    return (grad_hidden, None, None,
+                    return (grad_hidden, None, grad_recv_weights,
                             torch.zeros_like(w_gate),
                             torch.zeros_like(w_up),
                             torch.zeros_like(w_down))
@@ -956,7 +976,8 @@ class LumenConfig:
                 grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
                 del pad_gu, pad_h
 
-                return grad_hidden, None, None, grad_w_gate, grad_w_up, grad_w_down
+                return (grad_hidden, None, grad_recv_weights,
+                        grad_w_gate, grad_w_up, grad_w_down)
 
         def _fused_compute_local_experts(self, recv_hidden, recv_expert_ids, recv_weights):
             if recv_hidden.shape[0] == 0:
