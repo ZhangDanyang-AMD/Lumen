@@ -755,7 +755,7 @@ class LumenConfig:
                         * flat_down_out.reshape(T, top_k, hidden_dim)
                     ).sum(dim=-1)
 
-                    # --- Weight grads via per-expert matmul ---
+                    # --- Weight grads via sort + padded bmm ---
                     sorted_ids, sort_order = flat_ids.sort()
                     s_gd = flat_grad_down[sort_order]
                     s_gg = flat_grad_gate[sort_order]
@@ -769,18 +769,35 @@ class LumenConfig:
                         device=hidden_flat.device,
                     )
                     offsets[1:] = counts.cumsum(0)
+                    max_c = counts.max().item()
 
-                    grad_w_down = torch.zeros_like(w_down)
-                    grad_w_gate = torch.zeros_like(w_gate)
-                    grad_w_up = torch.zeros_like(w_up)
-                    for e in range(num_experts):
-                        s = offsets[e].item()
-                        n = offsets[e + 1].item()
-                        if s == n:
-                            continue
-                        grad_w_down[e] = s_gd[s:n].mT @ s_ao[s:n]
-                        grad_w_gate[e] = s_gg[s:n].mT @ s_h[s:n]
-                        grad_w_up[e] = s_gu[s:n].mT @ s_h[s:n]
+                    if max_c == 0:
+                        return (grad_hidden, None, grad_topk_weights,
+                                torch.zeros_like(w_gate),
+                                torch.zeros_like(w_up),
+                                torch.zeros_like(w_down))
+
+                    pos = torch.arange(
+                        sorted_ids.shape[0], device=hidden_flat.device,
+                    ) - offsets[sorted_ids]
+
+                    pad_gd = s_gd.new_zeros(num_experts, max_c, s_gd.shape[1])
+                    pad_gd[sorted_ids, pos] = s_gd
+                    pad_ao = s_ao.new_zeros(num_experts, max_c, s_ao.shape[1])
+                    pad_ao[sorted_ids, pos] = s_ao
+                    grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
+                    del pad_gd, pad_ao
+
+                    pad_h = s_h.new_zeros(num_experts, max_c, s_h.shape[1])
+                    pad_h[sorted_ids, pos] = s_h
+                    pad_gg = s_gg.new_zeros(num_experts, max_c, s_gg.shape[1])
+                    pad_gg[sorted_ids, pos] = s_gg
+                    grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
+                    del pad_gg
+                    pad_gu = s_gu.new_zeros(num_experts, max_c, s_gu.shape[1])
+                    pad_gu[sorted_ids, pos] = s_gu
+                    grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
+                    del pad_gu, pad_h
 
                     return (grad_hidden, None, grad_topk_weights,
                             grad_w_gate, grad_w_up, grad_w_down)
@@ -950,7 +967,7 @@ class LumenConfig:
                 ).squeeze(1)
                 grad_recv_weights = (grad_output * down_out).sum(dim=-1)
 
-                # --- Weight grads via per-expert matmul ---
+                # --- Weight grads via sort + padded bmm ---
                 sorted_ids, sort_order = recv_expert_ids.sort()
                 s_gd = grad_down[sort_order]
                 s_gg = grad_gate_all[sort_order]
@@ -964,18 +981,35 @@ class LumenConfig:
                     device=recv_hidden.device,
                 )
                 offsets[1:] = counts.cumsum(0)
+                max_c = counts.max().item()
 
-                grad_w_down = torch.zeros_like(w_down)
-                grad_w_gate = torch.zeros_like(w_gate)
-                grad_w_up = torch.zeros_like(w_up)
-                for e in range(experts_per_gpu):
-                    s = offsets[e].item()
-                    n = offsets[e + 1].item()
-                    if s == n:
-                        continue
-                    grad_w_down[e] = s_gd[s:n].mT @ s_ao[s:n]
-                    grad_w_gate[e] = s_gg[s:n].mT @ s_h[s:n]
-                    grad_w_up[e] = s_gu[s:n].mT @ s_h[s:n]
+                if max_c == 0:
+                    return (grad_hidden, None, grad_recv_weights,
+                            torch.zeros_like(w_gate),
+                            torch.zeros_like(w_up),
+                            torch.zeros_like(w_down))
+
+                pos = torch.arange(
+                    sorted_ids.shape[0], device=recv_hidden.device,
+                ) - offsets[sorted_ids]
+
+                pad_gd = s_gd.new_zeros(experts_per_gpu, max_c, s_gd.shape[1])
+                pad_gd[sorted_ids, pos] = s_gd
+                pad_ao = s_ao.new_zeros(experts_per_gpu, max_c, s_ao.shape[1])
+                pad_ao[sorted_ids, pos] = s_ao
+                grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
+                del pad_gd, pad_ao
+
+                pad_h = s_h.new_zeros(experts_per_gpu, max_c, s_h.shape[1])
+                pad_h[sorted_ids, pos] = s_h
+                pad_gg = s_gg.new_zeros(experts_per_gpu, max_c, s_gg.shape[1])
+                pad_gg[sorted_ids, pos] = s_gg
+                grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
+                del pad_gg
+                pad_gu = s_gu.new_zeros(experts_per_gpu, max_c, s_gu.shape[1])
+                pad_gu[sorted_ids, pos] = s_gu
+                grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
+                del pad_gu, pad_h
 
                 return (grad_hidden, None, grad_recv_weights,
                         grad_w_gate, grad_w_up, grad_w_down)
