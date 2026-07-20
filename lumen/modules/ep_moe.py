@@ -19,6 +19,10 @@ distributes experts across an EP process group.  Each GPU keeps
 The local expert compute (step 3) is isolated in
 ``_compute_local_experts`` so that ``LumenConfig._patch_ep_moe_block``
 can replace it with fused AITER kernels without duplicating routing.
+
+The all-to-all communication is wrapped in ``_AllToAllFn`` so that
+gradients flow correctly through the dispatch/combine steps during
+training.
 """
 
 import logging
@@ -38,6 +42,39 @@ def _rank0_print(msg: str) -> None:
     except Exception:
         pass
     logger.info(msg)
+
+
+class _AllToAllFn(torch.autograd.Function):
+    """Differentiable all-to-all: backward performs the inverse all-to-all."""
+
+    @staticmethod
+    def forward(ctx, input, send_counts, recv_counts, ep_group):
+        ctx.send_counts = send_counts
+        ctx.recv_counts = recv_counts
+        ctx.ep_group = ep_group
+
+        send_splits = send_counts.tolist()
+        recv_splits = recv_counts.tolist()
+        total_recv = sum(recv_splits)
+        dim = input.shape[1]
+
+        output = torch.empty(
+            total_recv, dim, dtype=input.dtype, device=input.device,
+        )
+        send_list = list(input.contiguous().view(-1).split(
+            [c * dim for c in send_splits]))
+        recv_list = list(output.view(-1).split(
+            [c * dim for c in recv_splits]))
+        dist.all_to_all(recv_list, send_list, group=ep_group)
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # Reverse: send_counts ↔ recv_counts
+        grad_input = _AllToAllFn.apply(
+            grad_output, ctx.recv_counts, ctx.send_counts, ctx.ep_group,
+        )
+        return grad_input, None, None, None
 
 
 class EPShardedMoeBlock(nn.Module):
@@ -158,52 +195,45 @@ class EPShardedMoeBlock(nn.Module):
         send_indices = sorted_order // self.top_k
         send_expert_ids_cat = local_expert_ids.reshape(-1)[sorted_order]
         send_weights_cat = topk_weights.reshape(-1)[sorted_order]
-        send_hidden = hidden_flat[send_indices]
 
-        # --- All-to-all within EP group: pack hidden + expert_ids + weights
-        #     into one buffer [total, hidden_dim+2] for a single all-to-all ---
+        # Build send buffer with autograd-tracked hidden and weights.
+        # Expert IDs are discrete (no grad); hidden and weights need grad flow.
+        send_hidden = hidden_flat[send_indices]
+        send_weights_sorted = send_weights_cat
+
+        # --- Differentiable all-to-all dispatch ---
+        recv_hidden = _AllToAllFn.apply(
+            send_hidden, send_counts, recv_counts, self.ep_group,
+        )
+
+        # Expert IDs: small integers, no grad needed — pack + all-to-all
         send_counts_list = send_counts.tolist()
         recv_counts_list = recv_counts.tolist()
         total_recv = sum(recv_counts_list)
-        packed_dim = hidden_dim + 2
 
-        send_packed = torch.empty(
-            send_hidden.shape[0], packed_dim,
-            dtype=hidden_flat.dtype, device=hidden_flat.device,
+        recv_expert_ids = torch.empty(
+            total_recv, dtype=send_expert_ids_cat.dtype,
+            device=hidden_flat.device,
         )
-        send_packed[:, :hidden_dim] = send_hidden
-        send_packed[:, hidden_dim] = send_expert_ids_cat.to(hidden_flat.dtype)
-        send_packed[:, hidden_dim + 1] = send_weights_cat
+        send_eid_list = list(send_expert_ids_cat.split(send_counts_list))
+        recv_eid_list = list(recv_expert_ids.split(recv_counts_list))
+        dist.all_to_all(recv_eid_list, send_eid_list, group=self.ep_group)
 
-        recv_packed = torch.empty(
-            total_recv, packed_dim,
-            dtype=hidden_flat.dtype, device=hidden_flat.device,
-        )
-        send_splits = [c * packed_dim for c in send_counts_list]
-        recv_splits = [c * packed_dim for c in recv_counts_list]
-        send_list = list(send_packed.contiguous().view(-1).split(send_splits))
-        recv_list = list(recv_packed.view(-1).split(recv_splits))
-        dist.all_to_all(recv_list, send_list, group=self.ep_group)
-        recv_packed = torch.cat(recv_list).view(-1, packed_dim)
-
-        recv_hidden = recv_packed[:, :hidden_dim].contiguous()
-        recv_expert_ids = recv_packed[:, hidden_dim].to(torch.long)
-        recv_weights = recv_packed[:, hidden_dim + 1]
+        # Weights: need grad flow through all-to-all
+        recv_weights = _AllToAllFn.apply(
+            send_weights_sorted.unsqueeze(1),
+            send_counts, recv_counts, self.ep_group,
+        ).squeeze(1)
 
         # --- Compute local experts (replaceable by fused_moe patch) ---
         output_hidden = self._compute_local_experts(
             recv_hidden, recv_expert_ids, recv_weights
         )
 
-        # --- All-to-all back within EP group ---
-        return_hidden = torch.empty(send_hidden.shape[0], hidden_dim,
-                                    dtype=hidden_flat.dtype, device=hidden_flat.device)
-        send_back_splits = [c * hidden_dim for c in recv_counts_list]
-        recv_back_splits = [c * hidden_dim for c in send_counts_list]
-        send_back_list = list(output_hidden.contiguous().view(-1).split(send_back_splits))
-        recv_back_list = list(return_hidden.view(-1).split(recv_back_splits))
-        dist.all_to_all(recv_back_list, send_back_list, group=self.ep_group)
-        return_hidden = torch.cat(recv_back_list).view(-1, hidden_dim)
+        # --- Differentiable all-to-all combine (reverse direction) ---
+        return_hidden = _AllToAllFn.apply(
+            output_hidden, recv_counts, send_counts, self.ep_group,
+        )
 
         # --- Scatter-add results back to original token positions ---
         final_output = torch.zeros(num_tokens, hidden_dim,
