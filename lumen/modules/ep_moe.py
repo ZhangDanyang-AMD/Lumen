@@ -144,7 +144,8 @@ class EPShardedMoeBlock(nn.Module):
         Returns:
             output_hidden: Weighted expert outputs [total_recv, hidden_dim].
         """
-        output_hidden = torch.zeros_like(recv_hidden)
+        results = []
+        indices = []
         for local_idx in range(self.experts_per_gpu):
             mask = recv_expert_ids == local_idx
             if not mask.any():
@@ -157,7 +158,13 @@ class EPShardedMoeBlock(nn.Module):
                 gate, up = F.linear(expert_input, gate_up).chunk(2, dim=-1)
                 expert_hidden = self.act_fn(gate) * up
                 expert_output = F.linear(expert_hidden, self.local_down_proj[local_idx])
-            output_hidden[mask] = expert_output * recv_weights[mask].unsqueeze(-1)
+            results.append(expert_output * recv_weights[mask].unsqueeze(-1))
+            indices.append(mask.nonzero(as_tuple=True)[0])
+        output_hidden = torch.zeros_like(recv_hidden)
+        if results:
+            output_hidden = output_hidden.index_add(
+                0, torch.cat(indices), torch.cat(results),
+            )
         return output_hidden
 
     def forward(self, hidden_states: torch.Tensor):
@@ -236,9 +243,12 @@ class EPShardedMoeBlock(nn.Module):
         )
 
         # --- Scatter-add results back to original token positions ---
+        # Use out-of-place index_add so autograd tracks the operation.
+        # In-place index_add_ on a requires_grad=False tensor silently
+        # drops gradients from return_hidden.
         final_output = torch.zeros(num_tokens, hidden_dim,
                                    dtype=hidden_flat.dtype, device=hidden_flat.device)
-        final_output.index_add_(0, send_indices, return_hidden)
+        final_output = final_output.index_add(0, send_indices, return_hidden)
 
         return final_output.view(batch_size, seq_len, hidden_dim)
 
