@@ -93,13 +93,13 @@ class TestAssertions:
 class TestConfig:
     """Verify default configuration."""
 
-    def test_default_config_values(self):
-        from lumen.ops.moe.fused_moe import _DEFAULT_MOE_CONFIG
+    def test_fallback_config_values(self):
+        from lumen.ops.moe.fused_moe import _FALLBACK_MOE_CONFIG
 
-        assert _DEFAULT_MOE_CONFIG["BLOCK_SIZE_M"] == 64
-        assert _DEFAULT_MOE_CONFIG["BLOCK_SIZE_N"] == 64
-        assert _DEFAULT_MOE_CONFIG["BLOCK_SIZE_K"] == 32
-        assert _DEFAULT_MOE_CONFIG["GROUP_SIZE_M"] == 8
+        assert _FALLBACK_MOE_CONFIG["BLOCK_SIZE_M"] == 64
+        assert _FALLBACK_MOE_CONFIG["BLOCK_SIZE_N"] == 64
+        assert _FALLBACK_MOE_CONFIG["BLOCK_SIZE_K"] == 64
+        assert _FALLBACK_MOE_CONFIG["GROUP_SIZE_M"] == 8
 
 
 class TestAPISignature:

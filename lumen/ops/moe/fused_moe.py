@@ -26,10 +26,10 @@ from lumen.ops.dispatch import (
     _probe_aiter_triton_moe_align,
 )
 
-_DEFAULT_MOE_CONFIG: Dict[str, int] = {
+_FALLBACK_MOE_CONFIG: Dict[str, int] = {
     "BLOCK_SIZE_M": 64,
     "BLOCK_SIZE_N": 64,
-    "BLOCK_SIZE_K": 32,
+    "BLOCK_SIZE_K": 64,
     "GROUP_SIZE_M": 8,
 }
 
@@ -49,6 +49,35 @@ def _get_aiter_fused_moe():
     from aiter.ops.triton.moe.moe_op import fused_moe
 
     return fused_moe
+
+
+@functools.lru_cache(maxsize=1)
+def _get_aiter_moe_wgrad():
+    from aiter.ops.triton.moe.moe_wgrad import moe_wgrad
+
+    return moe_wgrad
+
+
+@functools.lru_cache(maxsize=1)
+def _get_aiter_optimal_moe_config():
+    try:
+        from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config
+        return get_optimal_moe_config
+    except ImportError:
+        return None
+
+
+def _get_moe_config(
+    dtype: torch.dtype,
+    M: int,
+    use_fp8: bool = False,
+) -> Dict[str, int]:
+    """Select tuned MoE kernel config from AITER, falling back to defaults."""
+    lookup_fn = _get_aiter_optimal_moe_config()
+    if lookup_fn is not None:
+        return lookup_fn(dtype, use_fp8_w8a8=use_fp8, M=M)
+    return _FALLBACK_MOE_CONFIG
+
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -148,7 +177,10 @@ def fused_moe_triton(
     assert hidden_states.is_cuda, "fused_moe_triton requires CUDA tensors"
 
     fused_moe_fn = _get_aiter_fused_moe()
-    moe_config = config if config is not None else _DEFAULT_MOE_CONFIG
+    if config is not None:
+        moe_config = config
+    else:
+        moe_config = _get_moe_config(hidden_states.dtype, hidden_states.shape[0], use_fp8)
     block_size_m = moe_config["BLOCK_SIZE_M"]
 
     if precomputed_alignment is not None:
@@ -190,3 +222,30 @@ def fused_moe_triton(
         config=moe_config,
     )
     return C
+
+
+def moe_wgrad_triton(
+    grad: torch.Tensor,
+    input: torch.Tensor,
+    sorted_token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    num_tokens_post_padded: torch.Tensor,
+    num_experts: int,
+    top_k: int,
+    weight_shape: tuple,
+    block_size_m: int = 64,
+) -> torch.Tensor:
+    """Compute MoE weight gradients using AITER Triton wgrad kernel.
+
+    BLOCK_SIZE_N/K are selected by @triton.autotune keyed on (N, K).
+    BLOCK_SIZE_M must match the block_size used for alignment.
+
+    Args:
+        block_size_m: Must match the block_size used in _align_tokens.
+    """
+    wgrad_fn = _get_aiter_moe_wgrad()
+    return wgrad_fn(
+        grad, input, sorted_token_ids, expert_ids,
+        num_tokens_post_padded, num_experts, top_k, weight_shape,
+        block_size_m=block_size_m,
+    )
