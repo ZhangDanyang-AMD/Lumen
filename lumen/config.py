@@ -627,7 +627,12 @@ class LumenConfig:
             from lumen.ops.moe.fused_routing import fused_topk as aiter_fused_topk
 
         if has_fused:
-            from lumen.ops.moe.fused_moe import fused_moe_triton
+            from lumen.ops.moe.fused_moe import (
+                _DEFAULT_MOE_CONFIG,
+                _align_tokens,
+                fused_moe_triton,
+            )
+            block_size_m = _DEFAULT_MOE_CONFIG["BLOCK_SIZE_M"]
 
             class _FusedHFExpertsFn(torch.autograd.Function):
                 @staticmethod
@@ -636,24 +641,35 @@ class LumenConfig:
                     topk_ids_i32 = topk_indices.to(torch.int32)
                     topk_w_f32 = topk_weights.float()
 
+                    align_topk = _align_tokens(topk_ids_i32, num_experts, block_size_m)
+
                     gate_out = fused_moe_triton(
                         hidden_flat, w_gate, topk_ids_i32, topk_w_f32,
                         num_experts, top_k, mul_routed_weight=False,
+                        precomputed_alignment=align_topk,
                     )
                     up_out = fused_moe_triton(
                         hidden_flat, w_up, topk_ids_i32, topk_w_f32,
                         num_experts, top_k, mul_routed_weight=False,
+                        precomputed_alignment=align_topk,
                     )
                     silu_gate = F.silu(gate_out)
                     act_out = silu_gate * up_out
 
+                    flat_ids_down = topk_ids_i32.reshape(-1, 1)
+                    ones_down = torch.ones(
+                        flat_ids_down.shape[0], 1,
+                        dtype=torch.float32, device=hidden_flat.device,
+                    )
+                    align_flat = _align_tokens(flat_ids_down, num_experts, block_size_m)
+
                     down_out = fused_moe_triton(
                         act_out.reshape(-1, act_out.shape[-1]),
                         w_down,
-                        topk_ids_i32.unsqueeze(-1).expand(-1, -1, 1).reshape(-1, 1),
-                        torch.ones(topk_ids_i32.numel(), 1,
-                                   dtype=torch.float32, device=hidden_flat.device),
+                        flat_ids_down,
+                        ones_down,
                         num_experts, 1, mul_routed_weight=False,
+                        precomputed_alignment=align_flat,
                     ).reshape(hidden_flat.shape[0], top_k, -1)
 
                     output = (down_out * topk_weights.unsqueeze(-1)).sum(dim=1)
@@ -676,34 +692,33 @@ class LumenConfig:
                     hidden_dim = hidden_flat.shape[1]
                     inter_dim = gate_out.shape[-1]
 
-                    # Flatten (T, K) → (T*K) so all tokens are uniform
                     flat_ids = topk_indices.reshape(-1)
                     flat_hidden = hidden_flat.unsqueeze(1).expand(
                         -1, top_k, -1).reshape(-1, hidden_dim)
                     flat_gate = gate_out.reshape(-1, inter_dim)
                     flat_up = up_out.reshape(-1, inter_dim)
 
-                    # output = sum_k(down_out[:,k,:] * topk_weights[:,k])
                     flat_grad_down = (
                         grad_output.unsqueeze(1) * topk_weights.unsqueeze(-1)
                     ).reshape(-1, hidden_dim)
 
-                    # --- Input grads via fused_moe_triton (replaces per-expert loop) ---
                     fused_ids = flat_ids.unsqueeze(1).to(torch.int32)
                     ones = torch.ones(
                         flat_ids.shape[0], 1,
                         dtype=torch.float32, device=hidden_flat.device,
                     )
 
-                    # grad_act = grad_down @ w_down[e]
-                    # fused_moe does A @ W.T, so pass w_down transposed
+                    alignment = _align_tokens(fused_ids, num_experts, block_size_m)
+
                     w_down_t = w_down.transpose(1, 2).contiguous()
                     flat_grad_act = fused_moe_triton(
                         flat_grad_down, w_down_t, fused_ids, ones,
                         num_experts, 1, mul_routed_weight=False,
+                        precomputed_alignment=alignment,
                     ).squeeze(1)
+                    del w_down_t
 
-                    # SwiGLU backward (vectorized, no per-expert loop)
+                    # SwiGLU backward
                     sg = F.silu(flat_gate)
                     flat_grad_up = flat_grad_act * sg
                     flat_grad_silu = flat_grad_act * flat_up
@@ -711,34 +726,36 @@ class LumenConfig:
                     flat_grad_gate = flat_grad_silu * sig * (
                         1.0 + flat_gate * (1.0 - sig))
 
-                    # grad_hidden = grad_gate @ w_gate[e] + grad_up @ w_up[e]
                     w_gate_t = w_gate.transpose(1, 2).contiguous()
-                    w_up_t = w_up.transpose(1, 2).contiguous()
                     flat_grad_h = fused_moe_triton(
                         flat_grad_gate, w_gate_t, fused_ids, ones,
                         num_experts, 1, mul_routed_weight=False,
+                        precomputed_alignment=alignment,
                     ).squeeze(1)
+                    del w_gate_t
+                    w_up_t = w_up.transpose(1, 2).contiguous()
                     flat_grad_h += fused_moe_triton(
                         flat_grad_up, w_up_t, fused_ids, ones,
                         num_experts, 1, mul_routed_weight=False,
+                        precomputed_alignment=alignment,
                     ).squeeze(1)
+                    del w_up_t
 
-                    # Sum over top_k slots back to per-token grad
                     grad_hidden = flat_grad_h.reshape(T, top_k, hidden_dim).sum(dim=1)
 
-                    # --- grad_topk_weights: d(loss)/d(w_k) ---
-                    # output = sum_k(down_out[:,k,:] * w_k)
-                    # → grad_w_k = (grad_output * down_out[:,k,:]).sum(dim=-1)
-                    # Recompute down_out from act_out (sg * up) + w_down.
+                    # --- grad_topk_weights ---
                     flat_ao = sg * flat_up
                     flat_down_out = fused_moe_triton(
                         flat_ao, w_down, fused_ids, ones,
                         num_experts, 1, mul_routed_weight=False,
+                        precomputed_alignment=alignment,
                     ).squeeze(1)
                     grad_topk_weights = (
                         grad_output.unsqueeze(1)
                         * flat_down_out.reshape(T, top_k, hidden_dim)
                     ).sum(dim=-1)
+
+                    # --- Weight grads via per-expert matmul ---
                     sorted_ids, sort_order = flat_ids.sort()
                     s_gd = flat_grad_down[sort_order]
                     s_gg = flat_grad_gate[sort_order]
@@ -752,38 +769,18 @@ class LumenConfig:
                         device=hidden_flat.device,
                     )
                     offsets[1:] = counts.cumsum(0)
-                    max_c = counts.max().item()
 
-                    if max_c == 0:
-                        return (grad_hidden, None, grad_topk_weights,
-                                torch.zeros_like(w_gate),
-                                torch.zeros_like(w_up),
-                                torch.zeros_like(w_down))
-
-                    # Within-expert position for vectorized scatter
-                    pos = torch.arange(
-                        sorted_ids.shape[0], device=hidden_flat.device,
-                    ) - offsets[sorted_ids]
-
-                    # grad_w_down = s_gd.T @ s_ao  per expert via bmm
-                    pad_gd = s_gd.new_zeros(num_experts, max_c, s_gd.shape[1])
-                    pad_gd[sorted_ids, pos] = s_gd
-                    pad_ao = s_ao.new_zeros(num_experts, max_c, s_ao.shape[1])
-                    pad_ao[sorted_ids, pos] = s_ao
-                    grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
-                    del pad_gd, pad_ao
-
-                    # grad_w_gate = s_gg.T @ s_h,  grad_w_up = s_gu.T @ s_h
-                    pad_h = s_h.new_zeros(num_experts, max_c, s_h.shape[1])
-                    pad_h[sorted_ids, pos] = s_h
-                    pad_gg = s_gg.new_zeros(num_experts, max_c, s_gg.shape[1])
-                    pad_gg[sorted_ids, pos] = s_gg
-                    grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
-                    del pad_gg
-                    pad_gu = s_gu.new_zeros(num_experts, max_c, s_gu.shape[1])
-                    pad_gu[sorted_ids, pos] = s_gu
-                    grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
-                    del pad_gu, pad_h
+                    grad_w_down = torch.zeros_like(w_down)
+                    grad_w_gate = torch.zeros_like(w_gate)
+                    grad_w_up = torch.zeros_like(w_up)
+                    for e in range(num_experts):
+                        s = offsets[e].item()
+                        n = offsets[e + 1].item()
+                        if s == n:
+                            continue
+                        grad_w_down[e] = s_gd[s:n].mT @ s_ao[s:n]
+                        grad_w_gate[e] = s_gg[s:n].mT @ s_h[s:n]
+                        grad_w_up[e] = s_gu[s:n].mT @ s_h[s:n]
 
                     return (grad_hidden, None, grad_topk_weights,
                             grad_w_gate, grad_w_up, grad_w_down)
@@ -843,9 +840,14 @@ class LumenConfig:
         import torch
         import torch.nn.functional as F
 
-        from lumen.ops.moe.fused_moe import fused_moe_triton
+        from lumen.ops.moe.fused_moe import (
+            _DEFAULT_MOE_CONFIG,
+            _align_tokens,
+            fused_moe_triton,
+        )
 
         experts_per_gpu = ep_block.experts_per_gpu
+        block_size_m = _DEFAULT_MOE_CONFIG["BLOCK_SIZE_M"]
         has_module_list = ep_block.local_experts is not None
 
         class _FusedEPExpertsFn(torch.autograd.Function):
@@ -858,13 +860,17 @@ class LumenConfig:
                     dtype=torch.float32, device=recv_hidden.device,
                 )
 
+                alignment = _align_tokens(topk_ids, experts_per_gpu, block_size_m)
+
                 gate_out = fused_moe_triton(
                     recv_hidden, w_gate, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
                 up_out = fused_moe_triton(
                     recv_hidden, w_up, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
 
                 silu_gate = F.silu(gate_out)
@@ -873,6 +879,7 @@ class LumenConfig:
                 down_out = fused_moe_triton(
                     act_out, w_down, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
 
                 output = down_out * recv_weights.unsqueeze(-1)
@@ -898,15 +905,18 @@ class LumenConfig:
                     dtype=torch.float32, device=recv_hidden.device,
                 )
 
+                alignment = _align_tokens(topk_ids, experts_per_gpu, block_size_m)
+
                 grad_down = grad_output * recv_weights.unsqueeze(-1)
 
                 # --- Input grads via fused_moe_triton ---
-                # grad_act = grad_down @ w_down[e] → fused with transposed weights
                 w_down_t = w_down.transpose(1, 2).contiguous()
                 grad_act = fused_moe_triton(
                     grad_down, w_down_t, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
+                del w_down_t
 
                 # SwiGLU backward (vectorized)
                 sg = F.silu(gate_out)
@@ -917,26 +927,30 @@ class LumenConfig:
 
                 # grad_hidden = grad_gate @ w_gate[e] + grad_up @ w_up[e]
                 w_gate_t = w_gate.transpose(1, 2).contiguous()
-                w_up_t = w_up.transpose(1, 2).contiguous()
                 grad_hidden = fused_moe_triton(
                     grad_gate_all, w_gate_t, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
+                del w_gate_t
+                w_up_t = w_up.transpose(1, 2).contiguous()
                 grad_hidden += fused_moe_triton(
                     grad_up_all, w_up_t, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
+                del w_up_t
 
-                # --- grad_recv_weights: d(loss)/d(w) ---
-                # output = down_out * w  →  grad_w = (grad_output * down_out).sum(-1)
+                # --- grad_recv_weights ---
                 ao = sg * up_out
                 down_out = fused_moe_triton(
                     ao, w_down, topk_ids, ones,
                     experts_per_gpu, 1, mul_routed_weight=False,
+                    precomputed_alignment=alignment,
                 ).squeeze(1)
                 grad_recv_weights = (grad_output * down_out).sum(dim=-1)
 
-                # --- Weight grads via sort + segment slicing ---
+                # --- Weight grads via per-expert matmul ---
                 sorted_ids, sort_order = recv_expert_ids.sort()
                 s_gd = grad_down[sort_order]
                 s_gg = grad_gate_all[sort_order]
@@ -950,38 +964,18 @@ class LumenConfig:
                     device=recv_hidden.device,
                 )
                 offsets[1:] = counts.cumsum(0)
-                max_c = counts.max().item()
 
-                if max_c == 0:
-                    return (grad_hidden, None, grad_recv_weights,
-                            torch.zeros_like(w_gate),
-                            torch.zeros_like(w_up),
-                            torch.zeros_like(w_down))
-
-                # Within-expert position for vectorized scatter
-                pos = torch.arange(
-                    sorted_ids.shape[0], device=recv_hidden.device,
-                ) - offsets[sorted_ids]
-
-                # grad_w_down = s_gd.T @ s_ao  per expert via bmm
-                pad_gd = s_gd.new_zeros(experts_per_gpu, max_c, s_gd.shape[1])
-                pad_gd[sorted_ids, pos] = s_gd
-                pad_ao = s_ao.new_zeros(experts_per_gpu, max_c, s_ao.shape[1])
-                pad_ao[sorted_ids, pos] = s_ao
-                grad_w_down = torch.bmm(pad_gd.transpose(1, 2), pad_ao)
-                del pad_gd, pad_ao
-
-                # grad_w_gate = s_gg.T @ s_h,  grad_w_up = s_gu.T @ s_h
-                pad_h = s_h.new_zeros(experts_per_gpu, max_c, s_h.shape[1])
-                pad_h[sorted_ids, pos] = s_h
-                pad_gg = s_gg.new_zeros(experts_per_gpu, max_c, s_gg.shape[1])
-                pad_gg[sorted_ids, pos] = s_gg
-                grad_w_gate = torch.bmm(pad_gg.transpose(1, 2), pad_h)
-                del pad_gg
-                pad_gu = s_gu.new_zeros(experts_per_gpu, max_c, s_gu.shape[1])
-                pad_gu[sorted_ids, pos] = s_gu
-                grad_w_up = torch.bmm(pad_gu.transpose(1, 2), pad_h)
-                del pad_gu, pad_h
+                grad_w_down = torch.zeros_like(w_down)
+                grad_w_gate = torch.zeros_like(w_gate)
+                grad_w_up = torch.zeros_like(w_up)
+                for e in range(experts_per_gpu):
+                    s = offsets[e].item()
+                    n = offsets[e + 1].item()
+                    if s == n:
+                        continue
+                    grad_w_down[e] = s_gd[s:n].mT @ s_ao[s:n]
+                    grad_w_gate[e] = s_gg[s:n].mT @ s_h[s:n]
+                    grad_w_up[e] = s_gu[s:n].mT @ s_h[s:n]
 
                 return (grad_hidden, None, grad_recv_weights,
                         grad_w_gate, grad_w_up, grad_w_down)

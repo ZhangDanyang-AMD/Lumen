@@ -91,7 +91,6 @@ def _align_tokens(
         expert_ids,
         num_tokens_post_pad,
     )
-    torch.cuda.synchronize()
     return sorted_token_ids, expert_ids, num_tokens_post_pad
 
 
@@ -111,6 +110,7 @@ def fused_moe_triton(
     use_fp8: bool = False,
     block_shape: Optional[List[int]] = None,
     config: Optional[Dict[str, int]] = None,
+    precomputed_alignment: Optional[tuple] = None,
 ) -> torch.Tensor:
     """End-to-end fused MoE using AITER Triton kernels.
 
@@ -151,11 +151,14 @@ def fused_moe_triton(
     moe_config = config if config is not None else _DEFAULT_MOE_CONFIG
     block_size_m = moe_config["BLOCK_SIZE_M"]
 
-    sorted_token_ids, expert_ids, num_tokens_post_pad = _align_tokens(
-        topk_ids,
-        num_experts,
-        block_size_m,
-    )
+    if precomputed_alignment is not None:
+        sorted_token_ids, expert_ids, num_tokens_post_pad = precomputed_alignment
+    else:
+        sorted_token_ids, expert_ids, num_tokens_post_pad = _align_tokens(
+            topk_ids,
+            num_experts,
+            block_size_m,
+        )
 
     num_tokens = hidden_states.shape[0]
     intermediate_dim = expert_weights.shape[1]
@@ -186,5 +189,4 @@ def fused_moe_triton(
         block_shape=block_shape,
         config=moe_config,
     )
-    torch.cuda.synchronize()
     return C
