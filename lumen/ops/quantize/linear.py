@@ -62,6 +62,9 @@ def _to_2d(x: torch.Tensor) -> torch.Tensor:
 _PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
 _FAST_QUANT_DISPATCH = os.environ.get("LUMEN_FAST_QUANT_DISPATCH", "1") == "1"
 _FP8_DGRAD_OUTPUT = os.environ.get("LUMEN_FP8_DGRAD_OUTPUT", "0") == "1"
+# Route mixed-dtype (hybrid) dgrad/wgrad through torch._scaled_mm, which reaches
+# hipBLASLt's F8B8 Tensile kernels (same path TE uses) instead of AITER Triton.
+_MIXED_SCALED_MM = os.environ.get("LUMEN_MIXED_SCALED_MM", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # Tuned hipBLASLt GEMM solutions
@@ -219,6 +222,12 @@ def _fp8_cache_pop(bf16_ptr: int, expected_shape: tuple = None):
 
 __all__ = ["QuantizedLinearFunction", "quantized_linear"]
 
+# When per-step weight quantization is active (LUMEN_WEIGHT_QUANT_ONCE), the
+# backward reuses the scaling manager's step-cached weight descriptor (whose
+# transpose is materialized once per step) instead of rebuilding a fresh one
+# and re-transposing every micro-batch. Invalidation is handled by the manager
+# (optimizer post-step hook), not here.
+_WEIGHT_QUANT_ONCE = os.environ.get("LUMEN_WEIGHT_QUANT_ONCE", "0") == "1"
 
 
 
@@ -622,29 +631,45 @@ def _gemm_per_tensor_hipblas_mixed(a_fp8, w_fp8, scale_a, scale_w):
     return hipb_mm(a_fp8, w_fp8, sol, out_dtype=torch.bfloat16, scaleA=sa, scaleB=sw)
 
 
-def gemm_per_tensor_mixed(a_fp8, w_fp8, scale_a, scale_w):
+def gemm_per_tensor_mixed(a_fp8, w_fp8, scale_a, scale_w, w_transpose=None):
     """Mixed-dtype FP8 dgrad GEMM: ``Y = grad(M,N) @ weight(N,K)``.
 
     For hybrid backward: ``a_fp8`` is E5M2 gradient ``(M, N_out)`` and
     ``w_fp8`` is E4M3 weight ``(N_out, K_in)``.  Uses hipBLASLt which
     supports mixed FP8 dtypes and NN layout natively.
 
+    ``w_transpose`` (optional) is the pre-computed ``(K_in, N_out)`` FP8
+    transpose of the weight (``weight_desc.transpose_cached``).  When given,
+    the hipBLASLt path reuses it as the column-major RHS with zero copies.
+
     The hipBLASLt workspace must be pre-allocated (via
     :func:`ensure_hipblaslt_ready`) before model loading to avoid OOM.
     """
-    # Some hipBLASLt builds (e.g. this platform's hipb_mm) reject mixed FP8
-    # dtypes (E5M2 grad x E4M3 weight) — they require both operands to share a
-    # dtype. When the operands differ, dequant to BF16 for a correct dgrad
-    # (same pattern as the per_token path). Same-dtype FP8 keeps the fast path.
+    # Mixed FP8 dtypes (E5M2 grad x E4M3 weight): AITER's hipb_mm wrapper
+    # rejects them (single-dtype layout API). Two FP8 paths, both no-BF16:
+    #  1. torch._scaled_mm -> hipBLASLt F8B8 (same kernels as TE), ~20% faster
+    #     GEMM, but needs a column-major RHS. Free when the weight transpose is
+    #     already cached (dgrad): transpose_cached is (K_in,N_out) row-major, so
+    #     .t() is exactly the (N_out,K_in) column-major RHS scaled_mm wants.
+    #  2. AITER Triton gemm_a8w8_mixed (FP32 tl.dot) — consumes any strides, no
+    #     transpose copy needed. Fallback when no cached transpose is available.
     if a_fp8.dtype != w_fp8.dtype:
-        sa = _scale_to_f32_1x1(scale_a, a_fp8.device).to(torch.bfloat16)
-        sw = _scale_to_f32_1x1(scale_w, w_fp8.device).to(torch.bfloat16)
-        a_bf16 = a_fp8.to(torch.bfloat16) * sa
-        w_bf16 = w_fp8.to(torch.bfloat16) * sw
-        # dispatch_gemm("none") -> F.linear(inp, w) computes inp @ w^T.
-        # w_fp8 arrives as (N, K); dgrad needs inp(M,N) @ w(N,K) = (M,K),
-        # so pass w_bf16.t() as (K,N) and let F.linear transpose it to (N,K).
-        return dispatch_gemm(a_bf16, w_bf16.t().contiguous(), None, None, "none")
+        if w_transpose is not None and w_transpose.dtype == w_fp8.dtype:
+            sa = _scale_to_f32_1x1(scale_a, a_fp8.device).reshape(1)
+            sw = _scale_to_f32_1x1(scale_w, w_fp8.device).reshape(1)
+            return torch._scaled_mm(
+                a_fp8, w_transpose.t(), scale_a=sa, scale_b=sw,
+                out_dtype=torch.bfloat16,
+            )
+        from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+
+        M = a_fp8.shape[0]
+        K_in = w_fp8.shape[1]
+        sa = _expand_per_tensor_scale(scale_a, M)
+        sw = _expand_per_tensor_scale(scale_w, K_in)
+        return gemm_a8w8_mixed(
+            a_fp8, w_fp8, sa, sw, dtype=torch.bfloat16, w_transposed=True,
+        )
     if _FAST_GEMM_DISPATCH:
         fn = _get_fast_gemm_fn("gemm_per_tensor_mixed")
         if fn is not None:
@@ -658,37 +683,16 @@ def gemm_per_tensor_mixed(a_fp8, w_fp8, scale_a, scale_w):
 def gemm_per_tensor_mixed_fp8out(a_fp8, w_fp8, scale_a, scale_w, fp8_out_dtype, scale_out):
     """Mixed-dtype FP8 dgrad GEMM with FP8 output + AMAX_D epilogue.
 
-    Like :func:`gemm_per_tensor_mixed` but outputs FP8 instead of BF16.
-    hipBLASLt computes the output AMAX in the GEMM epilogue, avoiding a
-    separate quantization pass.
-
-    Returns ``(fp8_output, amax_d)`` where *amax_d* is a scalar tensor
-    containing ``max(|output_before_scaling|)``.
+    NOTE: not used. An FP8-output + AMAX_D dgrad epilogue was prototyped to match
+    TE's delayed-scaling grad, but TE on ROCm also outputs BF16 dgrad
+    (rocm_gemm.cu forbids FP8 GEMM output), and gfx942 hipBLASLt has no tuned
+    kernel for the mixed-dtype FP8-output combo (~38x slower fallback). Kept as a
+    reference stub; dgrad stays BF16.
     """
-    if a_fp8.dtype != w_fp8.dtype:
-        # hipBLASLt FP8-output epilogue requires matching operand dtypes; raise so
-        # the caller's try/except skips the epilogue and uses the BF16 dgrad instead.
-        raise RuntimeError(
-            f"gemm_per_tensor_mixed_fp8out: mixed FP8 dtypes not supported "
-            f"({a_fp8.dtype} vs {w_fp8.dtype})"
-        )
-    from aiter.ops.gradlib import hipb_mm
-
-    ensure_hipblaslt_ready()
-    sa = _scale_to_f32_1x1(scale_a, a_fp8.device)
-    sw = _scale_to_f32_1x1(scale_w, w_fp8.device)
-    so = _scale_to_f32_1x1(scale_out, a_fp8.device)
-    M = a_fp8.shape[0]
-    N, K = w_fp8.shape
-    sol = _get_tuned_solution(M, K, N)
-    amax_d = torch.zeros(1, dtype=torch.float32, device=a_fp8.device)
-    out = hipb_mm(
-        a_fp8, w_fp8, sol,
-        out_dtype=fp8_out_dtype,
-        scaleA=sa, scaleB=sw,
-        scaleOut=so, amaxD=amax_d,
+    raise RuntimeError(
+        "gemm_per_tensor_mixed_fp8out: FP8-output dgrad epilogue unsupported on "
+        "gfx942 hipBLASLt (no tuned mixed-dtype FP8-output kernel)"
     )
-    return out, amax_d
 
 
 def _gemm_wgrad_hipblas(grad_fp8, input_fp8, scale_grad, scale_input):
@@ -736,6 +740,54 @@ def gemm_wgrad_fp8(grad_fp8, input_fp8, scale_grad, scale_input):
     if _probe_aiter_hipblas():
         backends.append((Backend.HIPBLAS, lambda: _gemm_wgrad_hipblas(grad_fp8, input_fp8, scale_grad, scale_input)))
     return try_backends(backends, op_name="gemm_wgrad_fp8")
+
+
+def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
+    """Mixed-dtype FP8 wgrad GEMM: ``dW = grad^T @ input``.
+
+    For hybrid backward ``grad_fp8`` is E5M2 ``(M, N_out)`` and ``input_fp8``
+    is E4M3 ``(M, K_in)``.
+
+    Preferred path (matches TE on ROCm): materialize the grad transpose with
+    AITER's cheap dedicated FP8 transpose kernel (~0.1-0.25 ms), then run a
+    plain ``hipb_mm(grad_t, input)`` on hipBLASLt. Even including the transpose,
+    this beats the copy-free ``grad.t()`` stride path — that path forces a
+    slower kernel variant, so avoiding the transpose is a false economy for the
+    large-K wgrad shapes (e.g. down/gate_up: ~6-14% faster with the transpose).
+    Falls back to AITER Triton ``gemm_a8w8_mixed`` when hipBLASLt is absent.
+
+    ``grad_t`` (optional) is a pre-computed ``(N_out, M)`` contiguous transpose
+    of ``grad_fp8``, produced upstream by the fused cast+transpose grad
+    quantization (``LUMEN_FUSED_QUANT_TRANSPOSE_CPP``). When supplied it lets
+    wgrad skip the dedicated transpose kernel entirely — the fused quant already
+    paid for it — so grad is transposed once instead of twice.
+    """
+    if _probe_aiter_hipblas():
+        ensure_hipblaslt_ready()
+        if grad_t is None:
+            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+            grad_t = fast_transpose_fp8(grad_fp8)  # (N_out, M) contiguous
+        sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device)
+        si = _scale_to_f32_1x1(scale_input, input_fp8.device)
+        N_out = grad_fp8.shape[1]
+        K_in = input_fp8.shape[1]
+        M = grad_fp8.shape[0]
+        sol = _get_tuned_solution(N_out, K_in, M)
+        from aiter.ops.gradlib import hipb_mm
+
+        return hipb_mm(grad_t, input_fp8, sol, out_dtype=torch.bfloat16,
+                       scaleA=sg, scaleB=si)
+
+    from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+
+    N_out = grad_fp8.shape[1]
+    K_in = input_fp8.shape[1]
+    sx = _expand_per_tensor_scale(scale_grad, N_out)
+    sw = _expand_per_tensor_scale(scale_input, K_in)
+    return gemm_a8w8_mixed(
+        grad_fp8.t(), input_fp8, sx, sw, dtype=torch.bfloat16, w_transposed=True,
+    )
 
 
 def _gemm_per_token_triton(a_fp8, w_fp8, scale_a, scale_w):
@@ -846,7 +898,12 @@ def _get_fast_gemm_fn(op_name):
         return fn
     fn = None
     if op_name == "gemm_per_tensor":
-        if _probe_aiter_triton_gemm():
+        # Forward GEMM (Y = X @ W^T). hipBLASLt's tuned F8 kernel is ~1.1-1.2x
+        # faster than the AITER Triton one and reuses the weight's cached FP8
+        # transpose (w_transposed) with no copy, so prefer it when requested.
+        if _PREFER_HIPBLASLT and _probe_aiter_hipblas():
+            fn = _gemm_per_tensor_hipblas
+        elif _probe_aiter_triton_gemm():
             fn = _gemm_per_tensor_triton
         elif _probe_aiter_hipblas():
             fn = _gemm_per_tensor_hipblas
@@ -1314,7 +1371,19 @@ class QuantizedLinearFunction(torch.autograd.Function):
             input_data, input_scale, weight_data, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
         block_size = ctx.block_size
-        weight_desc = FP8Descriptor.from_tensors(weight_data, weight_scale, fp8_dtype)
+        # Per-step weight-quant mode: reuse the manager's cached weight
+        # descriptor (transpose materialized once per step) so dgrad does not
+        # re-transpose the identical FP8 weight every micro-batch. The cached
+        # desc's data equals the saved weight_data (forward used the same cache).
+        weight_desc = None
+        if _WEIGHT_QUANT_ONCE and ctx.scaling_manager is not None:
+            _cache = getattr(ctx.scaling_manager, "_fp8_param_cache", None)
+            if _cache is not None:
+                _cd = _cache.get(getattr(ctx, "tensor_id", None))
+                if _cd is not None and _cd.data.shape == weight_data.shape:
+                    weight_desc = _cd
+        if weight_desc is None:
+            weight_desc = FP8Descriptor.from_tensors(weight_data, weight_scale, fp8_dtype)
 
         mgr = ctx.scaling_manager
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
@@ -1513,6 +1582,10 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # Only per_token reaches here for the dequant→BF16 fallback; blockwise
         # and blockwise2d are handled by the full-FP8 block above (which returns).
         bwd_scaling = "dynamic" if scaling_type == "per_token" else scaling_type
+        # ``grad_t`` is the fused cast+transpose grad^T, populated only when the
+        # fused quant kernel ran (LUMEN_FUSED_QUANT_TRANSPOSE_CPP). When present,
+        # wgrad reuses it instead of transposing grad a second time.
+        grad_t = None
         if _cached is not None:
             grad_fp8, grad_scale = _cached
         else:
@@ -1526,6 +1599,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 backward=True,
             )
             grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
+            grad_t = grad_desc._transpose
 
         _needs_dequant = scaling_type == "per_token"
         if _needs_dequant:
@@ -1535,23 +1609,16 @@ class QuantizedLinearFunction(torch.autograd.Function):
             weight_bf16 = _dequant_fp8_weight(weight_data, weight_scale, block_size).bfloat16()
             grad_input = dispatch_gemm(grad_bf16, weight_bf16.t().contiguous(), None, None, "none")
         elif _probe_aiter_hipblas():
+            # dgrad -> BF16 (matches TE on ROCm: rocm_gemm.cu forbids FP8 GEMM
+            # output, so gradients propagate in BF16 and each layer re-quantizes
+            # its own grad). An FP8-output+amaxD epilogue path was prototyped
+            # (LUMEN_FP8_DGRAD_OUTPUT) but hipBLASLt on gfx942 has no tuned kernel
+            # for the mixed-dtype FP8-output combo (~38x slower fallback), so it
+            # is not used — see gemm_per_tensor_mixed_fp8out.
             grad_input = gemm_per_tensor_mixed(
                 grad_fp8, weight_data, grad_scale, weight_desc.scale,
+                w_transpose=weight_desc.transpose_cached,
             )
-            # FP8 dgrad epilogue: produce FP8 grad_input for next layer's backward
-            if _FP8_DGRAD_OUTPUT and mgr is not None and bwd_scaling in ("delayed", "dynamic"):
-                _ep_tid = (ctx.tensor_id or "linear") + "_bwd"
-                _ep_scale = mgr.get_bwd_scale_for_epilogue(_ep_tid)
-                if _ep_scale is not None:
-                    try:
-                        _fp8_dg, _amax_dg = gemm_per_tensor_mixed_fp8out(
-                            grad_fp8, weight_data, grad_scale, weight_desc.scale,
-                            fp8_out_dtype=bwd_dtype, scale_out=_ep_scale,
-                        )
-                        _fp8_cache_put(grad_input.data_ptr(), _fp8_dg, _ep_scale)
-                        mgr.update_amax_value(_ep_tid, _amax_dg)
-                    except RuntimeError:
-                        pass  # FP8 epilogue not supported; fall through
         else:
             grad_input = dispatch_gemm(
                 grad_fp8,
@@ -1586,26 +1653,26 @@ class QuantizedLinearFunction(torch.autograd.Function):
             _mgr = mgr
             _w_ref = ctx.weight_ref
             _gaf = ctx.gradient_accumulation_fusion
+            _grad_t = grad_t  # fused grad^T (or None); reused by mixed wgrad
 
             def _wgrad_fn():
                 if _use_fp8:
-                    if _use_hipblas and _bwd_scaling in ("delayed", "dynamic"):
+                    if _use_hipblas and _bwd_scaling in ("delayed", "dynamic") \
+                            and _grad_fp8.dtype == _input_data.dtype:
                         gw = gemm_wgrad_fp8(
                             _grad_fp8, _input_data, _grad_scale, _input_scale,
                         )
+                    elif _grad_fp8.dtype != _input_data.dtype and _bwd_scaling in ("delayed", "dynamic"):
+                        # Hybrid: keep wgrad fully FP8 via Triton mixed GEMM.
+                        gw = gemm_wgrad_mixed(
+                            _grad_fp8, _input_data, _grad_scale, _input_scale,
+                            grad_t=_grad_t,
+                        )
                     else:
-                        _g = _grad_fp8
-                        _gs = _grad_scale
-                        if _g.dtype != _input_data.dtype:
-                            _recast = quantize_input(
-                                (_g.bfloat16() * _gs.bfloat16()).contiguous().reshape(-1, _g.shape[-1]),
-                                _bwd_scaling, _input_data.dtype, block_size,
-                            )
-                            _g, _gs = _recast.data, _recast.scale
                         gw = dispatch_gemm(
-                            _g.t().contiguous(),
+                            _grad_fp8.t().contiguous(),
                             _input_data.t().contiguous(),
-                            _gs,
+                            _grad_scale,
                             _input_scale,
                             _bwd_scaling,
                         )
@@ -1637,19 +1704,18 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     grad_weight = gemm_wgrad_fp8(
                         grad_fp8, input_data, grad_scale, input_scale,
                     )
+                elif grad_fp8.dtype != input_data.dtype and bwd_scaling in ("delayed", "dynamic"):
+                    # Hybrid: E5M2 grad x E4M3 input. Keep wgrad fully FP8 via
+                    # Triton mixed GEMM instead of requanting grad to E4M3.
+                    grad_weight = gemm_wgrad_mixed(
+                        grad_fp8, input_data, grad_scale, input_scale,
+                        grad_t=grad_t,
+                    )
                 else:
-                    _g = grad_fp8
-                    _gs = grad_scale
-                    if _g.dtype != input_data.dtype:
-                        _recast = quantize_input(
-                            (_g.bfloat16() * _gs.bfloat16()).contiguous().reshape(-1, _g.shape[-1]),
-                            bwd_scaling, input_data.dtype, block_size,
-                        )
-                        _g, _gs = _recast.data, _recast.scale
                     grad_weight = dispatch_gemm(
-                        _g.t().contiguous(),
+                        grad_fp8.t().contiguous(),
                         input_data.t().contiguous(),
-                        _gs,
+                        grad_scale,
                         input_scale,
                         bwd_scaling,
                     )
@@ -1856,24 +1922,13 @@ class FP8StoredLinearFunction(torch.autograd.Function):
         elif scaling_type in ("per_token", "blockwise"):
             grad_input = _bf16_dgrad()
         elif _probe_aiter_hipblas():
+            # dgrad -> BF16 (matches TE on ROCm; FP8-output epilogue not viable on
+            # gfx942 hipBLASLt — see gemm_per_tensor_mixed_fp8out).
             grad_fp8, grad_scale = _ensure_grad_fp8()
             grad_input = gemm_per_tensor_mixed(
                 grad_fp8, weight_fp8, grad_scale, weight_desc.scale,
+                w_transpose=weight_desc.transpose_cached,
             )
-            # FP8 dgrad epilogue: produce FP8 grad_input for next layer's backward
-            if _FP8_DGRAD_OUTPUT and mgr is not None and bwd_scaling in ("delayed", "dynamic"):
-                _ep_tid = (ctx.tensor_id or "linear") + "_bwd"
-                _ep_scale = mgr.get_bwd_scale_for_epilogue(_ep_tid)
-                if _ep_scale is not None:
-                    try:
-                        _fp8_dg, _amax_dg = gemm_per_tensor_mixed_fp8out(
-                            grad_fp8, weight_fp8, grad_scale, weight_desc.scale,
-                            fp8_out_dtype=bwd_dtype, scale_out=_ep_scale,
-                        )
-                        _fp8_cache_put(grad_input.data_ptr(), _fp8_dg, _ep_scale)
-                        mgr.update_amax_value(_ep_tid, _amax_dg)
-                    except RuntimeError:
-                        pass  # FP8 epilogue not supported; fall through
         else:
             grad_fp8, grad_scale = _ensure_grad_fp8()
             grad_input = dispatch_gemm(

@@ -195,6 +195,7 @@ if csrc_available("flash_attn_fwd"):
             v_descale=_unit,
             return_lse=return_lse,
             return_softmax=return_softmax,
+            how_v3_bf16_cvt=2,  # rtz: faster than rtna on gfx942; same kernel, different pre-compiled variant
         )
         return out_padded, softmax_lse, S_dmask, rng_state
 
@@ -371,6 +372,7 @@ if csrc_available("flash_attn_fp8_pertensor_fwd"):
             v_descale=v_descale,
             return_lse=True,
             return_softmax=False,
+            how_v3_bf16_cvt=2,  # rtz: faster than rtna on gfx942; applies to bf16 kernel variant selection
         )
         return out_padded, softmax_lse
 
