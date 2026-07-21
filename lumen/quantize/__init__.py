@@ -385,26 +385,6 @@ def _patch_linear_layers(
     )
 
 
-# ---------------------------------------------------------------------------
-# Thread-local pre-quantized activation bypass for fused norm+quant
-# ---------------------------------------------------------------------------
-# When lumen.ops.fused_norm_quant produces an FP8 activation *before* the
-# linear's quant_forward() runs, the FP8 tensor + scale are stored here so
-# quant_forward() can skip its own quantize_input() call.
-
-_nqg_tls = threading.local()
-
-
-def _set_pre_quantized_activation(fp8_data, scale):
-    """Store pre-quantized FP8 activation for the next quant_forward() call."""
-    _nqg_tls.pre_quant = (fp8_data, scale)
-
-
-def _pop_pre_quantized_activation():
-    """Pop pre-quantized FP8 activation (returns None if not set)."""
-    result = getattr(_nqg_tls, "pre_quant", None)
-    _nqg_tls.pre_quant = None
-    return result
 
 
 def _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size):
@@ -586,8 +566,6 @@ def _replace_forward(
             _wcache = getattr(module, "_fp8_weight_data", None)
             _wscale = getattr(module, "_fp8_weight_scale", None)
 
-            pre_quant = _pop_pre_quantized_activation()
-
             if seq_parallel and not is_row_parallel:
                 from megatron.core.tensor_parallel.mappings import (
                     gather_from_sequence_parallel_region,
@@ -619,7 +597,6 @@ def _replace_forward(
                 fp8_weight_scale=_wscale,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
-                pre_quantized_input=pre_quant,
             )
 
             if is_row_parallel and seq_parallel:
