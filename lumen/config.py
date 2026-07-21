@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field, fields, replace
 from typing import Optional
 
@@ -1077,12 +1078,21 @@ class LumenConfig:
             else:
                 _rank0_print("> WARNING: fp8_checkpoint requires FP8 quantization")
 
-        if self.fp8_param_gather:
+        # LUMEN_WEIGHT_QUANT_ONCE registers weights for the FP8 param cache so the
+        # weight is quantized (cast+transpose+amax) once per optimizer step and
+        # reused across micro-batches, rather than re-quantized every forward.
+        # Invalidation is driven by the optimizer post-step hook
+        # (mark_fp8_params_stale), NOT tensor._version — see
+        # register_fp8_param_optimizer_hook. This does NOT enable FP8 DP gather
+        # (that is a separate forward-comm decision gated on fp8_param_gather).
+        _weight_quant_once = os.environ.get("LUMEN_WEIGHT_QUANT_ONCE", "0") == "1"
+        if self.fp8_param_gather or _weight_quant_once:
             if manager is not None:
                 manager.enable_fp8_params(model)
-                _rank0_print(f"> FP8 param gather enabled ({manager.num_fp8_params} params)")
+                _tag = "FP8 param gather" if self.fp8_param_gather else "per-step weight quant"
+                _rank0_print(f"> {_tag} enabled ({manager.num_fp8_params} params)")
             else:
-                _rank0_print("> WARNING: fp8_param_gather requires FP8 quantization")
+                _rank0_print("> WARNING: fp8 param cache requires FP8 quantization")
 
         if self.fp8_weight_cache:
             if manager is not None:
