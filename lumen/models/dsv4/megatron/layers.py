@@ -21,7 +21,6 @@ from lumen.modules.parallel_linear import (
     LumenColumnParallelLinear as _LumenColumnParallelLinear,
     LumenRowParallelLinear as _LumenRowParallelLinear,
 )
-from lumen.ops.quantize.linear import gemm_bf16
 
 
 def _dsv4_use_gemm_bf16() -> bool:
@@ -39,6 +38,7 @@ class LumenNorm(torch.nn.Module):
         self._norm_type = norm_type
         # Own weight at ``*.weight`` so torch_dist ckpt keys match mbridge/HF.
         self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight.sequence_parallel = bool(getattr(config, "sequence_parallel", False))
 
     def forward(self, x):
         if self._norm_type == "RMSNorm":
@@ -121,7 +121,9 @@ class LumenDuplicatedLinear(MegatronModule):
         self.block_size = 128
 
         self.weight = nn.Parameter(torch.empty(output_size, input_size, dtype=config.params_dtype))
-        set_tensor_model_parallel_attributes(self.weight, True, 0, 1)
+        # This weight is replicated on every TP rank, so marking it tensor-parallel
+        # would make Megatron's grad-norm count it tp_size times.
+        set_tensor_model_parallel_attributes(self.weight, False, -1, 1)
         if bias:
             self.bias = nn.Parameter(torch.empty(output_size, dtype=config.params_dtype))
         else:
@@ -135,7 +137,7 @@ class LumenDuplicatedLinear(MegatronModule):
 
     def forward(self, x: torch.Tensor):
         bias = None if self.skip_bias_add else self.bias
-        if self.scaling_type != "none":
+        if self.scaling_type != "none" or self.use_gemm_bf16:
             from lumen.ops.quantize.linear import quantized_linear
 
             out = quantized_linear(
@@ -147,8 +149,6 @@ class LumenDuplicatedLinear(MegatronModule):
                 fp8_dtype=self.fp8_dtype,
                 block_size=self.block_size,
             )
-        elif self.use_gemm_bf16:
-            out = gemm_bf16(x, self.weight, bias)
         else:
             out = F.linear(x, self.weight, bias)
         output_bias = self.bias if self.skip_bias_add and self.bias is not None else None

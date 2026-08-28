@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate MoE BF16 GEMM untuned shapes using aiter get_padded_m bucketing."""
+"""Generate DSV4 BF16 GEMM untuned shapes using aiter get_padded_m bucketing.
+
+Profiles:
+  moe            MoE forward (N,K) with M in [1, 1024]
+  flash2node     2-node flash forward gaps (lm_head, wq_b, 7168-K, ...)
+  training-bwd  dgrad+wgrad for every (N,K) already in the tuned CSV
+"""
 
 import argparse
 import csv
@@ -8,6 +14,7 @@ from pathlib import Path
 LUMEN = Path(__file__).resolve().parents[2]
 GEMM_TUNE_DIR = LUMEN / "examples/dsv4/.gemm_tune"
 DEFAULT_OUT = GEMM_TUNE_DIR / "dsv4_bf16_moe_bucket_untuned.csv"
+DEFAULT_BWD_OUT = GEMM_TUNE_DIR / "dsv4_bf16_bwd_untuned.csv"
 DEFAULT_EXISTING = LUMEN / "examples/dsv4/configs/dsv4_bf16_tuned_gemm_mi308x.csv"
 
 MOE_PAIRS = ((4096, 2048), (4096, 4096))
@@ -66,7 +73,7 @@ def _parse_pairs(text):
     return tuple(out)
 
 
-def build_shapes(pairs, min_m=1, max_m=1024, include_static=False):
+def representative_ms(min_m=1, max_m=1024):
     if min_m <= 1024:
         ms_small = [m for m in REPRESENTATIVE_MS_SMALL if min_m <= m <= min(max_m, 1024)]
     else:
@@ -76,11 +83,46 @@ def build_shapes(pairs, min_m=1, max_m=1024, include_static=False):
         ms_large = [m for m in REPRESENTATIVE_MS_LARGE if lo <= m <= max_m]
     else:
         ms_large = []
-    reps = sorted(set(ms_small + ms_large))
+    return sorted(set(ms_small + ms_large))
+
+
+def build_shapes(pairs, min_m=1, max_m=1024, include_static=False):
+    reps = representative_ms(min_m, max_m)
     shapes = [(m, n, k) for n, k in pairs for m in reps]
     if include_static:
         shapes.extend(STATIC_SHAPES)
     return sorted(set(shapes))
+
+
+def expand_backward(forward_pairs, reps):
+    """Shapes used by quantized_linear BF16 backward (same TN gemm_a16w16).
+
+    Forward is Y = X @ W.T with W ``(N, K)`` and tokens ``M``.
+      dgrad: gemm(dY, W.T)  -> (M, N, K) = (tokens, K_fwd, N_fwd)
+      wgrad: gemm(dY.T, X.T) -> (M, N, K) = (N_fwd, K_fwd, tokens)
+
+    Lookup only pads M, not K, so wgrad still sweeps token counts on K.
+    """
+    shapes = []
+    for n_fwd, k_fwd in forward_pairs:
+        for tokens in reps:
+            shapes.append((tokens, k_fwd, n_fwd))
+            shapes.append((n_fwd, k_fwd, tokens))
+    return shapes
+
+
+def _load_existing_nk(path, target_cu=None):
+    if not path.is_file():
+        return []
+    seen = set()
+    with path.open() as f:
+        for r in csv.DictReader(f):
+            if r.get("gfx", "gfx942") != "gfx942":
+                continue
+            if target_cu is not None and str(r.get("cu_num")) != str(target_cu):
+                continue
+            seen.add((int(r["N"]), int(r["K"])))
+    return sorted(seen)
 
 
 def _load_existing(path, target_cu=None):
@@ -104,14 +146,29 @@ def main():
     parser.add_argument("--existing", type=Path, default=DEFAULT_EXISTING)
     parser.add_argument(
         "--profile",
-        choices=("moe", "flash2node"),
+        choices=("moe", "flash2node", "training-bwd"),
         default="moe",
-        help="moe: MoE bucket pairs; flash2node: 2-node full-model gaps (lm_head, 7168-K, etc.)",
+        help="moe / flash2node: forward (N,K); training-bwd: dgrad+wgrad for NK already in --existing",
     )
     parser.add_argument(
         "--pairs",
         default="",
         help="comma-separated N,K pairs only (e.g. 4096,2048). Overrides --profile pairs",
+    )
+    parser.add_argument(
+        "--from-existing-nk",
+        action="store_true",
+        help="use unique (N,K) from --existing as forward pairs (unioned with --profile/--pairs)",
+    )
+    parser.add_argument(
+        "--include-backward",
+        action="store_true",
+        help="also emit dgrad (M,K,N) and wgrad (N,K,M) for each forward pair",
+    )
+    parser.add_argument(
+        "--backward-only",
+        action="store_true",
+        help="only emit dgrad/wgrad (implies --include-backward; skip forward buckets)",
     )
     parser.add_argument(
         "--include-existing",
@@ -133,24 +190,52 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.backward_only:
+        args.include_backward = True
+    if args.profile == "training-bwd":
+        args.backward_only = True
+        args.include_backward = True
+        args.from_existing_nk = True
+        if args.output == DEFAULT_OUT:
+            args.output = DEFAULT_BWD_OUT
+
     if args.pairs:
-        pairs = _parse_pairs(args.pairs)
+        pairs = list(_parse_pairs(args.pairs))
     elif args.profile == "flash2node":
-        pairs = FLASH2NODE_NK_PAIRS
+        pairs = list(FLASH2NODE_NK_PAIRS)
+    elif args.profile == "training-bwd":
+        pairs = []
     else:
-        pairs = MOE_PAIRS
+        pairs = list(MOE_PAIRS)
+
+    if args.from_existing_nk:
+        # NK inventory is global; --target-cu only affects --include-existing skips.
+        pairs = sorted(set(pairs) | set(_load_existing_nk(args.existing, target_cu=None)))
 
     min_m = 1 if args.min_m is None else args.min_m
     max_m = 4096 if args.max_m is None else args.max_m
-    if args.profile == "moe" and args.min_m is None and args.max_m is None:
+    if args.profile == "moe" and args.min_m is None and args.max_m is None and not args.backward_only:
         min_m, max_m = 1, 1024
 
-    shapes = build_shapes(
-        pairs,
-        min_m=min_m,
-        max_m=max_m,
-        include_static=args.include_static,
-    )
+    reps = representative_ms(min_m, max_m)
+    shapes = []
+    if not args.backward_only:
+        shapes.extend(
+            build_shapes(
+                pairs,
+                min_m=min_m,
+                max_m=max_m,
+                include_static=args.include_static,
+            )
+        )
+    elif args.include_static:
+        shapes.extend(STATIC_SHAPES)
+    if args.include_backward:
+        if not pairs:
+            raise SystemExit("no forward (N,K) pairs — pass --pairs, --profile, or --from-existing-nk")
+        shapes.extend(expand_backward(pairs, reps))
+    shapes = sorted(set(shapes))
+
     if args.include_existing:
         have = _load_existing(args.existing, target_cu=args.target_cu)
         shapes = [s for s in shapes if s not in have]
@@ -164,9 +249,15 @@ def main():
             w.writerow(row)
 
     print(f"wrote {args.output} ({len(shapes)} shapes)")
-    for n, k in pairs:
-        cnt = sum(1 for m, nn, kk in shapes if (nn, kk) == (n, k))
-        print(f"  N={n} K={k}: {cnt} bucket M")
+    print(f"  forward (N,K) sources: {len(pairs)}  token buckets: {len(reps)}")
+    if args.include_backward:
+        remain = set(shapes)
+        print("  missing dgrad/wgrad vs tuned CSV:")
+        for n_fwd, k_fwd in pairs:
+            d = sum(1 for t in reps if (t, k_fwd, n_fwd) in remain)
+            w = sum(1 for t in reps if (n_fwd, k_fwd, t) in remain)
+            if d or w:
+                print(f"    fwd N={n_fwd:6d} K={k_fwd:6d}: dgrad {d:3d}/{len(reps)}  wgrad {w:3d}/{len(reps)}")
     return 0
 
 

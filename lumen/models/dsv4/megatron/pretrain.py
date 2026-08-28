@@ -146,6 +146,10 @@ def dsv4_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None
     if config is None:
         config = core_transformer_config_from_args(args)
     config.dsv4_mode = True
+    # ROCm Megatron's TransformerConfig predates the unpadded vocab_size field
+    # used by DSV4 hash routers. tid2eid is [vocab_size, topk] in the checkpoint
+    # even though GPT embeddings use padded_vocab_size.
+    config.vocab_size = int(args.vocab_size)
     if getattr(args, "pipeline_model_parallel_size", 1) > 1:
         install_dsv4_pipeline_shape_exchange()
         config.variable_seq_lengths = True

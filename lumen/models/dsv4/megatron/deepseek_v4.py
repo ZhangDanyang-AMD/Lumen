@@ -15,7 +15,6 @@ from megatron.core.models.gpt.experimental_attention_variant_module_specs import
 )
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.mappings import (
-    copy_to_tensor_model_parallel_region,
     gather_from_sequence_parallel_region,
     scatter_to_sequence_parallel_region,
 )
@@ -48,6 +47,30 @@ from lumen.ops.dsv4 import (
 from lumen.ops.dsv4.sparse_mla import get_sparse_attn_fn
 
 _sparse_attn_fn = get_sparse_attn_fn()
+
+
+def _allreduce_kv_grad_fp32(tensor: torch.Tensor, group) -> torch.Tensor:
+    """Forward identity; all-reduce ``dkv`` in fp32 over ``group``.
+
+    ROCm Megatron's ``copy_to_tensor_model_parallel_region`` has no
+    ``all_reduce_grad_fp32`` argument, so this matches Miles' fp32 dkv reduce.
+    """
+
+    class _AllReduceKvGradFp32(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, x):
+            ctx.group = group
+            return x
+
+        @staticmethod
+        def backward(ctx, grad):
+            if grad is None:
+                return None
+            g = grad.contiguous().float()
+            torch.distributed.all_reduce(g, group=ctx.group)
+            return g.to(dtype=grad.dtype)
+
+    return _AllReduceKvGradFp32.apply(tensor)
 
 
 def _enable_deepseek_v4_tf32():
@@ -306,12 +329,7 @@ class DeepSeekV4Attention(MegatronModule):
         else:
             kv = kv_vanilla
 
-        try:
-            kv = copy_to_tensor_model_parallel_region(
-                kv, group=self.tp_group, all_reduce_grad_fp32=True
-            )
-        except TypeError:
-            kv = copy_to_tensor_model_parallel_region(kv, group=self.tp_group)
+        kv = _allreduce_kv_grad_fp32(kv, self.tp_group)
 
         o = _sparse_attn_fn(q, kv, attn_sink, topk_idxs, self.softmax_scale)
 

@@ -134,7 +134,7 @@ class LumenGroupedLinear(nn.Module):
             if self.use_bias and not self.skip_bias_add:
                 bias_i = getattr(self, f"bias{i}")
             weight = getattr(self, f"weight{i}")
-            if self.scaling_type != "none" or self.delay_wgrad:
+            if self.scaling_type != "none" or self.delay_wgrad or self.use_gemm_bf16:
                 from lumen.ops.quantize.linear import quantized_linear
 
                 yi = quantized_linear(
@@ -150,12 +150,7 @@ class LumenGroupedLinear(nn.Module):
                     deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
                 )
             else:
-                if self.use_gemm_bf16:
-                    from lumen.ops.quantize.linear import gemm_bf16
-
-                    yi = gemm_bf16(xi, weight, bias_i)
-                else:
-                    yi = F.linear(xi, weight, bias_i)
+                yi = F.linear(xi, weight, bias_i)
             outputs.append(yi)
             offset += count
 
