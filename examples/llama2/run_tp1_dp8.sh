@@ -136,11 +136,8 @@ pip install -q huggingface-hub==0.30.0 pandas pyarrow sentencepiece "transformer
 python -c "import numpy; numpy.product = numpy.prod" 2>/dev/null || true
 sed -i "s/np\\.product(/np.prod(/g" "${MEGATRON_ROOT}/megatron/core/dist_checkpointing/exchange_utils.py" 2>/dev/null || true
 
-python "${LUMEN_DIR}/scripts/patch_gpt_layer_specs.py" "${MEGATRON_ROOT}"
-python "${LUMEN_DIR}/scripts/patch_checkpointing.py"   "${MEGATRON_ROOT}"
-python "${LUMEN_DIR}/scripts/patch_requires_grad.py"    "${MEGATRON_ROOT}"
-python "${LUMEN_DIR}/scripts/patch_lora_scaling.py"     "${MEGATRON_ROOT}"
-python "${LUMEN_DIR}/scripts/patch_sft_loss_norm.py"    "${MEGATRON_ROOT}"
+PYTHONPATH="/workspace/Lumen" python3 -m lumen.patches "${MEGATRON_ROOT}" --tag llama
+PYTHONPATH="/workspace/Lumen" python3 -m lumen.patches "${MEGATRON_ROOT}" --tag lora
 
 cd "${LUMEN_DIR}"
 CONFIG="${LUMEN_DIR}/config_MI300X_tp1_dp8.sh" bash run_finetune.sh 2>&1 | tee "${LUMEN_LOG_PATH:-/home/danyzhan/mlperf_llama2_70b.log}"

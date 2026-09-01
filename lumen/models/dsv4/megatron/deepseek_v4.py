@@ -7,12 +7,6 @@ import copy
 import einops
 import torch
 from megatron.core.dist_checkpointing.mapping import ShardedStateDict
-from megatron.core.models.gpt import (
-    experimental_attention_variant_module_specs as _eav_specs,
-)
-from megatron.core.models.gpt.experimental_attention_variant_module_specs import (
-    get_transformer_block_with_experimental_attention_variant_spec,
-)
 from megatron.core.process_groups_config import ProcessGroupCollection
 from megatron.core.tensor_parallel.mappings import (
     gather_from_sequence_parallel_region,
@@ -30,8 +24,6 @@ from lumen.models.dsv4.megatron.layers import (
     LumenNorm,
     LumenRowParallelLinear,
 )
-from lumen.models.dsv4.megatron.moe_mori import mori_ep_enabled, patch_megatron_moe_mori
-from lumen.models.dsv4.megatron.spec_provider import LumenDSV4SpecProvider
 from lumen.models.dsv4.megatron.v4_indexer import V4Indexer
 from lumen.models.dsv4.ops.compressor import DeepSeekV4Compressor
 from lumen.ops.dsv4 import (
@@ -364,9 +356,9 @@ def _dsv4_attention_module_spec(config, backend=None):
     )
 
 
-def _patch_megatron_no_te() -> None:
-    """Allow Megatron optimizer init without Transformer Engine (Lumen bootstrap path)."""
-    if getattr(_patch_megatron_no_te, "_done", False):
+def patch_dsv4_megatron_bootstrap() -> None:
+    """One-time Megatron core init shims for the DSV4 spec path."""
+    if getattr(patch_dsv4_megatron_bootstrap, "_done", False):
         return
 
     import megatron.core.utils as mu
@@ -394,7 +386,7 @@ def _patch_megatron_no_te() -> None:
 
     jit.disable_jit_fuser()
 
-    _patch_megatron_no_te._done = True
+    patch_dsv4_megatron_bootstrap._done = True
 
 
 def get_dsv4_spec(args, config, vp_stage):
@@ -404,25 +396,9 @@ def get_dsv4_spec(args, config, vp_stage):
 
         --spec lumen.models.dsv4.megatron.spec get_dsv4_spec
     """
-    config.dsv4_dsa_topk_backend = getattr(args, "dsv4_dsa_topk_backend", "torch")
-    _patch_megatron_no_te()
-    if mori_ep_enabled():
-        patch_megatron_moe_mori()
-    _orig_get_spec = _eav_specs.get_experimental_attention_variant_module_spec
-    _orig_get_backend = _eav_specs._get_backend_spec_provider
+    from lumen.patches.builders import apply_config_build, apply_model_build
+    from lumen.patches.builders.dsv4 import build_dsv4_transformer_block_spec
 
-    def _patched_get_spec(config, backend=None):
-        if config.experimental_attention_variant == "dsv4":
-            return _dsv4_attention_module_spec(config, backend)
-        return _orig_get_spec(config, backend)
-
-    def _lumen_backend_spec_provider(config):
-        return LumenDSV4SpecProvider()
-
-    _eav_specs.get_experimental_attention_variant_module_spec = _patched_get_spec
-    _eav_specs._get_backend_spec_provider = _lumen_backend_spec_provider
-    try:
-        return get_transformer_block_with_experimental_attention_variant_spec(config, vp_stage=vp_stage)
-    finally:
-        _eav_specs.get_experimental_attention_variant_module_spec = _orig_get_spec
-        _eav_specs._get_backend_spec_provider = _orig_get_backend
+    apply_config_build(config, args, tags={"dsv4", "spec"})
+    apply_model_build(config=config, args=args, tags={"dsv4", "spec"})
+    return build_dsv4_transformer_block_spec(config, vp_stage)

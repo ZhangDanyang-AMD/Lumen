@@ -18,11 +18,9 @@ if MEGATRON_PATH not in sys.path:
 
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
-from lumen.models.megatron_patches import install_mmap_checkpoint  # noqa: E402
+from lumen.models.megatron_patches import install_all  # noqa: E402
 
-install_mmap_checkpoint()
-
-from lumen.models.dsv4.megatron.spec import get_dsv4_spec  # noqa: E402, F401
+install_all()  # IMPORT patches (incl. mmap) before Megatron checkpoint load
 
 from model_provider import model_provider as _megatron_model_provider  # noqa: E402
 
@@ -57,9 +55,9 @@ def _extra_args_provider(parser):
 
 def main() -> None:
     if os.environ.get("LUMEN_DSV4_LINEAR_FP8", "0") == "1":
-        from lumen.models.megatron import install_fp8_param_gather_hook
+        from lumen.patches import apply_training_patches
 
-        install_fp8_param_gather_hook()
+        apply_training_patches(names={"fp8_param_gather_hook"})
 
     run_dsv4_grpo_finetune(
         _build_model_provider(),

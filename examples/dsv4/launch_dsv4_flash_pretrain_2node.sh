@@ -88,6 +88,7 @@ for _rel in \
     lumen/models/dsv4/megatron/pretrain.py \
     examples/dsv4/run_dsv4_flash_pretrain.sh \
     examples/dsv4/run_dsv4_flash_pretrain_inner.sh \
+    examples/dsv4/patch_megatron_source.py \
     examples/dsv4/patch_rocm_megatron_dsv4.py
 do
     rsync -a -e "${_rsync_rsh}" \

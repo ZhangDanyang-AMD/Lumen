@@ -4,9 +4,14 @@
 # Usage:
 #   bash examples/dsv4/prepare_rocm_megatron.sh
 #
+# List SOURCE patches (no PyTorch required):
+#   PYTHONPATH="${LUMEN_DIR}" python3 examples/dsv4/patch_megatron_source.py --list
+#   PYTHONPATH="${LUMEN_DIR}" python3 examples/dsv4/patch_megatron_source.py --list --tag dsv4
+#   PYTHONPATH="${LUMEN_DIR}" python3 examples/dsv4/patch_megatron_source.py --list --tag rocm
+#
 # Output: ${MEGATRON_ROCM_DIR} (default ${DATA_ROOT}/Megatron-LM-rocm-dev)
 #
-# Reference: Lumen-RL examples/GRPO/Dockerfile.dsv4 + patch_rocm_megatron_dsv4.py
+# See examples/dsv4/PATCHES.md for the full patch registry guide.
 
 set -euo pipefail
 
@@ -18,7 +23,7 @@ MEGATRON_REPO="${MEGATRON_REPO:-https://github.com/ROCm/Megatron-LM.git}"
 MEGATRON_ROCM_REF="${MEGATRON_ROCM_REF:-fb4552449f9b33c6f72207a80e80045eadf5267e}"
 MEGATRON_ROCM_DIR="${MEGATRON_ROCM_DIR:-${DATA_ROOT}/Megatron-LM-rocm-dev}"
 LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
-PATCH_SCRIPT="${LUMEN_DIR}/examples/dsv4/patch_rocm_megatron_dsv4.py"
+PATCH_SCRIPT="${LUMEN_DIR}/examples/dsv4/patch_megatron_source.py"
 STAMP_FILE="${MEGATRON_ROCM_DIR}/.lumen_rocm_megatron_ref"
 
 if [[ -f "${STAMP_FILE}" && "$(cat "${STAMP_FILE}")" == "${MEGATRON_ROCM_REF}" \

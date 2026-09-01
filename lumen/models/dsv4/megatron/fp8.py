@@ -83,6 +83,6 @@ def enable_fp8_for_dsv4_model(model, args: Optional[Namespace] = None) -> None:
 
 def register_dsv4_megatron_cli(parser) -> None:
     """Register Lumen FP8 CLI flags on the Megatron parser."""
-    from lumen.models.megatron import add_common_megatron_args
+    from lumen.patches.builders import apply_args_patches
 
-    add_common_megatron_args(parser)
+    apply_args_patches(parser, names={"common_megatron_args"})

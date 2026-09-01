@@ -46,10 +46,11 @@ PY
         return 1
     fi
 
-    if [[ -f examples/dsv4/patch_rocm_megatron_dsv4.py && -d "${MEGATRON_PATH}" ]]; then
-        echo "[setup] ensuring ROCm Megatron DSV4 patch on ${MEGATRON_PATH}"
+    if [[ -f examples/dsv4/patch_megatron_source.py && -d "${MEGATRON_PATH}" ]]; then
+        echo "[setup] ensuring ROCm Megatron SOURCE patches on ${MEGATRON_PATH}"
+        # Idempotent SOURCE patches; list with: patch_megatron_source.py --list --tag dsv4
         PYTHONPATH="/workspace/Lumen:${PYTHONPATH:-}" \
-            python3 examples/dsv4/patch_rocm_megatron_dsv4.py "${MEGATRON_PATH}"
+            python3 examples/dsv4/patch_megatron_source.py "${MEGATRON_PATH}"
     fi
 
     local datasets_dir="${MEGATRON_PATH}/megatron/core/datasets"

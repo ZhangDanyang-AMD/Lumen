@@ -14,8 +14,8 @@ from megatron.training import get_args, print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 
 from lumen.models.dsv4.megatron.fp8 import dsv4_linear_fp8_enabled, enable_fp8_for_dsv4_model
-from lumen.models.dsv4.megatron.pipeline import install_dsv4_pipeline_shape_exchange
-from lumen.models.utils import safe_add_argument
+from lumen.patches.builders import apply_config_build
+from lumen.patches.builders.dsv4 import add_dsv4_pretrain_args
 
 __all__ = [
     "add_dsv4_pretrain_args",
@@ -96,64 +96,13 @@ def dsv4_forward_step(data_iterator, model, return_schedule_plan: bool = False):
     return output_tensor, partial(loss_func, loss_mask, model=model)
 
 
-def add_dsv4_pretrain_args(parser):
-    """Register DSV4-specific Megatron CLI flags."""
-    group = parser.add_argument_group(title="dsv4 pretrain")
-    safe_add_argument(
-        group,
-        "--dsv4-dsa-topk-backend",
-        type=str,
-        default="torch",
-        choices=["torch", "flashinfer"],
-        help="Top-k backend for DSV4 DSA indexer.",
-    )
-    safe_add_argument(
-        group,
-        "--original-max-position-embeddings",
-        type=int,
-        default=4096,
-        help="Original maximum position embeddings for YaRN RoPE (MLA).",
-    )
-    safe_add_argument(group, "--beta-fast", type=float, default=32, help="YaRN beta_fast (MLA).")
-    safe_add_argument(group, "--beta-slow", type=float, default=1, help="YaRN beta_slow (MLA).")
-    safe_add_argument(
-        group,
-        "--moe-router-freeze-gate",
-        action="store_true",
-        help="Freeze MoE router gate weights during training.",
-    )
-    safe_add_argument(
-        group,
-        "--freeze-e-score-correction-bias",
-        action="store_true",
-        help="Freeze MoE expert score correction bias during training.",
-    )
-    safe_add_argument(
-        group,
-        "--no-activation-func-clamp-shared-expert",
-        action="store_false",
-        dest="activation_func_clamp_shared_expert",
-        default=True,
-        help="Skip activation clamp inside shared expert MLP.",
-    )
-    return parser
-
-
 def dsv4_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, pg_collection=None):
     """Build GPTModel with callable ``--spec`` hooks."""
     print_rank_0("building DSV4 GPT model ...")
 
     if config is None:
         config = core_transformer_config_from_args(args)
-    config.dsv4_mode = True
-    # ROCm Megatron's TransformerConfig predates the unpadded vocab_size field
-    # used by DSV4 hash routers. tid2eid is [vocab_size, topk] in the checkpoint
-    # even though GPT embeddings use padded_vocab_size.
-    config.vocab_size = int(args.vocab_size)
-    if getattr(args, "pipeline_model_parallel_size", 1) > 1:
-        install_dsv4_pipeline_shape_exchange()
-        config.variable_seq_lengths = True
-        config.batch_p2p_comm = False
+    apply_config_build(config, args, tags={"dsv4", "builder"})
 
     if args.spec is not None:
         transformer_layer_spec = import_module(args.spec)
