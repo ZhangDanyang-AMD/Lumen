@@ -80,7 +80,7 @@ Patches are **not** all applied at import time. Each phase has explicit call sit
 
 | Pattern | API | When |
 |---------|-----|------|
-| Disk bootstrap | `python3 -m lumen.patches <megatron_root>` | Host/container before training |
+| Disk bootstrap | `python3 examples/dsv4/patch_megatron_source.py <megatron_root>` | Host/container before training |
 | IMPORT (default set) | `install_all()` or `import lumen.models.megatron` | Before Megatron model/checkpoint load |
 | IMPORT (opt-in) | `install_cross_entropy()` etc. | CLI flag or explicit call |
 | ARGS | `apply_args_patches(parser, tags={...})` | Entry script `add_*_args` |
@@ -88,7 +88,13 @@ Patches are **not** all applied at import time. Each phase has explicit call sit
 | MODEL_BUILD | `apply_model_build(config, args, tags={...})` or `names={...}` | Spec/builder hooks |
 | TRAINING | `apply_training_patches(names={...})` | Entry script before `pretrain()` |
 
-**Tag filtering** uses subset (AND) semantics — a patch matches when `filter_tags ⊆ patch.tags`:
+**SOURCE CLI tag filtering:**
+
+- Comma in one `--tag` → **OR** (e.g. `--tag dsv4,rocm`, `--tag llama,lora`)
+- Repeat `--tag` → **AND** (e.g. `--tag dsv4 --tag rocm`)
+- No `--tag` → all `default=True` SOURCE patches (dsv4 + rocm + llama)
+
+**CONFIG_BUILD / MODEL_BUILD tag filtering** uses subset (AND) semantics — a patch matches when `filter_tags ⊆ patch.tags`:
 
 ```python
 apply_model_build(config=config, args=args, tags={"dsv4", "spec"})
@@ -189,11 +195,19 @@ PYTHONPATH=. python3 examples/dsv4/patch_megatron_source.py --list --tag rocm
 PYTHONPATH=. python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM
 
 # Dry-run (no file changes)
-PYTHONPATH=. python3 -m lumen.patches /path/to/Megatron-LM --tag llama --dry-run
-PYTHONPATH=. python3 -m lumen.patches /path/to/Megatron-LM --tag lora --dry-run
+PYTHONPATH=. python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama --dry-run
+PYTHONPATH=. python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora --dry-run
 ```
 
-Inside a training container:
+Inside a training container (prefer `patch_megatron_source.py` — no full Lumen import):
+
+```bash
+python3 examples/dsv4/patch_megatron_source.py --list --tag dsv4
+python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM
+python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora
+```
+
+Equivalent module entry (requires full Lumen env):
 
 ```bash
 python3 -m lumen.patches --list --tag dsv4
@@ -248,7 +262,7 @@ Applied by: same entry points as DSV4 SOURCE patches (default set includes both)
 ### SOURCE patches (LLaMA / GPT)
 
 Module: `lumen/patches/source/llama.py`  
-Applied by: LLaMA2/3.1/Qwen3 pretrain scripts, `run_tp1_dp8.sh` (`--tag llama`)
+Applied by: `run_pretrain_llama2_7b.sh`, `run_pretrain_llama31_8b.sh`, `run_pretrain.sh` (Megatron), Qwen3 pretrain (`--tag llama`)
 
 | Name | Tags | Depends on | Env gate | Description |
 |------|------|------------|----------|-------------|
@@ -258,7 +272,7 @@ Applied by: LLaMA2/3.1/Qwen3 pretrain scripts, `run_tp1_dp8.sh` (`--tag llama`)
 
 ```bash
 # LLaMA pretrain bootstrap (inside container)
-PYTHONPATH=/workspace/Lumen python3 -m lumen.patches /path/to/Megatron-LM --tag llama
+PYTHONPATH=/workspace/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama
 ```
 
 Deprecated wrapper: `examples/llama2/scripts/patch_gpt_layer_specs.py` (forwards to registry).
@@ -266,7 +280,7 @@ Deprecated wrapper: `examples/llama2/scripts/patch_gpt_layer_specs.py` (forwards
 ### SOURCE patches (LLaMA LoRA finetune)
 
 Module: `lumen/patches/source/llama_lora.py`  
-Applied by: `run_tp1_dp8.sh` (`--tag lora`, opt-in / `default=False`)
+Applied by: `run_lora_finetune_llama2_70b.sh` (`--tag llama,lora`, opt-in / `default=False`)
 
 | Name | Tags | Depends on | Env gate | Description |
 |------|------|------------|----------|-------------|
@@ -276,8 +290,8 @@ Applied by: `run_tp1_dp8.sh` (`--tag lora`, opt-in / `default=False`)
 | `lora_sft_loss_default` | lora, finetune, megatron | — | — | Default `--sft=True` for MLPerf val loss norm |
 
 ```bash
-# MLPerf LoRA finetune bootstrap
-PYTHONPATH=/workspace/Lumen python3 -m lumen.patches /path/to/Megatron-LM --tag llama --tag lora
+# MLPerf LoRA finetune bootstrap (RMSNorm + LoRA in one OR command)
+PYTHONPATH=/workspace/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora
 ```
 
 ### Config fields introduced (SOURCE)

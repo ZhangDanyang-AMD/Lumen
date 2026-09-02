@@ -1,41 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-# MLPerf-aligned Llama2-70B LoRA SFT — 8x MI300X (v47)
+# LLaMA2-70B LoRA SFT — 8x MI300X (MLPerf-aligned, v47)
 #
-# All speed and convergence optimizations enabled:
-#   - hipBLASLt for all GEMMs (fwd+bwd) with .t() view (no weight transpose copy)
-#   - Wgrad .t() view (eliminates grad_fp8.t().contiguous())
-#   - Fused quant+amax, quant+scale, norm+quant, cast+transpose
-#   - Fused SwiGLU fwd/bwd with fused amax (fused_amax_abs in FP8 path)
-#   - Post-eval allocator fixes (recompute, warmup, GC, cache clear)
-#   - hipThreadExchangeStreamCaptureMode stub (LD_PRELOAD, ~10k fewer HIP calls/3 steps)
-#   - Backend caching + sync elimination
-#   - FP8 weight gradients (hipBLASLt)
-#   - ACL=21 activation checkpointing
-#   - Epoch-level data shuffling
+# Usage:
+#   bash examples/llama2/run_lora_finetune_llama2_70b.sh
 #
-# AITER: lumen/triton_kernels branch (cfaeaad3b) from ZhangDanyang-AMD/aiter.git
-#   - Mixed-dtype hipBLASLt GEMM (E5M2 grad x E4M3 weight)
-#   - Triton fused SwiGLU fwd/bwd kernels
-#   - Triton fused cast+transpose+amax kernel
-#   - CK FMHA v3 attention (fwd+bwd)
+# Parallel layout: TP=1, DP=8.
 #
-# Expected results (v47):
-#   Pre-eval step time:  ~4,730 ms  (power/thermal dependent)
-#   Post-eval step time: ~5,550 ms  (+17% allocator fragmentation)
-#   Memory utilization:  98.7%
-#   Best val_loss:       ~0.922     (passes MLPerf target 0.925)
-#   Convergence step:    ~576
-#
-# Local MLPerf reference (same machine, SEED=1234):
-#   Step time: 3,967 ms | Speed ratio: 1.19x
+# SOURCE patches (Megatron on disk):
+#   --tag llama,lora   (RMSNorm + LoRA opt-in patches, single OR command)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 bash "${SCRIPT_DIR}/runtime_tunables.sh" 2>/dev/null || true
 
-CONTAINER_NAME="lumen_tp1_dp8"
+CONTAINER_NAME="${CONTAINER_NAME:-lumen_llama2_70b_lora}"
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 sudo mkdir -p /data1/lumen/results/tp1_fp8
@@ -129,16 +109,17 @@ docker run --rm --init \
 set -euo pipefail
 
 MEGATRON_ROOT="/workspace/megatron_lm"
-LUMEN_DIR="/workspace/Lumen/examples/llama2"
+LUMEN_ROOT="/workspace/Lumen"
+LUMEN_DIR="${LUMEN_ROOT}/examples/llama2"
+PATCH_SCRIPT="${LUMEN_ROOT}/examples/dsv4/patch_megatron_source.py"
 
 pip install -q huggingface-hub==0.30.0 pandas pyarrow sentencepiece "transformers>=4.43.0" peft safetensors 2>&1 | tail -1
 
 python -c "import numpy; numpy.product = numpy.prod" 2>/dev/null || true
 sed -i "s/np\\.product(/np.prod(/g" "${MEGATRON_ROOT}/megatron/core/dist_checkpointing/exchange_utils.py" 2>/dev/null || true
 
-PYTHONPATH="/workspace/Lumen" python3 -m lumen.patches "${MEGATRON_ROOT}" --tag llama
-PYTHONPATH="/workspace/Lumen" python3 -m lumen.patches "${MEGATRON_ROOT}" --tag lora
+PYTHONPATH="${LUMEN_ROOT}" python3 "${PATCH_SCRIPT}" "${MEGATRON_ROOT}" --tag llama,lora
 
 cd "${LUMEN_DIR}"
-CONFIG="${LUMEN_DIR}/config_MI300X_tp1_dp8.sh" bash run_finetune.sh 2>&1 | tee "${LUMEN_LOG_PATH:-/home/danyzhan/mlperf_llama2_70b.log}"
+CONFIG="${LUMEN_DIR}/config_MI300X_lora_70b.sh" bash run_finetune.sh 2>&1 | tee "${LUMEN_LOG_PATH:-/home/danyzhan/mlperf_llama2_70b.log}"
 '

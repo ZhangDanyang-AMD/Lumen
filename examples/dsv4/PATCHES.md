@@ -2,9 +2,12 @@
 
 > **Full catalog (recommended):** [Megatron Patch Registry](https://zhangdanyang-amd.github.io/Lumen/docs/advance/patch_registry.html) in the official Lumen docs.
 
-Quick reference for DSV4 developers. Each patch is registered in `lumen/patches/` with a
-`PatchPhase` and optional **tags** (AND semantics: `--tag dsv4 --tag builder` matches
-patches whose tag set contains **both**).
+Quick reference for DSV4 developers. Each patch is registered in `lumen/patches/` with a **phase** and optional **tags**.
+Tag filtering on the SOURCE CLI:
+
+- **Comma in one `--tag`** → OR (e.g. `--tag dsv4,rocm` = dsv4 patches **or** rocm patches)
+- **Repeat `--tag`** → AND (e.g. `--tag dsv4 --tag rocm` = patches that have **both** tags)
+- **`--tag-mode any|all`** → override the default mode above
 
 ## Phase overview
 
@@ -38,8 +41,9 @@ PYTHONPATH="${LUMEN_DIR:-.}" python3 examples/dsv4/patch_megatron_source.py --li
 In a training container (full Lumen env):
 
 ```bash
-python3 -m lumen.patches --list
-python3 -m lumen.patches --list --tag dsv4
+python3 examples/dsv4/patch_megatron_source.py --list
+python3 examples/dsv4/patch_megatron_source.py --list --tag dsv4
+python3 examples/dsv4/patch_megatron_source.py "${MEGATRON_PATH}" --tag dsv4,rocm
 ```
 
 Example output:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deprecated — use ``python3 -m lumen.patches <megatron-root> --tag lora``."""
+"""Deprecated — use ``examples/dsv4/patch_megatron_source.py <megatron-root> --tag llama,lora``."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def _ensure_lumen_stub() -> None:
 def main(argv: list[str] | None = None) -> int:
     warnings.warn(
         f"{Path(__file__).name} is deprecated; use "
-        "'PYTHONPATH=<Lumen> python3 -m lumen.patches <megatron-root> --tag lora'",
+        "'PYTHONPATH=<Lumen> python3 examples/dsv4/patch_megatron_source.py <megatron-root> --tag llama,lora'",
         DeprecationWarning,
         stacklevel=2,
     )

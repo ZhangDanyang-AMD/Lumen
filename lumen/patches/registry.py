@@ -79,10 +79,24 @@ def register_patch(
     return decorator
 
 
+def _tags_match(
+    patch_tags: frozenset[str],
+    filter_tags: set[str],
+    tag_mode: str,
+) -> bool:
+    """Return whether *patch_tags* matches *filter_tags* under *tag_mode*."""
+    if tag_mode == "all":
+        return filter_tags.issubset(patch_tags)
+    if tag_mode == "any":
+        return bool(filter_tags & patch_tags)
+    raise ValueError(f"Unknown tag_mode {tag_mode!r} (expected 'all' or 'any')")
+
+
 def _filter_specs(
     phase: PatchPhase,
     *,
     tags: set[str] | None = None,
+    tag_mode: str = "all",
     names: set[str] | None = None,
     default_only: bool = False,
 ) -> list[PatchSpec]:
@@ -94,7 +108,7 @@ def _filter_specs(
             continue
         if default_only and not spec.default:
             continue
-        if tags is not None and not tags.issubset(spec.tags):
+        if tags is not None and not _tags_match(spec.tags, tags, tag_mode):
             continue
         specs.append(spec)
     return specs
@@ -136,13 +150,14 @@ def list_patches(
     phase: PatchPhase | None = None,
     *,
     tags: set[str] | None = None,
+    tag_mode: str = "all",
 ) -> list[PatchSpec]:
     """Return registered patches, optionally filtered."""
     specs = list(PatchRegistry.all())
     if phase is not None:
         specs = [spec for spec in specs if spec.phase is phase]
     if tags is not None:
-        specs = [spec for spec in specs if tags.issubset(spec.tags)]
+        specs = [spec for spec in specs if _tags_match(spec.tags, tags, tag_mode)]
     return sorted(specs, key=lambda spec: (spec.phase.value, spec.name))
 
 
@@ -150,6 +165,7 @@ def apply_patches(
     phase: PatchPhase,
     *,
     tags: set[str] | None = None,
+    tag_mode: str = "all",
     names: set[str] | None = None,
     default_only: bool = False,
     include_disabled: bool = False,
@@ -160,6 +176,7 @@ def apply_patches(
     specs = _filter_specs(
         phase,
         tags=tags,
+        tag_mode=tag_mode,
         names=names,
         default_only=default_only,
     )

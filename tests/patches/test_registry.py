@@ -115,6 +115,24 @@ class TestPatchRegistry:
         apply_patches(PatchPhase.IMPORT, tags={"dsv4"})
         assert calls == ["a"]
 
+    def test_filter_by_tags_any_mode(self):
+        calls: list[str] = []
+
+        @register_patch("a", PatchPhase.IMPORT, tags=frozenset({"dsv4", "rocm"}))
+        def _a():
+            calls.append("a")
+
+        @register_patch("b", PatchPhase.IMPORT, tags=frozenset({"rocm"}))
+        def _b():
+            calls.append("b")
+
+        @register_patch("c", PatchPhase.IMPORT, tags=frozenset({"llama"}))
+        def _c():
+            calls.append("c")
+
+        apply_patches(PatchPhase.IMPORT, tags={"dsv4", "rocm"}, tag_mode="any")
+        assert calls == ["a", "b"]
+
     def test_dry_run_does_not_invoke_patch(self):
         calls: list[str] = []
 

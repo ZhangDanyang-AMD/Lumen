@@ -17,8 +17,15 @@ Examples::
     # Dry-run (no file changes)
     PYTHONPATH=~/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --dry-run --tag llama
 
-    python3 -m lumen.patches /path/to/Megatron-LM
-    python3 -m lumen.patches --list --tag dsv4 --tag rocm
+    # Multiple tags in one flag (OR): DSV4 + standalone ROCm platform patches
+    PYTHONPATH=~/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag dsv4,rocm
+
+    # LLaMA + LoRA in one command (OR)
+    PYTHONPATH=~/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora
+
+    python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM
+    python3 examples/dsv4/patch_megatron_source.py --list --tag dsv4
+    python3 examples/dsv4/patch_megatron_source.py --list --tag dsv4,rocm
 
 See ``examples/dsv4/PATCHES.md`` for IMPORT / CONFIG_BUILD / TRAINING runtime patches.
 """

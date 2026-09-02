@@ -58,7 +58,7 @@ python examples/llama2/scripts/convert_dataset.py \
 ### Step 2 — Launch training
 
 ```bash
-bash examples/llama2/run_tp1_dp8.sh
+bash examples/llama2/run_lora_finetune_llama2_70b.sh
 ```
 
 The script applies system tunables (`runtime_tunables.sh`), launches a Docker container
@@ -96,24 +96,24 @@ rocm-smi --showtemp && rocm-smi --showpower
 ### Script chain
 
 ```
-[Host]  bash run_tp1_dp8.sh
+[Host]  bash run_lora_finetune_llama2_70b.sh
   ├── runtime_tunables.sh (CPU perf governor, THP, cache drop, NUMA/ASLR)
   └── docker run lumen_unit_test:latest bash -c '...'
         │
         ├── pip install runtime deps (huggingface-hub, sentencepiece, peft, ...)
         ├── Fix numpy.product → numpy.prod (Megatron compat)
         │
-        ├── PYTHONPATH=/workspace/Lumen python3 -m lumen.patches ${MEGATRON_ROOT} --tag llama
-        ├── PYTHONPATH=/workspace/Lumen python3 -m lumen.patches ${MEGATRON_ROOT} --tag lora
+        ├── PYTHONPATH=/workspace/Lumen python3 examples/dsv4/patch_megatron_source.py ${MEGATRON_ROOT} --tag llama,lora
         │
-        └── CONFIG=config_MI300X_tp1_dp8.sh bash run_finetune.sh
+        └── CONFIG=config_MI300X_lora_70b.sh bash run_finetune.sh
               └── torchrun --nproc_per_node=8 finetune_llama2.py \
                     --linear-fp8 --fp8-param-storage --lora-rank 16 ...
 ```
 
-The Megatron SOURCE patches are applied at runtime via ``python3 -m lumen.patches``
-(``--tag llama`` for RMSNorm; ``--tag lora`` for LoRA finetune workarounds). They
-modify the container's Megatron-LM-AMD checkout and are idempotent on re-apply.
+The Megatron SOURCE patches are applied at launch via
+``examples/dsv4/patch_megatron_source.py``
+(``--tag llama`` for RMSNorm; ``--tag llama,lora`` for LoRA finetune).
+They modify the container's Megatron-LM-AMD checkout and are idempotent on re-apply.
 
 See [Megatron Patches](#megatron-patches) below for the full patch catalog.
 
@@ -221,13 +221,13 @@ comparison against the AMD MLPerf reference.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `SIGKILL` during checkpoint load | CPU OOM — 8 ranks each loading 128 GB | Ensure ``lumen.patches --tag lora`` ran (`lora_checkpoint_load` adds `mmap=True`) |
+| `SIGKILL` during checkpoint load | CPU OOM — 8 ranks each loading 128 GB | Ensure ``--tag llama,lora`` ran (`lora_checkpoint_load` adds `mmap=True`) |
 | `HIP out of memory` in forward pass | Activation memory overflow | Verify `RECOMPUTE_NUM_LAYERS=21` in config |
-| `grad_norm: 0.000` every step | Broken autograd chain with LoRA + recompute | Ensure ``lumen.patches --tag lora`` ran (`lora_requires_grad`) |
-| NCCL timeout on step 1 | AITER kernel tuning takes > default timeout | Set `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=7200` (already in `run_tp1_dp8.sh`) |
-| Loss spikes / divergence | Missing patches or incomplete env var set | Use `run_tp1_dp8.sh` as-is — registry SOURCE patches and env vars are required |
-| `numpy.product` error on save | Deprecated numpy API in Megatron | Already patched in `run_tp1_dp8.sh` |
-| val\_loss stuck at ~0.937 | Data not shuffled | Set `LUMEN_SHUFFLE_TRAIN=1` (default in `run_tp1_dp8.sh`) |
+| `grad_norm: 0.000` every step | Broken autograd chain with LoRA + recompute | Ensure ``--tag llama,lora`` ran (`lora_requires_grad`) |
+| NCCL timeout on step 1 | AITER kernel tuning takes > default timeout | Set `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=7200` (already in `run_lora_finetune_llama2_70b.sh`) |
+| Loss spikes / divergence | Missing patches or incomplete env var set | Use `run_lora_finetune_llama2_70b.sh` as-is — SOURCE patches and env vars are required |
+| `numpy.product` error on save | Deprecated numpy API in Megatron | Already patched in `run_lora_finetune_llama2_70b.sh` |
+| val\_loss stuck at ~0.937 | Data not shuffled | Set `LUMEN_SHUFFLE_TRAIN=1` (default in `run_lora_finetune_llama2_70b.sh`) |
 | Step time ~400ms above target | GPU thermal throttling at 750W TDP | Normal at thermal equilibrium; check `rocm-smi --showtemp` |
 | AITER JIT compile hangs on first run | 8 ranks wait for rank 0 to finish JIT build | Expected — first launch takes ~5 min extra for kernel compilation |
 
@@ -253,16 +253,15 @@ When running inside the Docker container, Megatron-LM patches are applied at lau
 **RMSNorm / layer norm (SOURCE registry):**
 
 ```bash
-PYTHONPATH=/workspace/Lumen python3 -m lumen.patches /path/to/Megatron-LM --tag llama
+PYTHONPATH=/workspace/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama
 ```
 
 Registered in `lumen/patches/source/llama.py` (`llama_megatron_fused_rmsnorm`, `llama_gpt_layer_specs_rmsnorm`, `llama_transformer_block_rmsnorm`). The legacy `scripts/patch_gpt_layer_specs.py` is a deprecated wrapper.
 
-**LoRA finetune** (`run_tp1_dp8.sh`) applies SOURCE registry patches:
+**LoRA finetune** (``run_lora_finetune_llama2_70b.sh``) applies SOURCE registry patches:
 
 ```bash
-PYTHONPATH=/workspace/Lumen python3 -m lumen.patches /path/to/Megatron-LM --tag llama
-PYTHONPATH=/workspace/Lumen python3 -m lumen.patches /path/to/Megatron-LM --tag lora
+PYTHONPATH=/workspace/Lumen python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora
 ```
 
 Registered in `lumen/patches/source/llama_lora.py`:

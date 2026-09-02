@@ -107,7 +107,8 @@ mkdir -p "${DATA_DIR}"
 python -c "import megatron" 2>/dev/null || { echo "ERROR: megatron not found in image"; exit 1; }
 
 MEGATRON_ROOT="${MEGATRON_ROOT:-/workspace/megatron_lm}"
-PYTHONPATH="${LUMEN_ROOT}" python3 -m lumen.patches "${MEGATRON_ROOT}" --tag llama
+PATCH_SCRIPT="${LUMEN_ROOT}/examples/dsv4/patch_megatron_source.py"
+PYTHONPATH="${LUMEN_ROOT}" python3 "${PATCH_SCRIPT}" "${MEGATRON_ROOT}" --tag llama
 
 python - <<PYEOF
 import os, json, random

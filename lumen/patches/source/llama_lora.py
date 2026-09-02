@@ -2,11 +2,11 @@
 
 These patches are **opt-in** (``default=False``). Apply with::
 
-    python3 -m lumen.patches /path/to/Megatron-LM --tag lora
+    python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag lora
 
 Typical MLPerf finetune bootstrap also needs RMSNorm patches::
 
-    python3 -m lumen.patches /path/to/Megatron-LM --tag llama --tag lora
+    python3 examples/dsv4/patch_megatron_source.py /path/to/Megatron-LM --tag llama,lora
 """
 
 from __future__ import annotations

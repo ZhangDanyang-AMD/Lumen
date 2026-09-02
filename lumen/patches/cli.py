@@ -15,6 +15,40 @@ from lumen.patches.registry import PatchPhase, apply_patches, list_patches
 from lumen.patches.types import PatchResult
 
 
+def parse_cli_tags(
+    raw_tags: list[str] | None,
+    *,
+    tag_mode: str | None = None,
+) -> tuple[set[str] | None, str]:
+    """Parse ``--tag`` CLI values.
+
+    * Comma-separated values (``--tag dsv4,rocm``) use OR matching (``any``).
+    * Repeated flags (``--tag dsv4 --tag rocm``) use AND matching (``all``).
+    * A single tag keeps AND semantics (equivalent to OR for one tag).
+    """
+    if not raw_tags:
+        return None, "all"
+
+    expanded: list[str] = []
+    saw_comma = False
+    for item in raw_tags:
+        parts = [part.strip() for part in item.split(",") if part.strip()]
+        if len(parts) > 1:
+            saw_comma = True
+        expanded.extend(parts)
+
+    if tag_mode is not None:
+        mode = tag_mode
+    elif saw_comma:
+        mode = "any"
+    elif len(raw_tags) > 1:
+        mode = "all"
+    else:
+        mode = "all"
+
+    return set(expanded), mode
+
+
 def _ensure_source_patches_registered() -> None:
     import lumen.patches.source  # noqa: F401
 
@@ -23,6 +57,7 @@ def apply_megatron_source_patches(
     megatron_root: str,
     *,
     tags: set[str] | None = None,
+    tag_mode: str = "all",
     default_only: bool = True,
     dry_run: bool = False,
 ) -> dict[str, PatchResult]:
@@ -32,6 +67,7 @@ def apply_megatron_source_patches(
         PatchPhase.SOURCE,
         megatron_root=megatron_root,
         tags=tags,
+        tag_mode=tag_mode,
         default_only=default_only,
         dry_run=dry_run,
     )
@@ -72,7 +108,17 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         dest="tags",
         default=None,
-        help="Apply only patches with this tag (repeatable)",
+        help=(
+            "Filter patches by tag. Comma-separated values use OR "
+            "(e.g. --tag dsv4,rocm). Repeat --tag for AND "
+            "(e.g. --tag dsv4 --tag rocm)."
+        ),
+    )
+    parser.add_argument(
+        "--tag-mode",
+        choices=("all", "any"),
+        default=None,
+        help="Override tag matching: all=AND (default), any=OR.",
     )
     parser.add_argument(
         "--all",
@@ -88,9 +134,10 @@ def main(argv: list[str] | None = None) -> int:
 
     _ensure_source_patches_registered()
 
+    tag_set, tag_mode = parse_cli_tags(args.tags, tag_mode=args.tag_mode)
+
     if args.list:
-        tag_set = set(args.tags) if args.tags else None
-        for spec in list_patches(PatchPhase.SOURCE, tags=tag_set):
+        for spec in list_patches(PatchPhase.SOURCE, tags=tag_set, tag_mode=tag_mode):
             gate = "enabled" if spec.enabled() else "disabled"
             print(
                 f"{spec.name:40} [{gate}] default={spec.default} "
@@ -103,13 +150,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.megatron_root:
         parser.error("megatron_root is required unless --list is set")
 
-    tag_set = set(args.tags) if args.tags else None
     # Explicit --tag includes opt-in (default=False) patches; bare apply keeps defaults.
     default_only = not args.all and tag_set is None
 
     results = apply_megatron_source_patches(
         args.megatron_root,
         tags=tag_set,
+        tag_mode=tag_mode,
         default_only=default_only,
         dry_run=args.dry_run,
     )

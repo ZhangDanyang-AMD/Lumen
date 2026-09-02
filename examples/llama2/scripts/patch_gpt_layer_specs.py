@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deprecated alias — use ``python3 -m lumen.patches --tag llama`` instead.
+"""Deprecated alias — use ``examples/dsv4/patch_megatron_source.py --tag llama`` instead.
 
 This script applied FusedLayerNorm + RMSNorm fixes directly. The logic now lives
 in ``lumen/patches/source/llama.py`` (PatchPhase.SOURCE).
@@ -27,7 +27,7 @@ def _ensure_lumen_stub() -> None:
 def main(argv: list[str] | None = None) -> int:
     warnings.warn(
         "patch_gpt_layer_specs.py is deprecated; use "
-        "'PYTHONPATH=<Lumen> python3 -m lumen.patches <megatron-root> --tag llama'",
+        "'PYTHONPATH=<Lumen> python3 examples/dsv4/patch_megatron_source.py <megatron-root> --tag llama'",
         DeprecationWarning,
         stacklevel=2,
     )

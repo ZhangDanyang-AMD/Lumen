@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deprecated — use ``python3 -m lumen.patches <megatron-root> --tag lora``."""
+"""Deprecated — use ``examples/dsv4/patch_megatron_source.py <megatron-root> --tag lora``."""
 
 from __future__ import annotations
 

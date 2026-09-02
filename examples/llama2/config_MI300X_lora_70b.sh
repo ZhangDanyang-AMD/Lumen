@@ -1,5 +1,6 @@
 #!/bin/bash
-# TP=1 DP=8 config (v47) — fully aligned with MLPerf MI300X reference.
+# TP=1 DP=8 config (v47) — LLaMA2-70B LoRA MLPerf (config_MI300X_lora_70b.sh).
+# Used by run_lora_finetune_llama2_70b.sh.
 # NousResearch/Llama-2-70b-hf, FP8 HYBRID + LoRA (attention-only), seed=1234.
 # Self-contained (does NOT source base config).
 #
