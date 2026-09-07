@@ -1,0 +1,1620 @@
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+/workspace/Megatron-LM/megatron/core/hyper_comm_grid.py:26: UserWarning: absl.logging is not installed. Using logging.getLogger(__name__) instead. Please install absl.logging with `pip install absl-py` to use absl.logging.
+  warnings.warn(
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+using world size: 8, data-parallel size: 8, context-parallel size: 1, hierarchical context-parallel sizes: None, tensor-model-parallel size: 1, pipeline-model-parallel size: 1
+/workspace/Megatron-LM/megatron/training/utils.py:458: UserWarning: Overriding default arguments for tokenizer_type:HuggingFaceTokenizer with tokenizer_type:HuggingFaceTokenizer
+  warnings.warn(message)
+Number of virtual stages per pipeline stage: None
+accumulate and all-reduce gradients in fp32 for bfloat16 data type.
+using torch.bfloat16 for parameters ...
+/workspace/Megatron-LM/megatron/training/utils.py:455: UserWarning: te_rng_tracker is not enabled, enabling it for CUDA graphs.
+  warnings.warn(message)
+/workspace/Megatron-LM/megatron/training/utils.py:458: UserWarning: --tokenizer-hf-use-fast argument is deprecated and will be removed soon. `use_fast` is set to True by default for HF tokenizers.Use --tokenizer-hf-no-use-fast if you want to disable `use_fast`.
+  warnings.warn(message)
+/workspace/Megatron-LM/megatron/training/utils.py:458: UserWarning: --tokenizer-hf-include-special-tokens argument is deprecated and will be removed soon. `include_special_tokens` is set to True by default for HF tokenizers.Use --tokenizer-hf-no-include-special-tokens if you want to disable `include_special_tokens`.
+  warnings.warn(message)
+------------------------ arguments ------------------------
+  account_for_embedding_in_pipeline_split ......... False
+  account_for_loss_in_pipeline_split .............. False
+  accumulate_allreduce_grads_in_fp32 .............. True
+  activation_func_clamp_value ..................... None
+  adam_beta1 ...................................... 0.9
+  adam_beta2 ...................................... 0.95
+  adam_eps ........................................ 1e-08
+  add_bias_linear ................................. False
+  add_position_embedding .......................... False
+  add_qkv_bias .................................... False
+  adlr_autoresume ................................. False
+  adlr_autoresume_interval ........................ 1000
+  align_grad_reduce ............................... True
+  align_param_gather .............................. False
+  allow_ambiguous_pad_tokens ...................... False
+  app_tag_run_name ................................ None
+  app_tag_run_version ............................. 0.0.0
+  apply_query_key_layer_scaling ................... False
+  apply_residual_connection_post_layernorm ........ False
+  apply_rope_fusion ............................... True
+  apply_wd_to_qk_layernorm ........................ False
+  async_ckpt_cpu_priority ......................... 10
+  async_ckpt_io_priority .......................... 3
+  async_save ...................................... False
+  async_strategy .................................. nvrx
+  attention_backend ............................... AttnBackend.auto
+  attention_dropout ............................... 0.0
+  attention_output_gate ........................... False
+  attention_sink_k ................................ 0
+  attention_softmax_in_fp32 ....................... True
+  auto_detect_ckpt_format ......................... False
+  backend ......................................... megatron
+  barrier_with_L1_time ............................ True
+  batch_invariant_mode ............................ False
+  bert_binary_head ................................ True
+  bert_embedder_type .............................. megatron
+  bert_load ....................................... None
+  bf16 ............................................ True
+  bias_dropout_fusion ............................. True
+  bias_gelu_fusion ................................ False
+  bias_swiglu_fusion .............................. False
+  biencoder_projection_dim ........................ 0
+  biencoder_shared_query_context_model ............ False
+  block_data_path ................................. None
+  cache_mla_latents ............................... False
+  calc_ft_timeouts ................................ False
+  calculate_per_token_loss ........................ False
+  check_for_large_grads ........................... False
+  check_for_nan_in_loss_and_grad .................. True
+  check_for_spiky_loss ............................ False
+  check_weight_hash_across_dp_replicas_interval ... None
+  ckpt_assume_constant_structure .................. False
+  ckpt_convert_format ............................. None
+  ckpt_convert_save ............................... None
+  ckpt_convert_update_legacy_dist_opt_format ...... False
+  ckpt_format ..................................... torch
+  ckpt_fully_parallel_load ........................ False
+  ckpt_fully_parallel_load_exchange_algo .......... broadcast
+  ckpt_fully_parallel_load_process_group .......... dp
+  ckpt_fully_parallel_save ........................ True
+  ckpt_fully_parallel_save_deprecated ............. False
+  ckpt_fully_parallel_save_process_group .......... dp
+  ckpt_start_step ................................. 0
+  ckpt_step ....................................... None
+  classes_fraction ................................ 1.0
+  clip_grad ....................................... 1.0
+  clone_scatter_output_in_embedding ............... True
+  config_logger_dir ............................... 
+  consumed_train_samples .......................... 0
+  consumed_valid_samples .......................... 0
+  context_parallel_size ........................... 1
+  continual_ckpt_path ............................. None
+  cp_comm_type .................................... ['p2p']
+  cpu_offloading_num_layers ....................... 0
+  cpu_offloading_retain_pinned_cpu_buffers ........ False
+  create_all_gather_group ......................... False
+  create_attention_mask_in_dataloader ............. True
+  cross_entropy_fusion_impl ....................... native
+  cross_entropy_loss_fusion ....................... False
+  cuda_graph_impl ................................. transformer_engine
+  cuda_graph_scope ................................ [<CudaGraphScope.attn: 2>]
+  cuda_graph_warmup_steps ......................... 3
+  data_args_path .................................. None
+  data_cache_path ................................. None
+  data_parallel_random_init ....................... False
+  data_parallel_sharding_strategy ................. no_shard
+  data_parallel_size .............................. 8
+  data_path ....................................... None
+  data_per_class_fraction ......................... 1.0
+  data_sharding ................................... False
+  dataloader_defer_npy_index_mmap ................. False
+  dataloader_fast_cache_load ...................... False
+  dataloader_type ................................. cyclic
+  ddp_average_in_collective ....................... False
+  ddp_bucket_size ................................. None
+  ddp_num_buckets ................................. None
+  ddp_pad_buckets_for_high_nccl_busbw ............. False
+  ddp_param_name_patterns_for_fp32_local_accumulation  []
+  ddp_reduce_scatter_with_fp32_accumulation ....... False
+  decode_only_cuda_graphs ......................... False
+  decoder_first_pipeline_num_layers ............... None
+  decoder_last_pipeline_num_layers ................ None
+  decoder_num_layers .............................. None
+  decoder_seq_length .............................. None
+  decoupled_lr .................................... None
+  decoupled_min_lr ................................ None
+  decrease_batch_size_if_needed ................... False
+  defer_embedding_wgrad_compute ................... False
+  delay_wgrad_compute ............................. False
+  deprecated_keep_fp8_weight_transpose_cache ...... False
+  deprecated_use_mcore_models ..................... False
+  deterministic_mode .............................. False
+  dino_bottleneck_size ............................ 256
+  dino_freeze_last_layer .......................... 1
+  dino_head_hidden_size ........................... 2048
+  dino_local_crops_number ......................... 10
+  dino_local_img_size ............................. 96
+  dino_norm_last_layer ............................ False
+  dino_teacher_temp ............................... 0.07
+  dino_warmup_teacher_temp ........................ 0.04
+  dino_warmup_teacher_temp_epochs ................. 30
+  disable_bf16_reduced_precision_matmul ........... False
+  disable_jit_fuser ............................... False
+  disable_straggler_on_startup .................... False
+  disable_symmetric_registration .................. False
+  disable_te_fused_rope ........................... False
+  dist_ckpt_format_deprecated ..................... None
+  dist_ckpt_optim_fully_reshardable ............... False
+  dist_ckpt_save_pre_mcore_014 .................... False
+  dist_ckpt_strictness ............................ assume_ok_unexpected
+  dist_ckpt_workers ............................... 1
+  distrib_optim_fully_reshardable_mem_efficient ... False
+  distribute_saved_activations .................... False
+  distributed_backend ............................. nccl
+  distributed_timeout_minutes ..................... 10
+  distributed_timeout_seconds_after_init .......... None
+  dsa_indexer_head_dim ............................ None
+  dsa_indexer_loss_coeff .......................... None
+  dsa_indexer_n_heads ............................. None
+  dsa_indexer_topk ................................ None
+  dsa_indexer_use_sparse_loss ..................... False
+  dump_param_to_param_group_map ................... None
+  embedding_init_method_std ....................... None
+  embedding_path .................................. None
+  empty_unused_memory_level ....................... 0
+  enable_chunked_prefill .......................... False
+  enable_cuda_graph ............................... False
+  enable_experimental ............................. False
+  enable_ft_package ............................... False
+  enable_full_sharding_in_hsdp .................... False
+  enable_msc ...................................... True
+  enable_one_logger ............................... True
+  encoder_num_layers .............................. 48
+  encoder_seq_length .............................. 4096
+  end_weight_decay ................................ 0.1
+  eod_mask_loss ................................... False
+  ep_overlap_early_attn_memory_release ............ False
+  error_injection_rate ............................ 0
+  error_injection_type ............................ transient_error
+  eval_every ...................................... 0
+  eval_interval ................................... 1000000
+  eval_iters ...................................... 1
+  evidence_data_path .............................. None
+  exit_duration_in_mins ........................... None
+  exit_interval ................................... None
+  exit_on_missing_checkpoint ...................... True
+  exit_signal ..................................... 15
+  exit_signal_handler ............................. False
+  exit_signal_handler_for_dataloader .............. False
+  exit_signal_handler_for_training ................ False
+  exp_avg_dtype ................................... torch.float32
+  exp_avg_sq_dtype ................................ torch.float32
+  experimental_attention_variant .................. None
+  expert_model_parallel_size ...................... 8
+  expert_tensor_parallel_size ..................... 1
+  external_cuda_graph ............................. False
+  fake_process_group .............................. False
+  ffn_hidden_size ................................. 6144
+  fim_data ........................................ False
+  fim_eod_token ................................... <|endoftext|>
+  fim_fragment_rate ............................... None
+  fim_middle_token ................................ <fim_middle>
+  fim_no_prefix ................................... None
+  fim_pad_token ................................... <fim_pad>
+  fim_prefix_token ................................ <fim_prefix>
+  fim_rate ........................................ 0.5
+  fim_split_sample ................................ None
+  fim_spm_rate .................................... 0.5
+  fim_suffix_token ................................ <fim_suffix>
+  fine_grained_activation_offloading .............. False
+  finetune ........................................ True
+  first_last_layers_bf16 .......................... False
+  flash_decode .................................... False
+  flight_recorder_dump_on_timeout ................. True
+  flight_recorder_dump_path ....................... None
+  flight_recorder_extra_dump_on_exec .............. True
+  flight_recorder_include_only_active ............. True
+  flight_recorder_include_stack_trace ............. False
+  flight_recorder_trace_buffer_size ............... 2000
+  fp16 ............................................ False
+  fp16_lm_cross_entropy ........................... False
+  fp32_residual_connection ........................ False
+  fp4 ............................................. None
+  fp4_param ....................................... False
+  fp4_quantizer_factory ........................... None
+  fp4_recipe ...................................... nvfp4
+  fp8 ............................................. None
+  fp8_amax_compute_algo ........................... most_recent
+  fp8_amax_history_len ............................ 1
+  fp8_interval .................................... 1
+  fp8_margin ...................................... 0
+  fp8_param_gather ................................ False
+  fp8_param_storage ............................... False
+  fp8_params ...................................... False
+  fp8_quantizer_factory ........................... None
+  fp8_recipe ...................................... delayed
+  fp8_wgrad ....................................... True
+  fsdp_double_buffer .............................. False
+  fsdp_manual_registration ........................ False
+  ft_num_warmup_iters ............................. 5
+  full_validation ................................. False
+  fused_padded_mla_attention ...................... False
+  fused_residual_rmsnorm .......................... False
+  fused_single_qkv_rope ........................... False
+  global_batch_size ............................... 256
+  glu_linear_offset ............................... 0.0
+  grad_quant_type ................................. None
+  grad_reduce_in_bf16 ............................. False
+  gradient_accumulation_fusion .................... False
+  gradient_reduce_div_fusion ...................... True
+  group_query_attention ........................... True
+  grpo_clamp_eps_lower ............................ 0.01
+  grpo_clamp_eps_upper ............................ 0.01
+  grpo_entropy_term_weight ........................ 0.0
+  grpo_filter_groups_with_same_reward ............. False
+  grpo_group_size ................................. 2
+  grpo_iterations ................................. 2
+  grpo_kl_beta .................................... 0.001
+  grpo_prompts_per_step ........................... 32
+  head_lr_mult .................................... 1.0
+  heterogeneous_layers_config_encoded_json ........ None
+  heterogeneous_layers_config_path ................ None
+  hidden_dropout .................................. 0.0
+  hidden_size ..................................... 2048
+  hierarchical_context_parallel_sizes ............. None
+  high_priority_stream_groups ..................... []
+  hybrid_context_parallel ......................... False
+  hybrid_layer_pattern ............................ None
+  hybrid_override_pattern ......................... None
+  hysteresis ...................................... 2
+  ict_head_size ................................... None
+  ict_load ........................................ None
+  img_h ........................................... 224
+  img_w ........................................... 224
+  indexer_batch_size .............................. 128
+  indexer_log_interval ............................ 1000
+  inference_batch_times_seqlen_threshold .......... -1
+  inference_coordinator_port ...................... None
+  inference_disable_triton_nvls_kernels ........... False
+  inference_dynamic_batching ...................... False
+  inference_dynamic_batching_block_size ........... 256
+  inference_dynamic_batching_buffer_size_gb ....... 40.0
+  inference_dynamic_batching_cuda_graph_max_tokens  16384
+  inference_dynamic_batching_cuda_graph_mixed_prefill_count  16
+  inference_dynamic_batching_enable_prefix_caching  False
+  inference_dynamic_batching_mamba_memory_ratio ... None
+  inference_dynamic_batching_max_requests ......... None
+  inference_dynamic_batching_max_tokens ........... None
+  inference_dynamic_batching_num_cuda_graphs ...... 16
+  inference_dynamic_batching_paused_buffer_size_gb  None
+  inference_dynamic_batching_prefix_caching_coordinator_policy  first_prefix_block
+  inference_dynamic_batching_prefix_caching_eviction_policy  ref_zero
+  inference_dynamic_batching_prefix_caching_mamba_gb  None
+  inference_dynamic_batching_prefix_caching_routing_alpha  0.5
+  inference_dynamic_batching_track_generated_token_events  False
+  inference_dynamic_batching_track_paused_request_events  False
+  inference_dynamic_batching_unified_memory_level . 0
+  inference_fuse_tp_communication ................. False
+  inference_grouped_gemm_backend .................. auto
+  inference_logging_step_interval ................. 0
+  inference_max_requests .......................... 8
+  inference_max_seq_length ........................ 2560
+  inference_moe_disable_fused_quant_kernels ....... False
+  inference_rng_tracker ........................... False
+  inference_text_gen_server_logging ............... False
+  inference_use_synchronous_zmq_collectives ....... False
+  inference_wandb_logging ......................... False
+  init_method_std ................................. 0.02
+  init_method_xavier_uniform ...................... False
+  init_model_with_meta_device ..................... False
+  initial_ckpt_path ............................... None
+  initial_loss_scale .............................. 4294967296
+  inprocess_active_world_size ..................... 8
+  inprocess_barrier_timeout ....................... 120
+  inprocess_completion_timeout .................... 120
+  inprocess_empty_cuda_cache ...................... False
+  inprocess_granularity ........................... node
+  inprocess_hard_timeout .......................... 90
+  inprocess_heartbeat_interval .................... 30
+  inprocess_heartbeat_timeout ..................... 60
+  inprocess_last_call_wait ........................ 1
+  inprocess_max_iterations ........................ None
+  inprocess_monitor_process_interval .............. 1.0
+  inprocess_monitor_thread_interval ............... 1.0
+  inprocess_progress_watchdog_interval ............ 1.0
+  inprocess_restart ............................... False
+  inprocess_soft_timeout .......................... 60
+  inprocess_termination_grace_time ................ 1
+  is_hybrid_model ................................. False
+  iter_per_epoch .................................. 1250
+  iterations_to_skip .............................. []
+  keep_fp8_transpose_cache ........................ False
+  keep_fp8_weight_transpose_cache ................. False
+  kitchen_attention_backend ....................... sdpa
+  kv_channels ..................................... 128
+  kv_lora_rank .................................... 32
+  langrl_env_config ............................... None
+  layernorm_epsilon ............................... 1e-06
+  layernorm_zero_centered_gamma ................... False
+  lazy_mpu_init ................................... False
+  linear_attention_freq ........................... None
+  linear_conv_kernel_dim .......................... 4
+  linear_fp8 ...................................... False
+  linear_fp8_activation ........................... True
+  linear_fp8_amax_algo ............................ max
+  linear_fp8_amax_history ......................... 16
+  linear_fp8_block_size ........................... 128
+  linear_fp8_cache_frozen_weight .................. False
+  linear_fp8_margin ............................... 0
+  linear_fp8_reduce_amax .......................... False
+  linear_fp8_scaling .............................. delayed
+  linear_fp8_wgrad ................................ True
+  linear_key_head_dim ............................. 128
+  linear_num_key_heads ............................ 16
+  linear_num_value_heads .......................... 32
+  linear_value_head_dim ........................... 128
+  lion_beta1 ...................................... 0.95
+  lion_beta2 ...................................... 0.98
+  load ............................................ /nobackup/checkpoints/Qwen3-30B-A3B-tp1-pp1-ep8
+  load_main_params_from_ckpt ...................... False
+  local_rank ...................................... 0
+  log_batch_size_to_tensorboard ................... False
+  log_device_memory_used .......................... False
+  log_energy ...................................... False
+  log_interval .................................... 1
+  log_loss_scale_to_tensorboard ................... True
+  log_max_attention_logit ......................... False
+  log_memory_interval ............................. None
+  log_memory_to_tensorboard ....................... False
+  log_num_zeros_in_grad ........................... False
+  log_params_norm ................................. False
+  log_progress .................................... False
+  log_straggler ................................... False
+  log_throughput .................................. True
+  log_timers_to_tensorboard ....................... False
+  log_validation_ppl_to_tensorboard ............... False
+  log_world_size_to_tensorboard ................... False
+  logging_level ................................... None
+  lora_a2a ........................................ False
+  lora_alpha ...................................... 32.0
+  lora_dropout .................................... 0.1
+  lora_rank ....................................... 0
+  lora_target_modules ............................. all
+  loss_scale ...................................... None
+  loss_scale_window ............................... 1000
+  lr .............................................. 1e-05
+  lr_decay_iters .................................. None
+  lr_decay_samples ................................ None
+  lr_decay_style .................................. cosine
+  lr_warmup_fraction .............................. None
+  lr_warmup_init .................................. 0.0
+  lr_warmup_iters ................................. 2
+  lr_warmup_samples ............................... 0
+  lr_wsd_decay_iters .............................. None
+  lr_wsd_decay_samples ............................ None
+  lr_wsd_decay_style .............................. exponential
+  lumen_attn_backend .............................. csrc
+  lumen_ce_chunk_rows ............................. 0
+  lumen_cp_comm_type .............................. a2a
+  lumen_cpu_offload ............................... False
+  lumen_cross_entropy ............................. False
+  lumen_delay_wgrad ............................... False
+  lumen_fp8_activation_store ...................... False
+  lumen_fp8_attn .................................. none
+  lumen_fp8_checkpoint ............................ False
+  lumen_fp8_param_gather .......................... False
+  lumen_fp8_quant_type ............................ blockwise
+  lumen_fused_mlp ................................. False
+  lumen_fused_rope ................................ False
+  lumen_fused_router .............................. False
+  lumen_gradient_accumulation_fusion .............. False
+  lumen_hip_graphs ................................ False
+  lumen_linear .................................... False
+  lumen_norm ...................................... True
+  lumen_rmsnorm ................................... False
+  lumen_sonic_moe ................................. True
+  lumen_tp_comm_overlap ........................... False
+  lumen_tp_comm_overlap_chunks .................... 4
+  lumen_tp_comm_overlap_method .................... nccl
+  lumen_tp_comm_overlap_mode ...................... none
+  main_grads_dtype ................................ torch.float32
+  main_params_dtype ............................... torch.float32
+  make_vocab_size_divisible_by .................... 1187
+  mamba_head_dim .................................. 64
+  mamba_inference_conv_states_dtype ............... torch.bfloat16
+  mamba_inference_ssm_states_dtype ................ torch.bfloat16
+  mamba_num_groups ................................ 8
+  mamba_num_heads ................................. None
+  mamba_state_dim ................................. 128
+  manual_gc ....................................... False
+  manual_gc_eval .................................. True
+  manual_gc_interval .............................. 0
+  mask_factor ..................................... 1.0
+  mask_prob ....................................... 0.15
+  mask_type ....................................... random
+  masked_softmax_fusion ........................... False
+  max_position_embeddings ......................... 4096
+  max_seqlen_per_dp_cp_rank ....................... None
+  max_tokens_to_oom ............................... 12000
+  megatron_fsdp_grad_comm_dtype ................... None
+  megatron_fsdp_main_grads_dtype .................. None
+  megatron_fsdp_main_params_dtype ................. torch.float32
+  memory_snapshot_path ............................ snapshot.pickle
+  merge_file ...................................... None
+  micro_batch_size ................................ 2
+  microbatch_group_size_per_vp_stage .............. None
+  mid_level_dataset_surplus ....................... 0.005
+  min_loss_scale .................................. 1.0
+  min_lr .......................................... 0.0
+  min_offloaded_tensor_size ....................... 1048576
+  mla_down_proj_fusion ............................ False
+  mlp_chunks_for_prefill .......................... 1
+  mmap_bin_files .................................. True
+  mock_data ....................................... False
+  moe_apply_probs_on_input ........................ False
+  moe_aux_loss_coeff .............................. 0.001
+  moe_deepep_num_sms .............................. 20
+  moe_enable_deepep ............................... False
+  moe_enable_routing_replay ....................... False
+  moe_expert_capacity_factor ...................... None
+  moe_ffn_hidden_size ............................. 768
+  moe_flex_dispatcher_backend ..................... deepep
+  moe_grouped_gemm ................................ False
+  moe_hybridep_num_sms ............................ 16
+  moe_input_jitter_eps ............................ None
+  moe_latent_size ................................. None
+  moe_layer_freq .................................. 1
+  moe_layer_recompute ............................. False
+  moe_mori_kernel_type ............................ None
+  moe_mori_max_tokens_per_rank .................... None
+  moe_pad_expert_input_to_capacity ................ False
+  moe_pad_experts_for_cuda_graph_inference ........ False
+  moe_per_layer_logging ........................... False
+  moe_permute_fusion .............................. True
+  moe_router_bias_update_rate ..................... 0.001
+  moe_router_dtype ................................ fp32
+  moe_router_enable_expert_bias ................... False
+  moe_router_force_biased ......................... None
+  moe_router_force_load_balancing ................. False
+  moe_router_fusion ............................... False
+  moe_router_group_topk ........................... None
+  moe_router_load_balancing_type .................. aux_loss
+  moe_router_num_groups ........................... None
+  moe_router_padding_for_fp8 ...................... False
+  moe_router_padding_for_quantization ............. False
+  moe_router_pre_softmax .......................... False
+  moe_router_score_function ....................... softmax
+  moe_router_topk ................................. 8
+  moe_router_topk_scaling_factor .................. None
+  moe_shared_expert_gate .......................... False
+  moe_shared_expert_intermediate_size ............. None
+  moe_shared_expert_overlap ....................... False
+  moe_token_dispatcher_type ....................... alltoall
+  moe_token_drop_policy ........................... probs
+  moe_upcycling_granularity ....................... 1
+  moe_use_upcycling ............................... False
+  moe_z_loss_coeff ................................ None
+  mrope_section ................................... None
+  mscale .......................................... 1.0
+  mscale_all_dim .................................. 0.0
+  mtp_hybrid_override_pattern ..................... None
+  mtp_loss_scaling_factor ......................... 0.1
+  mtp_num_layers .................................. None
+  mtp_standalone .................................. False
+  mtp_use_repeated_layer .......................... False
+  multi_latent_attention .......................... False
+  multiple_validation_sets ........................ False
+  muon_coefficient_type ........................... quintic
+  muon_extra_scale_factor ......................... 1.0
+  muon_fp32_matmul_prec ........................... medium
+  muon_momentum ................................... 0.9
+  muon_num_ns_steps ............................... 5
+  muon_scalar_optimizer ........................... adam
+  muon_scale_mode ................................. spectral
+  muon_split_qkv .................................. True
+  muon_tp_mode .................................... blockwise
+  muon_use_nesterov ............................... False
+  mup_attn_scale_power ............................ 1.0
+  mup_base_head_dim ............................... None
+  mup_base_hidden_size ............................ None
+  mup_embedding_mult .............................. 1.0
+  mup_output_mult ................................. 1.0
+  mup_width_mult .................................. 1.0
+  mxfp8_block_m_dkv_bwd ........................... 128
+  mxfp8_block_m_dq_bwd ............................ 128
+  mxfp8_block_m_fwd ............................... 128
+  mxfp8_block_n_dkv_bwd ........................... 128
+  mxfp8_block_n_dq_bwd ............................ 128
+  mxfp8_block_n_fwd ............................... 128
+  mxfp8_quant_block_size .......................... 128
+  nccl_all_reduce_for_prefill ..................... False
+  nccl_communicator_config_path ................... None
+  nccl_ub ......................................... False
+  no_load_optim ................................... True
+  no_load_rng ..................................... True
+  no_persist_layer_norm ........................... False
+  no_rope_freq .................................... None
+  no_save_optim ................................... None
+  no_save_rng ..................................... None
+  no_weight_decay_cond_type ....................... None
+  non_persistent_ckpt_type ........................ None
+  non_persistent_global_ckpt_dir .................. None
+  non_persistent_local_ckpt_algo .................. fully_parallel
+  non_persistent_local_ckpt_dir ................... None
+  non_persistent_save_interval .................... None
+  normalization ................................... RMSNorm
+  num_attention_heads ............................. 32
+  num_channels .................................... 3
+  num_classes ..................................... 1000
+  num_dataset_builder_threads ..................... 1
+  num_distributed_optimizer_instances ............. 1
+  num_experts ..................................... 128
+  num_layers ...................................... 48
+  num_layers_at_end_in_bf16 ....................... 1
+  num_layers_at_start_in_bf16 ..................... 1
+  num_layers_per_virtual_pipeline_stage ........... None
+  num_query_groups ................................ 4
+  num_speculative_tokens .......................... 0
+  num_virtual_stages_per_pipeline_rank ............ None
+  num_workers ..................................... 2
+  object_storage_cache_path ....................... None
+  offload_modules ................................. []
+  one_logger_async ................................ False
+  one_logger_project .............................. megatron-lm
+  one_logger_run_name ............................. None
+  onnx_safe ....................................... None
+  openai_gelu ..................................... False
+  optimizer ....................................... adam
+  optimizer_cpu_offload ........................... False
+  optimizer_offload_fraction ...................... 1.0
+  outer_dp_sharding_strategy ...................... no_shard
+  output_bert_embeddings .......................... False
+  overlap_cpu_optimizer_d2h_h2d ................... False
+  overlap_grad_reduce ............................. True
+  overlap_moe_expert_parallel_comm ................ True
+  overlap_p2p_comm ................................ False
+  overlap_p2p_comm_warmup_flush ................... False
+  overlap_param_gather ............................ True
+  overlap_param_gather_with_optimizer_step ........ False
+  override_opt_param_scheduler .................... False
+  padded_vocab_size ............................... None
+  params_dtype .................................... torch.bfloat16
+  patch_dim ....................................... 16
+  per_dataset_sequences_path ...................... None
+  per_split_data_args_path ........................ None
+  perform_initialization .......................... True
+  perform_rl_step ................................. False
+  phase_transition_iterations ..................... None
+  pin_cpu_grads ................................... True
+  pin_cpu_params .................................. True
+  pipeline_model_parallel_comm_backend ............ None
+  pipeline_model_parallel_layout .................. None
+  pipeline_model_parallel_size .................... 1
+  position_embedding_type ......................... rope
+  pretrained_checkpoint ........................... None
+  profile ......................................... False
+  profile_ranks ................................... []
+  profile_step_end ................................ 12
+  profile_step_start .............................. 10
+  pytorch_profiler_collect_callstack .............. False
+  pytorch_profiler_collect_chakra ................. False
+  pytorch_profiler_collect_shapes ................. False
+  q_lora_rank ..................................... None
+  qk_clip ......................................... False
+  qk_clip_alpha ................................... 0.5
+  qk_clip_threshold ............................... 100
+  qk_head_dim ..................................... 128
+  qk_l2_norm ...................................... False
+  qk_layernorm .................................... True
+  qk_pos_emb_head_dim ............................. 64
+  query_in_block_prob ............................. 0.1
+  quick_geglu ..................................... False
+  rampup_batch_size ............................... None
+  rank ............................................ 0
+  recompute_granularity ........................... None
+  recompute_method ................................ None
+  recompute_modules ............................... None
+  recompute_num_layers ............................ None
+  record_memory_history ........................... False
+  refit_method .................................... gloo
+  relative_attention_max_distance ................. 128
+  relative_attention_num_buckets .................. 32
+  replication ..................................... False
+  replication_factor .............................. 2
+  replication_jump ................................ None
+  rerun_mode ...................................... validate_results
+  reset_attention_mask ............................ False
+  reset_position_ids .............................. False
+  result_rejected_tracker_filename ................ None
+  resume_from_hf .................................. False
+  retriever_report_topk_accuracies ................ []
+  retriever_score_scaling ......................... False
+  reuse_grad_buf_for_mxfp8_param_ag ............... False
+  rl_default_temperature .......................... 1.0
+  rl_default_top_k ................................ -1
+  rl_default_top_p ................................ 0
+  rl_generation_batch_size ........................ None
+  rl_importance_sampling_truncation_coef .......... None
+  rl_inference_expert_model_parallel_size ......... None
+  rl_inference_expert_tensor_model_parallel_size .. None
+  rl_inference_logprobs_is_correction ............. False
+  rl_inference_model_unified_memory_level ......... 0
+  rl_inference_parsers ............................ []
+  rl_inference_pipeline_model_parallel_size ....... None
+  rl_inference_tensor_model_parallel_size ......... None
+  rl_kv_cache_management_mode ..................... persist
+  rl_num_parallel_generation_batches .............. None
+  rl_num_parallel_generations ..................... None
+  rl_offload_inference_model_weights_when_idle .... False
+  rl_offload_optimizer_during_inference ........... False
+  rl_parallel_generation_tasks .................... None
+  rl_partial_rollouts ............................. False
+  rl_persist_cuda_graphs .......................... False
+  rl_prompts_per_eval ............................. 32
+  rl_sequence_packing_algo ........................ fifo
+  rl_sequence_packing_max_sequences_per_bin ....... 50
+  rl_skip_bos_token ............................... False
+  rl_training_cuda_graphs ......................... False
+  rl_use_sequence_packing ......................... False
+  rl_verify_model_weights_swap .................... False
+  rope_scaling_factor ............................. 8.0
+  rope_type ....................................... None
+  rotary_base ..................................... 1000000
+  rotary_interleaved .............................. False
+  rotary_percent .................................. 1.0
+  rotary_scaling_factor ........................... 1.0
+  rotary_seq_len_interpolation_factor ............. None
+  run_workload_inspector_server ................... False
+  sample_rate ..................................... 1.0
+  save ............................................ None
+  save_ckpt ....................................... False
+  save_dgrads_interval ............................ None
+  save_interval ................................... 1000000
+  save_retain_interval ............................ None
+  save_wgrads_interval ............................ None
+  scatter_gather_tensors_in_pipeline .............. True
+  seed ............................................ 1234
+  seq_length ...................................... 4096
+  sequence_parallel ............................... False
+  sft ............................................. False
+  sft_tokenizer_prompt_format ..................... nemotron-h-aligned
+  sgd_momentum .................................... 0.9
+  sharp_enabled_group ............................. None
+  short_seq_prob .................................. 0.1
+  size ............................................ 30b-a3b
+  skip_train ...................................... False
+  skipped_train_samples ........................... 0
+  softmax_type .................................... vanilla
+  spec ............................................ None
+  split ........................................... 98,1,1
+  squared_relu .................................... False
+  start_eval_at ................................... 0
+  start_weight_decay .............................. 0.1
+  step_time_atol .................................. 18000
+  straggler_ctrlr_port ............................ 65535
+  straggler_minmax_count .......................... 1
+  strict_fsdp_dtensor_load ........................ True
+  suggested_communication_unit_size ............... None
+  swiglu .......................................... True
+  swin_backbone_type .............................. tiny
+  symmetric_ar_type ............................... None
+  tag ............................................. 
+  target_log_ppl .................................. 3.3
+  te_precision_config_file ........................ None
+  te_rng_tracker .................................. True
+  tensor_model_parallel_size ...................... 1
+  tensorboard_dir ................................. None
+  tensorboard_log_interval ........................ 1
+  tensorboard_queue_size .......................... 1000
+  test_data_path .................................. ['/nobackup/data/fineweb-sample-10BT-26624.jsonl']
+  test_mode ....................................... False
+  tiktoken_num_special_tokens ..................... 1000
+  tiktoken_pattern ................................ None
+  tiktoken_special_tokens ......................... None
+  timing_log_level ................................ 0
+  timing_log_option ............................... minmax
+  titles_data_path ................................ None
+  tokenizer_hf_include_special_tokens ............. True
+  tokenizer_hf_no_include_special_tokens .......... False
+  tokenizer_hf_no_use_fast ........................ False
+  tokenizer_hf_use_fast ........................... True
+  tokenizer_metadata .............................. None
+  tokenizer_model ................................. /nobackup/model/Qwen3-30B-A3B
+  tokenizer_sentencepiece_legacy .................. False
+  tokenizer_special_tokens ........................ None
+  tokenizer_type .................................. HuggingFaceTokenizer
+  torch_fsdp2_reshard_after_forward ............... True
+  tp_comm_bootstrap_backend ....................... nccl
+  tp_comm_bulk_dgrad .............................. True
+  tp_comm_bulk_wgrad .............................. True
+  tp_comm_overlap ................................. False
+  tp_comm_overlap_ag .............................. True
+  tp_comm_overlap_cfg ............................. None
+  tp_comm_overlap_rs .............................. True
+  tp_comm_overlap_rs_dgrad ........................ False
+  tp_comm_split_ag ................................ True
+  tp_comm_split_rs ................................ True
+  tp_only_amax_red ................................ False
+  train_data_path ................................. ['/nobackup/data/fineweb-sample-10BT-26624.jsonl']
+  train_iters ..................................... 20
+  train_samples ................................... None
+  train_sync_interval ............................. None
+  transformer_impl ................................ local
+  transformer_pipeline_model_parallel_size ........ 1
+  trust_remote_code ............................... False
+  untie_embeddings_and_output_weights ............. True
+  use_checkpoint_args ............................. False
+  use_checkpoint_opt_param_scheduler .............. False
+  use_ckpt ........................................ False
+  use_cpu_initialization .......................... None
+  use_dist_ckpt ................................... False
+  use_dist_ckpt_deprecated ........................ False
+  use_distributed_optimizer ....................... True
+  use_flash_attn .................................. False
+  use_fsdp2 ....................................... False
+  use_fused_weighted_squared_relu ................. False
+  use_gloo_process_groups ......................... True
+  use_kitchen_attention ........................... False
+  use_legacy_models ............................... False
+  use_legacy_static_engine ........................ False
+  use_mamba_mem_eff_path .......................... True
+  use_megatron_fsdp ............................... False
+  use_mp_args_from_checkpoint_args ................ False
+  use_mup ......................................... False
+  use_one_sent_docs ............................... False
+  use_persistent_ckpt_worker ...................... False
+  use_precision_aware_optimizer ................... False
+  use_pytorch_profiler ............................ False
+  use_ring_exchange_p2p ........................... False
+  use_rope_scaling ................................ False
+  use_rotary_position_embeddings .................. True
+  use_sdma ........................................ False
+  use_sharp ....................................... False
+  use_te_activation_func .......................... False
+  use_tokenizer_model_from_checkpoint_args ........ True
+  use_torch_fsdp2 ................................. False
+  use_torch_optimizer_for_cpu_offload ............. False
+  use_tp_pp_dp_mapping ............................ False
+  v_head_dim ...................................... 128
+  val_loss_target ................................. None
+  valid_data_path ................................. ['/nobackup/data/fineweb-sample-10BT-26624.jsonl']
+  variable_seq_lengths ............................ False
+  virtual_pipeline_model_parallel_size ............ None
+  vision_backbone_type ............................ vit
+  vision_pretraining .............................. False
+  vision_pretraining_type ......................... classify
+  vocab_extra_ids ................................. 0
+  vocab_file ...................................... None
+  vocab_size ...................................... None
+  wandb_entity .................................... None
+  wandb_exp_name .................................. None
+  wandb_project ................................... None
+  wandb_save_dir .................................. None
+  warmup_steps .................................... 0
+  weight_decay .................................... 0.1
+  weight_decay_incr_style ......................... constant
+  wgrad_deferral_limit ............................ 0
+  window_attn_skip_freq ........................... None
+  window_size ..................................... None
+  world_size ...................................... 8
+  yaml_cfg ........................................ None
+-------------------- end of arguments ---------------------
+INFO:megatron.core.num_microbatches_calculator:setting number of microbatches to constant 16
+INFO:megatron.core.tokenizers.utils.build_tokenizer: > padded vocab (size: 151669) with 267 dummy tokens (new size: 151936)
+WARNING:megatron.core.rerun_state_machine:RerunStateMachine initialized in mode RerunMode.VALIDATE_RESULTS
+> initializing torch distributed ...
+WARNING: one_logger package is required to enable e2e metrics tracking. please go to https://confluence.nvidia.com/display/MLWFO/Package+Repositories for details to install it
+[Gloo] Rank [Gloo] Rank 10 is connected to  is connected to 7 peer ranks. 7Expected number of connected peer ranks is :  peer ranks. 7Expected number of connected peer ranks is : 7
+
+[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank [Gloo] Rank 56 is connected to  is connected to 77 peer ranks.  peer ranks. Expected number of connected peer ranks is : Expected number of connected peer ranks is : 77
+
+[Gloo] Rank 1 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 0 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 2 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 4 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 3 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 5 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 7 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 6 is connected to 7 peer ranks. Expected number of connected peer ranks is : 7
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+> initialized tensor model parallel with size 1
+> initialized pipeline model parallel with size 1
+> setting random seeds to 1234 ...
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
+> compiling dataset index builder ...
+make: Entering directory '/workspace/Megatron-LM/megatron/core/datasets'
+make: Nothing to be done for 'default'.
+make: Leaving directory '/workspace/Megatron-LM/megatron/core/datasets'
+>>> done with dataset index builder. Compilation time: 0.022 seconds
+/opt/venv/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(  # warn only once
+[rank0]:[W910 03:41:53.615061891 ProcessGroupNCCL.cpp:5072] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+time to initialize megatron (seconds): 26.095
+/opt/venv/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(  # warn only once
+[after in-process setup and before initialize_megatron] datetime: 2026-09-10 03:41:51.841844 
+[after in-job setup and before initialize_megatron] datetime: 2026-09-10 03:41:51.877736 
+[after megatron is initialized] datetime: 2026-09-10 03:42:13.001278 
+building Qwen3-30B-A3B model with Lumen attention ...
+> Replaced 193 RMSNorm modules with LumenRMSNorm
+INFO:lumen.config:> Replaced 48 Megatron MoE expert modules with SonicMoE
+INFO:lumen.config:> LumenConfig enabled (format=fp8_e4m3, scaling=none, lumen_norm, sonic_moe)
+ > number of parameters on (tensor, pipeline) model parallel rank (0, 0): 5164972032
+INFO:megatron.core.distributed.distributed_data_parallel:Setting up DistributedDataParallel with config DistributedDataParallelConfig(grad_reduce_in_fp32=True, overlap_grad_reduce=True, overlap_param_gather=True, align_param_gather=False, use_distributed_optimizer=True, num_distributed_optimizer_instances=1, check_for_nan_in_grad=True, check_for_large_grads=False, bucket_size=40000000, pad_buckets_for_high_nccl_busbw=False, reduce_scatter_with_fp32_accumulation=False, param_name_patterns_for_fp32_local_accumulation=(), average_in_collective=False, fp8_param_gather=False, reuse_grad_buf_for_mxfp8_param_ag=False, use_megatron_fsdp=False, use_custom_fsdp=False, data_parallel_sharding_strategy='no_shard', gradient_reduce_div_fusion=True, suggested_communication_unit_size=None, keep_fp8_transpose_cache=False, nccl_ub=False, fsdp_double_buffer=False, fsdp_db_use_persist_buf_on_alloc_fail=False, fsdp_all_gather_in_start_param_sync=True, outer_dp_sharding_strategy='no_shard', disable_symmetric_registration=False, fsdp_manual_registration=False, delay_wgrad_compute=False, megatron_fsdp_main_params_dtype=torch.float32, megatron_fsdp_main_grads_dtype=None, megatron_fsdp_grad_comm_dtype=None)
+INFO:megatron.core.distributed.param_and_grad_buffer:Number of buckets for gradient all-reduce / reduce-scatter: 21
+Params for bucket 1 (311164928 elements, 311164928 padded size, 0 param(s) with extra main_grads):
+	module.output_layer.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 2 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.final_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 3 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.45.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 4 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.43.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 5 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.40.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 6 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.38.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 7 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.35.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 8 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.33.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 9 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.30.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 10 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.28.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 11 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.25.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 12 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.23.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 13 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.20.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 14 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.18.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 15 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.15.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 16 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.13.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 17 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.10.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 18 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.8.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 19 (46670336 elements, 46670336 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.5.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 20 (49033984 elements, 49033984 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.3.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.mlp.router.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.pre_mlp_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.self_attention.k_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.self_attention.q_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.self_attention.linear_qkv.weight (param.main_grad.dtype=torch.float32)
+Params for bucket 21 (319555584 elements, 319555584 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.0.self_attention.linear_proj.weight (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.input_layernorm.weight (param.main_grad.dtype=torch.float32)
+	module.embedding.word_embeddings.weight (param.main_grad.dtype=torch.float32)
+INFO:megatron.core.distributed.param_and_grad_buffer:Number of buckets for gradient all-reduce / reduce-scatter: 48
+Params for bucket 1 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.47.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.47.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 2 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.46.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.46.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 3 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.45.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.45.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 4 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.44.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.44.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 5 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.43.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.43.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 6 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.42.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.42.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 7 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.41.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.41.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 8 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.40.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.40.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 9 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.39.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.39.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 10 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.38.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.38.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 11 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.37.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.37.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 12 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.36.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.36.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 13 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.35.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.35.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 14 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.34.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.34.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 15 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.33.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.33.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 16 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.32.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.32.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 17 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.31.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.31.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 18 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.30.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.30.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 19 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.29.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.29.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 20 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.28.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.28.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 21 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.27.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.27.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 22 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.26.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.26.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 23 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.25.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.25.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 24 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.24.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.24.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 25 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.23.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.23.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 26 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.22.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.22.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 27 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.21.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.21.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 28 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.20.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.20.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 29 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.19.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.19.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 30 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.18.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.18.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 31 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.17.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.17.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 32 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.16.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.16.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 33 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.15.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.15.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 34 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.14.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.14.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 35 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.13.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.13.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 36 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.12.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.12.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 37 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.11.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.11.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 38 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.10.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.10.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 39 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.9.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.9.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 40 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.8.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.8.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 41 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.7.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.7.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 42 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.6.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.6.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 43 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.5.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.5.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 44 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.4.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.4.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 45 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.3.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.3.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 46 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.2.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.2.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 47 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.1.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.1.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+Params for bucket 48 (75497472 elements, 75497472 padded size, 0 param(s) with extra main_grads):
+	module.decoder.layers.0.mlp.experts.w2 (param.main_grad.dtype=torch.float32)
+	module.decoder.layers.0.mlp.experts.w1 (param.main_grad.dtype=torch.float32)
+INFO:megatron.core.optimizer:Setting up optimizer with config AdamOptimizerConfig(lr=1e-05, min_lr=0.0, decoupled_lr=None, decoupled_min_lr=None, weight_decay=0.1, apply_wd_to_qk_layernorm=False, fp8_recipe='delayed', fp16=False, bf16=True, reuse_grad_buf_for_mxfp8_param_ag=False, params_dtype=torch.bfloat16, use_precision_aware_optimizer=False, store_param_remainders=True, main_grads_dtype=torch.float32, main_params_dtype=torch.float32, exp_avg_dtype=torch.float32, exp_avg_sq_dtype=torch.float32, optimizer='adam', loss_scale=None, initial_loss_scale=4294967296, min_loss_scale=1.0, loss_scale_window=1000, hysteresis=2, adam_beta1=0.9, adam_beta2=0.95, adam_eps=1e-08, decoupled_weight_decay=True, sgd_momentum=0.9, muon_momentum=0.9, muon_split_qkv=True, muon_use_nesterov=False, muon_scale_mode='spectral', muon_fp32_matmul_prec='medium', muon_coefficient_type='quintic', muon_num_ns_steps=5, muon_tp_mode='blockwise', muon_extra_scale_factor=1.0, muon_scalar_optimizer='adam', lion_beta1=0.95, lion_beta2=0.98, use_distributed_optimizer=True, overlap_param_gather=True, overlap_param_gather_with_optimizer_step=False, optimizer_cpu_offload=False, optimizer_offload_fraction=1.0, use_torch_optimizer_for_cpu_offload=False, overlap_cpu_optimizer_d2h_h2d=False, pin_cpu_grads=True, pin_cpu_params=True, clip_grad=1.0, log_num_zeros_in_grad=False, barrier_with_L1_time=True, timers=<megatron.core.timers.Timers object at 0x7970c5fb5280>, config_logger_dir='')
+INFO:megatron.core.optimizer_param_scheduler:> learning rate decay style: cosine
+ loading checkpoint from /nobackup/checkpoints/Qwen3-30B-A3B-tp1-pp1-ep8 at iteration 1
+could not find arguments in the checkpoint ...
+> remapped 48 legacy fused input-norm checkpoint keys to the local transformer spec
+> remapped 48 legacy fused input-norm checkpoint keys to the local transformer spec
+load_return: None
+load_return: None
+load_return: None
+load_return: None
+ checkpoint version 3.0
+load_return: None
+load_return: None
+load_return: None
+load_return: None
+  successfully loaded checkpoint from /nobackup/checkpoints/Qwen3-30B-A3B-tp1-pp1-ep8 [ t 1/1, p 1/1 ] at iteration 0
+INFO:megatron.core.timers:(min, max) time across ranks (ms):
+    load-checkpoint ................................: (33098.88, 33098.94)
+[after model, optimizer, and learning rate scheduler are built] datetime: 2026-09-10 03:42:47.804876 
+> building train, validation, and test datasets ...
+ > datasets target sizes (minimum size):
+    train:      5120
+    validation: 256
+    test:       256
+> building train, validation, and test pretraining datasets ...
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+INFO:lumen.models.llama31.dataset:Built 4513 pretraining samples (seq_length=4096) from /nobackup/data/fineweb-sample-10BT-26624.jsonl (18490442 tokens total)
+> finished creating pretraining datasets ...
+[after dataloaders are built] datetime: 2026-09-10 03:43:49.329656 
+done with setup ...
+training ...
+INFO:megatron.core.timers:(min, max) time across ranks (ms):
+    model-and-optimizer-setup ......................: (34803.08, 34803.33)
+    train/valid/test-data-iterators-setup ..........: (61524.15, 61524.22)
+Overwriting rerun_state_machine.current_iteration from -1 to 0...
+[before the start of training step] datetime: 2026-09-10 03:43:49.332860 
+INFO:megatron.core.transformer.cuda_graphs:Rank 0: 48 graphable layers.
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+WARNING:megatron.core.rerun_state_machine:Result validation enabled
+/opt/venv/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(  # warn only once
+Number of parameters in transformer block in billions:  29.90 [2026-09-10 03:45:43.081491] iteration        1/      20 | consumed samples:          256 | elapsed time per iteration (ms): 113748.5 | mem usages: 0.5858 | throughput per GPU (TFLOP/s/GPU): 26.5 | learning rate: 5.000000E-06 | global batch size:   256 | lm loss: 2.562533E+00 | load_balancing_loss: 1.904076E+00 | loss scale: 1.0 | grad norm: 6.768 | number of skipped iterations:   0 | number of nan iterations:   0 |
+Number of active parameters in transformer block in billions:  2.72
+Number of parameters in embedding layers in billions: 0.62
+Total number of parameters in billions: 30.52
+Total number of active parameters in billions: 3.34
+
+Number of parameters in most loaded shard in billions: 30.5195
+compute_activation_memory_without_sp
+Activation memory footprint per transformer layer (precise, without SP): 544.0 MB
+Theoretical memory footprints: weight and optimizer=218292.67 MB, activation=29960.77 MB, total=248253.44 MB
+
+[Rank 0] (after 1 iterations) memory (MB) | allocated: 91718.93 | max allocated: 97691.70 | reserved: 134456.00 | max reserved: 134456.00
+Number of parameters in transformer block in billions:  29.90 [2026-09-10 03:45:58.125129] iteration        2/      20 | consumed samples:          512 | elapsed time per iteration (ms): 64396.0 | mem usages: 0.7035 | throughput per GPU (TFLOP/s/GPU): 46.8 | learning rate: 1.000000E-05 | global batch size:   256 | lm loss: 2.578601E+00 | load_balancing_loss: 1.912150E+00 | loss scale: 1.0 | grad norm: 6.654 | number of skipped iterations:   0 | number of nan iterations:   0 |
+Number of active parameters in transformer block in billions:  2.72
+Number of parameters in embedding layers in billions: 0.62
+
+Total number of parameters in billions: 30.52
+Total number of active parameters in billions: 3.34
+Number of parameters in most loaded shard in billions: 30.5195
+compute_activation_memory_without_sp
+Activation memory footprint per transformer layer (precise, without SP): 544.0 MB
+Theoretical memory footprints: weight and optimizer=218292.67 MB, activation=29960.77 MB, total=248253.44 MB
+
+[Rank 0] (after 2 iterations) memory (MB) | allocated: 91715.72 | max allocated: 126840.30 | reserved: 162758.00 | max reserved: 162758.00
+Number of parameters in transformer block in billions:  29.90 [2026-09-10 03:46:10.789113] iteration        3/      20 | consumed samples:          768 | elapsed time per iteration (ms): 12663.8 | mem usages: 0.7035 | throughput per GPU (TFLOP/s/GPU): 238.1 | learning rate: 9.924039E-06 | global batch size:   256 | lm loss: 2.563235E+00 | load_balancing_loss: 1.943104E+00 | loss scale: 1.0 | grad norm: 5.921 | number of skipped iterations:   0 | number of nan iterations:   0 |
+
+Number of active parameters in transformer block in billions:  2.72
+Number of parameters in embedding layers in billions: 0.62
+Total number of parameters in billions: 30.52
+Total number of active parameters in billions: 3.34
+Number of parameters in most loaded shard in billions: 30.5195
+compute_activation_memory_without_sp
+Activation memory footprint per transformer layer (precise, without SP): 544.0 MB
+Theoretical memory footprints: weight and optimizer=218292.67 MB, activation=29960.77 MB, total=248253.44 MB
+
+[Rank 0] (after 3 iterations) memory (MB) | allocated: 91718.25 | max allocated: 126892.35 | reserved: 163200.00 | max reserved: 163200.00
+INFO:megatron.core.transformer.cuda_graphs:Start CUDA Graphs capture...
+INFO:megatron.core.transformer.cuda_graphs:Time spent in CUDA Graphs capture on rank 0: 6.916478395462036s
+ [2026-09-10 03:46:32.146205] iteration        4/      20 | consumed samples:         1024 | elapsed time per iteration (ms): 21356.9 | mem usages: 0.6861 | throughput per GPU (TFLOP/s/GPU): 141.2 | learning rate: 9.698463E-06 | global batch size:   256 | lm loss: 2.551686E+00 | load_balancing_loss: 1.940954E+00 | loss scale: 1.0 | grad norm: 4.288 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:46:44.483614] iteration        5/      20 | consumed samples:         1280 | elapsed time per iteration (ms): 12337.2 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 244.4 | learning rate: 9.330127E-06 | global batch size:   256 | lm loss: 2.498884E+00 | load_balancing_loss: 1.947590E+00 | loss scale: 1.0 | grad norm: 2.387 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:46:57.393259] iteration        6/      20 | consumed samples:         1536 | elapsed time per iteration (ms): 12909.5 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 233.6 | learning rate: 8.830222E-06 | global batch size:   256 | lm loss: 2.419268E+00 | load_balancing_loss: 1.938347E+00 | loss scale: 1.0 | grad norm: 1.272 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:47:09.762066] iteration        7/      20 | consumed samples:         1792 | elapsed time per iteration (ms): 12368.6 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 243.8 | learning rate: 8.213938E-06 | global batch size:   256 | lm loss: 2.472686E+00 | load_balancing_loss: 1.967960E+00 | loss scale: 1.0 | grad norm: 1.377 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:47:22.688527] iteration        8/      20 | consumed samples:         2048 | elapsed time per iteration (ms): 12926.3 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 233.3 | learning rate: 7.500000E-06 | global batch size:   256 | lm loss: 2.480073E+00 | load_balancing_loss: 1.958250E+00 | loss scale: 1.0 | grad norm: 1.257 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:47:34.971736] iteration        9/      20 | consumed samples:         2304 | elapsed time per iteration (ms): 12283.0 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 245.5 | learning rate: 6.710101E-06 | global batch size:   256 | lm loss: 2.439700E+00 | load_balancing_loss: 1.942014E+00 | loss scale: 1.0 | grad norm: 1.006 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:47:47.796510] iteration       10/      20 | consumed samples:         2560 | elapsed time per iteration (ms): 12824.6 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 235.1 | learning rate: 5.868241E-06 | global batch size:   256 | lm loss: 2.406171E+00 | load_balancing_loss: 1.960204E+00 | loss scale: 1.0 | grad norm: 0.776 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:48:00.037665] iteration       11/      20 | consumed samples:         2816 | elapsed time per iteration (ms): 12241.0 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 246.3 | learning rate: 5.000000E-06 | global batch size:   256 | lm loss: 2.447607E+00 | load_balancing_loss: 1.916989E+00 | loss scale: 1.0 | grad norm: 0.673 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:48:12.855391] iteration       12/      20 | consumed samples:         3072 | elapsed time per iteration (ms): 12817.5 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 235.3 | learning rate: 4.131759E-06 | global batch size:   256 | lm loss: 2.416220E+00 | load_balancing_loss: 1.953258E+00 | loss scale: 1.0 | grad norm: 0.574 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:48:25.077729] iteration       13/      20 | consumed samples:         3328 | elapsed time per iteration (ms): 12222.2 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 246.7 | learning rate: 3.289899E-06 | global batch size:   256 | lm loss: 2.398503E+00 | load_balancing_loss: 1.893175E+00 | loss scale: 1.0 | grad norm: 0.540 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:48:37.316773] iteration       14/      20 | consumed samples:         3584 | elapsed time per iteration (ms): 12238.9 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 246.4 | learning rate: 2.500000E-06 | global batch size:   256 | lm loss: 2.385709E+00 | load_balancing_loss: 1.921047E+00 | loss scale: 1.0 | grad norm: 0.555 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:48:50.090620] iteration       15/      20 | consumed samples:         3840 | elapsed time per iteration (ms): 12773.7 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 236.1 | learning rate: 1.786062E-06 | global batch size:   256 | lm loss: 2.419574E+00 | load_balancing_loss: 1.901975E+00 | loss scale: 1.0 | grad norm: 0.555 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:49:02.269683] iteration       16/      20 | consumed samples:         4096 | elapsed time per iteration (ms): 12178.9 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 247.6 | learning rate: 1.169778E-06 | global batch size:   256 | lm loss: 2.392904E+00 | load_balancing_loss: 1.909490E+00 | loss scale: 1.0 | grad norm: 0.504 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:49:14.979530] iteration       17/      20 | consumed samples:         4352 | elapsed time per iteration (ms): 12709.7 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 237.3 | learning rate: 6.698730E-07 | global batch size:   256 | lm loss: 2.365706E+00 | load_balancing_loss: 1.883140E+00 | loss scale: 1.0 | grad norm: 0.473 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:49:27.223828] iteration       18/      20 | consumed samples:         4608 | elapsed time per iteration (ms): 12244.1 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 246.3 | learning rate: 3.015369E-07 | global batch size:   256 | lm loss: 2.394468E+00 | load_balancing_loss: 1.928208E+00 | loss scale: 1.0 | grad norm: 0.452 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:49:39.944940] iteration       19/      20 | consumed samples:         4864 | elapsed time per iteration (ms): 12720.9 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 237.0 | learning rate: 7.596123E-08 | global batch size:   256 | lm loss: 2.387308E+00 | load_balancing_loss: 1.880704E+00 | loss scale: 1.0 | grad norm: 0.452 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-09-10 03:49:52.213996] iteration       20/      20 | consumed samples:         5120 | elapsed time per iteration (ms): 12268.9 | mem usages: 0.6878 | throughput per GPU (TFLOP/s/GPU): 245.8 | learning rate: 0.000000E+00 | global batch size:   256 | lm loss: 2.384702E+00 | load_balancing_loss: 1.903139E+00 | loss scale: 1.0 | grad norm: 0.426 | number of skipped iterations:   0 | number of nan iterations:   0 |
+INFO:megatron.core.transformer.cuda_graphs:Rank 0: 768 graphs deleted with explicit reset, 0 graphs deleted without explicit reset.
+[after training is done] datetime: 2026-09-10 03:49:55.196092 
+WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.DISABLED
+Evaluating on 256 samples
+Evaluating iter 1/1
+INFO:megatron.core.timers:(min, max) time across ranks (ms):
+    evaluate .......................................: (6000.06, 6001.21)
+WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
+----------------------------------------------------------------------------------------------------------------
+ validation loss at iteration 20 on validation set | lm loss value: 2.342302E+00 | lm loss PPL: 1.040516E+01 | 
+----------------------------------------------------------------------------------------------------------------
+/opt/venv/lib/python3.12/site-packages/torch/distributed/distributed_c10d.py:4876: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  warnings.warn(  # warn only once
+WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.DISABLED
+Evaluating on 256 samples
+Evaluating iter 1/1
+INFO:megatron.core.timers:(min, max) time across ranks (ms):
+    evaluate .......................................: (5665.04, 5666.28)
+WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
+----------------------------------------------------------------------------------------------------------
+ validation loss at iteration 20 on test set | lm loss value: 2.342302E+00 | lm loss PPL: 1.040516E+01 | 
+----------------------------------------------------------------------------------------------------------
+[rank0]:[W910 03:50:09.481396362 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank1]:[W910 03:50:12.909829162 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank7]:[W910 03:50:13.141305229 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank2]:[W910 03:50:13.181569004 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank6]:[W910 03:50:13.211800939 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank4]:[W910 03:50:13.272206431 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank5]:[W910 03:50:13.302405897 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
+[rank3]:[W910 03:50:13.312497817 ProcessGroupNCCL.cpp:1524] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
