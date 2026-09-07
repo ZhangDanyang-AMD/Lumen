@@ -25,6 +25,14 @@ from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
 )
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+        quant_fp8_blockwise_for_weight_kernel,
+    )
+    _HAVE_WEIGHT_BLOCKWISE = True
+except ImportError:
+    quant_fp8_blockwise_for_weight_kernel = None  # type: ignore[assignment]
+    _HAVE_WEIGHT_BLOCKWISE = False
+try:
+    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         requant_fp8_row_to_col_kernel,
     )
     _HAVE_REQUANT_ROW_TO_COL = True
@@ -97,6 +105,62 @@ def quant_fp8_blockwise_impl(
         axis,
     )
     return x_fp8, x_scales
+
+
+@triton_op("lumen::quant_fp8_blockwise_weight_3d", mutates_args=())
+def quant_fp8_blockwise_weight_3d(
+    w: torch.Tensor,
+    dtype: torch.dtype,
+    block_size: int = 128,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Batched 128×128 blockwise FP8 quant for expert weights ``[E, K, N]``.
+
+    Returns ``(w_fp8, w_scales)`` with scales ``[E, ceil(K/B), ceil(N/B)]``
+    stored as dequant multipliers (``amax / FP8_MAX``).
+    """
+    assert w.dim() == 3, "expert weights must be [E, K, N]"
+    w = w.contiguous()
+    num_experts, rows, cols = w.shape
+    w_fp8 = torch.empty(num_experts, rows, cols, dtype=dtype, device=w.device)
+    scale_k = triton.cdiv(rows, block_size)
+    scale_n = triton.cdiv(cols, block_size)
+    w_scales = torch.empty(
+        num_experts, scale_k, scale_n, dtype=torch.float32, device=w.device
+    )
+    if num_experts == 0 or rows == 0 or cols == 0:
+        return w_fp8, w_scales
+    if not _HAVE_WEIGHT_BLOCKWISE:
+        raise RuntimeError("quant_fp8_blockwise_for_weight_kernel is not in this aiter build")
+    wrap_triton(quant_fp8_blockwise_for_weight_kernel)[(num_experts, scale_k, scale_n)](
+        w,
+        w_fp8,
+        w_scales,
+        rows,
+        cols,
+        block_size,
+        torch.finfo(dtype).max,
+    )
+    return w_fp8, w_scales
+
+
+@quant_fp8_blockwise_weight_3d.register_fake
+def quant_fp8_blockwise_weight_3d_meta(
+    w: torch.Tensor,
+    dtype: torch.dtype,
+    block_size: int = 128,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    assert w.dim() == 3, "expert weights must be [E, K, N]"
+    num_experts, rows, cols = w.shape
+    return (
+        torch.empty(num_experts, rows, cols, dtype=dtype, device=w.device),
+        torch.empty(
+            num_experts,
+            triton.cdiv(rows, block_size),
+            triton.cdiv(cols, block_size),
+            dtype=torch.float32,
+            device=w.device,
+        ),
+    )
 
 
 @quant_fp8_blockwise_impl.register_fake

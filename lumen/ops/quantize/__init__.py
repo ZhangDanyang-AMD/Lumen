@@ -17,6 +17,7 @@ from lumen.ops.quantize.ops import (
     is_cdna4,
     quant_fp8_blockwise_impl,
     quant_fp8_blockwise_segment_m_impl,
+    quant_fp8_blockwise_weight_3d,
     quant_fp8_tensorwise_impl,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "is_cdna4",
     "quant_fp8_blockwise_impl",
     "quant_fp8_blockwise_segment_m_impl",
+    "quant_fp8_blockwise_weight_3d",
     "quant_fp8_tensorwise_impl",
     # Quantized linear (autograd)
     "QuantizedLinearFunction",

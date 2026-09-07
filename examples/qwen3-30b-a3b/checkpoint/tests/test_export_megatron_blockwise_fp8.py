@@ -84,9 +84,9 @@ def test_unaligned_linear_weight_is_rejected():
         quantize_model_state(model, lambda weight: (weight, torch.ones(1, 1)))
 
 
-def test_scale_key_is_explicitly_not_hf_scale_inv():
+def test_scale_key_matches_official_weight_scale_inv():
     assert scale_key_for("decoder.layers.0.mlp.weight") == (
-        "decoder.layers.0.mlp.weight_scale"
+        "decoder.layers.0.mlp.weight_scale_inv"
     )
     with pytest.raises(ValueError, match=r"\.weight"):
         scale_key_for("decoder.layers.0.mlp.bias")

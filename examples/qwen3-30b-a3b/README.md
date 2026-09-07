@@ -73,21 +73,38 @@ MOE_IMPL=sonic TRAIN_STEPS=5 SEQ_LEN=1024 \
 
 ### Blockwise FP8 training and offline export
 
-Set `FP8_MODE=blockwise2d` to keep BF16 master parameters while running
-eligible linear GEMMs with E4M3 weights quantized in 128x128 blocks and
-dynamic 1x128 activations:
+The default FP8 recipe (`FP8_MODE=blockwise2d`) matches official
+[`Qwen/Qwen3-30B-A3B-FP8`](https://huggingface.co/Qwen/Qwen3-30B-A3B-FP8)
+fine-grained FP8 (`fmt=e4m3`, `weight_block_size=[128,128]`,
+`activation_scheme=dynamic`):
+
+| | Official `-FP8` | This training path |
+|---|---|---|
+| Weight | E4M3, 128×128 tiles | same (`blockwise2d`) |
+| Activation | dynamic 1×128 | same (per-token × 128 channels) |
+| FP8 GEMMs | `q/k/v/o_proj` + expert `gate/up/down` | fused `linear_qkv` / `linear_proj` + Sonic fused `w1` (gate+up) / `w2` |
+| Forward + backward | inference dump is forward-only | those GEMMs use FP8 dgrad/wgrad too |
+| Kept in BF16 | embed, `lm_head`, norms, router (`mlp.gate`) | same; attention SDPA stays BF16 |
+| Checkpoint on disk | HF safetensors (FP8) | BF16 Megatron master (FP8 is compute-only) |
+
+Qwen3 dims (QKV out=5120, expert `2×768=1536`) are 128-aligned, so fused QKV/`w1`
+tiles match split official Linear tiles. ROCm uses `float8_e4m3fnuz` where
+CUDA official weights use `float8_e4m3fn`. Do **not** set
+`LUMEN_FP8_EXPERTS_ONLY=1` if you want official layer coverage (that flag
+leaves QKV/proj in BF16).
 
 ```bash
-FP8_MODE=blockwise2d MOE_IMPL=sequential \
+FP8_MODE=blockwise2d MOE_IMPL=sonic \
 TRAIN_STEPS=5 SEQ_LEN=1024 MBS=1 GBS=8 \
   bash examples/qwen3-30b-a3b/run_docker.sh
 ```
 
-The resumable training checkpoint remains BF16. Convert the final checkpoint
-to a Lumen FP8 inference artifact with
-`checkpoint/export_megatron_blockwise_fp8.py`; see `checkpoint/README.md`.
-The first milestone targets Megatron linear modules. SonicMoE expert FP8 and
-Hugging Face `weight_scale_inv` output are separate follow-up work.
+`MOE_IMPL=sequential` also works. TE grouped experts are not covered.
+
+The resumable training checkpoint remains BF16. Export the last iteration with
+`checkpoint/export_megatron_blockwise_fp8.py` (E4M3 + sibling
+`weight_scale_inv`, same dequant as official). Megatron key names are kept;
+a Hugging Face Transformers tree is still a separate conversion.
 
 ## Build
 

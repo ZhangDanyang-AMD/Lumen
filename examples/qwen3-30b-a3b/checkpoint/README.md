@@ -12,7 +12,7 @@ and `utils`) are imported from the bundled Megatron-LM checkout.
 - `schema_qwen3_moe.py`: maps Qwen3 fields to MCore module paths.
 - `qwen3_moe_mapping.py`: pure QKV, SwiGLU, and expert-sharding helpers.
 - `export_megatron_blockwise_fp8.py`: exports a final BF16 MCore checkpoint as
-  Lumen 128x128 blockwise FP8 inference weights.
+  official-style 128×128 E4M3 weights plus `weight_scale_inv`.
 - `tests/`: unit tests for tensor layouts and EP partitioning.
 
 ## Usage
@@ -43,10 +43,14 @@ python3 checkpoint/export_megatron_blockwise_fp8.py \
 ```
 
 Run this in the Lumen training image on a GPU. The exporter uses the same
-production `_quant_blockwise2d_weight` implementation as training. Each rank
-gets a `model_fp8.pt` containing E4M3 weights and sibling `weight_scale`
-dequantization factors. Embeddings, output heads, norms, and routers stay in
-their checkpoint dtype.
+`_quant_blockwise2d_weight` kernel as training. Coverage matches official
+Qwen3-30B-A3B-FP8: attn QKV/proj and expert fc1/fc2 (fused `w1`/`w2` in
+Sonic). Each rank gets a `model_fp8.pt` with E4M3 weights and sibling
+`weight_scale_inv` (dequant multiplier, `fp8.float() * scale`). Embeddings,
+output heads, norms, and routers stay in their checkpoint dtype. Training
+also runs FP8 dgrad/wgrad on those GEMMs; that is not part of the HF
+inference dump.
 
-The result is a Lumen inference artifact, not a resumable Megatron training
-checkpoint and not yet a Hugging Face `weight_scale_inv` checkpoint.
+The result is a Lumen/Megatron inference artifact, not a resumable training
+checkpoint and not a drop-in Hugging Face `Qwen/Qwen3-30B-A3B-FP8` directory
+(Transformers module names and CUDA `e4m3fn` still need a separate converter).

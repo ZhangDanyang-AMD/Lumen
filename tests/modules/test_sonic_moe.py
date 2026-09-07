@@ -357,3 +357,65 @@ def test_sonic_pre_routed_matches_torch_reference():
     )
     torch.testing.assert_close(w1_sonic.grad, w1_reference.grad, rtol=2e-2, atol=2e-2)
     torch.testing.assert_close(w2_sonic.grad, w2_reference.grad, rtol=2e-2, atol=2e-2)
+
+
+def test_lumen_config_enable_allows_blockwise2d_with_sonic():
+    model = nn.Sequential(MoELayer())
+    manager, returned = LumenConfig(
+        scaling="blockwise2d",
+        block_size=128,
+        sonic_moe=True,
+    ).enable(model)
+
+    assert returned is model
+    assert manager is not None
+    assert isinstance(model[0].experts, SonicMoEExperts)
+    assert model[0].experts.scaling_type == "blockwise2d"
+    assert model[0].experts.block_size == 128
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+def test_sonic_fp8_blockwise2d_empty_expert_and_backward():
+    hidden, intermediate = 128, 128
+
+    class _WideLinear(nn.Module):
+        def __init__(self, out_features, in_features):
+            super().__init__()
+            self.weight = nn.Parameter(
+                torch.randn(out_features, in_features, dtype=torch.bfloat16)
+            )
+
+    class _WideExpert(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear_fc1 = _WideLinear(2 * intermediate, hidden)
+            self.linear_fc2 = _WideLinear(hidden, intermediate)
+
+    class _WideExperts(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(
+                add_bias_linear=False,
+                gated_linear_unit=True,
+                expert_tensor_parallel_size=1,
+            )
+            self.num_local_experts = 2
+            self.local_experts = nn.ModuleList([_WideExpert(), _WideExpert()])
+
+    sonic = SonicMoEExperts(_WideExperts()).cuda()
+    sonic.enable_fp8(scaling_type="blockwise2d", block_size=128)
+    hidden_states = torch.randn(
+        32, hidden, device="cuda", dtype=torch.bfloat16, requires_grad=True
+    )
+    counts = torch.tensor([32, 0], dtype=torch.int32)
+    scores = torch.rand(32, device="cuda", dtype=torch.float32, requires_grad=True)
+
+    output, extra = sonic(hidden_states, counts, scores)
+    assert extra is None
+    assert output.shape == (32, hidden)
+    output.float().sum().backward()
+    assert hidden_states.grad is not None
+    assert sonic.w1.grad is not None
+    assert sonic.w2.grad is not None
+    assert torch.isfinite(output.float()).all()
+    assert torch.isfinite(sonic.w1.grad.float()).all()

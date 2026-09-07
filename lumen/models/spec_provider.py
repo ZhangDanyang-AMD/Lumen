@@ -10,9 +10,14 @@ Every ``BackendSpecProvider`` method returns a Lumen module class.
 Plug this into ``get_gpt_layer_with_transformer_engine_spec`` or compose
 your own ``ModuleSpec`` tree to get Lumen-accelerated attention, norms,
 and (optionally FP8) linear layers.
+
+``grouped_mlp_modules`` must return an ``ExpertsBuilder`` (a callable /
+``functools.partial``), matching Megatron-Core's current protocol. Returning
+a ``(cls, submodules)`` tuple is rejected by ``MoELayer``.
 """
 
-from typing import Optional, Tuple
+from functools import partial
+from typing import Optional
 
 from megatron.core.models.backends import BackendSpecProvider
 from megatron.core.transformer.mlp import MLPSubmodules
@@ -62,31 +67,40 @@ class LumenSpecProvider(BackendSpecProvider):
     def column_parallel_layer_norm_linear(self):
         return LumenLayerNormLinear
 
-    def layer_norm(self, rms_norm=False, for_qk=False):
+    def layer_norm(self, rms_norm=False, for_qk=False, has_residual=False, **kwargs):
         return _LumenNorm
 
     def core_attention(self):
         return LumenDotProductAttention
 
-    def grouped_mlp_modules(
-        self,
-        moe_use_grouped_gemm=False,
-        moe_use_legacy_grouped_gemm=False,
-    ) -> Tuple[type, Optional[MLPSubmodules]]:
-        try:
-            from megatron.core.transformer.moe.experts import TEGroupedMLP
-
-            if moe_use_grouped_gemm and not moe_use_legacy_grouped_gemm:
-                return TEGroupedMLP, MLPSubmodules(
-                    linear_fc1=LumenColumnParallelGroupedLinear,
-                    linear_fc2=LumenRowParallelGroupedLinear,
+    def grouped_mlp_modules(self, moe_use_grouped_gemm: bool = False, **kwargs):
+        """Return an ExpertsBuilder, not a (cls, submodules) tuple."""
+        act = self.activation_func()
+        if moe_use_grouped_gemm:
+            try:
+                from megatron.core.transformer.moe.experts import (
+                    GroupedMLPSubmodules,
+                    TEGroupedMLP,
                 )
-        except ImportError:
-            pass
 
-        return SequentialMLP, MLPSubmodules(
-            linear_fc1=LumenColumnParallelLinear,
-            linear_fc2=LumenRowParallelLinear,
+                return partial(
+                    TEGroupedMLP,
+                    submodules=GroupedMLPSubmodules(
+                        linear_fc1=LumenColumnParallelGroupedLinear,
+                        linear_fc2=LumenRowParallelGroupedLinear,
+                        activation_func=act,
+                    ),
+                )
+            except ImportError:
+                pass
+
+        return partial(
+            SequentialMLP,
+            submodules=MLPSubmodules(
+                linear_fc1=LumenColumnParallelLinear,
+                linear_fc2=LumenRowParallelLinear,
+                activation_func=act,
+            ),
         )
 
     def activation_func(self):

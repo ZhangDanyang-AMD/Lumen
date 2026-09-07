@@ -32,13 +32,21 @@ docker run --rm --init \
     --cap-add=SYS_PTRACE \
     --shm-size=64G \
     --volume "${REPO_ROOT}/lumen/models/megatron.py:/workspace/Lumen/lumen/models/megatron.py" \
+    --volume "${REPO_ROOT}/lumen/models/megatron_patches.py:/workspace/Lumen/lumen/models/megatron_patches.py" \
+    --volume "${REPO_ROOT}/lumen/models/spec_provider.py:/workspace/Lumen/lumen/models/spec_provider.py" \
     --volume "${REPO_ROOT}/lumen/models/fsdp.py:/workspace/Lumen/lumen/models/fsdp.py" \
     --volume "${REPO_ROOT}/lumen/models/llama31:/workspace/Lumen/lumen/models/llama31" \
     --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
     --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
     --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
+    --volume "${REPO_ROOT}/lumen/modules/parallel_linear.py:/workspace/Lumen/lumen/modules/parallel_linear.py" \
+    --volume "${REPO_ROOT}/lumen/modules/layernorm_linear.py:/workspace/Lumen/lumen/modules/layernorm_linear.py" \
+    --volume "${REPO_ROOT}/lumen/ops/fused_residual_norm.py:/workspace/Lumen/lumen/ops/fused_residual_norm.py" \
     --volume "${REPO_ROOT}/lumen/quantize:/workspace/Lumen/lumen/quantize" \
+    --volume "${REPO_ROOT}/lumen/kernels:/workspace/Lumen/lumen/kernels" \
     --volume "${REPO_ROOT}/lumen/ops/quantize:/workspace/Lumen/lumen/ops/quantize" \
+    --volume "${REPO_ROOT}/lumen/ops/gemm/grouped_gemm.py:/workspace/Lumen/lumen/ops/gemm/grouped_gemm.py" \
+    --volume "${REPO_ROOT}/lumen/ops/gemm/__init__.py:/workspace/Lumen/lumen/ops/gemm/__init__.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/__init__.py:/workspace/Lumen/lumen/ops/moe/__init__.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_layout.py:/workspace/Lumen/lumen/ops/moe/dispatch_layout.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_overlap.py:/workspace/Lumen/lumen/ops/moe/dispatch_overlap.py" \
@@ -79,6 +87,18 @@ docker run --rm --init \
     --env SONIC_MOE_LOG_BACKEND="${SONIC_MOE_LOG_BACKEND:-0}" \
     --env SONIC_MOE_TRACE_GEMM="${SONIC_MOE_TRACE_GEMM:-0}" \
     --env SONIC_MOE_TRACE_ALL_RANKS="${SONIC_MOE_TRACE_ALL_RANKS:-0}" \
+    --env SONIC_MOE_FP8_GROUPED="${SONIC_MOE_FP8_GROUPED:-1}" \
+    --env LUMEN_WEIGHT_QUANT_ONCE="${LUMEN_WEIGHT_QUANT_ONCE:-0}" \
+    --env LUMEN_FUSED_QUANT_AMAX="${LUMEN_FUSED_QUANT_AMAX:-0}" \
+    --env LUMEN_FUSED_QUANT_SCALE="${LUMEN_FUSED_QUANT_SCALE:-0}" \
+    --env LUMEN_FUSED_QUANT_TRANSPOSE_CPP="${LUMEN_FUSED_QUANT_TRANSPOSE_CPP:-0}" \
+    --env LUMEN_FUSED_CAST_TRANSPOSE="${LUMEN_FUSED_CAST_TRANSPOSE:-0}" \
+    --env LUMEN_FUSED_CAST_TRANSPOSE_V2="${LUMEN_FUSED_CAST_TRANSPOSE_V2:-0}" \
+    --env LUMEN_FUSED_NORM_QUANT="${LUMEN_FUSED_NORM_QUANT:-0}" \
+    --env LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-0}" \
+    --env LUMEN_NORM_CLI="${LUMEN_NORM_CLI:-0}" \
+    --env LUMEN_LINEAR_CLI="${LUMEN_LINEAR_CLI:-0}" \
+    --env LUMEN_FP8_EXPERTS_ONLY="${LUMEN_FP8_EXPERTS_ONLY:-0}" \
     --env NVTE_USE_CUTLASS_GROUPED_GEMM="${NVTE_USE_CUTLASS_GROUPED_GEMM:-0}" \
     --env NVTE_CUTLASS_GROUPED_GEMM_WARN_FALLBACK="${NVTE_CUTLASS_GROUPED_GEMM_WARN_FALLBACK:-0}" \
     --env NVTE_USE_HIPBLASLT="${NVTE_USE_HIPBLASLT:-}" \

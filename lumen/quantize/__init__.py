@@ -30,6 +30,7 @@ Usage::
 
 import functools
 import logging
+import os
 import re
 import threading
 from typing import Optional, Set
@@ -316,8 +317,9 @@ def _patch_linear_layers(
                 continue
 
             # Keep the output/vocab-projection layer in BF16 unless explicitly
-            # opted in: its M×N output overflows int32 pointer arithmetic in the
-            # Triton FP8 GEMM kernels for large vocab × long sequence (page fault).
+            # opted in: official Qwen3-*-FP8 also leaves lm_head in high precision,
+            # and the Triton FP8 GEMM overflows int32 pointer math on large vocab
+            # × long sequence (page fault).
             if not config.quantize_output_layer and _is_output_layer(name):
                 skipped += 1
                 continue
@@ -329,6 +331,21 @@ def _patch_linear_layers(
             if "lora_" in name:
                 skipped += 1
                 continue
+
+            # Dense attention/MLP GEMMs stay BF16; SonicMoE experts still FP8.
+            if os.environ.get("LUMEN_FP8_EXPERTS_ONLY", "0") == "1":
+                leaf = name.rsplit(".", 1)[-1]
+                if leaf in (
+                    "linear_qkv",
+                    "linear_proj",
+                    "linear_q",
+                    "linear_k",
+                    "linear_v",
+                    "linear_fc1",
+                    "linear_fc2",
+                ):
+                    skipped += 1
+                    continue
 
             tensor_id = f"{name}.weight" if name else "weight"
             module._quant_manager = manager

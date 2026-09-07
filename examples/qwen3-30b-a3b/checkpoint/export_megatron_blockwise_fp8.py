@@ -1,10 +1,13 @@
-"""Export a BF16 Megatron checkpoint as Lumen blockwise2d FP8 weights.
+"""Export a BF16 Megatron checkpoint as fine-grained FP8 weights.
 
-The output is an inference artifact, not a resumable Megatron training
-checkpoint: optimizer and RNG state are intentionally omitted. Quantized
-weights keep their original state-dict key and receive a sibling
-``<module>.weight_scale`` tensor containing the dequantization factor consumed
-by Lumen's blockscale GEMM.
+The scheme matches official Qwen3-*-FP8 (and DeepSeek-V3) blockwise FP8:
+E4M3 weights, ``weight_block_size = [128, 128]``, dynamic activations,
+``dequant = fp8.float() * weight_scale_inv`` broadcast over each tile.
+
+The output keeps Megatron module names (``linear_qkv`` / ``linear_proj`` /
+``linear_fc1`` / ``linear_fc2``). It is not a resumable training checkpoint
+and not a drop-in HuggingFace ``Qwen/Qwen3-30B-A3B-FP8`` tree (those use
+Transformers key names and CUDA ``float8_e4m3fn``).
 """
 
 from __future__ import annotations
@@ -21,15 +24,17 @@ import torch
 
 BLOCK_SIZE = 128
 FORMAT_NAME = "lumen_blockwise2d_fp8_v1"
-SCALE_SUFFIX = "_scale"
+# Official Qwen/HF FP8 checkpoints store the dequant multiplier as
+# ``<module>.weight_scale_inv`` (same math as Lumen's blockscale GEMM scale).
+SCALE_SUFFIX = "_scale_inv"
 
 
 def should_quantize_weight(name: str, tensor: torch.Tensor) -> bool:
-    """Return whether *tensor* is a blockwise2d GEMM weight.
+    """Return whether *tensor* is a Qwen3 official-FP8 GEMM weight.
 
-    Embeddings, output heads, norms, and MoE routers remain in their checkpoint
-    dtype. Norms are one-dimensional already; explicit name checks make the
-    export contract clear and protect future two-dimensional implementations.
+    Same coverage as ``Qwen/Qwen3-30B-A3B-FP8``: attn QKV/proj and expert
+    fc1/fc2. Embeddings, output heads, norms, and routers stay in checkpoint
+    dtype.
     """
     if not name.endswith(".weight") or tensor.ndim != 2 or not tensor.is_floating_point():
         return False
@@ -151,7 +156,13 @@ def export_checkpoint(
             "format": FORMAT_NAME,
             "block_size": [BLOCK_SIZE, BLOCK_SIZE],
             "fp8_dtype": fp8_dtype_name,
+            "scale_key": "weight_scale_inv",
             "scale_semantics": "dequantization_factor",
+            "quantization_config": {
+                "quant_method": "fp8",
+                "activation_scheme": "dynamic",
+                "weight_block_size": [BLOCK_SIZE, BLOCK_SIZE],
+            },
             "source_iteration": iteration,
             "checkpoint_version": checkpoint.get("checkpoint_version"),
             "model": model,
@@ -182,7 +193,13 @@ def export_checkpoint(
         "iteration": iteration,
         "block_size": [BLOCK_SIZE, BLOCK_SIZE],
         "fp8_dtype": fp8_dtype_name,
+        "scale_key": "weight_scale_inv",
         "scale_semantics": "dequantization_factor",
+        "quantization_config": {
+            "quant_method": "fp8",
+            "activation_scheme": "dynamic",
+            "weight_block_size": [BLOCK_SIZE, BLOCK_SIZE],
+        },
         "resumable_training_checkpoint": False,
         "rank_files": rank_reports,
     }

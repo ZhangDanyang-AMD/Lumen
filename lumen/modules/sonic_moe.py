@@ -13,6 +13,7 @@ from typing import Iterable, MutableMapping
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from megatron.core.dist_checkpointing.mapping import ShardedTensor, ShardedTensorFactory
 from megatron.core.utils import get_pg_rank
@@ -197,6 +198,15 @@ class SonicMoEExperts(nn.Module):
             parameter.allreduce = False
         self._register_load_state_dict_pre_hook(self._remap_checkpoint_state)
 
+        self.scaling_type = "none"
+        self.scaling_manager = None
+        from lumen.quantize.config import _get_float8_e4m3
+
+        self.fp8_dtype = _get_float8_e4m3()
+        self.block_size = 128
+        self.gradient_accumulation_fusion = False
+        self.delay_wgrad = False
+
     def _remap_checkpoint_state(
         self,
         state_dict: MutableMapping[str, torch.Tensor],
@@ -265,21 +275,61 @@ class SonicMoEExperts(nn.Module):
             ),
         }
 
+    def enable_fp8(
+        self,
+        scaling_manager=None,
+        scaling_type="dynamic",
+        fp8_dtype=None,
+        block_size=None,
+    ):
+        """Use FP8 compute on expert GEMMs; master ``w1`` / ``w2`` stay BF16.
+
+        ``blockwise2d`` is the official Qwen3-*-FP8 recipe (128×128 weights,
+        dynamic 1×128 activations) on both forward and backward.
+        """
+        from lumen.quantize import QuantConfig, ScalingManager
+
+        self.scaling_type = scaling_type
+        self.scaling_manager = scaling_manager or ScalingManager(QuantConfig())
+        if fp8_dtype is not None:
+            self.fp8_dtype = fp8_dtype
+        if block_size is not None:
+            self.block_size = block_size
+
     def forward(
         self,
         permuted_local_hidden_states: torch.Tensor,
         tokens_per_expert,
         permuted_probs: torch.Tensor,
     ):
+        cpu_counts = None
+        gpu_counts = None
         if isinstance(tokens_per_expert, tuple):
             cpu_counts, gpu_counts = tokens_per_expert
-            tokens_per_expert = cpu_counts if cpu_counts is not None else gpu_counts
+        else:
+            cpu_counts = tokens_per_expert
+
+        if self.scaling_type != "none":
+            return _fp8_pre_routed_forward(
+                permuted_local_hidden_states,
+                gpu_counts if gpu_counts is not None else cpu_counts,
+                permuted_probs,
+                self.w1,
+                self.w2,
+                scaling_manager=self.scaling_manager,
+                scaling_type=self.scaling_type,
+                fp8_dtype=self.fp8_dtype,
+                block_size=self.block_size,
+            ), None
 
         # Keep Megatron's dispatcher-produced host counts on the CPU. The
         # pre-routed entry point creates the GPU offsets needed by Triton while
         # the multi-stream hipBLASLt backend reuses host offsets, matching
         # TEGroupedMLP's one-D2H-per-layer metadata boundary.
-        counts = torch.as_tensor(tokens_per_expert, dtype=torch.int32)
+        counts = torch.as_tensor(
+            cpu_counts if cpu_counts is not None else gpu_counts,
+            dtype=torch.int32,
+        )
 
         from aiter.ops.triton.sonicmoe import (
             SonicMoEActivationType,
@@ -300,6 +350,139 @@ class SonicMoEExperts(nn.Module):
             True,
         )
         return output, None
+
+
+def _group_sizes_on_device(tokens_per_expert, num_experts: int, device) -> torch.Tensor:
+    counts = torch.as_tensor(tokens_per_expert)
+    if counts.numel() != num_experts:
+        raise ValueError(
+            f"Expected {num_experts} local expert counts, got {counts.numel()}"
+        )
+    if counts.device.type == "cpu":
+        return counts.to(device=device, dtype=torch.int32)
+    return counts.to(dtype=torch.int32)
+
+
+def _expert_token_counts(tokens_per_expert, num_experts: int) -> list[int]:
+    counts = torch.as_tensor(tokens_per_expert, dtype=torch.int64)
+    if counts.numel() != num_experts:
+        raise ValueError(
+            f"Expected {num_experts} local expert counts, got {counts.numel()}"
+        )
+    if counts.device.type != "cpu":
+        counts = counts.cpu()
+    return [int(value) for value in counts.tolist()]
+
+
+def _quantized_expert_linear(
+    tokens: torch.Tensor,
+    weight_kn: torch.Tensor,
+    *,
+    scaling_manager,
+    scaling_type: str,
+    fp8_dtype,
+    block_size: int,
+    tensor_id: str,
+):
+    """Run one expert GEMM: ``tokens @ weight_kn`` with BF16-master FP8 compute.
+
+    ``weight_kn`` is the SonicMoE slice ``[K, N]``. ``quantized_linear`` uses the
+    Linear convention ``Y = X @ W.T`` with ``W = [N, K]``.
+    """
+    if tokens.numel() == 0:
+        return tokens.new_empty(tokens.shape[0], weight_kn.shape[1])
+    from lumen.ops.quantize.linear import quantized_linear
+
+    return quantized_linear(
+        tokens,
+        weight_kn.transpose(0, 1),
+        None,
+        scaling_manager=scaling_manager,
+        scaling_type=scaling_type,
+        fp8_dtype=fp8_dtype,
+        block_size=block_size,
+        tensor_id=tensor_id,
+    )
+
+
+def _fp8_pre_routed_forward(
+    hidden_states: torch.Tensor,
+    tokens_per_expert,
+    permuted_probs: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    *,
+    scaling_manager,
+    scaling_type: str,
+    fp8_dtype,
+    block_size: int,
+) -> torch.Tensor:
+    """SwiGLU expert MLP with official blockwise FP8 on expert-sorted tokens.
+
+    Default path uses grouped FP8 GEMM for ``w1``/``w2`` forward and backward.
+    Set ``SONIC_MOE_FP8_GROUPED=0`` to fall back to per-expert
+    ``quantized_linear``.
+    """
+    num_experts = w1.shape[0]
+    hidden = hidden_states.shape[-1]
+    if hidden_states.numel() == 0:
+        return hidden_states.new_empty(hidden_states.shape[0], hidden)
+
+    use_grouped = os.environ.get("SONIC_MOE_FP8_GROUPED", "1") != "0"
+    if use_grouped:
+        group_sizes = _group_sizes_on_device(
+            tokens_per_expert, num_experts, hidden_states.device
+        )
+        from lumen.ops.gemm.grouped_gemm import grouped_fp8_expert_mlp
+
+        output = grouped_fp8_expert_mlp(
+            hidden_states,
+            w1,
+            w2,
+            group_sizes,
+            scaling_type=scaling_type,
+            fp8_dtype=fp8_dtype,
+            block_size=block_size,
+        )
+    else:
+        counts = _expert_token_counts(tokens_per_expert, num_experts)
+        outputs = []
+        offset = 0
+        for expert_index, token_count in enumerate(counts):
+            expert_tokens = hidden_states[offset : offset + token_count]
+            fc1 = _quantized_expert_linear(
+                expert_tokens,
+                w1[expert_index],
+                scaling_manager=scaling_manager,
+                scaling_type=scaling_type,
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                tensor_id=f"sonic_w1.{expert_index}",
+            )
+            gate, up = fc1.chunk(2, dim=-1)
+            hidden_act = F.silu(gate) * up
+            fc2 = _quantized_expert_linear(
+                hidden_act,
+                w2[expert_index],
+                scaling_manager=scaling_manager,
+                scaling_type=scaling_type,
+                fp8_dtype=fp8_dtype,
+                block_size=block_size,
+                tensor_id=f"sonic_w2.{expert_index}",
+            )
+            outputs.append(fc2)
+            offset += token_count
+        output = (
+            torch.cat(outputs, dim=0) if outputs else hidden_states.new_empty(0, hidden)
+        )
+
+    scores = permuted_probs.reshape(-1, 1).to(dtype=output.dtype)
+    if scores.numel() != output.shape[0]:
+        raise ValueError(
+            f"Expected one router score per pre-routed token ({output.shape[0]}), "
+            f"got {scores.numel()}"
+        )
+    return output * scores
 
 
 def replace_megatron_moe_experts(model: nn.Module) -> int:

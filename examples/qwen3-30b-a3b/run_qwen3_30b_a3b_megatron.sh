@@ -69,15 +69,32 @@ if [ "${GRAD_ACC_FUSION:-0}" != "1" ]; then
     GRAD_ACC_ARGS=(--no-gradient-accumulation-fusion)
 fi
 
+LUMEN_EXTRA_ARGS=()
+if [ "${FUSED_ROUTER:-0}" = "1" ]; then
+    LUMEN_EXTRA_ARGS+=(--lumen-fused-router)
+fi
+# LUMEN_NORM is exported by run_docker.sh (default 1) but --lumen-norm is
+# opt-in so production A/B numbers stay comparable. Set LUMEN_NORM_CLI=1.
+if [ "${LUMEN_NORM_CLI:-0}" = "1" ]; then
+    LUMEN_EXTRA_ARGS+=(--lumen-norm)
+fi
+if [ "${LUMEN_LINEAR_CLI:-0}" = "1" ]; then
+    LUMEN_EXTRA_ARGS+=(--lumen-linear)
+fi
+
 FP8_ARGS=()
 case "${FP8_MODE:-bf16}" in
     bf16)
         ;;
     blockwise2d)
-        if [ "${MOE_IMPL}" != "sequential" ]; then
-            echo "ERROR: FP8_MODE=blockwise2d currently requires MOE_IMPL=sequential; SonicMoE is BF16-only and TE grouped experts are not covered by the default linear FP8 patch" >&2
+        if [ "${MOE_IMPL}" = "te_grouped" ]; then
+            echo "ERROR: FP8_MODE=blockwise2d does not cover TE grouped experts; use MOE_IMPL=sequential or sonic" >&2
             exit 2
         fi
+        # Official Qwen3-30B-A3B-FP8 coverage: E4M3 128x128 weights + dynamic
+        # 1x128 activations on attn QKV/proj and expert w1/w2 (fwd and bwd).
+        # Master weights stay BF16. LUMEN_FP8_EXPERTS_ONLY=1 skips QKV/proj
+        # (not official).
         FP8_ARGS=(
             --linear-fp8
             --linear-fp8-scaling blockwise2d
@@ -147,6 +164,7 @@ torchrun \
     "${SCRIPT_DIR}/pretrain_qwen3_30b_a3b_megatron.py" \
     --backend megatron \
     --lumen-attn-backend "${LUMEN_ATTN_BACKEND}" \
+    "${LUMEN_EXTRA_ARGS[@]}" \
     --num-layers 48 \
     --hidden-size 2048 \
     --ffn-hidden-size 6144 \

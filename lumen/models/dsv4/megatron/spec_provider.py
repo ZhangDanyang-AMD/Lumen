@@ -1,9 +1,6 @@
 """Lumen backend spec provider for DSV4 transformer blocks (MoE/MLP, no TE)."""
 
-from typing import Optional, Tuple
-
-from megatron.core.transformer.mlp import MLPSubmodules
-from megatron.core.transformer.moe.experts import SequentialMLP, TEGroupedMLP
+from megatron.core.transformer.moe.experts import TEGroupedMLP
 
 from lumen.models.dsv4.megatron.layers import (
     LumenColumnParallelGroupedLinear,
@@ -23,18 +20,19 @@ class LumenDSV4SpecProvider(LumenSpecProvider):
     def row_parallel_linear(self):
         return LumenRowParallelLinear
 
-    def grouped_mlp_modules(
-        self,
-        moe_use_grouped_gemm: bool = False,
-        moe_use_legacy_grouped_gemm: bool = False,
-    ) -> Tuple[type, Optional[MLPSubmodules]]:
-        if moe_use_grouped_gemm and not moe_use_legacy_grouped_gemm:
-            return TEGroupedMLP, MLPSubmodules(
-                linear_fc1=LumenColumnParallelGroupedLinear,
-                linear_fc2=LumenRowParallelGroupedLinear,
-            )
+    def grouped_mlp_modules(self, moe_use_grouped_gemm: bool = False, **kwargs):
+        from functools import partial
 
-        return SequentialMLP, MLPSubmodules(
-            linear_fc1=self.column_parallel_linear(),
-            linear_fc2=self.row_parallel_linear(),
-        )
+        act = self.activation_func()
+        if moe_use_grouped_gemm:
+            from megatron.core.transformer.moe.experts import GroupedMLPSubmodules
+
+            return partial(
+                TEGroupedMLP,
+                submodules=GroupedMLPSubmodules(
+                    linear_fc1=LumenColumnParallelGroupedLinear,
+                    linear_fc2=LumenRowParallelGroupedLinear,
+                    activation_func=act,
+                ),
+            )
+        return super().grouped_mlp_modules(moe_use_grouped_gemm, **kwargs)

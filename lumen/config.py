@@ -152,7 +152,7 @@ class LumenConfig:
     # -- Tier 2: Linear GEMM patching (BF16) --
     lumen_linear: bool = False
 
-    # -- Tier 2: Megatron MoE expert replacement (BF16) --
+    # -- Tier 2: Megatron MoE expert replacement --
     sonic_moe: bool = False
 
     # -- Tier 2: Megatron fused router function patch --
@@ -335,6 +335,10 @@ class LumenConfig:
                 backend=backend,
                 dp_group=dp_group if qcfg.reduce_amax else None,
             )
+
+        # 3b. SonicMoE expert FP8 (experts are not nn.Linear / parallel linear)
+        if self.sonic_moe and qcfg.is_quantized:
+            self._enable_sonic_moe_fp8(model, manager)
 
         # 4. Post-quant features
         self._apply_post_quant(model, manager)
@@ -521,15 +525,34 @@ class LumenConfig:
 
     def _patch_sonic_moe(self, model) -> None:
         """Replace Megatron MoE expert MLPs with AITER SonicMoE."""
-        if self.quant_config.is_quantized:
-            raise ValueError("SonicMoE currently supports BF16 training only")
-
         from lumen.modules.sonic_moe import replace_megatron_moe_experts
 
         count = replace_megatron_moe_experts(model)
         if count == 0:
             raise ValueError("sonic_moe=True but no Megatron MoELayer modules were found")
         _rank0_print(f"> Replaced {count} Megatron MoE expert modules with SonicMoE")
+
+    def _enable_sonic_moe_fp8(self, model, manager) -> None:
+        """Quantize SonicMoE expert GEMMs after ``quant.enable()``."""
+        from lumen.modules.sonic_moe import SonicMoEExperts
+
+        qcfg = self.quant_config
+        scaling_type = qcfg.scaling.value if hasattr(qcfg.scaling, "value") else str(qcfg.scaling)
+        count = 0
+        for module in model.modules():
+            if not isinstance(module, SonicMoEExperts):
+                continue
+            module.enable_fp8(
+                scaling_manager=manager,
+                scaling_type=scaling_type,
+                fp8_dtype=qcfg.torch_dtype,
+                block_size=qcfg.block_size,
+            )
+            count += 1
+        if count:
+            _rank0_print(
+                f"> Enabled FP8 (scaling={scaling_type}) on {count} SonicMoE expert modules"
+            )
 
     def _patch_fused_router(self, model) -> None:
         """Enable model-local router hooks and Megatron patch points."""

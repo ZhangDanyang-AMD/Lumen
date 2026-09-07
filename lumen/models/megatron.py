@@ -813,6 +813,7 @@ def enable_fp8_for_parallel_linear(
     from lumen.modules.grouped_linear import LumenGroupedLinear
     from lumen.modules.layernorm_linear import LumenLayerNormLinear
     from lumen.modules.parallel_linear import LumenColumnParallelLinear, LumenRowParallelLinear
+    from lumen.modules.sonic_moe import SonicMoEExperts
 
     if fp8_dtype is None:
         from lumen.quantize.config import _get_float8_e4m3
@@ -829,7 +830,14 @@ def enable_fp8_for_parallel_linear(
     count = 0
     for module in model.modules():
         if isinstance(
-            module, (LumenColumnParallelLinear, LumenRowParallelLinear, LumenLayerNormLinear, LumenGroupedLinear)
+            module,
+            (
+                LumenColumnParallelLinear,
+                LumenRowParallelLinear,
+                LumenLayerNormLinear,
+                LumenGroupedLinear,
+                SonicMoEExperts,
+            ),
         ):
             _mgr = scaling_manager
             if _mgr is None and quant_config is not None:
