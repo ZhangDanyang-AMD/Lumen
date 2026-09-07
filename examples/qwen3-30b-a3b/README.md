@@ -101,10 +101,11 @@ TRAIN_STEPS=5 SEQ_LEN=1024 MBS=1 GBS=8 \
 
 `MOE_IMPL=sequential` also works. TE grouped experts are not covered.
 
-The resumable training checkpoint remains BF16. Export the last iteration with
-`checkpoint/export_megatron_blockwise_fp8.py` (E4M3 + sibling
+The resumable training checkpoint remains BF16. Export the last **Megatron**
+iteration with `checkpoint/export_megatron_blockwise_fp8.py` (E4M3 + sibling
 `weight_scale_inv`, same dequant as official). Megatron key names are kept;
-a Hugging Face Transformers tree is still a separate conversion.
+a Hugging Face Transformers tree is still a separate conversion. FSDP
+training does not have an equivalent exporter.
 
 ## Build
 
@@ -165,12 +166,28 @@ Megatron-compatible overlapping dense-DP and EP layout:
 - Every global rank consumes a different microbatch. Shared parameters are
   sharded over the full dense-DP world, while corresponding local experts are
   sharded only over expert-DP replicas (`world_size / EP_SIZE`).
-- `--expert-backend` selects `sequential`, `te_grouped`, or `sonic`. The Sonic
-  path supports both AITER general-routing and pre-routed APIs and keeps its
-  gate/up weights in the interleaved layout required for correct gradients.
-- Both BF16 and Lumen FP8 blockwise2d full-parameter training are supported.
+- `--expert-backend` selects `sequential`, `te_grouped`, or `sonic` (Python
+  default is `te_grouped`). The Sonic path supports both AITER general-routing
+  and pre-routed APIs and keeps its gate/up weights in the interleaved layout
+  required for correct gradients.
+- BF16 full-parameter training is supported for all three backends.
+- Lumen FP8 `blockwise2d` is supported for `sequential` (HF `nn.Linear` hooks)
+  and `sonic` (`grouped_fp8_expert_mlp` on `w1`/`w2`). The router, embed,
+  `lm_head`, and norms stay BF16, matching official `Qwen3-30B-A3B-FP8`.
+  **TE grouped experts are not covered** (`MODE`/`FP8_MODE=blockwise2d` with
+  `EXPERT_BACKEND=te_grouped` exits). There is no FSDP FP8 export yet; only
+  Megatron `checkpoint/export_megatron_blockwise_fp8.py`.
+- Sonic expert FP8 needs the AITER grouped GEMM that accepts `A_scale` /
+  `B_scale` (host `third_party/aiter` branch `lumen/moe`). The Lumen gitlink
+  pin (`ccd9200`) does not include that kernel; without it the GPU tests skip
+  and training cannot run official expert FP8. `run_docker.sh` bind-mounts
+  the host aiter tree; `run_qwen3_30b_a3b_fsdp.sh` now mounts the same.
+- `expert_dp > 1` (multi-node expert replicas) plus Sonic FP8 is not
+  smoke-tested. The one-node recipe is `DP=8 EP=8` so `expert_dp=1`.
+- `LUMEN_FP8_EXPERTS_ONLY=1` skips HF `q/k/v/o_proj` as well as Megatron
+  `linear_qkv` / `linear_proj`. Do not set it for official layer coverage.
 
-Run dense-DP=8, EP=8 on one eight-GPU node:
+Run dense-DP=8, EP=8 on one eight-GPU node (Alpaca, default TE grouped, BF16):
 
 ```bash
 NNODES=1 DP_SIZE=8 EP_SIZE=8 \
@@ -181,16 +198,43 @@ bash examples/qwen3-30b-a3b/run_qwen3_30b_a3b_fsdp.sh
 ```
 
 For two eight-GPU nodes, run the same command on both nodes with `NNODES=2`,
-`DP_SIZE=16`, a shared `MASTER_ADDR`, and `NODE_RANK=0`/`1`. Set
-`MODE=fp8_blockwise2d` to enable Lumen FP8. The Python entry point can also be
-launched directly:
+`DP_SIZE=16`, a shared `MASTER_ADDR`, and `NODE_RANK=0`/`1`. For FP8 on that
+launcher:
+
+```bash
+MODE=fp8_blockwise2d EXPERT_BACKEND=sonic \
+NNODES=1 DP_SIZE=8 EP_SIZE=8 \
+HOST_MODEL=/path/to/Qwen3-30B-A3B \
+HOST_DATA=/path/to/alpaca \
+TRAIN_FILE=train.jsonl VAL_FILE=test.jsonl \
+bash examples/qwen3-30b-a3b/run_qwen3_30b_a3b_fsdp.sh
+```
+
+Docker accuracy runs (`run_fsdp.sh`) use the same `FP8_MODE` as Megatron.
+Default `EXPERT_BACKEND` in docker is `te_grouped`; set `sonic` or
+`sequential` for FP8. Prefer a unique `MASTER_PORT`.
+
+```bash
+HOST_ASSET_ROOT=/dev/shm/qwen3-30b-a3b \
+MODEL_PATH=/nobackup/model/Qwen3-30B-A3B \
+DATA_PATH=/nobackup/data/fineweb-sample-10BT-26624.jsonl \
+FP8_MODE=blockwise2d EXPERT_BACKEND=sonic MASTER_PORT=29512 \
+TRAIN_STEPS=20 SEQ_LEN=4096 GBS=256 MBS=2 \
+COMMAND='export TOKENIZER_PATH=/nobackup/model/Qwen3-30B-A3B
+bash run_fsdp.sh' \
+bash examples/qwen3-30b-a3b/run_docker.sh
+```
+
+The Python entry point can also be launched directly. Pass `--mode` and
+`--expert-backend` explicitly; omitting them is BF16 + TE grouped:
 
 ```bash
 torchrun --nproc_per_node=8 \
   pretrain_qwen3_30b_a3b_fsdp.py \
   --model-name-or-path /path/to/Qwen3-30B-A3B \
   --train-data-path /path/to/train.jsonl \
-  --ep-size 8 --dp-size 8
+  --ep-size 8 --dp-size 8 \
+  --mode fp8_blockwise2d --expert-backend sonic
 ```
 
 For a from-scratch BF16 accuracy run aligned with the Megatron TE flow
@@ -213,12 +257,13 @@ TRAIN_STEPS=20 COMMAND="bash run_fsdp.sh" \
 
 At sequence length 4096, MBS 32, 16, and 8 exceed the 288 GiB device-memory
 limit with activation checkpointing disabled. MBS 4 is the largest divisor of
-GBS 256 that completed the one-step memory probe.
+GBS 256 that completed the BF16 one-step memory probe. FSDP FP8 at the same
+GBS OOMs at MBS=4 on the logits; use MBS=2.
 
 `run_docker.sh` defaults to
 `zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream` and
-overlays the local FSDP implementation while preserving the image's bundled
-SonicMoE AITER sources.
+overlays the local FSDP implementation plus the host `third_party/aiter`
+tree (needed for Sonic FP8 grouped GEMM).
 
 ## Benchmark
 

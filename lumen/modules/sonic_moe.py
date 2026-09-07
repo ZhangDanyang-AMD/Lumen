@@ -443,6 +443,8 @@ def _fp8_pre_routed_forward(
             scaling_type=scaling_type,
             fp8_dtype=fp8_dtype,
             block_size=block_size,
+            # Megatron linear_fc1 concatenates gate and up halves.
+            concat_layout=True,
         )
     else:
         counts = _expert_token_counts(tokens_per_expert, num_experts)

@@ -202,6 +202,9 @@ _LAYER_INDEX_RE = re.compile(r"layers\.(\d+)\b")
 
 # Module leaf names of the vocab-projection (output) layer across HF / Megatron.
 _OUTPUT_LAYER_NAMES = ("lm_head", "output_layer")
+# Official Qwen3-*-FP8 keeps the MoE router in BF16 (HF ``mlp.gate``,
+# Megatron ``mlp.router``).
+_MOE_ROUTER_NAMES = ("gate", "router")
 
 
 def _is_output_layer(name: str) -> bool:
@@ -212,6 +215,49 @@ def _is_output_layer(name: str) -> bool:
     """
     leaf = name.rsplit(".", 1)[-1]
     return leaf in _OUTPUT_LAYER_NAMES
+
+
+def _is_moe_router(name: str) -> bool:
+    """True if *name* is the MoE router linear (not expert SwiGLU gate)."""
+    return name.rsplit(".", 1)[-1] in _MOE_ROUTER_NAMES
+
+
+def _materialize_linear_weight(module: nn.Module, scaling_type: str, block_size: int):
+    """Return a dense ``[out, in]`` weight for FP8 GEMM.
+
+    FSDP2 all-gather should already have run on the parent layer. If the live
+    Parameter is still a sharded DTensor, fail closed rather than tiling
+    128×128 on a rank-local slice (``k_proj`` 512/8=64 is not 128-aligned).
+    """
+    w = module.weight
+    to_local = getattr(w, "to_local", None)
+    if callable(to_local):
+        local = to_local()
+        global_shape = tuple(w.shape)
+        if tuple(local.shape) != global_shape:
+            name = getattr(module, "_quant_tensor_id", type(module).__name__)
+            raise RuntimeError(
+                f"{name}: FP8 Linear saw a sharded DTensor local "
+                f"{tuple(local.shape)} vs global {global_shape}. "
+                "blockwise2d needs the full unsharded weight; the parent "
+                "FSDP all-gather did not run before this forward."
+            )
+        w = local
+    if hasattr(module, "out_features") and hasattr(module, "in_features"):
+        expected = (int(module.out_features), int(module.in_features))
+        if tuple(w.shape) != expected:
+            name = getattr(module, "_quant_tensor_id", type(module).__name__)
+            raise RuntimeError(
+                f"{name}: FP8 Linear weight shape {tuple(w.shape)} != {expected}"
+            )
+    if scaling_type in ("blockwise", "blockwise2d") and w.dim() == 2:
+        if w.shape[0] % block_size or w.shape[1] % block_size:
+            name = getattr(module, "_quant_tensor_id", type(module).__name__)
+            raise RuntimeError(
+                f"{name}: FP8 {scaling_type} weight {tuple(w.shape)} is not "
+                f"divisible by block_size={block_size}"
+            )
+    return w
 
 
 def _build_bf16_skip_prefixes(
@@ -324,6 +370,10 @@ def _patch_linear_layers(
                 skipped += 1
                 continue
 
+            if _is_moe_router(name):
+                skipped += 1
+                continue
+
             # Keep PEFT LoRA adapter matrices (lora_A / lora_B) in BF16: they are
             # the trainable low-rank update and their rank dim (e.g. 16) is not
             # block-quantizable (blockwise / blockwise2d require dims divisible by
@@ -343,6 +393,12 @@ def _patch_linear_layers(
                     "linear_v",
                     "linear_fc1",
                     "linear_fc2",
+                    # HuggingFace Qwen3 attention (FSDP path).
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "o_proj",
+                    "qkv_proj",
                 ):
                     skipped += 1
                     continue
@@ -546,10 +602,13 @@ def _replace_forward(
                 # blockwise2d cache backward path. Frozen → WGrad is skipped.
                 _wcache, _wscale = w._fp8, w._scale
                 w._lumen_frozen = True
-            elif getattr(module, "_lumen_frozen", False):
-                # thread the patch-time frozen fact onto the live weight tensor so the
-                # autograd Function can skip its WGrad (FSDP may swap the param view).
-                w._lumen_frozen = True
+            else:
+                w = _materialize_linear_weight(module, scaling_type, block_size)
+                if getattr(module, "_lumen_frozen", False):
+                    # thread the patch-time frozen fact onto the live weight
+                    # tensor so the autograd Function can skip its WGrad
+                    # (FSDP may swap the param view).
+                    w._lumen_frozen = True
             return quantized_linear(
                 input_tensor,
                 w,

@@ -198,3 +198,52 @@ def test_fp8_max_bwd_hybrid_uses_e5m2():
     bwd = get_fp8_max_bwd(QuantFormat.HYBRID)
     assert bwd == get_fp8_max(QuantFormat.FP8_E5M2)
     assert fwd == get_fp8_max(QuantFormat.FP8_E4M3)
+
+
+def test_materialize_linear_weight_rejects_sharded_dtensor():
+    from types import SimpleNamespace
+
+    import torch
+    import torch.nn as nn
+
+    from lumen.quantize import _materialize_linear_weight
+
+    class _ShardedWeight:
+        def __init__(self, local, global_shape):
+            self._local = local
+            self.shape = global_shape
+
+        def to_local(self):
+            return self._local
+
+    module = nn.Linear(2048, 512, bias=False)
+    module._quant_tensor_id = "k_proj"
+    dense = _materialize_linear_weight(module, "blockwise2d", 128)
+    assert dense.shape == (512, 2048)
+
+    sharded = SimpleNamespace(
+        out_features=512,
+        in_features=2048,
+        _quant_tensor_id="k_proj",
+        weight=_ShardedWeight(torch.zeros(64, 2048), (512, 2048)),
+    )
+    try:
+        _materialize_linear_weight(sharded, "blockwise2d", 128)
+    except RuntimeError as exc:
+        assert "sharded DTensor" in str(exc)
+        assert "64" in str(exc)
+    else:
+        raise AssertionError("expected sharded DTensor to fail closed")
+
+
+def test_moe_router_names_are_skipped():
+    from lumen.quantize import _is_moe_router, _is_output_layer
+
+    assert _is_moe_router("model.layers.0.mlp.gate")
+    assert _is_moe_router("decoder.layers.3.mlp.router")
+    assert not _is_moe_router("model.layers.0.self_attn.q_proj")
+    assert not _is_moe_router("model.layers.0.self_attn.o_proj")
+    assert not _is_moe_router("model.layers.0.mlp.experts.0.gate_up_proj")
+    assert _is_output_layer("lm_head")
+    assert _is_output_layer("output_layer")
+

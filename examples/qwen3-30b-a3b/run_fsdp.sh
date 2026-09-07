@@ -46,8 +46,30 @@ with path.open("w") as output:
 PY
 fi
 
+FP8_MODE=${FP8_MODE:-${MODE:-bf16}}
+case "${FP8_MODE}" in
+    bf16)
+        TRAIN_MODE=bf16
+        ;;
+    blockwise2d|fp8_blockwise2d)
+        if [ "${EXPERT_BACKEND}" = "te_grouped" ]; then
+            echo "ERROR: FP8_MODE=blockwise2d does not cover TE grouped experts; use EXPERT_BACKEND=sequential or sonic" >&2
+            exit 2
+        fi
+        TRAIN_MODE=fp8_blockwise2d
+        ;;
+    *)
+        echo "ERROR: FP8_MODE must be bf16 or blockwise2d" >&2
+        exit 2
+        ;;
+esac
+
 RUN_SUFFIX=${RUN_SUFFIX:-}
-LOG_FILE="${RESULTS_DIR}/qwen3-30b-a3b-fsdp-${EXPERT_BACKEND}${RUN_SUFFIX:+-${RUN_SUFFIX}}-bf16-seq${SEQ_LEN}-mbs${MBS}-gbs${GBS}.log"
+if [ "${LUMEN_FP8_EXPERTS_ONLY:-0}" = "1" ] && [[ "${RUN_SUFFIX}" != *experts-only* ]]; then
+    RUN_SUFFIX="${RUN_SUFFIX:+${RUN_SUFFIX}-}experts-only"
+fi
+LOG_FILE="${RESULTS_DIR}/qwen3-30b-a3b-fsdp-${EXPERT_BACKEND}${RUN_SUFFIX:+-${RUN_SUFFIX}}-${TRAIN_MODE}-seq${SEQ_LEN}-mbs${MBS}-gbs${GBS}.log"
+echo "FSDP ${TRAIN_MODE}: EXPERT_BACKEND=${EXPERT_BACKEND} LUMEN_FP8_EXPERTS_ONLY=${LUMEN_FP8_EXPERTS_ONLY:-0} log=${LOG_FILE}"
 WORLD_SIZE=$((NGPU * NNODES))
 DP=${DP:-${WORLD_SIZE}}
 if [ $((WORLD_SIZE % EP)) -ne 0 ]; then
@@ -77,7 +99,7 @@ torchrun \
     --train-data-path "${DATA_PATH}" \
     --val-data-path "${DATA_PATH}" \
     --data-format pretrain \
-    --mode bf16 \
+    --mode "${TRAIN_MODE}" \
     --seq-length "${SEQ_LEN}" \
     --max-position-embeddings 4096 \
     --micro-batch-size "${MBS}" \

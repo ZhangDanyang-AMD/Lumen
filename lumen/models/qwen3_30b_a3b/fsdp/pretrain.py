@@ -231,6 +231,20 @@ class _LocalExpertMLP(nn.Module):
         return self.down_proj(self.activation(gate) * up)
 
 
+def _local_weight(weight: torch.Tensor) -> torch.Tensor:
+    """Unwrap FSDP2/DTensor views so Sonic grouped GEMM sees a dense tensor."""
+    to_local = getattr(weight, "to_local", None)
+    if not callable(to_local):
+        return weight
+    local = to_local()
+    if tuple(local.shape) == tuple(weight.shape):
+        return local
+    full_tensor = getattr(weight, "full_tensor", None)
+    if callable(full_tensor):
+        return full_tensor()
+    return local
+
+
 class _FusedLocalExperts(nn.Module):
     """Convert a local packed-weight slice into patchable expert modules."""
 
@@ -356,6 +370,10 @@ class _SonicLocalExperts(nn.Module):
         self.w2 = nn.Parameter(
             experts.down_proj[start:end].detach().transpose(1, 2).contiguous()
         )
+        self.scaling_type = "none"
+        self.scaling_manager = None
+        self.fp8_dtype = None
+        self.block_size = 128
         self.gemm_backend = os.environ.get("SONIC_MOE_GEMM_BACKEND", "triton")
         if self.gemm_backend != "triton":
             raise ValueError(
@@ -363,6 +381,28 @@ class _SonicLocalExperts(nn.Module):
                 "with SONIC_MOE_GROUPED_GEMM_BACKEND="
                 "triton|hipblaslt|multistream|auto"
             )
+
+    def enable_fp8(
+        self,
+        scaling_manager=None,
+        scaling_type="blockwise2d",
+        fp8_dtype=None,
+        block_size=None,
+    ):
+        """Use official blockwise FP8 on expert GEMMs; master w1/w2 stay BF16."""
+        from lumen.quantize import QuantConfig, ScalingManager
+
+        if scaling_type != "blockwise2d":
+            raise ValueError(
+                "FSDP Sonic expert FP8 only supports scaling_type='blockwise2d', "
+                f"got {scaling_type!r}"
+            )
+        self.scaling_type = scaling_type
+        self.scaling_manager = scaling_manager or ScalingManager(QuantConfig())
+        if fp8_dtype is not None:
+            self.fp8_dtype = fp8_dtype
+        if block_size is not None:
+            self.block_size = block_size
 
     def forward_grouped(
         self,
@@ -373,12 +413,30 @@ class _SonicLocalExperts(nn.Module):
         if hidden_states.shape[0] == 0:
             return hidden_states
 
+        w1 = _local_weight(self.w1)
+        w2 = _local_weight(self.w2)
+        if self.scaling_type != "none":
+            from lumen.ops.gemm.grouped_gemm import grouped_fp8_expert_mlp
+
+            return grouped_fp8_expert_mlp(
+                hidden_states,
+                w1,
+                w2,
+                counts.to(device=hidden_states.device, dtype=torch.int32),
+                scaling_type=self.scaling_type,
+                fp8_dtype=self.fp8_dtype,
+                block_size=self.block_size,
+                # w1 stores per-column gate/up pairs, matching the BF16
+                # moe_pre_routed_inputs call below.
+                concat_layout=False,
+            )
+
         from aiter.ops.triton import sonicmoe
 
         common = (
-            self.w1,
+            w1,
             None,
-            self.w2,
+            w2,
             None,
         )
         if not hasattr(sonicmoe, "moe_pre_routed_inputs"):
@@ -522,6 +580,12 @@ class EPShardedMoeBlock(nn.Module):
             else:
                 self.local_experts = _FusedLocalExperts(experts, self.local_expert_start, end)
         elif isinstance(experts, (nn.ModuleList, list)):
+            if expert_backend in ("sonic", "te_grouped"):
+                raise TypeError(
+                    f"expert_backend={expert_backend} requires packed HF expert "
+                    "weights (gate_up_proj/down_proj); "
+                    f"got {type(experts).__name__}"
+                )
             self.local_experts = _ModuleListLocalExperts(experts, self.local_expert_start, end)
         else:
             raise TypeError(f"Unsupported Qwen3 expert container: {type(experts).__name__}")
@@ -1006,11 +1070,45 @@ def build_model(args: argparse.Namespace) -> nn.Module:
     return model
 
 
+def _enable_fsdp_sonic_fp8(model: nn.Module, lumen_config, manager) -> None:
+    """Apply official blockwise FP8 to FSDP Sonic expert modules."""
+    qcfg = lumen_config.quant_config
+    scaling_type = (
+        qcfg.scaling.value if hasattr(qcfg.scaling, "value") else str(qcfg.scaling)
+    )
+    count = 0
+    for module in model.modules():
+        if not isinstance(module, _SonicLocalExperts):
+            continue
+        module.enable_fp8(
+            scaling_manager=manager,
+            scaling_type=scaling_type,
+            fp8_dtype=qcfg.torch_dtype,
+            block_size=qcfg.block_size,
+        )
+        count += 1
+    if count == 0:
+        raise RuntimeError(
+            "fp8_blockwise2d with --expert-backend sonic found no "
+            "_SonicLocalExperts modules"
+        )
+    _rank0_log(
+        "Enabled FP8 (scaling=%s) on %d FSDP Sonic expert modules",
+        scaling_type,
+        count,
+    )
+
+
 def _enable_lumen(
     model: nn.Module,
     args: argparse.Namespace,
     dp_group: Optional[dist.ProcessGroup] = None,
 ) -> nn.Module:
+    if args.mode == "fp8_blockwise2d" and args.expert_backend == "te_grouped":
+        raise ValueError(
+            "fp8_blockwise2d does not cover TE grouped experts; "
+            "use --expert-backend sequential or sonic"
+        )
     if (
         args.mode == "bf16"
         and not args.aiter_attn
@@ -1042,7 +1140,9 @@ def _enable_lumen(
         moe_dispatch_overlap=args.lumen_moe_dispatch_overlap,
         moe_global_expert_layout=args.lumen_moe_global_expert_layout,
     )
-    _manager, model = config.enable(model, dp_group=dp_group)
+    manager, model = config.enable(model, dp_group=dp_group)
+    if args.mode == "fp8_blockwise2d" and args.expert_backend == "sonic":
+        _enable_fsdp_sonic_fp8(model, config, manager)
     return model
 
 

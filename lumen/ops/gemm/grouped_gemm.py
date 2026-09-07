@@ -114,7 +114,7 @@ def _build_routing_data_from_group_sizes(group_sizes, total_tokens):
     )
 
 
-# data_ptr -> (version, fp8_dtype, block_size, shape, w_fp8, w_scales)
+# id(nn.Parameter) -> (version, fp8_dtype, block_size, shape, w_fp8, w_scales)
 _weight_fp8_cache = {}
 
 
@@ -123,8 +123,17 @@ def _quant_blockwise_2d(w, fp8_dtype, block_size=128):
 
     Uses a batched GPU kernel and caches the result until the BF16 master
     tensor's ``_version`` changes (optimizer in-place updates).
+
+    Only ``nn.Parameter`` storage is cached. FSDP2 all-gather views are
+    ephemeral tensors whose ``data_ptr`` is recycled; caching those leaks
+    GPU memory and can serve stale scales.
     """
-    cache_key = w.data_ptr()
+    from lumen.ops.quantize.ops import quant_fp8_blockwise_weight_3d
+
+    if not isinstance(w, torch.nn.Parameter):
+        return quant_fp8_blockwise_weight_3d(w, fp8_dtype, block_size)
+
+    cache_key = id(w)
     version = int(w._version)
     shape = tuple(w.shape)
     cached = _weight_fp8_cache.get(cache_key)
@@ -136,8 +145,6 @@ def _quant_blockwise_2d(w, fp8_dtype, block_size=128):
         and cached[3] == shape
     ):
         return cached[4], cached[5]
-
-    from lumen.ops.quantize.ops import quant_fp8_blockwise_weight_3d
 
     w_fp8, w_scales = quant_fp8_blockwise_weight_3d(w, fp8_dtype, block_size)
     _weight_fp8_cache[cache_key] = (
@@ -674,6 +681,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         scaling_type: str,
         fp8_dtype: torch.dtype,
         block_size: int,
+        concat_layout: bool,
     ):
         from aiter.ops.triton._triton_kernels.moe.sonicmoe.activation_kernels import (
             activation_fwd,
@@ -689,7 +697,9 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=fp8_dtype,
         )
         intermediate = w1.shape[-1] // 2
-        hidden_act = activation_fwd(fc1, intermediate, "swiglu", concat_layout=True)
+        hidden_act = activation_fwd(
+            fc1, intermediate, "swiglu", concat_layout=concat_layout
+        )
         output = grouped_gemm(
             hidden_act,
             w2,
@@ -703,6 +713,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
         ctx.block_size = block_size
+        ctx.concat_layout = concat_layout
         return output
 
     @staticmethod
@@ -728,7 +739,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             block_size=ctx.block_size,
         )
         grad_fc1 = activation_bwd(
-            fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=True
+            fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=ctx.concat_layout
         )
         grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
             grad_fc1,
@@ -740,7 +751,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
         )
-        return grad_hidden, grad_w1, grad_w2, None, None, None, None
+        return grad_hidden, grad_w1, grad_w2, None, None, None, None, None
 
 
 def grouped_fp8_expert_mlp(
@@ -752,12 +763,19 @@ def grouped_fp8_expert_mlp(
     scaling_type: str = "blockwise2d",
     fp8_dtype: Optional[torch.dtype] = None,
     block_size: int = 128,
+    concat_layout: bool = True,
 ) -> torch.Tensor:
     """Pre-routed SwiGLU expert MLP with official blockwise FP8.
 
     Forward: grouped FP8 GEMM on fused ``w1`` (gate+up) and ``w2``, with
-    Sonic concat SwiGLU in between. Backward: FP8 dgrad/wgrad on both GEMMs
+    Sonic SwiGLU in between. Backward: FP8 dgrad/wgrad on both GEMMs
     (activation backward stays BF16). Master ``w1``/``w2`` remain BF16.
+
+    ``concat_layout`` must match how ``w1`` interleaves its gate and up
+    halves, exactly as for the BF16 SonicMoE entry points: ``True`` for
+    ``[gate | up]`` (Megatron ``linear_fc1``), ``False`` for per-column
+    ``gate, up`` pairs (the FSDP expert slice). A mismatch silently computes
+    ``silu(up) * gate`` on shuffled columns instead of raising.
     """
     if fp8_dtype is None:
         fp8_dtype = _default_fp8_dtype()
@@ -775,4 +793,5 @@ def grouped_fp8_expert_mlp(
         scaling_type,
         fp8_dtype,
         block_size,
+        concat_layout,
     )

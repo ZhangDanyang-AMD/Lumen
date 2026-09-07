@@ -428,3 +428,50 @@ def test_grouped_fp8_expert_mlp_matches_silu_path():
     assert torch.isfinite(hidden.grad.float()).all()
     assert torch.isfinite(w1.grad.float()).all()
     assert torch.isfinite(w2.grad.float()).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+@pytest.mark.parametrize("concat_layout", [True, False])
+def test_grouped_fp8_expert_mlp_follows_gate_up_layout(concat_layout):
+    """w1 gate/up packing must drive the SwiGLU split, not a hardcoded layout."""
+    import torch.nn.functional as F
+
+    from lumen.ops.gemm.grouped_gemm import grouped_fp8_expert_mlp
+    from lumen.quantize.config import _get_float8_e4m3
+
+    device = "cuda"
+    dtype = torch.bfloat16
+    e, k, i = 2, 256, 128
+    group_sizes = torch.tensor([40, 24], dtype=torch.int32, device=device)
+    torch.manual_seed(5)
+    hidden = torch.randn(64, k, device=device, dtype=dtype)
+    gate = torch.randn(e, k, i, device=device, dtype=dtype) * 0.05
+    up = torch.randn(e, k, i, device=device, dtype=dtype) * 0.05
+    w2 = torch.randn(e, i, k, device=device, dtype=dtype) * 0.05
+
+    if concat_layout:
+        w1 = torch.cat((gate, up), dim=2).contiguous()
+    else:
+        w1 = torch.stack((gate, up), dim=3).flatten(2, 3).contiguous()
+
+    reference, offset = [], 0
+    for expert in range(e):
+        count = int(group_sizes[expert])
+        tokens = hidden[offset : offset + count]
+        activated = F.silu((tokens @ gate[expert]).float()) * (tokens @ up[expert]).float()
+        reference.append(activated.to(dtype) @ w2[expert])
+        offset += count
+    reference = torch.cat(reference)
+
+    out = grouped_fp8_expert_mlp(
+        hidden,
+        w1,
+        w2,
+        group_sizes,
+        scaling_type="blockwise2d",
+        fp8_dtype=_get_float8_e4m3(),
+        block_size=128,
+        concat_layout=concat_layout,
+    )
+    snr = compute_snr(reference.float(), out.float())
+    assert snr > 20, f"concat_layout={concat_layout} SwiGLU split SNR {snr:.1f} dB"

@@ -1,7 +1,9 @@
 """CPU tests for the Qwen3-30B-A3B Transformers/FSDP implementation."""
 
+import argparse
 import copy
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 
@@ -26,6 +28,16 @@ EPShardedMoeBlock = MODULE.EPShardedMoeBlock
 SonicLocalExperts = MODULE._SonicLocalExperts
 create_parallel_groups = MODULE.create_parallel_groups
 parallel_rank_layout = MODULE._parallel_rank_layout
+
+
+def _sonic_blockwise_fp8_supported() -> bool:
+    try:
+        from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
+            grouped_gemm as sonic_grouped_gemm,
+        )
+    except ImportError:
+        return False
+    return "A_scale" in inspect.signature(sonic_grouped_gemm).parameters
 
 
 class _FakeGate(nn.Module):
@@ -243,6 +255,132 @@ def test_sonic_triton_forward_and_gradients(monkeypatch):
     torch.testing.assert_close(weights.grad, reference_weights.grad, rtol=0.08, atol=0.03)
     torch.testing.assert_close(sonic.w1.grad, reference_w1.grad, rtol=0.08, atol=0.03)
     torch.testing.assert_close(sonic.w2.grad, reference_w2.grad, rtol=0.08, atol=0.03)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a ROCm GPU")
+def test_sonic_fp8_forward_and_gradients():
+    pytest.importorskip("aiter.ops.triton.sonicmoe")
+    if not _sonic_blockwise_fp8_supported():
+        pytest.skip("AITER Sonic grouped GEMM has no in-kernel blockwise FP8 scales")
+    from lumen.quantize.config import _get_float8_e4m3
+
+    torch.manual_seed(17)
+    device = torch.device("cuda")
+    dtype = torch.bfloat16
+    experts = _FakeExperts()
+    experts.gate_up_proj = nn.Parameter(
+        torch.randn(4, 128, 128, device=device, dtype=dtype) * 0.02
+    )
+    experts.down_proj = nn.Parameter(
+        torch.randn(4, 128, 64, device=device, dtype=dtype) * 0.02
+    )
+    sonic = SonicLocalExperts(experts, 0, 4)
+    sonic.enable_fp8(scaling_type="blockwise2d", fp8_dtype=_get_float8_e4m3(), block_size=128)
+
+    hidden = torch.randn(19, 128, device=device, dtype=dtype, requires_grad=True)
+    expert_ids = torch.tensor(
+        [0, 2, 1, 3, 1, 0, 2, 2, 3, 0, 1, 3, 2, 0, 1, 1, 3, 2, 0],
+        device=device,
+    )
+    weights = torch.rand(19, device=device, dtype=dtype, requires_grad=True)
+    reference_w1 = sonic.w1.detach().clone()
+    reference_w2 = sonic.w2.detach().clone()
+
+    reference = torch.empty(19, 128, device=device, dtype=dtype)
+    for expert_id in range(4):
+        positions = torch.where(expert_ids == expert_id)[0]
+        tokens = hidden[positions].detach()
+        gate = tokens @ reference_w1[expert_id, :, 0::2]
+        up = tokens @ reference_w1[expert_id, :, 1::2]
+        activated = (F.silu(gate.float()) * up.float()).to(dtype)
+        reference[positions] = (activated @ reference_w2[expert_id]) * weights[
+            positions
+        ].detach().unsqueeze(-1)
+
+    sonic_output = sonic.forward_all(hidden, expert_ids, weights)
+    assert torch.isfinite(sonic_output.float()).all()
+    # FP8 expert GEMMs must reproduce the BF16 SwiGLU, so a gate/up layout
+    # mismatch cannot hide behind "output is finite".
+    cosine = F.cosine_similarity(
+        sonic_output.detach().float().flatten(), reference.float().flatten(), dim=0
+    )
+    assert cosine > 0.99, f"FP8 expert MLP vs BF16 reference cosine {cosine:.4f}"
+
+    sonic_output.backward(torch.randn_like(sonic_output))
+    torch.cuda.synchronize()
+    assert torch.isfinite(hidden.grad.float()).all()
+    assert torch.isfinite(sonic.w1.grad.float()).all()
+    assert torch.isfinite(sonic.w2.grad.float()).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a ROCm GPU")
+def test_sonic_fp8_zero_expert_counts():
+    pytest.importorskip("aiter.ops.triton.sonicmoe")
+    if not _sonic_blockwise_fp8_supported():
+        pytest.skip("AITER Sonic grouped GEMM has no in-kernel blockwise FP8 scales")
+    from lumen.quantize.config import _get_float8_e4m3
+
+    torch.manual_seed(3)
+    device = torch.device("cuda")
+    dtype = torch.bfloat16
+    experts = _FakeExperts()
+    experts.gate_up_proj = nn.Parameter(
+        torch.randn(4, 128, 128, device=device, dtype=dtype) * 0.02
+    )
+    experts.down_proj = nn.Parameter(
+        torch.randn(4, 128, 64, device=device, dtype=dtype) * 0.02
+    )
+    sonic = SonicLocalExperts(experts, 0, 4)
+    sonic.enable_fp8(scaling_type="blockwise2d", fp8_dtype=_get_float8_e4m3(), block_size=128)
+
+    hidden = torch.randn(16, 128, device=device, dtype=dtype, requires_grad=True)
+    expert_ids = torch.zeros(16, device=device, dtype=torch.int64)
+    weights = torch.ones(16, device=device, dtype=dtype)
+    out = sonic.forward_all(hidden, expert_ids, weights)
+    out.float().sum().backward()
+    torch.cuda.synchronize()
+    assert torch.isfinite(hidden.grad.float()).all()
+    assert sonic.w1.grad[1].abs().sum() == 0
+
+
+def test_enable_lumen_rejects_te_grouped_fp8():
+    args = argparse.Namespace(mode="fp8_blockwise2d", expert_backend="te_grouped")
+    with pytest.raises(ValueError, match="does not cover TE grouped"):
+        MODULE._enable_lumen(nn.Linear(2, 2), args)
+
+
+def test_sonic_enable_fp8_rejects_non_blockwise2d():
+    experts = _FakeExperts()
+    sonic = SonicLocalExperts(experts, 0, 4)
+    with pytest.raises(ValueError, match="blockwise2d"):
+        sonic.enable_fp8(scaling_type="delayed")
+
+
+def test_sonic_backend_rejects_modulelist_experts():
+    class _ListBlock(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gate = _FakeGate()
+            self.experts = nn.ModuleList([nn.Linear(6, 6) for _ in range(4)])
+
+    with pytest.raises(TypeError, match="packed HF expert"):
+        EPShardedMoeBlock(
+            _ListBlock(),
+            ep_rank=0,
+            ep_size=1,
+            ep_group=None,
+            expert_backend="sonic",
+        )
+
+
+def test_local_weight_unwraps_to_local():
+    class _Sharded:
+        def to_local(self):
+            return torch.ones(2, 2)
+
+    dense = torch.zeros(2, 2)
+    assert MODULE._local_weight(dense).equal(dense)
+    assert torch.equal(MODULE._local_weight(_Sharded()), torch.ones(2, 2))
 
 
 def test_single_rank_parallel_groups_do_not_require_distributed_init():

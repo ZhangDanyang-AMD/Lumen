@@ -54,3 +54,4 @@ inference dump.
 The result is a Lumen/Megatron inference artifact, not a resumable training
 checkpoint and not a drop-in Hugging Face `Qwen/Qwen3-30B-A3B-FP8` directory
 (Transformers module names and CUDA `e4m3fn` still need a separate converter).
+FSDP/HF training has no equivalent exporter.

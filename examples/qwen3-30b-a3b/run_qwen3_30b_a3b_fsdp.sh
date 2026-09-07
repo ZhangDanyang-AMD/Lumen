@@ -31,8 +31,9 @@
 #   TRAIN_FILE=train.jsonl VAL_FILE=test.jsonl \
 #     bash run_qwen3_30b_a3b_fsdp.sh
 #
-# Throughput-oriented config (memory permitting):
-#   MODE=fp8_blockwise2d SHARDING=shard_grad_op GRAD_CKPT=0 \
+# Throughput-oriented config (memory permitting). TE grouped experts are
+# not covered by Lumen blockwise2d FP8; use sequential or sonic:
+#   MODE=fp8_blockwise2d EXPERT_BACKEND=sonic SHARDING=shard_grad_op GRAD_CKPT=0 \
 #   AITER_ATTN=1 LUMEN_NORM=1 FUSE_ROPE=1 \
 #     bash run_qwen3_30b_a3b_fsdp.sh
 set -euo pipefail
@@ -56,6 +57,7 @@ MASTER_PORT="${MASTER_PORT:-29500}"
 
 # ---- Training config ----
 MODE="${MODE:-bf16}"                    # bf16 | fp8_blockwise2d
+EXPERT_BACKEND="${EXPERT_BACKEND:-te_grouped}"  # sequential | te_grouped | sonic
 SEQ_LENGTH="${SEQ_LENGTH:-2048}"
 MAX_STEPS="${MAX_STEPS:-100}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
@@ -68,6 +70,17 @@ if [[ "${DP_SIZE}" -ne "${WORLD_SIZE}" ]]; then
 fi
 if (( WORLD_SIZE % EP_SIZE != 0 )); then
     echo "ERROR: WORLD_SIZE=${WORLD_SIZE} must be divisible by EP_SIZE=${EP_SIZE}" >&2
+    exit 2
+fi
+case "${EXPERT_BACKEND}" in
+    sequential|te_grouped|sonic) ;;
+    *)
+        echo "ERROR: EXPERT_BACKEND must be sequential, te_grouped, or sonic" >&2
+        exit 2
+        ;;
+esac
+if [[ "${MODE}" == "fp8_blockwise2d" && "${EXPERT_BACKEND}" == "te_grouped" ]]; then
+    echo "ERROR: MODE=fp8_blockwise2d does not cover TE grouped experts; use EXPERT_BACKEND=sequential or sonic" >&2
     exit 2
 fi
 SHARDING="${SHARDING:-full_shard}"      # full_shard | shard_grad_op
@@ -98,10 +111,11 @@ echo "=== Qwen3-30B-A3B dense-DP=${DP_SIZE}, EP=${EP_SIZE} Training ==="
 echo "  Model:       ${HOST_MODEL}"
 echo "  Data:        ${HOST_DATA}"
 echo "  Mode:        ${MODE}"
+echo "  Experts:     ${EXPERT_BACKEND}"
 echo "  Sharding:    ${SHARDING} (FSDP2 fully_shard)"
 echo "  Steps:       ${MAX_STEPS}"
 echo "  SeqLen:      ${SEQ_LENGTH}"
-echo "  Training:    full-param BF16"
+echo "  Training:    full-param ${MODE}"
 echo "  Nodes:       ${NNODES} (node_rank=${NODE_RANK})"
 echo "  GPUs/node:   ${NPROC_PER_NODE}"
 echo "  Master:      ${MASTER_ADDR}:${MASTER_PORT}"
@@ -118,7 +132,7 @@ docker run --rm --init \
     --cap-add=SYS_PTRACE \
     -v "${HOST_LUMEN}/lumen:/workspace/Lumen/lumen" \
     -v "${HOST_LUMEN}/examples:/workspace/Lumen/examples" \
-    -v "${HOST_LUMEN}/third_party/aiter/aiter/ops/triton/configs:/workspace/Lumen/third_party/aiter/aiter/ops/triton/configs" \
+    -v "${HOST_LUMEN}/third_party/aiter:/workspace/Lumen/third_party/aiter" \
     -v "${HOST_MODEL}:/model-qwen3-moe:ro" \
     -v "${HOST_DATA}:/data:ro" \
     -v "${HOST_RESULTS}:/results" \
@@ -139,7 +153,7 @@ EXTRA=""
 [[ -n "'"${FUSED_ROUTER}"'" ]]        && EXTRA="${EXTRA} --fused-router"
 [[ -n "'"${MOE_DISPATCH_OVERLAP}"'" ]] && EXTRA="${EXTRA} --lumen-moe-dispatch-overlap"
 [[ -n "'"${MOE_GLOBAL_EXPERT_LAYOUT}"'" ]] && EXTRA="${EXTRA} --lumen-moe-global-expert-layout"
-[[ "'"${GRAD_CKPT}"'" == "0" ]]       && EXTRA="${EXTRA} --no-grad-checkpointing"
+[[ "'"${GRAD_CKPT}"'" == "0" ]]       && EXTRA="${EXTRA} --no-gradient-checkpointing"
 
 torchrun \
     --nnodes='"${NNODES}"' \
@@ -153,6 +167,7 @@ torchrun \
     --train-data-path "/data/'"${TRAIN_FILE}"'" \
     --val-data-path "/data/'"${VAL_FILE}"'" \
     --mode '"${MODE}"' \
+    --expert-backend '"${EXPERT_BACKEND}"' \
     --ep-size '"${EP_SIZE}"' \
     --dp-size '"${DP_SIZE}"' \
     --sharding '"${SHARDING}"' \
