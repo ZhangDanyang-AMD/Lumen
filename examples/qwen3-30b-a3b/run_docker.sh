@@ -37,6 +37,8 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
     --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
     --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
+    --volume "${REPO_ROOT}/lumen/quantize:/workspace/Lumen/lumen/quantize" \
+    --volume "${REPO_ROOT}/lumen/ops/quantize:/workspace/Lumen/lumen/ops/quantize" \
     --volume "${REPO_ROOT}/lumen/ops/moe/__init__.py:/workspace/Lumen/lumen/ops/moe/__init__.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_layout.py:/workspace/Lumen/lumen/ops/moe/dispatch_layout.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_overlap.py:/workspace/Lumen/lumen/ops/moe/dispatch_overlap.py" \
@@ -84,6 +86,7 @@ docker run --rm --init \
     --env NVTE_USE_HIPKITTENS_GROUPED_GEMM="${NVTE_USE_HIPKITTENS_GROUPED_GEMM:-}" \
     --env LUMEN_USE_MEGATRON_ATTENTION="${LUMEN_USE_MEGATRON_ATTENTION:-0}" \
     --env LUMEN_ATTN_BACKEND="${LUMEN_ATTN_BACKEND:-csrc}" \
+    --env FP8_MODE="${FP8_MODE:-bf16}" \
     --env USE_ROCM_AITER_ROPE_BACKEND="${USE_ROCM_AITER_ROPE_BACKEND:-1}" \
     --env MEGATRON_OVERLAP="${MEGATRON_OVERLAP:-1}" \
     --env OVERLAP_MOE_EP_COMM="${OVERLAP_MOE_EP_COMM:-1}" \

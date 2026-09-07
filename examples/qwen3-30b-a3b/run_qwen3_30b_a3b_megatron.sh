@@ -69,6 +69,27 @@ if [ "${GRAD_ACC_FUSION:-0}" != "1" ]; then
     GRAD_ACC_ARGS=(--no-gradient-accumulation-fusion)
 fi
 
+FP8_ARGS=()
+case "${FP8_MODE:-bf16}" in
+    bf16)
+        ;;
+    blockwise2d)
+        if [ "${MOE_IMPL}" != "sequential" ]; then
+            echo "ERROR: FP8_MODE=blockwise2d currently requires MOE_IMPL=sequential; SonicMoE is BF16-only and TE grouped experts are not covered by the default linear FP8 patch" >&2
+            exit 2
+        fi
+        FP8_ARGS=(
+            --linear-fp8
+            --linear-fp8-scaling blockwise2d
+            --linear-fp8-block-size 128
+        )
+        ;;
+    *)
+        echo "ERROR: FP8_MODE must be bf16 or blockwise2d" >&2
+        exit 2
+        ;;
+esac
+
 CUDA_GRAPH_IMPL="${CUDA_GRAPH_IMPL:-transformer_engine}"
 CUDA_GRAPH_SCOPE="${CUDA_GRAPH_SCOPE:-attn}"
 CUDA_GRAPH_ARGS=()
@@ -115,7 +136,7 @@ RUN_SUFFIX=${RUN_SUFFIX:-}
 RUN_NAME="qwen3-30b-a3b-${MOE_IMPL}${RUN_SUFFIX:+-${RUN_SUFFIX}}-seq${SEQ_LEN}-mbs${MBS}-gbs${GBS}"
 LOG_FILE="${RESULTS_DIR}/${RUN_NAME}.log"
 
-echo "Qwen3-30B-A3B: MOE_IMPL=${MOE_IMPL}, TP=${TP}, EP=${EP}, seq=${SEQ_LEN}, pad=${MOE_PAD_TO_CAPACITY:-0}, grad_acc_fusion=${GRAD_ACC_FUSION:-0}, cuda_graph_scope=${CUDA_GRAPH_SCOPE:-}"
+echo "Qwen3-30B-A3B: MOE_IMPL=${MOE_IMPL}, FP8_MODE=${FP8_MODE:-bf16}, TP=${TP}, EP=${EP}, seq=${SEQ_LEN}, pad=${MOE_PAD_TO_CAPACITY:-0}, grad_acc_fusion=${GRAD_ACC_FUSION:-0}, cuda_graph_scope=${CUDA_GRAPH_SCOPE:-}"
 
 torchrun \
     --nproc_per_node="${NGPU}" \
@@ -174,6 +195,7 @@ torchrun \
     --adam-beta2 0.95 \
     --adam-eps 1e-8 \
     --bf16 \
+    "${FP8_ARGS[@]}" \
     "${GRAD_ACC_ARGS[@]}" \
     --use-distributed-optimizer \
     "${OVERLAP_ARGS[@]}" \

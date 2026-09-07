@@ -71,6 +71,24 @@ MOE_IMPL=sonic TRAIN_STEPS=5 SEQ_LEN=1024 \
   bash examples/qwen3-30b-a3b/run_docker.sh
 ```
 
+### Blockwise FP8 training and offline export
+
+Set `FP8_MODE=blockwise2d` to keep BF16 master parameters while running
+eligible linear GEMMs with E4M3 weights quantized in 128x128 blocks and
+dynamic 1x128 activations:
+
+```bash
+FP8_MODE=blockwise2d MOE_IMPL=sequential \
+TRAIN_STEPS=5 SEQ_LEN=1024 MBS=1 GBS=8 \
+  bash examples/qwen3-30b-a3b/run_docker.sh
+```
+
+The resumable training checkpoint remains BF16. Convert the final checkpoint
+to a Lumen FP8 inference artifact with
+`checkpoint/export_megatron_blockwise_fp8.py`; see `checkpoint/README.md`.
+The first milestone targets Megatron linear modules. SonicMoE expert FP8 and
+Hugging Face `weight_scale_inv` output are separate follow-up work.
+
 ## Build
 
 ```bash

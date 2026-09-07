@@ -513,6 +513,12 @@ def _replace_forward(
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            # MoE token routing can assign zero tokens to a local expert.
+            # AITER's dynamic quantization kernel cannot launch a zero-sized
+            # grid, while the original linear handles the empty tensor and
+            # produces correctly connected zero gradients.
+            if input_tensor.numel() == 0:
+                return original_forward(input_tensor, *args, **kwargs)
             _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
             w = module.weight
             _wcache = getattr(module, "_fp8_weight_data", None)
@@ -552,6 +558,8 @@ def _replace_forward(
     else:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            if input_tensor.numel() == 0:
+                return original_forward(input_tensor, *args, **kwargs)
             skip_bias_add = getattr(module, "skip_bias_add", False)
             bias = getattr(module, "bias", None)
             bias_for_gemm = None if skip_bias_add else bias
