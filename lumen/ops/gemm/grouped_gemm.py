@@ -13,7 +13,8 @@ used in Mixture-of-Experts architectures.
 
 Backends:
     - **Triton GMM**: ``gmm`` / ``ptgmm`` / ``nptgmm`` (BF16/FP16 only)
-    - **Triton MOE GEMM**: ``moe_gemm_a8w8``, ``moe_gemm_a8w8_blockscale``
+    - **Triton MOE GEMM**: ``moe_gemm_a8w8`` (per-tensor delayed/dynamic)
+    - **Sonic grouped GEMM**: blockwise FP8 with in-kernel 1×128 / 128×128 scales
     - **Triton MOE per-token**: ``moe_gemm_per_token`` (fused per-token scale)
     - **Triton MOE MXFP8**: ``moe_gemm_mxfp8`` (fused MXFP8 microscaling)
     - **CKTile DeepGEMM**: ``deepgemm`` (BF16/FP16/FP8 grouped flat MM)
@@ -43,6 +44,12 @@ from lumen.ops.dispatch import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _default_fp8_dtype() -> torch.dtype:
+    from lumen.quantize.config import _get_float8_e4m3
+
+    return _get_float8_e4m3()
 
 
 def _build_routing_data_from_group_sizes(group_sizes, total_tokens):
@@ -179,12 +186,6 @@ def _get_moe_gemm_a8w8():
     return moe_gemm_a8w8
 
 
-def _get_moe_gemm_a8w8_blockscale():
-    from aiter.ops.triton.moe.moe_op_gemm_a8w8_blockscale import moe_gemm_a8w8_blockscale
-
-    return moe_gemm_a8w8_blockscale
-
-
 # ---------------------------------------------------------------------------
 # BF16 Grouped GEMM (no quantization) — all via AITER
 # ---------------------------------------------------------------------------
@@ -205,7 +206,7 @@ def grouped_gemm(
     w_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
     block_size: int = 128,
-    fp8_dtype: torch.dtype = torch.float8_e4m3fn,
+    fp8_dtype: Optional[torch.dtype] = None,
 ) -> torch.Tensor:
     """Grouped GEMM dispatch with multi-backend fallback (all AITER).
 
@@ -231,6 +232,8 @@ def grouped_gemm(
     Returns:
         Output tensor ``[total_tokens, N]``.
     """
+    if fp8_dtype is None:
+        fp8_dtype = _default_fp8_dtype()
     if scaling_type == "none":
         backends = []
         if _probe_aiter_gmm():
@@ -297,43 +300,6 @@ def grouped_gemm(
             )
 
         backends.append((Backend.TRITON, _sonic_blockscale))
-
-        def _moe_blockscale():
-            lhs_2d = lhs.reshape(-1, lhs.shape[-1]).contiguous()
-            routing_data = _build_routing_data_from_group_sizes(
-                group_sizes, lhs_2d.shape[0]
-            )
-
-            if lhs.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz):
-                if x_scale is None or w_scale is None:
-                    raise ValueError("Pre-quantized FP8 inputs require explicit x_scale and w_scale")
-                lhs_fp8, lhs_scales = lhs, x_scale
-                rhs_fp8, rhs_scales = rhs, w_scale
-            else:
-                from lumen.ops.quantize.ops import quant_fp8_blockwise_impl
-
-                lhs_fp8, lhs_scales = quant_fp8_blockwise_impl(
-                    lhs_2d, fp8_dtype, axis=1, block_size=block_size
-                )
-                rhs_fp8, rhs_scales = _quant_blockwise_2d(rhs, fp8_dtype, block_size)
-
-            fn = _get_moe_gemm_a8w8_blockscale()
-            return fn(
-                x=lhs_fp8,
-                w=rhs_fp8,
-                x_block_scales=lhs_scales,
-                w_block_scales=rhs_scales,
-                bias=bias,
-                routing_data=routing_data,
-                out_dtype=torch.bfloat16,
-                per_row_x_scale=True,
-            )
-
-        try:
-            _get_moe_gemm_a8w8_blockscale()
-            backends.append((Backend.TRITON, _moe_blockscale))
-        except (ImportError, OSError):
-            pass
 
         def _sequential_fallback():
             return _grouped_gemm_fp8_sequential(
@@ -413,9 +379,11 @@ def _grouped_gemm_fp8_sequential(
     scaling_type,
     bias=None,
     block_size=128,
-    fp8_dtype=torch.float8_e4m3fn,
+    fp8_dtype=None,
 ):
     """Sequential per-expert FP8 GEMM via AITER Triton GEMM backends."""
+    if fp8_dtype is None:
+        fp8_dtype = _default_fp8_dtype()
     from lumen.ops.quantize.linear import dispatch_gemm, quantize_input
 
     outputs = []
@@ -465,57 +433,36 @@ def grouped_gemm_wgrad(
 ) -> torch.Tensor:
     """Grouped GEMM weight gradient: out[g] = grad[:, g_start:g_end].T @ input[g_start:g_end].
 
-    For BF16 uses AITER's ptgmm (Persistent Transposed GMM).
-    For FP8 modes uses sequential per-expert wgrad via AITER Triton GEMM.
+    BF16 only (AITER ptgmm). Blockwise FP8 wgrad lives on
+    ``grouped_quantized_linear`` / ``grouped_fp8_expert_mlp``.
 
     Args:
         grad_output: ``[total_tokens, N]``.
         input_tensor: ``[total_tokens, K]``.
         group_sizes: Expert token counts ``[num_experts]``.
-        scaling_type: Quantization mode.
+        scaling_type: Must be ``"none"``.
 
     Returns:
         Weight gradient ``[num_experts, N, K]``.
     """
-    if scaling_type == "none":
-        backends = []
-        if _probe_aiter_gmm():
-
-            def _ptgmm():
-                fn = _get_ptgmm()
-                # ptgmm documents TRANS_LHS for a view of .t(), but large T
-                # has produced GPU memory-access faults. Materialize (N, T).
-                lhs = grad_output.transpose(0, 1).contiguous()
-                rhs = input_tensor.contiguous()
-                return fn(lhs, rhs, group_sizes)
-
-            backends.append((Backend.TRITON, _ptgmm))
-        return try_backends(backends, op_name="grouped_gemm_wgrad")
-
-    # FP8 wgrad: sequential per-expert via AITER GEMM (in BF16 for numerical stability)
-    from lumen.ops.quantize.linear import dispatch_gemm
-
-    num_experts = len(group_sizes)
-    N = grad_output.shape[-1]
-    K = input_tensor.shape[-1]
-    wgrad = torch.zeros(num_experts, N, K, device=grad_output.device, dtype=torch.bfloat16)
-    offset = 0
-    for g, size in enumerate(group_sizes):
-        size = int(size)
-        if size == 0:
-            continue
-        g_bf16 = grad_output[offset : offset + size].to(torch.bfloat16)
-        x_bf16 = input_tensor[offset : offset + size].to(torch.bfloat16)
-        # wgrad[g] = g^T @ x  →  dispatch(g^T, x^T) since kernel does A @ W^T → (g^T) @ (x^T)^T = g^T @ x
-        wgrad[g] = dispatch_gemm(
-            g_bf16.t().contiguous(),
-            x_bf16.t().contiguous(),
-            None,
-            None,
-            "none",
+    if scaling_type != "none":
+        raise ValueError(
+            "grouped_gemm_wgrad is BF16-only; use grouped_quantized_linear or "
+            "grouped_fp8_expert_mlp for blockwise FP8 wgrad"
         )
-        offset += size
-    return wgrad
+    backends = []
+    if _probe_aiter_gmm():
+
+        def _ptgmm():
+            fn = _get_ptgmm()
+            # ptgmm documents TRANS_LHS for a view of .t(), but large T
+            # has produced GPU memory-access faults. Materialize (N, T).
+            lhs = grad_output.transpose(0, 1).contiguous()
+            rhs = input_tensor.contiguous()
+            return fn(lhs, rhs, group_sizes)
+
+        backends.append((Backend.TRITON, _ptgmm))
+    return try_backends(backends, op_name="grouped_gemm_wgrad")
 
 
 def _cu_seqlens_from_group_sizes(group_sizes: torch.Tensor) -> torch.Tensor:
@@ -531,7 +478,7 @@ def _sonic_grouped_linear_backward(
     group_sizes,
     cu_seqlens=None,
     scaling_type="none",
-    fp8_dtype=torch.float8_e4m3fn,
+    fp8_dtype=None,
     block_size=128,
 ):
     """Dgrad/wgrad via SonicMoE grouped GEMM.
@@ -548,6 +495,8 @@ def _sonic_grouped_linear_backward(
     if cu_seqlens is None:
         cu_seqlens = _cu_seqlens_from_group_sizes(group_sizes)
     if scaling_type in ("blockwise", "blockwise2d"):
+        if fp8_dtype is None:
+            fp8_dtype = _default_fp8_dtype()
         from lumen.ops.quantize.ops import (
             quant_fp8_blockwise_impl,
             quant_fp8_blockwise_segment_m_impl,
@@ -626,35 +575,6 @@ def _sonic_grouped_linear_backward(
     return grad_input, grad_weight
 
 
-def _sequential_grouped_linear_backward(grad_output, inp, weight, group_sizes):
-    """Per-expert BF16 dgrad/wgrad via ``dispatch_gemm``."""
-    from lumen.ops.quantize.linear import dispatch_gemm
-
-    grad_input = torch.empty_like(inp)
-    grad_weight = torch.zeros_like(weight)
-    offset = 0
-    for expert, size in enumerate(group_sizes.tolist()):
-        size = int(size)
-        if size == 0:
-            continue
-        dy = grad_output[offset : offset + size]
-        x = inp[offset : offset + size]
-        w_nk = weight[expert].transpose(0, 1).contiguous()
-        grad_input[offset : offset + size] = dispatch_gemm(
-            dy, w_nk, None, None, "none"
-        )
-        # dW[e] is [K, N] = X^T @ dY  →  dispatch(X^T, dY^T) with A @ W^T
-        grad_weight[expert] = dispatch_gemm(
-            x.t().contiguous(),
-            dy.t().contiguous(),
-            None,
-            None,
-            "none",
-        )
-        offset += size
-    return grad_input, grad_weight
-
-
 class _GroupedQuantizedLinear(torch.autograd.Function):
     """Pre-routed grouped GEMM with BF16 master weights and FP8 compute.
 
@@ -662,7 +582,7 @@ class _GroupedQuantizedLinear(torch.autograd.Function):
     ``[K, N]`` and ``Y_e = X_e @ weight[e]``.
 
     ``blockwise`` / ``blockwise2d`` use FP8 grouped GEMM on forward, dgrad,
-    and wgrad. Other modes, or a kernel failure, fall back to sequential BF16.
+    and wgrad. Failures propagate; there is no BF16 backward fallback.
     """
 
     @staticmethod
@@ -674,7 +594,6 @@ class _GroupedQuantizedLinear(torch.autograd.Function):
         scaling_type: str,
         fp8_dtype: torch.dtype,
         block_size: int,
-        fp8_wgrad: bool,
     ) -> torch.Tensor:
         group_sizes = group_sizes.to(device=inp.device, dtype=torch.int32)
         out = grouped_gemm(
@@ -689,7 +608,6 @@ class _GroupedQuantizedLinear(torch.autograd.Function):
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
         ctx.block_size = block_size
-        ctx.fp8_wgrad = fp8_wgrad
         return out
 
     @staticmethod
@@ -698,25 +616,16 @@ class _GroupedQuantizedLinear(torch.autograd.Function):
         grad_output = grad_output.contiguous()
         inp = inp.contiguous()
         weight = weight.contiguous()
-        try:
-            grad_input, grad_weight = _sonic_grouped_linear_backward(
-                grad_output,
-                inp,
-                weight,
-                group_sizes,
-                scaling_type=ctx.scaling_type,
-                fp8_dtype=ctx.fp8_dtype,
-                block_size=ctx.block_size,
-            )
-        except (ImportError, OSError, RuntimeError, ValueError) as exc:
-            logger.warning(
-                "Sonic grouped GEMM backward failed (%s); using sequential BF16",
-                exc,
-            )
-            grad_input, grad_weight = _sequential_grouped_linear_backward(
-                grad_output, inp, weight, group_sizes
-            )
-        return grad_input, grad_weight, None, None, None, None, None
+        grad_input, grad_weight = _sonic_grouped_linear_backward(
+            grad_output,
+            inp,
+            weight,
+            group_sizes,
+            scaling_type=ctx.scaling_type,
+            fp8_dtype=ctx.fp8_dtype,
+            block_size=ctx.block_size,
+        )
+        return grad_input, grad_weight, None, None, None, None
 
 
 def grouped_quantized_linear(
@@ -727,7 +636,6 @@ def grouped_quantized_linear(
     scaling_type: str = "blockwise2d",
     fp8_dtype: Optional[torch.dtype] = None,
     block_size: int = 128,
-    fp8_wgrad: bool = True,
 ) -> torch.Tensor:
     """Autograd grouped Linear for expert-sorted tokens.
 
@@ -740,7 +648,7 @@ def grouped_quantized_linear(
         group_sizes: per-expert token counts ``[num_experts]``.
     """
     if fp8_dtype is None:
-        fp8_dtype = torch.float8_e4m3fn
+        fp8_dtype = _default_fp8_dtype()
     if inp.numel() == 0:
         return inp.new_empty(inp.shape[0], weight.shape[-1])
     return _GroupedQuantizedLinear.apply(
@@ -750,7 +658,6 @@ def grouped_quantized_linear(
         scaling_type,
         fp8_dtype,
         block_size,
-        fp8_wgrad,
     )
 
 
@@ -810,44 +717,29 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         w1 = w1.contiguous()
         w2 = w2.contiguous()
         cu_seqlens = _cu_seqlens_from_group_sizes(group_sizes)
-        try:
-            grad_act, grad_w2 = _sonic_grouped_linear_backward(
-                grad_output,
-                hidden_act,
-                w2,
-                group_sizes,
-                cu_seqlens=cu_seqlens,
-                scaling_type=ctx.scaling_type,
-                fp8_dtype=ctx.fp8_dtype,
-                block_size=ctx.block_size,
-            )
-            grad_fc1 = activation_bwd(
-                fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=True
-            )
-            grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
-                grad_fc1,
-                hidden,
-                w1,
-                group_sizes,
-                cu_seqlens=cu_seqlens,
-                scaling_type=ctx.scaling_type,
-                fp8_dtype=ctx.fp8_dtype,
-                block_size=ctx.block_size,
-            )
-        except (ImportError, OSError, RuntimeError, ValueError) as exc:
-            logger.warning(
-                "Fused FP8 expert backward failed (%s); using sequential BF16",
-                exc,
-            )
-            grad_act, grad_w2 = _sequential_grouped_linear_backward(
-                grad_output, hidden_act, w2, group_sizes
-            )
-            grad_fc1 = activation_bwd(
-                fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=True
-            )
-            grad_hidden, grad_w1 = _sequential_grouped_linear_backward(
-                grad_fc1, hidden, w1, group_sizes
-            )
+        grad_act, grad_w2 = _sonic_grouped_linear_backward(
+            grad_output,
+            hidden_act,
+            w2,
+            group_sizes,
+            cu_seqlens=cu_seqlens,
+            scaling_type=ctx.scaling_type,
+            fp8_dtype=ctx.fp8_dtype,
+            block_size=ctx.block_size,
+        )
+        grad_fc1 = activation_bwd(
+            fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=True
+        )
+        grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
+            grad_fc1,
+            hidden,
+            w1,
+            group_sizes,
+            cu_seqlens=cu_seqlens,
+            scaling_type=ctx.scaling_type,
+            fp8_dtype=ctx.fp8_dtype,
+            block_size=ctx.block_size,
+        )
         return grad_hidden, grad_w1, grad_w2, None, None, None, None
 
 
@@ -868,7 +760,7 @@ def grouped_fp8_expert_mlp(
     (activation backward stays BF16). Master ``w1``/``w2`` remain BF16.
     """
     if fp8_dtype is None:
-        fp8_dtype = torch.float8_e4m3fn
+        fp8_dtype = _default_fp8_dtype()
     if hidden.numel() == 0:
         return hidden.new_empty(hidden.shape[0], w2.shape[-1])
     if w1.shape[-1] % 2 != 0:

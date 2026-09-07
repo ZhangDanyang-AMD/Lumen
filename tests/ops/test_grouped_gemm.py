@@ -18,7 +18,6 @@ Covers:
 
 import pytest
 import torch
-import importlib
 from conftest import compute_snr, grouped_gemm_ref
 
 from lumen.ops.gemm.grouped_gemm import grouped_gemm, grouped_gemm_wgrad
@@ -223,10 +222,19 @@ def test_grouped_gemm_invalid_scaling_type():
         grouped_gemm(lhs, rhs, group_sizes, scaling_type="invalid")
 
 
+def test_grouped_gemm_wgrad_rejects_fp8_scaling():
+    dtype = torch.bfloat16
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    grad = torch.randn(32, 64, device=device, dtype=dtype)
+    inp = torch.randn(32, 128, device=device, dtype=dtype)
+    group_sizes = torch.tensor([16, 16], dtype=torch.int32, device=device)
+    with pytest.raises(ValueError, match="BF16-only"):
+        grouped_gemm_wgrad(grad, inp, group_sizes, scaling_type="blockwise2d")
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
-def test_grouped_quantized_linear_fwd_bwd_matches_per_expert(monkeypatch):
+def test_grouped_quantized_linear_fwd_bwd_matches_per_expert():
     """Grouped FP8 Linear should match per-expert quantized_linear."""
-    grouped_gemm_module = importlib.import_module("lumen.ops.gemm.grouped_gemm")
     from lumen.ops.gemm.grouped_gemm import grouped_quantized_linear
     from lumen.ops.quantize.linear import quantized_linear
     from lumen.quantize.config import _get_float8_e4m3
@@ -239,13 +247,6 @@ def test_grouped_quantized_linear_fwd_bwd_matches_per_expert(monkeypatch):
     inp = torch.randn(tokens, k, device=device, dtype=dtype, requires_grad=True)
     weight = torch.randn(e, k, n, device=device, dtype=dtype, requires_grad=True)
     fp8_dtype = _get_float8_e4m3()
-    monkeypatch.setattr(
-        grouped_gemm_module,
-        "_sequential_grouped_linear_backward",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected BF16 expert backward fallback")
-        ),
-    )
 
     grouped_out = grouped_quantized_linear(
         inp,
@@ -295,18 +296,10 @@ def test_grouped_quantized_linear_fwd_bwd_matches_per_expert(monkeypatch):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
-def test_grouped_quantized_linear_zero_expert(monkeypatch):
-    grouped_gemm_module = importlib.import_module("lumen.ops.gemm.grouped_gemm")
+def test_grouped_quantized_linear_zero_expert():
     from lumen.ops.gemm.grouped_gemm import grouped_quantized_linear
     from lumen.quantize.config import _get_float8_e4m3
 
-    monkeypatch.setattr(
-        grouped_gemm_module,
-        "_sequential_grouped_linear_backward",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected BF16 expert backward fallback")
-        ),
-    )
     inp = torch.randn(32, 128, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     weight = torch.randn(2, 128, 128, device="cuda", dtype=torch.bfloat16, requires_grad=True)
     group_sizes = torch.tensor([32, 0], dtype=torch.int32, device="cuda")
@@ -326,22 +319,14 @@ def test_grouped_quantized_linear_zero_expert(monkeypatch):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
-def test_grouped_quantized_linear_qwen3_mbs2_shapes(monkeypatch):
+def test_grouped_quantized_linear_qwen3_mbs2_shapes():
     """Regression: MBS=2 token counts used to GPU-fault in FP8 dgrad/ptgmm."""
-    grouped_gemm_module = importlib.import_module("lumen.ops.gemm.grouped_gemm")
     from lumen.ops.gemm.grouped_gemm import grouped_quantized_linear
     from lumen.quantize.config import _get_float8_e4m3
 
     device = "cuda"
     dtype = torch.bfloat16
     e, tokens, k, n = 16, 8192, 2048, 1536
-    monkeypatch.setattr(
-        grouped_gemm_module,
-        "_sequential_grouped_linear_backward",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected BF16 expert backward fallback")
-        ),
-    )
     torch.manual_seed(1)
     raw = torch.randint(16, 1024, (e,), device=device)
     group_sizes = (raw * tokens // int(raw.sum().item())).to(torch.int32)
@@ -412,8 +397,7 @@ def test_routing_data_stays_on_gpu():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
-def test_grouped_fp8_expert_mlp_matches_silu_path(monkeypatch):
-    grouped_gemm_module = importlib.import_module("lumen.ops.gemm.grouped_gemm")
+def test_grouped_fp8_expert_mlp_matches_silu_path():
     from lumen.ops.gemm.grouped_gemm import (
         grouped_fp8_expert_mlp,
         grouped_quantized_linear,
@@ -429,13 +413,6 @@ def test_grouped_fp8_expert_mlp_matches_silu_path(monkeypatch):
     w1 = torch.randn(e, k, n, device=device, dtype=dtype, requires_grad=True)
     w2 = torch.randn(e, n // 2, k, device=device, dtype=dtype, requires_grad=True)
     fp8_dtype = _get_float8_e4m3()
-    monkeypatch.setattr(
-        grouped_gemm_module,
-        "_sequential_grouped_linear_backward",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected BF16 expert backward fallback")
-        ),
-    )
     kwargs = dict(scaling_type="blockwise2d", fp8_dtype=fp8_dtype, block_size=128)
 
     fused = grouped_fp8_expert_mlp(hidden, w1, w2, group_sizes, **kwargs)
