@@ -1338,7 +1338,8 @@ class ScalingManager:
 
         if grad_quant_type == "fp4":
             raise NotImplementedError(
-                "FP4 gradient quantization is not yet implemented. " "Use 'fp8' or 'mxfp8' for now."
+                "Unscaled FP4 gradient quantization is not implemented. Use "
+                "'mxfp4' for block-scaled FP4, or 'fp8'/'mxfp8'."
             )
 
         raise ValueError(f"Unknown grad_quant_type={grad_quant_type!r}. " f"Valid options: {GRAD_QUANT_TYPES}")

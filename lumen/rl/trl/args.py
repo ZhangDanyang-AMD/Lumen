@@ -96,6 +96,9 @@ class TrlLumenArgs:
     use_8bit_adam: bool = False
 
     def __post_init__(self) -> None:
+        from lumen.config import check_linear_quant_exclusive
+
+        check_linear_quant_exclusive(self.linear_fp8, self.linear_fp4)
         if self.algorithm != "grpo":
             raise ValueError(f"Unsupported algorithm {self.algorithm!r}; v1 only supports 'grpo'.")
         if self.backend != "fsdp":

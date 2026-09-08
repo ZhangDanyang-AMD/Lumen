@@ -89,6 +89,22 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
 }
 
 
+def check_linear_quant_exclusive(linear_fp8, linear_fp4) -> None:
+    """Refuse a config that asks for FP8 and FP4 linears at once.
+
+    Lives here rather than only inside ``from_args`` because not every consumer
+    goes through it: the RL dataclasses are constructed directly and several
+    call sites read ``args.linear_fp4`` off the namespace. With the check in one
+    place they all reach it, and the two flags are also mutually exclusive at
+    the Megatron parser so the common case fails before any model is built.
+    """
+    if linear_fp8 and linear_fp4:
+        raise ValueError(
+            "--linear-fp8 and --linear-fp4 are mutually exclusive: FP4 selects the "
+            "fixed MXFP4 recipe and cannot share the FP8 format selector. Pick one."
+        )
+
+
 @dataclass
 class LumenConfig:
     """Unified configuration for all Lumen training features.
@@ -663,8 +679,7 @@ class LumenConfig:
         linear_fp8_enabled = getattr(args, "linear_fp8", None)
         linear_fp4_enabled = getattr(args, "linear_fp4", False)
 
-        if linear_fp8_enabled and linear_fp4_enabled:
-            raise ValueError("--linear-fp8 and --linear-fp4 are mutually exclusive")
+        check_linear_quant_exclusive(linear_fp8_enabled, linear_fp4_enabled)
 
         kwargs: dict = {}
         for field_name, arg_names in _ARG_MAP.items():

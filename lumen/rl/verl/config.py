@@ -78,6 +78,9 @@ class VerlLumenArgs:
                 f"Unsupported rollout_backend {self.rollout_backend!r}; "
                 f"v1 only supports {_VALID_ROLLOUT_BACKENDS}"
             )
+        from lumen.config import check_linear_quant_exclusive
+
+        check_linear_quant_exclusive(self.linear_fp8, self.linear_fp4)
         validate_backend_matrix(self)
 
 

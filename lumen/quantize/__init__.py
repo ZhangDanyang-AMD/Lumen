@@ -235,6 +235,19 @@ def _build_bf16_skip_prefixes(
     bf16_end = config.num_layers_at_end_in_bf16
     total = config.num_layers
 
+    if total <= 0:
+        # ``total - bf16_end`` goes non-positive, so _should_skip answers True
+        # for every index and the caller keeps the whole model in BF16 with
+        # nothing said. The Megatron native path guards this at its call site;
+        # putting it here covers the generic path too, which has the same hole.
+        logger.warning(
+            "first_last_layers_bf16 is set but num_layers=%d, so the BF16 tail "
+            "cannot be located; quantizing every layer instead of none. Set "
+            "num_layers on the quant config to use this option.",
+            total,
+        )
+        return set()
+
     def _should_skip(global_idx: int) -> bool:
         return global_idx < bf16_start or global_idx >= total - bf16_end
 

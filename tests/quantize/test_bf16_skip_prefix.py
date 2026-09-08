@@ -48,3 +48,48 @@ class TestIsUnderBF16Prefix:
         prefixes = {f"decoder.layers.{i}" for i in range(31, 36)}
         held = [i for i in range(36) if is_under_bf16_prefix(f"decoder.layers.{i}", prefixes)]
         assert held == [31, 32, 33, 34, 35]
+
+
+class TestBf16SkipWithoutALayerCount:
+    """num_layers=0 must not turn into "every layer stays BF16".
+
+    ``total - bf16_end`` goes non-positive, so the skip predicate answers True
+    for every index and the caller keeps the whole model in BF16 -- a run that
+    reports quantization enabled and trains none of it. The Megatron native
+    path guards this at its call site; the generic path did not.
+    """
+
+    @staticmethod
+    def _model():
+        import torch.nn as nn
+
+        model = nn.Module()
+        model.layers = nn.ModuleList(nn.Linear(8, 8) for _ in range(4))
+        return model
+
+    def _config(self, num_layers):
+        from lumen.quantize.config import QuantConfig
+
+        return QuantConfig(
+            first_last_layers_bf16=True,
+            num_layers_at_start_in_bf16=1,
+            num_layers_at_end_in_bf16=1,
+            num_layers=num_layers,
+        )
+
+    def test_no_layer_count_quantizes_everything(self, caplog):
+        import logging
+
+        from lumen.quantize import _build_bf16_skip_prefixes
+
+        with caplog.at_level(logging.WARNING):
+            prefixes = _build_bf16_skip_prefixes(self._model(), self._config(0))
+
+        assert prefixes == set(), "kept the whole model in BF16 instead of none of it"
+        assert any("num_layers" in r.message for r in caplog.records), "said nothing"
+
+    def test_a_layer_count_still_selects_the_ends(self):
+        from lumen.quantize import _build_bf16_skip_prefixes
+
+        prefixes = _build_bf16_skip_prefixes(self._model(), self._config(4))
+        assert prefixes == {"layers.0", "layers.3"}

@@ -916,6 +916,38 @@ class TestAddCommonMegatronArgs:
             args = self._parse(["--grad-quant-type", gq])
             assert args.grad_quant_type == gq
 
+    def test_grad_quant_type_still_accepts_the_retired_fp4_spelling(self):
+        """Scripts written against "fp4" must not die at argparse.
+
+        "fp4" has never computed anything -- ScalingManager raises
+        NotImplementedError for it -- so dropping it from choices broke no
+        working configuration, only moved the failure earlier and made it less
+        legible. Keeping it means the error still arrives from the place that
+        can name mxfp4 as the replacement. It is deliberately *not* aliased to
+        mxfp4, which would quietly start quantizing gradients to a format the
+        flag does not name.
+        """
+        from lumen.quantize.scaling_manager import ScalingManager
+
+        args = self._parse(["--grad-quant-type", "fp4"])
+        assert args.grad_quant_type == "fp4"
+
+        with pytest.raises(NotImplementedError, match="mxfp4"):
+            ScalingManager.quantize_grad_tensor(
+                torch.zeros(4, 4), grad_quant_type="fp4", block_size=32,
+            )
+
+    def test_linear_fp8_and_fp4_are_exclusive_at_the_parser(self):
+        """Both gates at once has to fail before a model is built.
+
+        The exclusion lived only in LumenConfig.from_args, which the FSDP and
+        RL call sites bypass by reading args.linear_fp4 off the namespace.
+        """
+        assert self._parse(["--linear-fp4"]).linear_fp4 is True
+        assert self._parse(["--linear-fp8"]).linear_fp8 is True
+        with pytest.raises(SystemExit):
+            self._parse(["--linear-fp8", "--linear-fp4"])
+
     def test_lumen_fp8_quant_type_default(self):
         args = self._parse()
         assert args.lumen_fp8_quant_type == "blockwise"
@@ -1280,6 +1312,28 @@ class TestModelProviderParallelLinearRecipe:
         # Omitting block_size leaves the linears at their init default of 128,
         # which silently disables the MXFP4 scale-swizzle fusion.
         assert self._captured_kwargs("mxfp4")["block_size"] == 32
+
+    @pytest.mark.parametrize("fmt", ["mxfp4", "fp8_e4m3"])
+    def test_quantized_linears_without_lumen_linear_are_refused(self, fmt):
+        """A half-quantized model must not start.
+
+        The native pass is gated on --lumen-linear but cfg.enable() is not, so
+        asking for FP8/FP4 linears without it left norms patched and parameters
+        wrapped while every GEMM stayed BF16 -- and said nothing, so the run
+        looked like a working quantized run.
+        """
+        from lumen.models.megatron import make_lumen_model_provider
+
+        args = self._args(fmt)
+        args.lumen_linear = False
+        provider = make_lumen_model_provider(
+            lambda args, pre_process, post_process, vp_stage, config=None: nn.Sequential(
+                nn.Linear(16, 16)
+            )
+        )
+        with mock.patch("lumen.models.megatron.get_args", return_value=args):
+            with pytest.raises(ValueError, match="requires --lumen-linear"):
+                provider()
 
 
 # ===================================================================
