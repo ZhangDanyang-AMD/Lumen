@@ -193,11 +193,20 @@ class LumenConfig:
     def quant_config(self):
         """Build the inner :class:`~lumen.quantize.QuantConfig`."""
         from lumen.quantize import QuantConfig
+        from lumen.quantize.config import MXFP4_BLOCK_SIZE
+
+        # ``block_size`` defaults to 128 for FP8's blockwise recipes, and MXFP4
+        # has exactly one legal value. from_args already pins it for
+        # --linear-fp4; do the same here so hand-built configs -- the RL and
+        # FSDP entry points construct this dataclass directly -- do not have to
+        # pass the only value that works. QuantConfig still refuses a
+        # disagreeing one, which is where an explicit wrong value belongs.
+        block_size = MXFP4_BLOCK_SIZE if self.format == "mxfp4" else self.block_size
 
         return QuantConfig.from_str(
             format=self.format,
             scaling=self.scaling,
-            block_size=self.block_size,
+            block_size=block_size,
             amax_algo=self.amax_algo,
             margin=self.margin,
             reduce_amax=self.reduce_amax,

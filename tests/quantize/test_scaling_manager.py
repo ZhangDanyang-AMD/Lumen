@@ -289,6 +289,24 @@ class TestFP8ParamLifecycle:
         with pytest.raises(ValueError, match="does not apply to MXFP4"):
             mgr.enable_fp8_params(model)
 
+    def test_fp8_weight_cache_is_refused_for_mxfp4(self):
+        """Same defect as the param cache, in the sibling feature.
+
+        store_weights_fp8 leaves per-tensor FP8 with a scalar scale on the
+        module, and the forward hands a populated cache straight to the GEMM --
+        _mxfp4_cached_weight passes it through and quantize_input is skipped.
+        The MXFP4 GEMM then got e4m3 bytes where it wanted packed FP4 and died
+        unpacking an empty shape, several frames from the cause.
+        """
+        import lumen.quantize as quant
+        from lumen.quantize.config import QuantConfig as _QC
+
+        model = torch.nn.Linear(64, 64).cuda().to(torch.bfloat16)
+        quant.enable(model, config=_QC(format=QuantFormat.MXFP4, scaling=ScalingType.BLOCKWISE))
+
+        with pytest.raises(ValueError, match="does not apply to MXFP4"):
+            quant.store_weights_fp8(model)
+
 
 # ===================================================================
 # Gradient quantization (static method)

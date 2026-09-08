@@ -210,6 +210,17 @@ class TestMXFP4BlockSize:
     def test_fp8_still_takes_any_block_size(self):
         assert QuantConfig(format=QuantFormat.FP8_E4M3, block_size=128).block_size == 128
 
+    def test_lumen_config_normalizes_rather_than_refusing(self):
+        """The RL and FSDP entry points build LumenConfig directly.
+
+        Its block_size default of 128 is FP8's, and MXFP4 has one legal value,
+        so asking the caller for it buys nothing. from_args already pins it.
+        """
+        from lumen.config import LumenConfig
+
+        assert LumenConfig(format="mxfp4", scaling="blockwise").quant_config.block_size == 32
+        assert LumenConfig(format="fp8_e4m3", scaling="blockwise").quant_config.block_size == 128
+
 
 # ===================================================================
 # get_fp8_max helpers

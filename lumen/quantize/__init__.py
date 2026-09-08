@@ -857,6 +857,22 @@ def store_weights_fp8(
     for _name, module in model.named_modules():
         if not getattr(module, "_quant_enabled", False):
             continue
+        # This cache holds per-tensor FP8 with a scalar scale, and the forward
+        # hands whatever is in it straight to the GEMM: _mxfp4_cached_weight
+        # passes a populated cache through untouched, and quantize_input is
+        # skipped. An MXFP4 GEMM then receives e4m3 bytes where it expects
+        # packed FP4 and a scalar where it expects an E8M0 tile grid, and dies
+        # unpacking an empty shape several frames from the cause. Refuse here,
+        # where the feature and the format are both still named.
+        if getattr(module, "_quant_scaling_type", None) == "mxfp4":
+            raise ValueError(
+                f"{_name or type(module).__name__}: the FP8 weight cache "
+                "(--fp8-weight-cache) does not "
+                "apply to MXFP4. It stores per-tensor FP8 with a scalar scale, "
+                "which no MXFP4 GEMM can read. MXFP4 already caches its "
+                "quantized weight per optimizer step in "
+                "lumen.quantize._mxfp4_cached_weight."
+            )
         weight = getattr(module, "weight", None)
         if weight is None or not isinstance(weight, nn.Parameter):
             continue
