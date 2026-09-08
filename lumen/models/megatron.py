@@ -447,11 +447,9 @@ def _enable_quantization_for_parallel_linear(
 
         fp8_dtype = _get_float8_e4m3()
 
-    # MXFP4 coerces the CLI block size to 32 on args, and QuantConfig carries it
-    # from there. Leaving block_size=None keeps the linears on their init default
-    # of 128, and _mxfp4_cached_weight then compares a scale grid the quantizer
-    # built at 32 against a tile grid derived from 128 -- never equal, so the
-    # scale-swizzle fusion is unreachable.
+    # Leaving this None keeps the linears on their init default of 128, and
+    # _mxfp4_cached_weight would then compare a scale grid built at 32 against a
+    # tile grid derived from 128 -- never equal, so the swizzle fusion is dead.
     if block_size is None and quant_config is not None:
         block_size = quant_config.block_size
 
@@ -462,11 +460,9 @@ def _enable_quantization_for_parallel_linear(
 
     set_fused_swiglu_scaling(scaling_type, block_size)
 
-    # --first-last-layers-bf16 has to be applied here as well. The other place
-    # that honours it, quantize._patch_linear_layers, only ever sees Megatron's
-    # own linear types, and --lumen-linear has already swapped those out by the
-    # time it runs -- so on this path the flag used to select nothing at all and
-    # every layer went to MXFP4 regardless.
+    # --first-last-layers-bf16 has to be applied here too: the other place that
+    # honours it, quantize._patch_linear_layers, only sees Megatron's own linear
+    # types, which --lumen-linear has already swapped out by then.
     from lumen.quantize import is_under_bf16_prefix
 
     bf16_prefixes: Set[str] = set()

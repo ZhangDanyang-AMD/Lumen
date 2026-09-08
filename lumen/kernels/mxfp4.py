@@ -37,30 +37,20 @@ import triton.language as tl
 FP4_E2M1_MAX = 6.0
 _E2M1_EMAX = 2  # largest normal biased exponent for E2M1
 
-# Philox rounds behind stochastic rounding. Triton defaults to 10; Random123's
-# authors report Philox4x32-7 already passing BigCrush, and rounding noise asks
-# less of a generator than a simulation does. Dropping the three spare rounds
-# takes 8-12% off the dual-layout quantizer, where SR is a fifth of the work.
+# Philox rounds behind stochastic rounding. Triton defaults to 10; Philox4x32-7
+# already passes BigCrush, and rounding noise asks less of a generator than a
+# simulation does. The rounds are a third of the kernel's instructions and it is
+# VALU-bound, so dropping three takes 8-12% off the dual-layout quantizer.
 #
-# It is worth more than that comment suggests. The compiled kernel spends a third
-# of its instructions here -- on ``grad gate_up``, 796 of 2415 are the mulhi,
-# mullo and xor triplets of the Philox rounds -- and the kernel is VALU-bound
-# with no spills, so instructions are time (report §5.20). The count is close to
-# linear in the round count, which makes this the largest single lever left in
-# the quantizer.
-#
-# Read from the environment because it has to be a compile-time constant: a
-# sweep cannot patch it in place, since Triton rejects a global that changed
-# after tracing. Lowering it is a numerics change and belongs in the precision
-# harness before it belongs in a run.
+# Read from the environment because it must be a compile-time constant: Triton
+# rejects a global that changed after tracing, so a sweep cannot patch it in
+# place. Lowering it is a numerics change.
 SR_PHILOX_ROUNDS_DEFAULT = 7
 SR_PHILOX_ROUNDS = int(os.environ.get("LUMEN_SR_PHILOX_ROUNDS", SR_PHILOX_ROUNDS_DEFAULT))
 SR_PHILOX_ROUNDS_C = tl.constexpr(SR_PHILOX_ROUNDS)
 
-# The round count changes gradient numerics but is not a Megatron argument, so it
-# does not appear in the argument dump every run logs. A run that quietly used
-# fewer rounds would be indistinguishable from a default one after the fact, so
-# say so once, on one rank, and only when it is not the default.
+# Not a Megatron argument, so it is absent from the argument dump every run logs;
+# an overridden run would otherwise be indistinguishable from a default one.
 if SR_PHILOX_ROUNDS != SR_PHILOX_ROUNDS_DEFAULT and os.environ.get("RANK", "0") == "0":
     print(
         f"[lumen] LUMEN_SR_PHILOX_ROUNDS={SR_PHILOX_ROUNDS} "

@@ -7,19 +7,15 @@
 #   LAUNCH=native bash run_pretrain_qwen3_8b_mxfp4.sh      # on the host
 #   PRECISION=bf16 LAUNCH=native bash ...                  # reference run
 #
-# The training command itself lives in ../scripts/train_pretrain.sh, shared with
-# the other benchmark models; this file only sets up paths and environment for
-# one of the two launch modes.
-#
-# Native mode needs a Megatron-LM checkout (MEGATRON_ROOT) and works without
-# TransformerEngine or apex — Megatron falls back to torch norms and optimizers.
-# Rope fusion still runs: the body asks for AITER's kernel, which needs neither.
+# The training command lives in ../scripts/train_pretrain.sh; this file only sets
+# up paths and environment. Native mode needs a Megatron-LM checkout
+# (MEGATRON_ROOT) and works without TransformerEngine or apex.
 #
 # Differences from run_pretrain_qwen3_8b.sh (BF16 / FP8 delayed):
 #   * MXFP4 is selected with its dedicated --linear-fp4 switch.
 #   * Last 5 of 36 layers stay BF16 (docs/mxfp4_training_report.md §1.5, §6.3).
-#   * --qk-layernorm is on, matching HF Qwen3's per-head q_norm/k_norm. The
-#     BF16/FP8 script leaves it off, so its loss curve is not comparable here.
+#   * --qk-layernorm is on, matching HF Qwen3's per-head q_norm/k_norm, so the
+#     BF16/FP8 script's loss curve is not comparable here.
 #
 # Override any of MBS / GBS / SEQ_LEN / TRAIN_STEPS / SEED / NPROC via env.
 ###############################################################################

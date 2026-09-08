@@ -1110,11 +1110,9 @@ def dual_layout_quant_mxfp4(
     col_fp4 = torch.empty((N, M // 2), dtype=torch.uint8, device=x.device)
     col_scales = torch.empty(scale_b_shape, dtype=torch.uint8, device=x.device)
 
-    # BLOCK_M sets how long a contiguous run the transposed output writes
-    # (BLOCK_M/2 bytes), so it wants to be the larger of the two. (256, 32)
-    # measured fastest across Qwen3-8B's wgrad shapes once the rotation moved
-    # to the matrix unit; before that the wider tile's register pressure cost
-    # more occupancy than the longer runs bought.
+    # BLOCK_M is the transposed output's contiguous run (BLOCK_M/2 bytes), so it
+    # wants to be the larger of the two. (256, 32) measured fastest across
+    # Qwen3-8B's wgrad shapes.
     BLOCK_M = _dividing_block(M, 256, floor=max(block_size, g))
     BLOCK_N = _dividing_block(N, 32, floor=block_size)
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
@@ -1229,9 +1227,8 @@ def dequant_hadamard_quant_mxfp4(
 
     # BLOCK_M is the output's contiguous run (BLOCK_M/2 bytes) and carries the
     # quant blocks, so it wants to be the larger of the two. (128, 64) measured
-    # fastest across Qwen3-8B's activation shapes, 5-9% ahead of (128, 32):
-    # this kernel reads and writes FP4 on both sides, so it is short of bytes to
-    # hide latency behind and wants the wider tile more than the taller one.
+    # 5-9% ahead of (128, 32) across Qwen3-8B's activation shapes: FP4 on both
+    # sides leaves few bytes to hide latency behind, so the wider tile wins.
     BLOCK_M = _dividing_block(M, 128, floor=max(block_size, g))
     BLOCK_K = _dividing_block(K, 64, floor=block_size)
     grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(K, BLOCK_K))

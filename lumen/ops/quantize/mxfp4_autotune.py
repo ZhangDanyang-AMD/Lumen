@@ -7,19 +7,17 @@
 """Pick the fastest MXFP4 GEMM backend per shape, by measuring rather than guessing.
 
 Lumen can reach three AITER MXFP4 GEMM kernels — the plain Triton one, its
-shuffled-layout sibling, and the prebuilt A4W4 ASM/CK kernels. Which is fastest
-depends on the shape, and the two fast ones carry a layout prologue that only
-pays off once the problem is large enough.
+shuffled-layout sibling, and the prebuilt A4W4 ASM/CK kernels. Which wins depends
+on the shape, and the two fast ones carry a layout prologue that only pays off
+once the problem is large enough.
 
-That crossover was originally a hand-measured byte threshold, which does not
-survive a change of model: the constant tuned on Llama 3.1 8B (28 MiB MLP
-weights) excludes Qwen3-8B (24 MiB) entirely. So instead of a constant, the first
-call for a given shape times the legal backends and remembers the winner. A model
-only issues a few dozen distinct shapes, so this costs a second or so once.
+A hand-measured byte threshold does not survive a change of model: the constant
+tuned on Llama 3.1 8B (28 MiB MLP weights) excludes Qwen3-8B (24 MiB) entirely.
+So the first call for a shape times the legal backends and remembers the winner;
+a model issues only a few dozen shapes, so this costs a second once.
 
-This is only safe because the three backends are bit-for-bit identical — they
-differ in memory layout, not arithmetic — so which one wins can change speed but
-never results.
+Safe because the three backends are bit-for-bit identical — they differ in memory
+layout, not arithmetic.
 
 Environment:
     ``LUMEN_MXFP4_AUTOTUNE=0``       fall back to the static byte thresholds
@@ -46,18 +44,16 @@ _SHAPE_LOG_PATH = os.environ.get("LUMEN_MXFP4_GEMM_SHAPE_LOG", "")
 # multiple paths into one merged table.
 AITER_TUNED_CONFIG_ENV = "AITER_CONFIG_GEMM_A4W4"
 
-# Enough to get past the first-call JIT and cache warmup without making the
-# measurement itself a visible stall: a model issues a few dozen shapes, and the
-# largest single GEMM here runs ~2.5 ms. The median of the timed iterations is
-# what counts, so a stray slow one does not decide anything.
+# Past the first-call JIT and cache warmup without the measurement itself
+# stalling. The median of the timed iterations decides, so a stray slow one does
+# not.
 _WARMUP_ITERS = 3
 _TIMED_ITERS = 11
 
-# How much faster a layout-rewriting backend has to be before it is worth
-# leaving the plain kernel. Run-to-run spread on these GEMMs reaches a few
-# percent -- enough that two measurements of the *same* shape can rank the
-# backends differently -- and the fast paths also cost extra host-side work and
-# transient memory. Below this margin, stay on the simplest backend.
+# How much faster a layout-rewriting backend has to be to be worth leaving the
+# plain kernel. Run-to-run spread reaches a few percent -- enough to rank the
+# backends differently on two measurements of the same shape -- and the fast
+# paths cost extra host work and transient memory.
 _SWITCH_MARGIN = 1.05
 
 ShapeKey = Tuple[int, int, int]

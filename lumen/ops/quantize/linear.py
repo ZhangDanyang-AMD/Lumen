@@ -1277,15 +1277,11 @@ def _mxfp4_wgrad_activation_operand(input_2d, weight, scaling_type, row_scales_s
     )
 
 
-# Measured on gfx950 (MI350X) at M=8192, sweeping N. Like the preshuffle kernel,
-# the ASM path has to amortise a layout prologue -- here a weight shuffle plus a
-# pad+swizzle of both scale tensors -- so it only pays off on large weights.
-# Where the crossover sits depends on whether the CPU gets to run ahead: timing
-# each call with a sync (benchmarks/bench_utils.cuda_timer) exposes the prologue's
-# launch chain and puts it between 24 MiB (plain still 3% ahead, within noise) and
-# 28 MiB (ASM 3.2x ahead); letting the queue stay full moves it down to ~10 MiB.
-# Gate on the pessimistic bracket, since a training step that is launch-bound
-# cannot hide the difference. LUMEN_MXFP4_ASM=1 skips the check.
+# The ASM path amortises a layout prologue (weight shuffle plus pad+swizzle of
+# both scale tensors), so it only pays off on large weights. Measured on gfx950
+# at M=8192: the crossover sits at 24-28 MiB when each call is synced, ~10 MiB
+# when the queue stays full. Gate on the pessimistic bracket, since a launch-bound
+# step cannot hide the prologue. LUMEN_MXFP4_ASM=1 skips the check.
 _MXFP4_ASM_MIN_WEIGHT_BYTES = 26 * 1024 * 1024
 
 _MXFP4_ASM_ENV = os.environ.get("LUMEN_MXFP4_ASM")
@@ -1397,18 +1393,14 @@ def _cached_weight_operands(w_fp4, scale_w, key, build):
     built = build()
     if any(_aliases(t, w_fp4) for t in built):
         # A quantizer that already stored this operand in the GEMM's layout gets
-        # the weight's own memory back, so there is nothing to memoize -- and
-        # hanging the result off it would make the tensor reference itself, which
-        # refcounting cannot free. GPU bytes are invisible to the cyclic
-        # collector's thresholds, so the weight would sit in memory until an
-        # unrelated gen-2 collection happened to run.
+        # the weight's own memory back, so caching it would make the tensor
+        # reference itself -- a cycle refcounting cannot free, and GPU bytes are
+        # invisible to the cyclic collector's thresholds.
         #
-        # This has to compare storage, not identity: the shuffled-layout path
-        # reshapes what it gets back, and a reshape of an already-shuffled weight
-        # is a *view*, which is a different object pointing at the same bytes. It
-        # slipped through an identity check and leaked one copy of every
-        # quantized weight per iteration -- ~3.6 GiB/step at TP=1, enough to OOM
-        # an 8-GPU TP=2 run by step 10.
+        # Compare storage, not identity: the shuffled-layout path reshapes what it
+        # gets back, and a reshape is a view -- a different object over the same
+        # bytes. An identity check here leaked one copy of every quantized weight
+        # per step (~3.6 GiB at TP=1).
         return built
     setattr(w_fp4, key, (stamp, built))
     return built
@@ -2378,18 +2370,13 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
         # ----- end blockwise2d -----
 
-        # ----- MXFP4: optimized FP4 DGrad + WGrad -----
-        # Optimizations vs original (NVFP4 paper §4 baseline):
-        #   1. DGrad reuses FP4 weight cached from forward (2D block scales
-        #      are transpose-invariant).  Eliminates BF16→FP4 re-quantization
-        #      + packed transpose from backward — both are pre-computed in fwd.
-        #   2. The gradient is quantized once into both layouts DGrad and WGrad
-        #      need (dual_layout_quant_mxfp4), off a single dense read.
-        #   3. The activation's WGrad operand goes straight from stored FP4 to
-        #      rotated, transposed FP4 (dequant_hadamard_quant_mxfp4) — the BF16
-        #      form in between is never written.
-        # Per-layer ops: 3 quant, 0 dequant, 0 separate Hadamard, 0 transpose,
-        # 3 FP4 GEMM.
+        # ----- MXFP4: FP4 DGrad + WGrad -----
+        # Against the NVFP4 paper §4 baseline: DGrad reuses the FP4 weight cached
+        # in forward (2D block scales are transpose-invariant); the gradient is
+        # quantized once into both layouts DGrad and WGrad need; and the
+        # activation's WGrad operand goes from stored FP4 straight to rotated,
+        # transposed FP4, never writing the BF16 form in between.
+        # Per layer: 3 quant, 3 FP4 GEMM, no dequant/Hadamard/transpose.
         if scaling_type == "mxfp4":
             from lumen.ops.quantize.ops import (
                 convert_from_mxfp4,
