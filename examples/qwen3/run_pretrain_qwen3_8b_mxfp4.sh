@@ -111,8 +111,13 @@ fi
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
 
 if [ "${PRECISION}" = "mxfp4" ]; then
+    # AITER_CONFIG_GEMM_A4W4 is left alone here for the same reason as native
+    # mode: train_pretrain.sh only builds the path list while it is empty, and
+    # that list is the only thing that puts qwen3_8b_a4w4_blockscale_tuned_gemm
+    # .csv in front. The two tables are disjoint -- every M=16384 shape this run
+    # issues lives in the model one -- so pinning the stock table alone dropped
+    # 8 of the 11 MXFP4 GEMMs to Triton, ~132 ms/step.
     RUNTIME_ENV+=(
-        AITER_CONFIG_GEMM_A4W4=/workspace/Lumen/examples/qwen3/configs/a4w4_blockscale_tuned_gemm.csv
         LUMEN_MXFP4_AUTOTUNE_CACHE=/results/mxfp4_autotune_qwen3_8b.json
         LUMEN_FAST_QUANT_DISPATCH=1
     )
