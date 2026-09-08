@@ -5,7 +5,7 @@
 #
 # Launches the lumen/llama2 container, overlays the host Lumen package and
 # examples (keeping the image's compiled third_party AITER/mori), mounts the HF
-# model + alpaca jsonl dataset, and runs train_qwen3_fsdp_fp8_blockwise2d.py.
+# model + alpaca jsonl dataset, and runs train_qwen3_fsdp.py.
 #
 # Overridable env: HOST_MODEL, HOST_DATA, HOST_RESULTS, TRAIN_FILE, VAL_FILE,
 # SEQ_LENGTH, MAX_STEPS, EVAL_INTERVAL, IMAGE, CONTAINER_NAME.
@@ -112,7 +112,7 @@ EXTRA=""
 [[ -n "${AITER_ATTN}" ]] && EXTRA="${EXTRA} --aiter-attn"
 [[ -n "${LUMEN_NORM}" ]] && EXTRA="${EXTRA} --lumen-norm"
 [[ -n "${FUSE_ROPE}" ]] && EXTRA="${EXTRA} --fuse-rope"
-torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
+torchrun --nproc_per_node=8 train_qwen3_fsdp.py \
     --model-name-or-path /model-qwen3 \
     --train-data-path "/data/${TRAIN_FILE}" \
     --val-data-path "/data/${VAL_FILE}" \
