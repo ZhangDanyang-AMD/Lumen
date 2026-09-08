@@ -51,9 +51,19 @@ class Backend(Enum):
     ASM = "asm"
     TRITON = "triton"
     HIPBLAS = "hipblas"
+    # FlyDSL kernels are compiled by the flydsl JIT, not provided by AITER, so
+    # they need their own tag to be selectable and to log distinguishably.
+    FLYDSL = "flydsl"
+    # Last resort. Always available, so only ever the tail of a chain.
+    TORCH = "torch"
 
 
 FALLBACK_ORDER = [Backend.ASM, Backend.TRITON]
+
+# FlyDSL first where it exists, then plain torch. Kept separate from
+# FALLBACK_ORDER: adding FLYDSL there would put it ahead of Triton for every op
+# that builds a default chain, and only conv has a FlyDSL implementation.
+FLYDSL_FALLBACK_ORDER = [Backend.FLYDSL, Backend.TORCH]
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +436,28 @@ def _probe_aiter_fused_gemm_blockscale_mul_add():
         from aiter.ops.triton.gemm.fused.fused_gemm_a8w8_blockscale_mul_add import (  # noqa: F401
             fused_gemm_a8w8_blockscale_mul_add as _,
         )
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# FlyDSL probes — Lumen-owned kernels, compiled by the flydsl JIT
+# ---------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_flydsl_conv3d():
+    """Check if the Lumen FlyDSL conv3d kernel can be compiled here.
+
+    Importing the kernel module pulls in ``flydsl.compiler`` and the MLIR
+    bindings, so a missing or too-old flydsl surfaces as ImportError. Whether the
+    JIT can actually link a kernel is not knowable without compiling one, so the
+    dispatch chain keeps a torch tail for that case.
+    """
+    try:
+        from lumen.kernels.conv.conv3d_implicit import conv3d_implicit as _  # noqa: F401
 
         return True
     except (ImportError, OSError):
