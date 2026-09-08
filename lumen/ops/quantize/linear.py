@@ -973,6 +973,27 @@ def _is_mxfp4_data_shuffled(data):
     return getattr(data, _MXFP4_DATA_SHUFFLED_ATTR, False)
 
 
+_mxfp4_bwd_fallback_warned = set()
+
+
+def _warn_mxfp4_backward_fallback(reason, shape):
+    """Report once per shape that a layer's backward left FP4.
+
+    Every other fallback in the MXFP4 backward logs; the alignment one did not,
+    so a layer computing its gradients in BF16 was indistinguishable from one
+    that was not. Once per shape rather than per step, since a shape that
+    misses alignment misses it on every micro-batch.
+    """
+    key = (reason, shape)
+    if key in _mxfp4_bwd_fallback_warned:
+        return
+    _mxfp4_bwd_fallback_warned.add(key)
+    _logger.warning(
+        "mxfp4 backward: %s for shape (M=%d, N=%d, K=%d); this layer's gradients are BF16",
+        reason, *shape,
+    )
+
+
 def _unswizzle_mxfp4_scale(scale):
     """Undo a fused swizzle, for the backends that read scales row-major.
 
@@ -2064,6 +2085,16 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # obliged to carry to the tensor backward unpacks; the layout is a
             # property of this call, so record it on ctx instead.
             ctx.mxfp4_input_scale_swizzled = _is_mxfp4_scale_swizzled(input_desc.scale)
+            # DGrad's B operand and its scales need the same treatment, and not
+            # having it was the asymmetry: _mxfp4_cached_weight stores this
+            # weight already shuffled and its scales already swizzled, so a lost
+            # marker has _shuffle_mxfp4_weight re-shuffle shuffled data and
+            # _pad_and_swizzle_mxfp4_scale re-swizzle a swizzled scale. Neither
+            # changes shape, so nothing downstream can notice; DGrad is just
+            # wrong. Attribute resurrection covers it today, which is not a
+            # contract save_for_backward offers.
+            ctx.mxfp4_weight_t_shuffled = _is_mxfp4_data_shuffled(w_fp4_t)
+            ctx.mxfp4_weight_t_scale_swizzled = _is_mxfp4_scale_swizzled(w_scale_t)
             ctx.mxfp4_wgrad_activation = input_wgrad_operand is not None
             if input_wgrad_operand is not None:
                 # The row-major activation stays saved for the BF16 fallback,
@@ -2258,6 +2289,10 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 input_data, input_scale, weight_data, weight_scale = ctx.saved_tensors
             if getattr(ctx, "mxfp4_input_scale_swizzled", False):
                 _mark_mxfp4_scale_swizzled(input_scale)
+            if getattr(ctx, "mxfp4_weight_t_shuffled", False):
+                _mark_mxfp4_data_shuffled(weight_data)
+            if getattr(ctx, "mxfp4_weight_t_scale_swizzled", False):
+                _mark_mxfp4_scale_swizzled(weight_scale)
         else:
             input_data, input_scale, weight_data, weight_scale = ctx.saved_tensors
         fp8_dtype = ctx.fp8_dtype
@@ -2485,7 +2520,49 @@ class QuantizedLinearFunction(torch.autograd.Function):
             K_in = input_data.shape[-1] * 2  # input_data is packed (M, K//2)
             mxfp4_block = 32
 
-            _aligned = (M % mxfp4_block == 0 and N_out % mxfp4_block == 0 and K_in % mxfp4_block == 0)
+            # Of the three axes only M is not a property of the model: it is
+            # seq x mbs, which a last batch, a variable-length run or a MoE
+            # expert's token count makes ragged. It is also the one that can be
+            # repaired rather than refused. M is WGrad's reduction axis, where a
+            # zero row contributes nothing to dY^T @ X, and DGrad's free axis,
+            # where the rows padding adds slice back off -- so pad it and keep
+            # both gradients in FP4.
+            #
+            # Folding M into a single _aligned flag sent the whole layer to
+            # BF16 instead, and that path took DGrad from the BF16 master while
+            # WGrad went through the dequantized activation: two gradient terms
+            # against two different versions of the forward, reachable by
+            # accident on a last batch.
+            m_unpadded = M
+            if M % mxfp4_block != 0:
+                from lumen.ops.quantize.padding import pad_to_block
+
+                if _is_mxfp4_scale_swizzled(input_scale):
+                    # Unreachable: fusing the swizzle needs rows % 256, which a
+                    # ragged M cannot meet. Padding rows of a swizzled scale
+                    # would mis-order it with no shape change to catch it, so
+                    # refuse rather than guess.
+                    raise AssertionError(
+                        "mxfp4 backward: ragged M with a swizzled activation scale"
+                    )
+                grad_flat, _ = pad_to_block(grad_flat, mxfp4_block, dim=0)
+                input_data, _ = pad_to_block(
+                    input_data.reshape(-1, input_data.shape[-1]), mxfp4_block, dim=0,
+                )
+                input_scale, _ = pad_to_block(
+                    input_scale.reshape(-1, input_scale.shape[-1]), mxfp4_block, dim=0,
+                )
+                M = grad_flat.shape[0]
+
+            # What is left are the layer's own dims, so reaching the fallback is
+            # a property of the model rather than of a batch.
+            _aligned = (N_out % mxfp4_block == 0 and K_in % mxfp4_block == 0)
+            if not _aligned:
+                _warn_mxfp4_backward_fallback(
+                    "N=%d and K=%d must both be multiples of %d"
+                    % (N_out, K_in, mxfp4_block),
+                    (m_unpadded, N_out, K_in),
+                )
 
             if _aligned:
                 try:
@@ -2588,13 +2665,44 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     _aligned = False
 
             if not _aligned:
-                w_ref = ctx.weight_ref
                 input_bf16 = convert_from_mxfp4(
                     input_data, _unswizzle_mxfp4_scale(input_scale),
                     output_dtype=torch.bfloat16, block_size=mxfp4_block,
                 )
+                # Take DGrad against the weight the forward actually used.
+                # Reaching for ctx.weight_ref here was the precision split:
+                # WGrad reads the activation as the forward quantized it, so a
+                # DGrad against the unquantized master makes the two terms the
+                # gradient of two different forwards. The blockwise2d path in
+                # this same function already dequantizes its saved weight for
+                # exactly this reason.
+                if _is_mxfp4_data_shuffled(weight_data):
+                    # The alignment that gates the shuffle is the alignment we
+                    # just failed, so this does not happen -- but decoding
+                    # permuted bytes as if they were in place would be silent,
+                    # and falling back to the master is at least reported.
+                    _warn_mxfp4_backward_fallback(
+                        "DGrad's weight operand is shuffled and cannot be decoded here, "
+                        "so DGrad uses the BF16 master and disagrees with WGrad",
+                        (m_unpadded, N_out, K_in),
+                    )
+                    w_dgrad = ctx.weight_ref.t().contiguous()
+                else:
+                    # weight_data is already W^T, which is the (K_in, N_out)
+                    # operand dispatch_gemm wants. Its scales are the 2D tile
+                    # grid, so they need the same expansion the row-major
+                    # kernel does before a per-row dequant can read them.
+                    w_dgrad = convert_from_mxfp4(
+                        weight_data,
+                        _expand_2d_scale_to_1d(
+                            _unswizzle_mxfp4_scale(weight_scale),
+                            (weight_data.shape[0], weight_data.shape[1] * 2),
+                            mxfp4_block,
+                        ),
+                        output_dtype=torch.bfloat16, block_size=mxfp4_block,
+                    )
                 grad_input = dispatch_gemm(
-                    grad_flat, w_ref.t().contiguous(), None, None, "none",
+                    grad_flat, w_dgrad, None, None, "none",
                 )
 
                 def _compute_wgrad():
@@ -2603,6 +2711,10 @@ class QuantizedLinearFunction(torch.autograd.Function):
                         None, None, "none",
                     )
 
+            if m_unpadded != M:
+                # Drop the rows padding added. They exist only so WGrad's
+                # reduction axis tiles; DGrad computed them and nobody wants them.
+                grad_input = grad_input[:m_unpadded].contiguous()
             grad_input = grad_input.view(*grad_output.shape[:-1], K_in)
 
             mgr = ctx.scaling_manager

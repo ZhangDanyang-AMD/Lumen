@@ -1777,6 +1777,91 @@ def test_mxfp4_backward_gradients_track_the_bf16_reference(m, n, k):
     assert compute_snr(x_ref.grad, x.grad) > 11.0
 
 
+@pytest.mark.parametrize("m", [1000, 513, 33])
+def test_mxfp4_backward_ragged_m_stays_in_fp4(m):
+    """A ragged token count must not change which arithmetic backward runs.
+
+    M is seq x mbs: a last batch, a variable-length run and a MoE expert's
+    token count are all ragged, so this is ordinary rather than exceptional.
+    Requiring M % 32 sent the whole layer to BF16, and that path took DGrad
+    from the BF16 master weight while WGrad went through the dequantized
+    activation. Measured at M=1000 before this was fixed: dX 101.7 dB against
+    the unquantized reference -- effectively exact, because it *was* the
+    unquantized computation -- next to 13.7 dB for an aligned M=2048 on the
+    same shapes. A last batch was getting a differently conditioned gradient
+    from every other batch in the run, and nothing said so.
+
+    Hence the upper bound: this asserts the gradient carries FP4 quantization
+    error, not merely that it is close to correct.
+    """
+    _require_mxfp4_dtype()
+    from lumen.ops.quantize.linear import quantized_linear
+
+    torch.manual_seed(0)
+    k, n = 512, 768
+    x = (torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.05).requires_grad_(True)
+    w = (torch.randn(n, k, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+    x_ref = x.detach().clone().requires_grad_(True)
+    w_ref = w.detach().clone().requires_grad_(True)
+    grad_out = torch.randn(m, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+    quantized_linear(x, w, scaling_type="mxfp4").backward(grad_out)
+    torch.nn.functional.linear(x_ref, w_ref).backward(grad_out)
+
+    assert x.grad.shape == x.shape, "padding rows were not sliced back off"
+    assert torch.isfinite(x.grad).all() and torch.isfinite(w.grad).all()
+
+    dx_snr = compute_snr(x_ref.grad, x.grad)
+    dw_snr = compute_snr(w_ref.grad, w.grad)
+    assert dx_snr > 11.0, f"dX is not a correct gradient ({dx_snr:.1f} dB)"
+    assert dw_snr > 11.0, f"dW is not a correct gradient ({dw_snr:.1f} dB)"
+    assert dx_snr < 40.0, (
+        f"dX at {dx_snr:.1f} dB is too good to have gone through FP4 -- backward "
+        "took this shape to BF16 against the master weight"
+    )
+
+
+def test_mxfp4_backward_bf16_fallback_uses_the_quantized_weight():
+    """When backward does fall back, both gradients must describe one forward.
+
+    The fallback dequantizes the saved activation for WGrad, so taking DGrad
+    from ctx.weight_ref -- the untouched BF16 master -- made the two terms the
+    gradient of two different functions. The forward ran FP4; DGrad has to see
+    the weight the forward saw.
+    """
+    _require_mxfp4_dtype()
+    from lumen.ops.quantize import linear as linear_mod
+
+    torch.manual_seed(3)
+    m, n, k = 256, 768, 512
+    x = (torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.05).requires_grad_(True)
+    w = (torch.randn(n, k, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+    grad_out = torch.randn(m, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+    out = linear_mod.quantized_linear(x, w, scaling_type="mxfp4")
+
+    # Drive the fallback the way a kernel rejecting these operands would, which
+    # is the only way in now that a ragged M is padded rather than refused.
+    real_dispatch = linear_mod.gemm_mxfp4_dispatch
+
+    def _reject(*args, **kwargs):
+        raise RuntimeError("pretend this shape has no kernel")
+
+    linear_mod.gemm_mxfp4_dispatch = _reject
+    try:
+        out.backward(grad_out)
+    finally:
+        linear_mod.gemm_mxfp4_dispatch = real_dispatch
+
+    against_master = (grad_out.float() @ w.float())
+    snr_master = compute_snr(against_master, x.grad)
+    assert snr_master > 11.0, f"dX is not a correct gradient at all ({snr_master:.1f} dB)"
+    assert snr_master < 40.0, (
+        f"dX matches the unquantized master weight to {snr_master:.1f} dB, so DGrad "
+        "bypassed the quantized weight the forward used"
+    )
+
+
 def test_mxfp4_ignores_a_pre_quantized_fp8_activation():
     """An FP8 activation cache must never reach the MXFP4 GEMM.
 
