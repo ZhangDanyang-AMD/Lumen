@@ -210,16 +210,28 @@ class TestMXFP4BlockSize:
     def test_fp8_still_takes_any_block_size(self):
         assert QuantConfig(format=QuantFormat.FP8_E4M3, block_size=128).block_size == 128
 
-    def test_lumen_config_normalizes_rather_than_refusing(self):
-        """The RL and FSDP entry points build LumenConfig directly.
-
-        Its block_size default of 128 is FP8's, and MXFP4 has one legal value,
-        so asking the caller for it buys nothing. from_args already pins it.
-        """
+    def test_lumen_config_uses_format_default_but_refuses_explicit_mismatch(self):
         from lumen.config import LumenConfig
 
         assert LumenConfig(format="mxfp4", scaling="blockwise").quant_config.block_size == 32
         assert LumenConfig(format="fp8_e4m3", scaling="blockwise").quant_config.block_size == 128
+        with pytest.raises(ValueError, match="32-element blocks"):
+            LumenConfig(
+                format="mxfp4", scaling="blockwise", block_size=128,
+            ).quant_config
+
+    def test_fp8_param_manager_is_refused_before_mxfp4_patching(self):
+        import torch.nn as nn
+
+        from lumen.config import LumenConfig
+
+        cfg = LumenConfig(
+            format="mxfp4",
+            scaling="blockwise",
+            fp8_param_manager=True,
+        )
+        with pytest.raises(ValueError, match="fp8_param_manager cannot be combined"):
+            cfg.enable(nn.Linear(32, 32))
 
 
 # ===================================================================

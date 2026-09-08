@@ -605,7 +605,17 @@ def _mxfp4_cached_weight(
     # fusions share the entry, so nothing is rebuilt that need not be.
     layout = (fuse_fwd_shuffle, fuse_dgrad_shuffle)
     cached = getattr(module, "_mxfp4_w_cache", None)
-    if cached is not None and cached[0] == layout:
+    # Optimizers update Parameters in-place and increment ``_version``. Keying
+    # the cache on that generation makes the generic ``quant.enable(nn.Linear)``
+    # path correct even when its training loop cannot register Lumen's optional
+    # post-step hook. The hook remains useful for eagerly releasing old buffers,
+    # but correctness must not depend on framework-specific optimizer wiring.
+    weight_version = weight._version
+    if (
+        cached is not None
+        and cached[0] == layout
+        and getattr(module, "_mxfp4_w_cache_version", None) == weight_version
+    ):
         return cached[1], cached[2]
 
     desc = quantize_input(
@@ -639,6 +649,7 @@ def _mxfp4_cached_weight(
 
     data._mxfp4_wt_cached = (data_t, dgrad_scale)
     module._mxfp4_w_cache = (layout, data, fwd_scale)
+    module._mxfp4_w_cache_version = weight_version
     return data, fwd_scale
 
 
@@ -1049,6 +1060,8 @@ def register_mxfp4_weight_optimizer_hooks(
             for m in chunk.modules():
                 if hasattr(m, "_mxfp4_w_cache"):
                     del m._mxfp4_w_cache
+                    if hasattr(m, "_mxfp4_w_cache_version"):
+                        del m._mxfp4_w_cache_version
                 # Native Lumen parallel linears cache on their Parameter because
                 # they call the shared _do_gemm helper rather than the patched
                 # module forward above. Every parameter the module owns has to be
@@ -1062,6 +1075,8 @@ def register_mxfp4_weight_optimizer_hooks(
                 for param in m._parameters.values():
                     if param is not None and hasattr(param, "_mxfp4_w_cache"):
                         del param._mxfp4_w_cache
+                        if hasattr(param, "_mxfp4_w_cache_version"):
+                            del param._mxfp4_w_cache_version
 
     # Megatron's ChainedOptimizer / DistributedOptimizer are not
     # torch.optim.Optimizer subclasses and lack register_step_post_hook, so

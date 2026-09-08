@@ -492,16 +492,27 @@ def _enable_quantization_for_parallel_linear(
             if bf16_prefixes and is_under_bf16_prefix(name, bf16_prefixes):
                 skipped += 1
                 continue
-            if scaling_type == "mxfp4" and not _mxfp4_weight_shape_supported(module):
+            bad_mxfp4_weight = (
+                next(
+                    (
+                        weight
+                        for weight in _mxfp4_weight_parameters(module)
+                        if weight.shape[0] % _MXFP4_BLOCK_SIZE
+                    ),
+                    None,
+                )
+                if scaling_type == "mxfp4"
+                else None
+            )
+            if bad_mxfp4_weight is not None:
                 # The MXFP4 quantizer pads a weight's output rows up to 32 and
                 # drops the original count, so forward's
                 # output.view(..., weight.shape[0]) fails on the padded width --
                 # a RuntimeError mid-step, with no fallback, for a shape that
                 # was knowable here. N is hidden size / vocab / a TP shard, so
                 # it is fixed for the run: decide once and leave the layer BF16.
-                _w = getattr(module, "weight", None)
                 print_rank_0(
-                    f"> {name}: output width {tuple(_w.shape)[0]} is not a multiple of "
+                    f"> {name}: output width {bad_mxfp4_weight.shape[0]} is not a multiple of "
                     f"{_MXFP4_BLOCK_SIZE}, leaving this layer in BF16"
                 )
                 skipped += 1
@@ -542,6 +553,25 @@ def _enable_quantization_for_parallel_linear(
         )
 
 
+def _mxfp4_weight_parameters(module):
+    """Return the 2-D weights whose output widths this module's GEMMs expose."""
+    weight = getattr(module, "weight", None)
+    if weight is not None and weight.dim() == 2:
+        return (weight,)
+
+    # Grouped/MoE modules follow Megatron's checkpoint names: weight0..weightN.
+    # They have no plain ``.weight``, but each expert independently reaches
+    # quantize_input and therefore needs the same output-width contract.
+    return tuple(
+        param
+        for param_name, param in module._parameters.items()
+        if param_name.startswith("weight")
+        and param_name[6:].isdigit()
+        and param is not None
+        and param.dim() == 2
+    )
+
+
 def _mxfp4_weight_shape_supported(module) -> bool:
     """Whether MXFP4 can run this module's GEMM without padding its output.
 
@@ -551,13 +581,13 @@ def _mxfp4_weight_shape_supported(module) -> bool:
     caller asked for. The reduction dim K is fine either way: both operands are
     padded along it, and zeros do not contribute.
 
-    A module with no plain weight -- grouped/MoE experts keep theirs elsewhere --
-    is left alone rather than guessed at.
+    Grouped/MoE modules expose ``weight0``...``weightN`` instead of a plain
+    weight; every expert is checked.
     """
-    weight = getattr(module, "weight", None)
-    if weight is None or weight.dim() != 2:
-        return True
-    return weight.shape[0] % _MXFP4_BLOCK_SIZE == 0
+    return all(
+        weight.shape[0] % _MXFP4_BLOCK_SIZE == 0
+        for weight in _mxfp4_weight_parameters(module)
+    )
 
 
 def enable_fp8_for_parallel_linear(

@@ -247,6 +247,14 @@ Move disproved suspicions here instead of deleting them.
 
 ## Resolved
 
+### [2026-09-09 post-review-qwen3-8b-mxfp4-bf16-smoke]
+- Ask: after the PR #14 correctness fixes, run matched Qwen3-8B MXFP4 and BF16 arms and verify the effective precision path.
+- Setup: current working tree with the local fixes, native Megatron backend, 8×gfx950, 36 layers, MBS 2, GBS 128, seq 8192, seed 1234, 5 steps on the same generated mock corpus, eval moved outside the training window (`EVAL_INTERVAL=100000`, `EVAL_ITERS=1`). MXFP4 used the shipped `TAIL_BF16=5` recipe. Logs: `examples/qwen3/results/lumen_qwen3_8b_postfix_precision_check_{mxfp4,bf16}.log`.
+- Effective configuration: both arms store model params in BF16 and use FP32 main params, main grads, Adam moments, and gradient reduce. MXFP4 enabled 124 Lumen parallel linears and left 20 in BF16. The stale Megatron argument dump still prints `linear_fp8_block_size=128`, but Lumen constructs the MXFP4 QuantConfig at 32 and passes `cfg.quant_config.block_size` into the parallel linears; runtime A4W4 autotune selected ASM for every production shape observed.
+- Results: MXFP4 completed 5/5 with losses 13.1408, 13.1419, 5.9476, 8.9855, 8.8146 and validation 8.1590; BF16 completed 5/5 with losses 13.2440, 13.2364, 5.9052, 9.0840, 9.6382 and validation 8.0177. Both had zero skipped and zero NaN iterations. No MXFP4 kernel rejection or BF16 emergency-fallback message occurred.
+- Timing is smoke-only: excluding compilation-heavy step 1, MXFP4 steps 2-5 were 6.26-7.05 s and BF16 8.89-9.21 s. Five steps are enough to exercise forward, DGrad, WGrad, optimizer-step invalidation, and the next-step cache rebuild, but not convergence or late-training stability.
+- Status: resolved for end-to-end path execution; long-horizon accuracy remains bounded by the existing 1000/5000-step evidence, not this smoke.
+
 ### [2026-09-06 lumen-fused-moe-router-never-applied]
 - Symptom: nothing visible at default log level. Found while auditing the stranded `refactor/patch-registry-on-94560b7` branch, whose `d06433a` claimed to "restore Megatron fused-router APIs" — the file it touches turned out to be identical on `94560b7`, `origin/main` and `feature/mxfp4`, so it was not restoring anything the registry refactor broke. It was fixing a bug all three shared.
 - Root cause: `lumen/ops/moe/fused_router.py` was a stale duplicate of `fused_routing.py`'s contents (`fused_topk`, `fused_permute`, `fused_unpermute`, `decode_aiter_sorted_ids`), and the three score-function/aux-loss autograd functions existed **nowhere in the tree**. `lumen/ops/moe/__init__.py` imported those three from `fused_router` and `decode_aiter_sorted_ids` from `fused_routing` — both groups pointed at the wrong module, so `import lumen.ops.moe` raised ImportError. Because importing *any* submodule of a package runs the package `__init__` first, every MoE test failed, including tests that only touch `fused_routing`.

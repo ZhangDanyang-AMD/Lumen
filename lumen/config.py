@@ -127,7 +127,11 @@ class LumenConfig:
     # -- Tier 1: Linear quantization (forwarded to QuantConfig) --
     format: str = "fp8_e4m3"
     scaling: str = "delayed"
-    block_size: int = 128
+    # ``None`` means the format default: 128 for FP8 block recipes and the
+    # spec-mandated 32 for MXFP4. Keeping the sentinel is what lets an explicit
+    # invalid MXFP4 value reach QuantConfig and fail instead of being silently
+    # rewritten to 32.
+    block_size: Optional[int] = None
     amax_algo: str = "max"
     margin: int = 0
     reduce_amax: bool = False
@@ -195,13 +199,12 @@ class LumenConfig:
         from lumen.quantize import QuantConfig
         from lumen.quantize.config import MXFP4_BLOCK_SIZE
 
-        # ``block_size`` defaults to 128 for FP8's blockwise recipes, and MXFP4
-        # has exactly one legal value. from_args already pins it for
-        # --linear-fp4; do the same here so hand-built configs -- the RL and
-        # FSDP entry points construct this dataclass directly -- do not have to
-        # pass the only value that works. QuantConfig still refuses a
-        # disagreeing one, which is where an explicit wrong value belongs.
-        block_size = MXFP4_BLOCK_SIZE if self.format == "mxfp4" else self.block_size
+        # Hand-built configs use the format default, while an explicit value is
+        # preserved so QuantConfig can enforce MXFP4's fixed 32-element blocks.
+        if self.block_size is None:
+            block_size = MXFP4_BLOCK_SIZE if self.format == "mxfp4" else 128
+        else:
+            block_size = self.block_size
 
         return QuantConfig.from_str(
             format=self.format,
@@ -273,6 +276,14 @@ class LumenConfig:
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
         import torch
+
+        if self.fp8_param_manager and self.format == "mxfp4":
+            raise ValueError(
+                "fp8_param_manager cannot be combined with MXFP4: it replaces "
+                "nn.Linear weights with FP8 storage before MXFP4 quantization, "
+                "which requires BF16/FP32 masters. Disable fp8_param_manager; "
+                "MXFP4 already caches packed FP4 weights per master-weight version."
+            )
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None

@@ -1439,7 +1439,10 @@ def test_mxfp4_gemm_vs_torchao_gemm(M, K, N):
 
     # Lumen GEMM vs Lumen dequant-matmul (self-consistency, SNR)
     snr_self = compute_snr(y_lumen_deq, y_lumen.float())
-    assert snr_self >= 4.0, f"Lumen GEMM self-consistency SNR {snr_self:.1f} dB too low"
+    # Both paths consume identical FP4 values and scales, so quantization noise
+    # cancels; only accumulation order remains. A single-digit floor would let
+    # a wrong kernel/backend pass while still looking like ordinary FP4 error.
+    assert snr_self >= 40.0, f"Lumen GEMM self-consistency SNR {snr_self:.1f} dB too low"
 
     # Lumen dequant-matmul vs torchAO dequant-matmul (cross-framework, bitwise)
     torch.testing.assert_close(y_lumen_deq.cpu(), y_torchao, atol=0, rtol=0)
@@ -1862,6 +1865,58 @@ def test_mxfp4_backward_bf16_fallback_uses_the_quantized_weight():
     )
 
 
+def test_mxfp4_backward_fallback_decodes_a_shuffled_quantized_weight(monkeypatch):
+    """A rejected DGrad kernel must not make a shuffled cache use the master."""
+    _require_mxfp4_dtype()
+    from lumen.ops.quantize import linear as linear_mod
+    from lumen.quantize import _mxfp4_cached_weight
+
+    torch.manual_seed(31)
+    m = n = k = 256
+    x = (torch.randn(m, k, device="cuda", dtype=torch.bfloat16) * 0.05).requires_grad_(True)
+    w = (torch.randn(n, k, device="cuda", dtype=torch.bfloat16) * 0.02).requires_grad_(True)
+    grad_out = torch.randn(m, n, device="cuda", dtype=torch.bfloat16) * 0.1
+
+    # Model a later micro-batch whose fprop and DGrad backends have already
+    # selected the shuffled B layout.
+    monkeypatch.setattr(linear_mod, "_mxfp4_can_fuse_b_shuffle", lambda *_args: True)
+    owner = torch.nn.Module()
+    weight_data, weight_scale = _mxfp4_cached_weight(
+        owner, w, None, None, "mxfp4", None, 32, gemm_rows=m,
+    )
+    assert getattr(weight_data._mxfp4_wt_cached[0], "_mxfp4_data_shuffled", False)
+
+    reject = False
+
+    def _dispatch(a_fp4, w_fp4, *_args):
+        if reject:
+            raise RuntimeError("force DGrad fallback after a shuffled cache")
+        return torch.zeros(
+            (a_fp4.shape[0], w_fp4.shape[0]),
+            device=a_fp4.device,
+            dtype=torch.bfloat16,
+        )
+
+    monkeypatch.setattr(linear_mod, "gemm_mxfp4_dispatch", _dispatch)
+    out = linear_mod.quantized_linear(
+        x,
+        w,
+        scaling_type="mxfp4",
+        block_size=32,
+        fp8_weight_cache=weight_data,
+        fp8_weight_scale=weight_scale,
+    )
+    reject = True
+    out.backward(grad_out)
+
+    against_master = grad_out.float() @ w.float()
+    snr_master = compute_snr(against_master, x.grad)
+    assert 11.0 < snr_master < 40.0, (
+        f"DGrad matches the BF16 master to {snr_master:.1f} dB; the shuffled "
+        "FP4 weight was not decoded for fallback"
+    )
+
+
 def test_mxfp4_ignores_a_pre_quantized_fp8_activation():
     """An FP8 activation cache must never reach the MXFP4 GEMM.
 
@@ -2166,6 +2221,48 @@ def test_mxfp4_choose_backend_rechecks_a_cached_decision(monkeypatch):
     finally:
         mxfp4_autotune.clear()
         linear_mod._mxfp4_legality_cache.clear()
+
+
+def test_mxfp4_dispatch_fallback_lock_is_scoped_to_shape(monkeypatch):
+    """One shape's BF16 verdict must not bypass another shape's working kernel."""
+    from lumen.ops import dispatch as dispatch_mod
+    from lumen.ops.quantize import linear as linear_mod
+
+    dispatch_mod._backend_cache.clear()
+    monkeypatch.setattr(dispatch_mod, "_SKIP_BACKEND_SYNC", True)
+    monkeypatch.setattr(linear_mod, "_FAST_QUANT_DISPATCH", False)
+    monkeypatch.setattr(linear_mod, "_mxfp4_probe_backends", lambda: True)
+    monkeypatch.setattr(linear_mod, "_mxfp4_choose_backend", lambda *_args: "plain")
+
+    bad_m, good_m, n, k = 32, 64, 64, 128
+    bad_a = torch.empty((bad_m, k // 2), dtype=torch.uint8)
+    good_a = torch.empty((good_m, k // 2), dtype=torch.uint8)
+    weight = torch.empty((n, k // 2), dtype=torch.uint8)
+    scale_w = torch.empty((n, k // 32), dtype=torch.uint8)
+
+    def _plain(a, *_args):
+        if a.shape[0] == bad_m:
+            raise RuntimeError("this shape has no plain kernel")
+        return "plain"
+
+    def _unavailable(*_args):
+        raise RuntimeError("backend unavailable in this test")
+
+    monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "asm", _unavailable)
+    monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "shuffled", _unavailable)
+    monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "plain", _plain)
+    monkeypatch.setattr(linear_mod, "_gemm_mxfp4_fallback", lambda *_args: "dequant_bf16")
+
+    try:
+        # Lock only the bad shape onto the degraded path.
+        for _ in range(dispatch_mod._BACKEND_WARMUP_CALLS):
+            assert linear_mod.gemm_mxfp4_dispatch(bad_a, weight, None, scale_w) == "dequant_bf16"
+
+        # The old key omitted M/N/K, so this call inherited that lock and never
+        # reached its working plain backend.
+        assert linear_mod.gemm_mxfp4_dispatch(good_a, weight, None, scale_w) == "plain"
+    finally:
+        dispatch_mod._backend_cache.clear()
 
 
 def test_mxfp4_configure_wires_tuned_table_and_cache(tmp_path):

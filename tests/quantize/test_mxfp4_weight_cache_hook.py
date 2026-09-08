@@ -44,6 +44,48 @@ def _cached(model):
 
 
 class TestMXFP4WeightCacheHook:
+    def test_weight_version_invalidates_cache_without_optimizer_hook(self, monkeypatch):
+        """Generic nn.Linear training must not depend on Megatron's setup hook."""
+        from lumen.ops.quantize import linear as linear_mod
+        from lumen.ops.quantize import ops as ops_mod
+        from lumen.quantize import _mxfp4_cached_weight
+
+        builds = 0
+
+        def _quantize(*_args, **_kwargs):
+            nonlocal builds
+            builds += 1
+            desc = type("_Desc", (), {})()
+            desc.data = torch.full((32, 16), builds, dtype=torch.uint8)
+            desc.scale = torch.ones((1, 1), dtype=torch.uint8)
+            return desc
+
+        monkeypatch.setattr(linear_mod, "quantize_input", _quantize)
+        monkeypatch.setattr(linear_mod, "_mxfp4_can_fuse_b_shuffle", lambda *_args: False)
+        monkeypatch.setattr(linear_mod, "_mxfp4_can_fuse_scale_swizzle", lambda *_args: False)
+        monkeypatch.setattr(
+            ops_mod,
+            "transpose_packed_fp4",
+            lambda data, **_kwargs: data.t().contiguous(),
+        )
+
+        module = nn.Linear(32, 32, bias=False)
+        first, _ = _mxfp4_cached_weight(
+            module, module.weight, None, None, "mxfp4", None, 32, gemm_rows=32,
+        )
+        reused, _ = _mxfp4_cached_weight(
+            module, module.weight, None, None, "mxfp4", None, 32, gemm_rows=32,
+        )
+        assert reused is first and builds == 1
+
+        with torch.no_grad():
+            module.weight.add_(1)
+
+        rebuilt, _ = _mxfp4_cached_weight(
+            module, module.weight, None, None, "mxfp4", None, 32, gemm_rows=32,
+        )
+        assert rebuilt is not first and builds == 2
+
     def test_torch_optimizer_post_step_hook_clears_cache(self):
         model = _model_with_cache()
         optimizer = torch.optim.SGD(model.parameters(), lr=0.01)

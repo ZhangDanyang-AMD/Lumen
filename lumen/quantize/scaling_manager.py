@@ -14,6 +14,7 @@ import torch.nn as nn
 
 from lumen.quantize.config import (
     AmaxAlgo,
+    MXFP4_BLOCK_SIZE,
     QuantConfig,
     QuantFormat,
     ScalingType,
@@ -1356,7 +1357,10 @@ class ScalingManager:
             return _round_to_mxfp8(tensor, block_size=block_size)
 
         if grad_quant_type == "mxfp4":
-            return _round_to_mxfp4(tensor, block_size=block_size)
+            # MXFP4's E8M0 scale belongs to exactly 32 elements. ``block_size``
+            # may come from an otherwise-FP8 linear recipe (normally 128), so
+            # gradient format selection must not inherit that unrelated knob.
+            return _round_to_mxfp4(tensor, block_size=MXFP4_BLOCK_SIZE)
 
         if grad_quant_type == "fp4":
             raise NotImplementedError(

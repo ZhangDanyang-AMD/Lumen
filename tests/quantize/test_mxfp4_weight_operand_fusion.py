@@ -182,6 +182,13 @@ def test_mxfp4_weight_shape_check_leaves_ragged_layers_alone():
     ragged = nn.Linear(64, 48)
     assert _mxfp4_weight_shape_supported(ok)
     assert not _mxfp4_weight_shape_supported(ragged)
+
+    grouped = nn.Module()
+    grouped.register_parameter("weight0", nn.Parameter(torch.empty(64, 64)))
+    grouped.register_parameter("weight1", nn.Parameter(torch.empty(48, 64)))
+    assert not _mxfp4_weight_shape_supported(grouped), (
+        "grouped linears expose weight0..weightN rather than .weight"
+    )
     # No plain 2-D weight (grouped/MoE experts keep theirs elsewhere): not ours
     # to veto.
     assert _mxfp4_weight_shape_supported(nn.Module())

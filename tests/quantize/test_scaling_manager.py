@@ -342,6 +342,22 @@ class TestGradQuantStatic:
         snr = compute_snr(golden, result)
         assert snr > 20, f"Grad quant vs golden SNR: {snr:.1f} dB"
 
+    def test_mxfp4_ignores_an_fp8_recipe_block_size(self, monkeypatch):
+        import lumen.quantize.scaling_manager as sm_mod
+
+        seen = {}
+
+        def _round(tensor, block_size):
+            seen["block_size"] = block_size
+            return tensor
+
+        monkeypatch.setattr(sm_mod, "_round_to_mxfp4", _round)
+        tensor = torch.zeros(2, 32)
+        assert ScalingManager.quantize_grad_tensor(
+            tensor, "mxfp4", block_size=128,
+        ) is tensor
+        assert seen["block_size"] == 32
+
     def test_invalid_raises(self):
         t = torch.randn(4, 8, device="cuda")
         with pytest.raises(ValueError):

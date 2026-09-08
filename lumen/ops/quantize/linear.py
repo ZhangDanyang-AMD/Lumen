@@ -1667,13 +1667,18 @@ def gemm_mxfp4_dispatch(a_fp4, w_fp4, scale_a, scale_w):
                 "dequant_bf16",
             )
         )
-    # The chain's contents depend on both the autotuned winner and whether the B
-    # operand is pre-shuffled, so those belong in the cache key. Sharing one key
-    # across chains is what let a shape that had to fall back hand its verdict to
-    # every later shape.
+    # The chain's contents depend on the shape, the autotuned winner and whether
+    # B is pre-shuffled, so all three belong in the cache key. A backend name is
+    # not a shape contract: two shapes can both prefer ``plain`` while only one
+    # of them rejects it and locks onto dequant->BF16. Sharing that verdict would
+    # silently send the other shape to BF16 without trying its working kernel.
+    m, n, k = a_fp4.shape[0], w_fp4.shape[0], a_fp4.shape[1] * 2
     return try_backends(
         backends,
-        op_name=f"gemm_mxfp4:{name or 'none'}:{'shuffled_b' if shuffled_b else 'rowmajor_b'}",
+        op_name=(
+            f"gemm_mxfp4:{m}x{n}x{k}:{name or 'none'}:"
+            f"{'shuffled_b' if shuffled_b else 'rowmajor_b'}"
+        ),
         slow_labels=("dequant_bf16",),
     )
 
@@ -2535,6 +2540,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 dequant_hadamard_quant_mxfp4,
                 dequant_transpose_mxfp4,
                 dual_layout_quant_mxfp4,
+                transpose_packed_fp4,
             )
 
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).to(torch.bfloat16).contiguous()
@@ -2699,30 +2705,30 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 # this same function already dequantizes its saved weight for
                 # exactly this reason.
                 if _is_mxfp4_data_shuffled(weight_data):
-                    # The alignment that gates the shuffle is the alignment we
-                    # just failed, so this does not happen -- but decoding
-                    # permuted bytes as if they were in place would be silent,
-                    # and falling back to the master is at least reported.
-                    _warn_mxfp4_backward_fallback(
-                        "DGrad's weight operand is shuffled and cannot be decoded here, "
-                        "so DGrad uses the BF16 master and disagrees with WGrad",
-                        (m_unpadded, N_out, K_in),
+                    # A runtime GEMM rejection can happen after the aligned
+                    # weight was deliberately cached in the backend's shuffled
+                    # B layout. The row-major dequantizer cannot read that
+                    # layout. Transpose twice: the first pass consumes the
+                    # shuffled W^T and writes row-major W; the second writes
+                    # row-major W^T. This is a slow emergency path, but it keeps
+                    # DGrad on the exact FP4 weight used by forward.
+                    weight_rowmajor = transpose_packed_fp4(
+                        transpose_packed_fp4(weight_data, in_shuffled=True)
                     )
-                    w_dgrad = ctx.weight_ref.t().contiguous()
                 else:
-                    # weight_data is already W^T, which is the (K_in, N_out)
-                    # operand dispatch_gemm wants. Its scales are the 2D tile
-                    # grid, so they need the same expansion the row-major
-                    # kernel does before a per-row dequant can read them.
-                    w_dgrad = convert_from_mxfp4(
-                        weight_data,
-                        _expand_2d_scale_to_1d(
-                            _unswizzle_mxfp4_scale(weight_scale),
-                            (weight_data.shape[0], weight_data.shape[1] * 2),
-                            mxfp4_block,
-                        ),
-                        output_dtype=torch.bfloat16, block_size=mxfp4_block,
-                    )
+                    weight_rowmajor = weight_data
+                # weight_rowmajor is W^T, the (K_in, N_out) operand
+                # dispatch_gemm wants. Its scales are the 2D tile grid, so they
+                # need the same expansion as the row-major FP4 kernel.
+                w_dgrad = convert_from_mxfp4(
+                    weight_rowmajor,
+                    _expand_2d_scale_to_1d(
+                        _unswizzle_mxfp4_scale(weight_scale),
+                        (weight_rowmajor.shape[0], weight_rowmajor.shape[1] * 2),
+                        mxfp4_block,
+                    ),
+                    output_dtype=torch.bfloat16, block_size=mxfp4_block,
+                )
                 grad_input = dispatch_gemm(
                     grad_flat, w_dgrad, None, None, "none",
                 )
