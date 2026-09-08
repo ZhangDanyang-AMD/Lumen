@@ -20,11 +20,22 @@ def install_moe_fused_router() -> None:
     if getattr(moe_utils, "_lumen_fused_router_patched", False):
         return
 
-    from lumen.ops.moe.fused_router import (
-        fused_compute_score_for_moe_aux_loss,
-        fused_moe_aux_loss,
-        fused_topk_with_score_function,
-    )
+    try:
+        from lumen.ops.moe.fused_router import (
+            fused_compute_score_for_moe_aux_loss,
+            fused_moe_aux_loss,
+            fused_topk_with_score_function,
+        )
+    except ImportError as exc:
+        # IMPORT-phase patches are applied unconditionally, so a dense run --
+        # which never touches a router -- would otherwise die here on its way to
+        # GPTModel. Megatron keeps its own router; only MoE runs lose the AITER
+        # kernels, and they are no worse off than without this patch.
+        logger.warning(
+            "Lumen fused router ops unavailable (%s), skipping MoE router patch",
+            exc,
+        )
+        return
 
     moe_utils.fused_topk_with_score_function = fused_topk_with_score_function
     moe_utils.fused_compute_score_for_moe_aux_loss = fused_compute_score_for_moe_aux_loss
