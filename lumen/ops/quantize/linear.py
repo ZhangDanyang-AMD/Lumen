@@ -1570,16 +1570,30 @@ def gemm_mxfp4_dispatch(a_fp4, w_fp4, scale_a, scale_w):
             (
                 _MXFP4_BACKEND_KIND[n],
                 (lambda fn=_MXFP4_BACKENDS[n]: fn(a_fp4, w_fp4, scale_a, scale_w)),
+                n,
             )
             for n in order
         ]
     else:
         backends = []
+        name = None
     if not shuffled_b:
         backends.append(
-            (Backend.TRITON, lambda: _gemm_mxfp4_fallback(a_fp4, w_fp4, scale_a, scale_w))
+            (
+                Backend.TRITON,
+                lambda: _gemm_mxfp4_fallback(a_fp4, w_fp4, scale_a, scale_w),
+                "dequant_bf16",
+            )
         )
-    return try_backends(backends, op_name="gemm_mxfp4")
+    # The chain's contents depend on both the autotuned winner and whether the B
+    # operand is pre-shuffled, so those belong in the cache key. Sharing one key
+    # across chains is what let a shape that had to fall back hand its verdict to
+    # every later shape.
+    return try_backends(
+        backends,
+        op_name=f"gemm_mxfp4:{name or 'none'}:{'shuffled_b' if shuffled_b else 'rowmajor_b'}",
+        slow_labels=("dequant_bf16",),
+    )
 
 
 def _gemm_bf16_tuned(a, w, bias):
