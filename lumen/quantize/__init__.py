@@ -500,10 +500,6 @@ def _mxfp4_cached_weight(
     ):
         return wcache, wscale
 
-    cached = getattr(module, "_mxfp4_w_cache", None)
-    if cached is not None:
-        return cached[0], cached[1]
-
     from lumen.ops.quantize.linear import (
         _mark_mxfp4_data_shuffled,
         _mark_mxfp4_scale_swizzled,
@@ -531,6 +527,21 @@ def _mxfp4_cached_weight(
     fuse_dgrad_shuffle = unpadded and gemm_rows is not None and _mxfp4_can_fuse_b_shuffle(
         (gemm_rows, k_in, n_out), k_in, n_out // 2,
     )
+
+    # The two fusions are what the layout depends on, and they are decided from
+    # gemm_rows -- so the cache is keyed on them, not on the module alone.
+    # Keyed on the module, the first micro-batch's row count fixed the layout
+    # for the whole step: a later GEMM whose row count dispatches to a backend
+    # reading the other order either trips the quantizer/dispatch disagreement
+    # assertion or, for the operand with no such check, reads permuted bytes as
+    # if they were in place. A pipeline's last micro-batch and a ragged final
+    # batch both change the row count. Two row counts that agree on both
+    # fusions share the entry, so nothing is rebuilt that need not be.
+    layout = (fuse_fwd_shuffle, fuse_dgrad_shuffle)
+    cached = getattr(module, "_mxfp4_w_cache", None)
+    if cached is not None and cached[0] == layout:
+        return cached[1], cached[2]
+
     desc = quantize_input(
         weight.contiguous(), "mxfp4", fp8_dtype, block_size,
         None, None, is_weight=True, shuffle_data=fuse_fwd_shuffle,
@@ -561,7 +572,7 @@ def _mxfp4_cached_weight(
         fwd_scale, dgrad_scale = scale, scale.t().contiguous()
 
     data._mxfp4_wt_cached = (data_t, dgrad_scale)
-    module._mxfp4_w_cache = (data, fwd_scale)
+    module._mxfp4_w_cache = (layout, data, fwd_scale)
     return data, fwd_scale
 
 

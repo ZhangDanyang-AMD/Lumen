@@ -96,6 +96,97 @@ def test_operand_cache_lets_the_weight_die_by_refcount_alone():
             gc.enable()
 
 
+def test_weight_cache_rebuilds_when_the_operand_layout_changes():
+    """The layout the cache holds depends on the row count that asked for it.
+
+    Whether either operand may be stored pre-shuffled is decided from
+    ``gemm_rows``, since only some backends read that order. Keyed on the module
+    alone, the first micro-batch's row count fixed the layout for the whole
+    step, and a later GEMM dispatching to a backend that reads the other order
+    got bytes in the wrong one -- which does not raise for the operand that has
+    no quantizer/dispatch cross-check, it just multiplies the right numbers in
+    the wrong places.
+
+    It also means the fusion the docstring promises ("the first micro-batch
+    writes row-major and every later one fuses") only actually arrived after the
+    next optimizer step dropped the cache.
+    """
+    from lumen.ops.quantize import mxfp4_autotune
+    from lumen.quantize import _mxfp4_cached_weight
+
+    n_out, k_in = 4096, 4096
+    weight = torch.randn(n_out, k_in, device="cuda", dtype=torch.bfloat16) * 0.02
+    module = nn.Module()
+
+    unfused_rows, fused_rows = 2048, 4096
+    mxfp4_autotune.clear()
+    try:
+        # The unfused row count has no measured backend, so no operand may be
+        # stored shuffled; the other is measured as one that reads that order.
+        mxfp4_autotune._choice[(fused_rows, n_out, k_in)] = "asm"
+        mxfp4_autotune._choice[(fused_rows, k_in, n_out)] = "asm"
+
+        _mxfp4_cached_weight(
+            module, weight, None, None, "mxfp4", None, BLOCK, gemm_rows=unfused_rows,
+        )
+        first_layout = module._mxfp4_w_cache[0]
+        assert first_layout == (False, False)
+
+        _mxfp4_cached_weight(
+            module, weight, None, None, "mxfp4", None, BLOCK, gemm_rows=fused_rows,
+        )
+        assert module._mxfp4_w_cache[0] != first_layout, (
+            "kept the row-major operands for a row count whose backend reads shuffled"
+        )
+
+        # A row count that agrees on both fusions reuses the entry.
+        data_before = module._mxfp4_w_cache[1]
+        _mxfp4_cached_weight(
+            module, weight, None, None, "mxfp4", None, BLOCK, gemm_rows=fused_rows,
+        )
+        assert module._mxfp4_w_cache[1] is data_before, "rebuilt for an identical layout"
+    finally:
+        mxfp4_autotune.clear()
+
+
+def test_mxfp4_refuses_a_weight_whose_output_width_is_ragged():
+    """The quantizer pads those rows and nothing carries the count forward.
+
+    Forward's ``output.view(..., weight.shape[0])`` then meets a wider tensor
+    and dies on the row count, several frames from the cause and with no
+    fallback. The reduction dim is free -- both operands are padded along it.
+    """
+    from lumen.ops.quantize.linear import quantize_input, quantized_linear
+
+    with pytest.raises(ValueError, match="multiple of 32"):
+        quantize_input(
+            torch.randn(48, 64, device="cuda", dtype=torch.bfloat16),
+            "mxfp4", None, BLOCK, None, None, is_weight=True,
+        )
+
+    x = torch.randn(64, 48, device="cuda", dtype=torch.bfloat16) * 0.05
+    w = torch.randn(64, 48, device="cuda", dtype=torch.bfloat16) * 0.02
+    assert quantized_linear(x, w, scaling_type="mxfp4").shape == (64, 64), (
+        "a ragged reduction dim is fine and must keep working"
+    )
+
+
+def test_mxfp4_weight_shape_check_leaves_ragged_layers_alone():
+    """The patch-time gate, which is where a static shape belongs.
+
+    N is hidden size, vocab or a TP shard, so it cannot change during a run.
+    """
+    from lumen.models.megatron import _mxfp4_weight_shape_supported
+
+    ok = nn.Linear(64, 64)
+    ragged = nn.Linear(64, 48)
+    assert _mxfp4_weight_shape_supported(ok)
+    assert not _mxfp4_weight_shape_supported(ragged)
+    # No plain 2-D weight (grouped/MoE experts keep theirs elsewhere): not ours
+    # to veto.
+    assert _mxfp4_weight_shape_supported(nn.Module())
+
+
 def test_operand_cache_does_not_hit_on_a_recycled_scale_address():
     """A freed scale's address is not proof the cached operands still match it.
 

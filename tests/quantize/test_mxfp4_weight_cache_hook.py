@@ -35,7 +35,7 @@ class _MegatronStyleOptimizer:
 def _model_with_cache():
     model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
     for layer in model:
-        layer._mxfp4_w_cache = ("fp4", "scale")
+        layer._mxfp4_w_cache = ((False, False), "fp4", "scale")
     return model
 
 
@@ -66,7 +66,7 @@ class TestMXFP4WeightCacheHook:
         """Native parallel linears keep the cache on weight, not the module."""
         model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
         for layer in model:
-            layer.weight._mxfp4_w_cache = ("fp4", "scale")
+            layer.weight._mxfp4_w_cache = ((False, False), "fp4", "scale")
         optimizer = _MegatronStyleOptimizer()
         register_mxfp4_weight_optimizer_hooks(model, optimizer)
 
@@ -96,6 +96,6 @@ class TestMXFP4WeightCacheHook:
 
         for _ in range(3):
             for layer in model:
-                layer._mxfp4_w_cache = ("fp4", "scale")
+                layer._mxfp4_w_cache = ((False, False), "fp4", "scale")
             optimizer.step()
             assert not any(_cached(model))

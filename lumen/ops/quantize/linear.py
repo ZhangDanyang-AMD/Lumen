@@ -514,6 +514,18 @@ def quantize_input(
         # along rows; the row-wise activation path takes any M. Padding it too
         # would hand the GEMM more rows than the caller asked for, and nothing
         # downstream knows to slice them off again.
+        if is_weight and x_2d.shape[0] % mxfp4_block != 0:
+            # Padding the rows here is what the 2D tile grid needs, but nothing
+            # carries the original count forward, so the caller's reshape of the
+            # GEMM output meets a wider tensor and dies on the row count -- an
+            # unreadable RuntimeError several frames away. N is hidden size,
+            # vocab or a TP shard, so it is fixed for the run: say so here, and
+            # let the patch-time check leave such layers in BF16.
+            raise ValueError(
+                f"MXFP4 needs a weight whose output width is a multiple of "
+                f"{mxfp4_block}; got {tuple(x_2d.shape)}. The reduction dim is "
+                "free -- only the row count matters. Leave this layer in BF16."
+            )
         if is_weight or swizzle_scale:
             x_2d, _orig_m = pad_to_block(x_2d, mxfp4_block, dim=0)
         x_2d, _orig_n = pad_to_block(x_2d, mxfp4_block, dim=-1)

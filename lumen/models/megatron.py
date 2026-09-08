@@ -491,6 +491,20 @@ def _enable_quantization_for_parallel_linear(
             if bf16_prefixes and is_under_bf16_prefix(name, bf16_prefixes):
                 skipped += 1
                 continue
+            if scaling_type == "mxfp4" and not _mxfp4_weight_shape_supported(module):
+                # The MXFP4 quantizer pads a weight's output rows up to 32 and
+                # drops the original count, so forward's
+                # output.view(..., weight.shape[0]) fails on the padded width --
+                # a RuntimeError mid-step, with no fallback, for a shape that
+                # was knowable here. N is hidden size / vocab / a TP shard, so
+                # it is fixed for the run: decide once and leave the layer BF16.
+                _w = getattr(module, "weight", None)
+                print_rank_0(
+                    f"> {name}: output width {tuple(_w.shape)[0]} is not a multiple of "
+                    f"{_MXFP4_BLOCK_SIZE}, leaving this layer in BF16"
+                )
+                skipped += 1
+                continue
             _mgr = scaling_manager
             if _mgr is None and quant_config is not None:
                 from lumen.quantize import ScalingManager
@@ -525,6 +539,24 @@ def _enable_quantization_for_parallel_linear(
             f"> Enabled {_display_name} (scaling={scaling_type}) "
             f"on {count} Lumen parallel linear modules{note}"
         )
+
+
+def _mxfp4_weight_shape_supported(module) -> bool:
+    """Whether MXFP4 can run this module's GEMM without padding its output.
+
+    ``quantize_input(is_weight=True)`` pads the weight's rows to the 32-element
+    block and returns no record of the original count, so a width that is not a
+    multiple of 32 reaches the forward's reshape as a wider tensor than the
+    caller asked for. The reduction dim K is fine either way: both operands are
+    padded along it, and zeros do not contribute.
+
+    A module with no plain weight -- grouped/MoE experts keep theirs elsewhere --
+    is left alone rather than guessed at.
+    """
+    weight = getattr(module, "weight", None)
+    if weight is None or weight.dim() != 2:
+        return True
+    return weight.shape[0] % _MXFP4_BLOCK_SIZE == 0
 
 
 def enable_fp8_for_parallel_linear(
