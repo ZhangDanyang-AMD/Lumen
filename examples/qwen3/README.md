@@ -9,7 +9,7 @@ applies FP8 blockwise2d linear quant + LoRA; attention and norm stay BF16.
 
 | Path | Purpose |
 |---|---|
-| `train_qwen3_fsdp.py` | Training script (FSDP + `LumenConfig.enable`) |
+| `train_qwen3_fsdp_fp8_blockwise2d.py` | Training script (FSDP + `LumenConfig.enable`) |
 | `run_qwen3_fsdp_mi308.sh` | Docker launcher for 8×MI308X |
 | `scripts/download_model.py` | Fetch the HF model checkpoint |
 | `scripts/download_dataset.py` | Fetch an alpaca-style dataset as jsonl |
@@ -47,7 +47,7 @@ Overridable env: `HOST_MODEL`, `HOST_DATA`, `HOST_RESULTS`, `TRAIN_FILE`,
 Direct `torchrun` (inside the container):
 
 ```bash
-torchrun --nproc_per_node=8 train_qwen3_fsdp.py \
+torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
   --model-name-or-path /model-qwen3 \
   --train-data-path /data/train.jsonl --val-data-path /data/validation.jsonl \
   --seq-length 2048 --max-steps 200 --eval-interval 50 --seed 1234

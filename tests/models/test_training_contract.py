@@ -9,8 +9,8 @@
 Covers:
   - Shared checkpoint and experiment flags reusable across Megatron and FSDP
   - FSDP training defaults required for parity with launcher behavior
-  - Independent FSDP FP8 and FP4 enable switches
-  - FSDP legacy Docker/launcher FP8 flag aliases mapping onto the shared contract
+  - FSDP legacy Docker/launcher FP8 flag aliases mapping onto the shared
+    linear-FP8 contract
 """
 
 import argparse
@@ -119,12 +119,6 @@ class TestSharedTrainingContractArgs:
     def test_fsdp_fp8_training_legacy_alias_sets_linear_fp8(self):
         args = self._parse_fsdp(["--fp8-training"])
         assert args.linear_fp8 is True
-        assert args.linear_fp4 is False
-
-    def test_fsdp_fp4_has_independent_enable_switch(self):
-        args = self._parse_fsdp(["--linear-fp4"])
-        assert args.linear_fp4 is True
-        assert args.linear_fp8 is False
 
     def test_fsdp_fp8_format_legacy_alias_sets_linear_fp8_format(self):
         args = self._parse_fsdp(["--fp8-format", "hybrid"])
@@ -167,7 +161,6 @@ class TestSharedTrainingContractIntegration:
         calls = _get_function_calls(_parse_module(MODELS_DIR / "fsdp.py"), "add_common_fsdp_args")
         assert "add_fsdp_runtime_contract_args" in calls
         assert "add_fsdp_fp8_contract_args" in calls
-        assert "add_fsdp_fp4_contract_args" in calls
         assert "add_shared_checkpoint_args" in calls
         assert "add_shared_experiment_args" in calls
 

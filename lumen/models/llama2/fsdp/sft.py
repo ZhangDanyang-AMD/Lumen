@@ -192,11 +192,7 @@ class FSDPTrainer:
             )
             mixed_precision = MixedPrecision(
                 param_dtype=torch.bfloat16,
-                reduce_dtype=(
-                    torch.float32
-                    if (getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False))
-                    else torch.bfloat16
-                ),
+                reduce_dtype=torch.float32 if args.linear_fp8 else torch.bfloat16,
                 buffer_dtype=torch.bfloat16,
             )
             sharding = ShardingStrategy.FULL_SHARD
@@ -364,7 +360,7 @@ class FSDPTrainer:
             _rank0_print(f"> Running {args.warmup_steps} synthetic warmup steps ...")
             for _ in range(args.warmup_steps):
                 self._synthetic_warmup_step()
-            if getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
+            if args.linear_fp8:
                 reset_fp8_state(self.model)
             if dist.is_initialized():
                 dist.barrier()

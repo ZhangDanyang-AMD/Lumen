@@ -127,7 +127,6 @@ class TestMegatronExampleParity:
         # against the step-0 weights, which raises nothing.
         names = _get_apply_training_patch_names(LLAMA31_EXAMPLE, "_run_megatron")
         assert "mxfp4_weight_cache_hook" in names
-        assert "gc_freeze_hook" in names
 
     def test_llama2_installs_mxfp4_weight_cache_hook(self):
         names = _get_apply_training_patch_names(LLAMA2_EXAMPLE, "_run_megatron")

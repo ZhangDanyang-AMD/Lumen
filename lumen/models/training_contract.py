@@ -14,7 +14,6 @@ from .utils import safe_add_argument
 
 __all__ = [
     "add_fsdp_contract_args",
-    "add_fsdp_fp4_contract_args",
     "add_fsdp_fp8_contract_args",
     "add_fsdp_runtime_contract_args",
     "add_shared_checkpoint_args",
@@ -167,24 +166,10 @@ def add_fsdp_fp8_contract_args(parser_or_group):
     return parser_or_group
 
 
-def add_fsdp_fp4_contract_args(parser_or_group):
-    """Register the dedicated FSDP MXFP4 enable switch."""
-    safe_add_argument(
-        parser_or_group,
-        "--linear-fp4",
-        dest="linear_fp4",
-        action="store_true",
-        default=False,
-        help="Enable MXFP4 quantised training for Linear layers (32-element blocks).",
-    )
-    return parser_or_group
-
-
 def add_fsdp_contract_args(parser_or_group):
     """Register the full shared FSDP contract on a parser or group."""
     add_fsdp_runtime_contract_args(parser_or_group)
     add_fsdp_fp8_contract_args(parser_or_group)
-    add_fsdp_fp4_contract_args(parser_or_group)
     add_shared_checkpoint_args(parser_or_group)
     add_shared_experiment_args(parser_or_group)
     return parser_or_group

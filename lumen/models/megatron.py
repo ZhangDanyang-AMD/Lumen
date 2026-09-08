@@ -1090,7 +1090,6 @@ from lumen.patches.builders.megatron_args import add_common_megatron_args  # noq
 from lumen.patches.training.megatron_hooks import (  # noqa: E402
     install_fp8_param_gather_hook,
     install_fp8_param_storage_hook,
-    install_gc_freeze_hook,
     install_hip_graphs_hook,
     install_mxfp4_weight_cache_hook,
     install_val_loss_early_stop_hook,
@@ -1100,7 +1099,6 @@ __all__ = [
     "add_common_megatron_args",
     "install_fp8_param_gather_hook",
     "install_fp8_param_storage_hook",
-    "install_gc_freeze_hook",
     "install_hip_graphs_hook",
     "install_mxfp4_weight_cache_hook",
     "install_val_loss_early_stop_hook",

@@ -184,30 +184,11 @@ class AlpacaDataset(Dataset):
         return {"input_ids": torch.LongTensor(ids), "loss_mask": torch.LongTensor(mask)}
 
 
-_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
-
-
-def _configure_mxfp4_dispatch():
-    """Hand Lumen the Qwen3 tuned A4W4 table before the first MXFP4 GEMM.
-
-    Widens which shapes can reach the prebuilt ASM kernels. Every MXFP4 backend
-    is bit-identical, so this affects speed only. Skipped if the environment
-    variable is already set.
-    """
-    from lumen.ops.quantize import mxfp4_autotune
-
-    applied = mxfp4_autotune.configure(
-        tuned_config=os.path.join(_CONFIG_DIR, "a4w4_blockscale_tuned_gemm.csv"),
-        autotune_cache=os.environ.get("LUMEN_MXFP4_AUTOTUNE_CACHE") or None,
-    )
-    rank0(f"> MXFP4 tuned config: {applied['tuned_config'] or '(aiter default)'}")
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--model-name-or-path", required=True)
     p.add_argument("--tokenizer-name-or-path", default=None)
-    p.add_argument("--mode", choices=["bf16", "fp8_blockwise2d", "mxfp4"], default="fp8_blockwise2d")
+    p.add_argument("--mode", choices=["bf16", "fp8_blockwise2d"], default="fp8_blockwise2d")
     p.add_argument("--train-data-path", required=True)
     p.add_argument("--val-data-path", default=None)
     p.add_argument("--seq-length", type=int, default=2048)
@@ -253,8 +234,6 @@ def main():
     p.add_argument("--eval-interval", type=int, default=50)
     p.add_argument("--val-samples", type=int, default=200)
     p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--tensorboard-dir", type=str, default=None,
-                   help="write TensorBoard scalars (loss, lr, step_time) to this directory (rank0 only)")
     args = p.parse_args()
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -286,24 +265,17 @@ def main():
     else:
         rank0("> Gradient checkpointing DISABLED (more activation memory, no backward recompute)")
 
-    # ---- Lumen LoRA (+ optional quantised linears) ----
-    # mode=bf16 -> LoRA only; fp8_blockwise2d -> FP8 128×128; mxfp4 -> MXFP4 32×32.
-    if args.mode == "mxfp4":
-        _configure_mxfp4_dispatch()
-        use_fp8, use_fp4, fmt, scaling, blk = False, True, "fp8_e4m3", "delayed", 128
-    elif args.mode == "fp8_blockwise2d":
-        use_fp8, use_fp4, fmt, scaling, blk = True, False, "fp8_e4m3", args.fp8_scaling, 128
-    else:
-        use_fp8, use_fp4, fmt, scaling, blk = False, False, "fp8_e4m3", args.fp8_scaling, 128
+    # ---- Lumen LoRA (+ optional FP8 blockwise2d), same recipe as llama2 ----
+    # mode=bf16 -> LoRA only (FP8 off); mode=fp8_blockwise2d -> FP8 blockwise2d linears.
+    use_fp8 = args.mode == "fp8_blockwise2d"
     cfg = LumenConfig.from_args(Namespace(
-        linear_fp8=use_fp8, linear_fp4=use_fp4,
-        linear_fp8_format=fmt, linear_fp8_scaling=scaling,
-        linear_fp8_block_size=blk, linear_fp8_amax_algo="max", linear_fp8_amax_history=16,
+        linear_fp8=use_fp8, linear_fp8_format="fp8_e4m3", linear_fp8_scaling=args.fp8_scaling,
+        linear_fp8_block_size=128, linear_fp8_amax_algo="max", linear_fp8_amax_history=16,
         linear_fp8_reduce_amax=False, linear_fp8_activation=True, linear_fp8_wgrad=True,
         linear_fp8_cache_frozen_weight=args.cache_frozen_weight,
         linear_fp8_bpreshuffle=args.bpreshuffle,
         grad_quant_type=None, first_last_layers_bf16=False, lumen_norm=args.lumen_norm,
-        hf_attn_patch=args.aiter_attn,
+        hf_attn_patch=args.aiter_attn,   # route SDPA -> AITER CK FMHA when set
         lora_rank=args.lora_rank, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
     ))
     _manager, model = cfg.enable(model)  # logs INFO:lumen.quantize + INFO:lumen.config (LoRA + trainable)
@@ -324,7 +296,6 @@ def main():
         from lumen.models.fsdp import apply_fsdp2
         apply_fsdp2(model, Namespace(
             linear_fp8=use_fp8,
-            linear_fp4=use_fp4,
             sharding_strategy=args.sharding,
             fsdp_fp8_param_storage=args.fsdp_fp8_param_storage,
         ))
@@ -394,12 +365,6 @@ def main():
             t = torch.tensor([avg], device="cuda"); dist.all_reduce(t, op=dist.ReduceOp.AVG); avg = t.item()
         return avg
 
-    tb_writer = None
-    if global_rank == 0 and args.tensorboard_dir:
-        from torch.utils.tensorboard import SummaryWriter
-        tb_writer = SummaryWriter(log_dir=args.tensorboard_dir)
-        rank0(f"> TensorBoard logging to {args.tensorboard_dir}")
-
     model.train()
     ga = args.gradient_accumulation_steps
     it = iter(train_loader)
@@ -427,22 +392,11 @@ def main():
         opt.step(); sched.step()
         torch.cuda.synchronize(); step_time_ms = (time.perf_counter() - t0) * 1e3
         if step % args.log_interval == 0:
-            train_loss = acc / ga
-            lr = sched.get_last_lr()[0]
-            rank0(f"  step {step}/{args.max_steps} | loss {train_loss:.4f} | lr {lr:.2e} | step_time_ms {step_time_ms:.1f}")
-            if tb_writer:
-                tb_writer.add_scalar("train/loss", train_loss, step)
-                tb_writer.add_scalar("train/lr", lr, step)
-                tb_writer.add_scalar("train/step_time_ms", step_time_ms, step)
+            rank0(f"  step {step}/{args.max_steps} | loss {acc/ga:.4f} | lr {sched.get_last_lr()[0]:.2e} | step_time_ms {step_time_ms:.1f}")
         profiler.step_end(step)
         if val_loader and step % args.eval_interval == 0:
-            val_loss = validate()
-            rank0(f"  step {step}/{args.max_steps} | val_loss {val_loss:.4f}")
-            if tb_writer:
-                tb_writer.add_scalar("val/loss", val_loss, step)
+            rank0(f"  step {step}/{args.max_steps} | val_loss {validate():.4f}")
 
-    if tb_writer:
-        tb_writer.close()
     rank0(f"> Training complete after {args.max_steps} steps.")
 
 

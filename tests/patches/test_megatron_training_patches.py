@@ -36,7 +36,6 @@ class TestMegatronTrainingPatches:
         expected = {
             "fp8_param_gather_hook",
             "mxfp4_weight_cache_hook",
-            "gc_freeze_hook",
             "fp8_param_storage_hook",
             "hip_graphs_hook",
             "val_loss_early_stop_hook",
@@ -128,10 +127,6 @@ class TestMegatronTrainingPatches:
 
         monkeypatch.setattr(builtins, "__import__", _block_training_import)
         self.hooks.install_val_loss_early_stop_hook()
-
-    def test_gc_freeze_hook_skips_when_disabled(self, monkeypatch):
-        monkeypatch.setenv("LUMEN_GC_FREEZE", "0")
-        self.hooks.install_gc_freeze_hook()
 
     def _stub_megatron_training(self, monkeypatch, *, setup=None, get_args=None):
         """Point TRAINING installers at in-process stubs, not a real Megatron."""
