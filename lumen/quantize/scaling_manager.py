@@ -798,10 +798,12 @@ class ScalingManager:
         # have gotten a silently wrong layout rather than an error.
         if self.config.format == QuantFormat.MXFP4:
             raise ValueError(
-                "The FP8 param cache (--fp8-param-gather / LUMEN_WEIGHT_QUANT_ONCE) "
-                "does not apply to MXFP4: its descriptors are never read back, and "
-                "the layout would not match. MXFP4 already caches the quantized "
-                "weight per optimizer step in lumen.quantize._mxfp4_cached_weight."
+                "The FP8 param cache (--lumen-fp8-param-gather, or "
+                "LUMEN_WEIGHT_QUANT_ONCE=1) does not apply to MXFP4: its "
+                "descriptors are never read back, and the layout would not match. "
+                "Nothing is lost by turning it off: MXFP4 caches its own FP4 "
+                "weight per optimizer step unconditionally "
+                "(lumen.quantize._mxfp4_cached_weight)."
             )
         count = 0
         for _name, module in model.named_modules():

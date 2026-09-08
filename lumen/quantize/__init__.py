@@ -867,11 +867,15 @@ def store_weights_fp8(
         if getattr(module, "_quant_scaling_type", None) == "mxfp4":
             raise ValueError(
                 f"{_name or type(module).__name__}: the FP8 weight cache "
-                "(--fp8-weight-cache) does not "
-                "apply to MXFP4. It stores per-tensor FP8 with a scalar scale, "
-                "which no MXFP4 GEMM can read. MXFP4 already caches its "
-                "quantized weight per optimizer step in "
-                "lumen.quantize._mxfp4_cached_weight."
+                "(LUMEN_FP8_WEIGHT_CACHE=1, or fp8_weight_cache on LumenConfig) "
+                "does not apply to MXFP4. It stores per-tensor FP8 with a scalar "
+                "scale, which no MXFP4 GEMM can read. Nothing is lost by turning "
+                "it off: MXFP4 caches its own FP4 weight per optimizer step "
+                "unconditionally (lumen.quantize._mxfp4_cached_weight, opt out "
+                "with LUMEN_MXFP4_DISABLE_WEIGHT_CACHE=1). It could not be filled "
+                "from here anyway -- the operand layout depends on the backend "
+                "measured for the consuming GEMM shape, which is not known until "
+                "that shape's first call."
             )
         weight = getattr(module, "weight", None)
         if weight is None or not isinstance(weight, nn.Parameter):
