@@ -1924,6 +1924,7 @@ def test_mxfp4_autotune_cache_roundtrip(tmp_path):
     try:
         cache.write_text(json.dumps({
             "arch": mxfp4_autotune._arch(),
+            "tuned_tables": mxfp4_autotune._tuned_table_fingerprint(),
             "choices": {"8192,12288,4096": "asm"},
         }))
         mxfp4_autotune._load_cache()
@@ -1933,6 +1934,7 @@ def test_mxfp4_autotune_cache_roundtrip(tmp_path):
         mxfp4_autotune.clear()
         cache.write_text(json.dumps({
             "arch": "gfx000-not-a-real-arch",
+            "tuned_tables": mxfp4_autotune._tuned_table_fingerprint(),
             "choices": {"8192,12288,4096": "asm"},
         }))
         mxfp4_autotune._load_cache()
@@ -1940,6 +1942,145 @@ def test_mxfp4_autotune_cache_roundtrip(tmp_path):
     finally:
         mxfp4_autotune._CACHE_PATH = original_path
         mxfp4_autotune.clear()
+
+
+def test_mxfp4_autotune_cache_rejects_a_different_tuned_table(tmp_path):
+    """``asm`` is only meaningful against the table it was measured with.
+
+    The cache persists on a shared results directory and outlives the run that
+    earned it. Replaying an ``asm`` decision with a different (or absent) A4W4
+    table dispatches the ASM kernel to a shape AITER has no config for, where
+    it picks an unvalidated default kernel and returns garbage -- 0.6 dB, no
+    error. ``arch`` cannot catch this: the GPU has not changed.
+    """
+    cache = tmp_path / "autotune.json"
+    table = tmp_path / "tuned.csv"
+    table.write_text("gfx,cu_num,M,N,K,kernelId,splitK,us\ngfx950,256,8192,12288,4096,7,1,42\n")
+    key = (8192, 12288, 4096)
+
+    original_path = mxfp4_autotune._CACHE_PATH
+    original_env = os.environ.get(mxfp4_autotune.AITER_TUNED_CONFIG_ENV)
+    mxfp4_autotune._CACHE_PATH = str(cache)
+    mxfp4_autotune.clear()
+    try:
+        os.environ[mxfp4_autotune.AITER_TUNED_CONFIG_ENV] = str(table)
+        cache.write_text(json.dumps({
+            "arch": mxfp4_autotune._arch(),
+            "tuned_tables": mxfp4_autotune._tuned_table_fingerprint(),
+            "choices": {"8192,12288,4096": "asm"},
+        }))
+        mxfp4_autotune._load_cache()
+        assert mxfp4_autotune.cached(key) == "asm"
+
+        # Same file, different rows: a table tuned for another model.
+        mxfp4_autotune.clear()
+        table.write_text("gfx,cu_num,M,N,K,kernelId,splitK,us\ngfx950,256,64,64,128,3,1,9\n")
+        mxfp4_autotune._load_cache()
+        assert mxfp4_autotune.cached(key) is None, "replayed asm against a different table"
+
+        # And no table at all is likewise a different world.
+        mxfp4_autotune.clear()
+        os.environ.pop(mxfp4_autotune.AITER_TUNED_CONFIG_ENV, None)
+        mxfp4_autotune._load_cache()
+        assert mxfp4_autotune.cached(key) is None
+
+        # Contents, not paths: the same table bind-mounted elsewhere still hits.
+        mxfp4_autotune.clear()
+        os.environ[mxfp4_autotune.AITER_TUNED_CONFIG_ENV] = str(table)
+        cache.write_text(json.dumps({
+            "arch": mxfp4_autotune._arch(),
+            "tuned_tables": mxfp4_autotune._tuned_table_fingerprint(),
+            "choices": {"8192,12288,4096": "asm"},
+        }))
+        moved = tmp_path / "elsewhere"
+        moved.mkdir()
+        (moved / "tuned.csv").write_text(table.read_text())
+        os.environ[mxfp4_autotune.AITER_TUNED_CONFIG_ENV] = str(moved / "tuned.csv")
+        mxfp4_autotune._load_cache()
+        assert mxfp4_autotune.cached(key) == "asm"
+    finally:
+        if original_env is None:
+            os.environ.pop(mxfp4_autotune.AITER_TUNED_CONFIG_ENV, None)
+        else:
+            os.environ[mxfp4_autotune.AITER_TUNED_CONFIG_ENV] = original_env
+        mxfp4_autotune._CACHE_PATH = original_path
+        mxfp4_autotune.clear()
+
+
+def test_mxfp4_autotune_cache_write_cannot_tear_the_file(tmp_path, monkeypatch):
+    """Every rank writes this path at exit, so a failed write must not destroy it."""
+    cache = tmp_path / "autotune.json"
+    good = json.dumps({
+        "arch": mxfp4_autotune._arch(),
+        "tuned_tables": mxfp4_autotune._tuned_table_fingerprint(),
+        "choices": {"1,2,3": "plain"},
+    })
+    cache.write_text(good)
+
+    original_path = mxfp4_autotune._CACHE_PATH
+    mxfp4_autotune._CACHE_PATH = str(cache)
+    mxfp4_autotune.clear()
+    try:
+        mxfp4_autotune._choice[(4, 5, 6)] = "asm"
+        mxfp4_autotune._cache_dirty = True
+
+        def _die(*args, **kwargs):
+            raise OSError("disk full halfway through")
+
+        monkeypatch.setattr(mxfp4_autotune.json, "dump", _die)
+        mxfp4_autotune._save_cache()
+        assert cache.read_text() == good, "a failed write truncated the existing cache"
+        assert not list(tmp_path.glob("*.tmp")), "left a temp file behind"
+
+        monkeypatch.undo()
+        mxfp4_autotune._cache_dirty = True
+        mxfp4_autotune._save_cache()
+        written = json.loads(cache.read_text())
+        assert written["choices"]["4,5,6"] == "asm"
+        assert written["tuned_tables"] == mxfp4_autotune._tuned_table_fingerprint()
+        assert not list(tmp_path.glob("*.tmp"))
+    finally:
+        mxfp4_autotune._CACHE_PATH = original_path
+        mxfp4_autotune.clear()
+
+
+def test_mxfp4_choose_backend_rechecks_a_cached_decision(monkeypatch):
+    """A cached name that these operands cannot legally run must be re-measured.
+
+    The blob's table fingerprint covers a cache written elsewhere, but not a
+    table narrowed inside the process, so the dispatcher checks legality before
+    trusting the decision rather than after.
+    """
+    from lumen.ops.quantize import linear as linear_mod
+
+    key = (2048, 4096, 14336)
+    a = torch.empty((key[0], key[2] // 2), dtype=torch.uint8)
+    w = torch.empty((key[1], key[2] // 2), dtype=torch.uint8)
+
+    mxfp4_autotune.clear()
+    linear_mod._mxfp4_legality_cache.clear()
+    try:
+        # Measured when the ASM kernels were reachable; they no longer are.
+        mxfp4_autotune._choice[key] = "asm"
+        monkeypatch.setattr(linear_mod, "_mxfp4_backend_legality", lambda k, x, y: (False, False))
+        monkeypatch.setattr(
+            linear_mod.mxfp4_autotune, "pick_backend", lambda k, c, fallback=None: "plain"
+        )
+
+        assert linear_mod._mxfp4_choose_backend(a, w, None, None) == "plain"
+        assert mxfp4_autotune.cached(key) is None, "kept a decision it could not honour"
+
+        # A cached name that is still legal is used as-is, with no re-measure.
+        mxfp4_autotune._choice[key] = "plain"
+        monkeypatch.setattr(
+            linear_mod.mxfp4_autotune,
+            "pick_backend",
+            lambda k, c, fallback=None: pytest.fail("re-measured a legal cached decision"),
+        )
+        assert linear_mod._mxfp4_choose_backend(a, w, None, None) == "plain"
+    finally:
+        mxfp4_autotune.clear()
+        linear_mod._mxfp4_legality_cache.clear()
 
 
 def test_mxfp4_configure_wires_tuned_table_and_cache(tmp_path):

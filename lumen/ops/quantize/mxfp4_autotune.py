@@ -26,6 +26,7 @@ Environment:
 """
 
 import atexit
+import hashlib
 import json
 import logging as _logging
 import os
@@ -85,8 +86,47 @@ def _cache_key(key: ShapeKey) -> str:
     return "{},{},{}".format(*key)
 
 
+def _tuned_table_paths() -> List[str]:
+    """The A4W4 tuned tables AITER will actually consult, in its merge order.
+
+    AITER reads the env var if set and its own bundled table otherwise, so the
+    two cases are not additive -- ``configure`` merges the default in by hand
+    precisely because setting the variable replaces it.
+    """
+    env = os.environ.get(AITER_TUNED_CONFIG_ENV, "")
+    if env:
+        return [p for p in env.split(":") if p]
+    default = _aiter_default_tuned_config()
+    return [default] if default else []
+
+
+def _tuned_table_fingerprint() -> str:
+    """Identity of the tuned tables a decision was measured against.
+
+    A choice recorded as ``asm`` means "AITER had a tuned kernel for this shape
+    when we measured it". Replaying that against a different table dispatches
+    the ASM kernel to a shape it has no config for, where ``gemm_a4w4`` picks an
+    unvalidated default kernel and returns garbage -- 0.6 dB, no error. The
+    ``arch`` check does not catch it because the GPU has not changed.
+
+    Contents rather than paths and mtimes: the same table arrives at a new path
+    with a new timestamp on every container rebuild and bind mount, and
+    invalidating on that would throw away good measurements constantly.
+    """
+    h = hashlib.sha256()
+    for p in _tuned_table_paths():
+        # Basename, not the full path, for the same bind-mount reason.
+        h.update(os.path.basename(p).encode())
+        try:
+            with open(p, "rb") as f:
+                h.update(hashlib.sha256(f.read()).digest())
+        except OSError:
+            h.update(b"<unreadable>")
+    return h.hexdigest()[:16]
+
+
 def _load_cache() -> None:
-    """Read previously measured decisions, if the file was written on this GPU."""
+    """Read previously measured decisions, if they still apply to this process."""
     global _cache_loaded
     _cache_loaded = True
     if not _CACHE_PATH or not os.path.exists(_CACHE_PATH):
@@ -102,6 +142,17 @@ def _load_cache() -> None:
         _logger.info(
             "MXFP4 autotune cache %s was measured on %s, ignoring on %s",
             _CACHE_PATH, blob.get("arch"), _arch(),
+        )
+        return
+    # Nor does one measured against a different tuned table. Caches written
+    # before this field existed carry None and are discarded for the same
+    # reason: there is no way to tell what they were measured against.
+    live_tables = _tuned_table_fingerprint()
+    if blob.get("tuned_tables") != live_tables:
+        _logger.info(
+            "MXFP4 autotune cache %s was measured against tuned tables %s, "
+            "ignoring against %s -- decisions will be re-measured",
+            _CACHE_PATH, blob.get("tuned_tables"), live_tables,
         )
         return
     for k, name in blob.get("choices", {}).items():
@@ -120,14 +171,27 @@ def _save_cache() -> None:
         return
     blob = {
         "arch": _arch(),
+        "tuned_tables": _tuned_table_fingerprint(),
         "choices": {_cache_key(k): v for k, v in sorted(_choice.items())},
     }
+    # Every rank runs this atexit, and the path is usually a shared results
+    # directory, so a plain open(path, "w") lets one rank truncate the file
+    # another is mid-write in. Write private, then rename: the reader either
+    # sees the old file or the new one.
+    tmp = "{}.{}.tmp".format(_CACHE_PATH, os.getpid())
     try:
         os.makedirs(os.path.dirname(_CACHE_PATH) or ".", exist_ok=True)
-        with open(_CACHE_PATH, "w") as f:
+        with open(tmp, "w") as f:
             json.dump(blob, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, _CACHE_PATH)
     except OSError as e:
         _logger.warning("could not write MXFP4 autotune cache %s: %s", _CACHE_PATH, e)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +435,19 @@ def cached(key: ShapeKey) -> Optional[str]:
     Lets the dispatcher skip building the candidate list on the hot path.
     """
     return _choice.get(key)
+
+
+def forget(key: ShapeKey) -> None:
+    """Drop one shape's decision so the next call re-measures it.
+
+    The dispatcher calls this when a loaded decision names a backend that is
+    not legal for these operands -- a cache written against a tuned table this
+    process does not have, say.
+    """
+    global _cache_dirty
+    with _lock:
+        if _choice.pop(key, None) is not None:
+            _cache_dirty = True
 
 
 def clear() -> None:

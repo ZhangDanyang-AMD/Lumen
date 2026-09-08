@@ -1501,6 +1501,30 @@ def _mxfp4_probe_backends():
     return _fast_mxfp4_gemm_fn is not None
 
 
+_mxfp4_legality_cache = {}  # ShapeKey -> (asm_ok, shuf_ok)
+
+
+def _mxfp4_backend_legality(key, a_fp4, w_fp4):
+    """Which backends may correctly run this shape, memoized per shape.
+
+    Both predicates read only the operand shapes, the arch and AITER's tuned
+    A4W4 table, none of which change once the process has issued its first
+    MXFP4 GEMM. That is what makes it cheap enough to consult before trusting a
+    cached decision rather than after.
+    """
+    hit = _mxfp4_legality_cache.get(key)
+    if hit is None:
+        hit = (
+            bool(_fast_mxfp4_asm_ok and _mxfp4_asm_supported(a_fp4, w_fp4)),
+            bool(_fast_mxfp4_preshuffle_ok and _mxfp4_preshuffle_supported(a_fp4, w_fp4)),
+        )
+        _mxfp4_legality_cache[key] = hit
+    return hit
+
+
+_MXFP4_BACKEND_REQUIRES = {"asm": 0, "shuffled": 1}
+
+
 def _mxfp4_choose_backend(a_fp4, w_fp4, scale_a, scale_w):
     """Name of the MXFP4 backend to run for these operands.
 
@@ -1510,12 +1534,27 @@ def _mxfp4_choose_backend(a_fp4, w_fp4, scale_a, scale_w):
     """
     _mxfp4_probe_backends()
     key = (a_fp4.shape[0], w_fp4.shape[0], a_fp4.shape[1] * 2)
+    asm_ok, shuf_ok = _mxfp4_backend_legality(key, a_fp4, w_fp4)
+
     name = mxfp4_autotune.cached(key)
     if name is not None:
-        return name
-
-    asm_ok = _fast_mxfp4_asm_ok and _mxfp4_asm_supported(a_fp4, w_fp4)
-    shuf_ok = _fast_mxfp4_preshuffle_ok and _mxfp4_preshuffle_supported(a_fp4, w_fp4)
+        # A decision is only as good as the conditions it was measured under.
+        # A persisted cache outlives the run that earned it, and "asm" recorded
+        # with a tuned table in front of AITER means garbage without one --
+        # gemm_a4w4 falls back to an unvalidated kernel choice. The cache blob
+        # fingerprints the tables, but that cannot see a table narrowed within
+        # the process, so check legality here too and re-measure if it lapsed.
+        required = _MXFP4_BACKEND_REQUIRES.get(name)
+        if required is None or (asm_ok, shuf_ok)[required]:
+            return name
+        _logger.warning(
+            "MXFP4 autotune: cached %s backend for shape %s is not legal for these "
+            "operands; re-measuring. A cache reused with a different "
+            "AITER_CONFIG_GEMM_A4W4 table than it was written with is the usual cause.",
+            name,
+            key,
+        )
+        mxfp4_autotune.forget(key)
 
     candidates = []
     if asm_ok:
