@@ -31,10 +31,20 @@ def install_moe_fused_router() -> None:
         # which never touches a router -- would otherwise die here on its way to
         # GPTModel. Megatron keeps its own router; only MoE runs lose the AITER
         # kernels, and they are no worse off than without this patch.
+        #
+        # Only this module's own absence is expected, and it arrives as a plain
+        # ImportError rather than ModuleNotFoundError: the module is present and
+        # the three names are not. Anything attributable to another module -- a
+        # broken AITER, say -- has to propagate, because swallowing it would turn
+        # a bad environment into a silent slow path for every MoE run.
+        if exc.name is not None and not exc.name.startswith("lumen.ops.moe"):
+            raise
         logger.warning(
             "Lumen fused router ops unavailable (%s), skipping MoE router patch",
             exc,
         )
+        # Mark it handled so a later apply_patches pass does not warn again.
+        moe_utils._lumen_fused_router_patched = True
         return
 
     moe_utils.fused_topk_with_score_function = fused_topk_with_score_function
