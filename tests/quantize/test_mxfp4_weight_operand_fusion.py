@@ -96,6 +96,44 @@ def test_operand_cache_lets_the_weight_die_by_refcount_alone():
             gc.enable()
 
 
+def test_operand_cache_does_not_hit_on_a_recycled_scale_address():
+    """A freed scale's address is not proof the cached operands still match it.
+
+    The cache keyed on ``(scale.data_ptr(), scale._version)``. The caching
+    allocator readily returns a freed pointer for the next allocation of that
+    size, and a freshly built scale starts at ``_version == 0``, so a dead
+    tensor's stamp compared equal to a live unrelated one: a stale-operand hit
+    with nothing to raise. Keyed on a weakref, a dead scale reads as dead.
+    """
+    from lumen.ops.quantize.linear import _cached_weight_operands
+
+    w = torch.zeros(64, 64, device="cuda", dtype=torch.uint8)
+    key = "_test_recycled_scale"
+
+    first_scale = torch.zeros(64, 2, device="cuda", dtype=torch.uint8)
+    addr = first_scale.data_ptr()
+    version = first_scale._version
+    # The build result must not close over the scale, or the cache's strong
+    # reference to it keeps the address alive and there is nothing to recycle.
+    built_first = _cached_weight_operands(
+        w, first_scale, key, lambda: (torch.full_like(w, 1),),
+    )
+    assert int(built_first[0][0, 0]) == 1
+
+    del first_scale, built_first
+    # Same size and dtype, so the allocator hands back the block just freed.
+    second_scale = torch.ones(64, 2, device="cuda", dtype=torch.uint8)
+    if second_scale.data_ptr() != addr or second_scale._version != version:
+        pytest.skip("allocator did not recycle the address this test is about")
+
+    built_second = _cached_weight_operands(
+        w, second_scale, key, lambda: (torch.full_like(w, 2),),
+    )
+    assert int(built_second[0][0, 0]) == 2, (
+        "returned the operands built for a scale tensor that no longer exists"
+    )
+
+
 @pytest.mark.parametrize(
     "N_out,K_in", [(6144, 4096), (4096, 12288)], ids=["qkv", "fc2"],
 )

@@ -33,6 +33,7 @@ import functools
 import logging as _logging
 import os
 import threading
+import weakref
 from typing import Optional, Set
 
 import torch
@@ -1406,11 +1407,20 @@ def _cached_weight_operands(w_fp4, scale_w, key, build):
     ``optimizer.step()``, and with weight caching off every call gets a fresh
     tensor and simply misses. The scale identity is part of the key because a
     weight tensor outliving its scales would otherwise go silently stale.
+
+    That identity is a weakref to the scale tensor, not its address. Keying on
+    ``data_ptr()`` let the caching allocator hand a freed pointer back for the
+    next allocation of that size, and a freshly built scale starts at
+    ``_version == 0`` -- so the stamp of a dead tensor compared equal to a live
+    unrelated one, and the GEMM ran against the wrong operand with nothing to
+    raise. A weakref cannot be confused that way: a dead scale reads as dead.
     """
-    stamp = (scale_w.data_ptr(), scale_w._version)
+    stamp = (weakref.ref(scale_w), scale_w._version)
     cached = getattr(w_fp4, key, None)
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
+    if cached is not None:
+        prev_ref, prev_version = cached[0]
+        if prev_ref() is scale_w and prev_version == scale_w._version:
+            return cached[1]
     built = build()
     if any(_aliases(t, w_fp4) for t in built):
         # A quantizer that already stored this operand in the GEMM's layout gets
