@@ -19,11 +19,22 @@ RUN rm -f /etc/apt/sources.list.d/rocm.list && \
 # Copy project source
 COPY . /workspace/Lumen
 
-# AITER (editable from third_party)
+# AITER, installed outside /workspace/Lumen.
+#
+# Every launcher bind-mounts the host checkout over /workspace/Lumen so the
+# tree can be iterated without a rebuild, and a mount masks whatever the image
+# baked underneath it. Installed in place, aiter went under that mount along
+# with the kernel files Lumen overlays onto it and the .so PREBUILD_KERNELS
+# compiled: the image looked complete, and the container then imported the host
+# submodule instead. That is how LUMEN_FUSED_SWIGLU=1 came to be inert in
+# docker -- the swiglu kernels are in the image, just not at the path the
+# container ends up reading. /opt is outside the mount, so it survives.
+#
 # PREBUILD_KERNELS=1 pre-compiles CK attention forward+backward .so at
 # install time.  Without it, the first CK call triggers JIT compilation
 # which SIGSEGV's inside mp.spawn subprocesses (fork + HIP driver issue).
-RUN cd /workspace/Lumen/third_party/aiter && \
+RUN cp -a /workspace/Lumen/third_party/aiter /opt/aiter && \
+    cd /opt/aiter && \
     PREBUILD_KERNELS=1 pip install -e .
 
 # mori — SDMA communication library (editable from third_party)
@@ -46,7 +57,7 @@ RUN cd megatron_lm && git checkout ${MEGATRON_COMMIT} \
 
 ENV PYTHONPATH="/workspace/megatron_lm:"
 ENV PYTHONPATH="/workspace/Lumen/third_party/mori:${PYTHONPATH:-}"
-ENV PYTHONPATH="/workspace/Lumen/third_party/aiter:${PYTHONPATH:-}"
+ENV PYTHONPATH="/opt/aiter:${PYTHONPATH:-}"
 
 # Lumen + test dependencies
 RUN cd /workspace/Lumen && pip install -e ".[dev]"

@@ -11,11 +11,17 @@ FROM ${LUMEN_IMAGE}
 
 WORKDIR /workspace/Lumen
 
-# The base image installed aiter, mori and Lumen editable against this path, so
-# re-copying moves all three onto this commit without reinstalling them.
+# The base image installed mori and Lumen editable against this path, so
+# re-copying moves both onto this commit without reinstalling them. aiter is
+# installed at /opt/aiter instead and is refreshed separately below.
 # Submodules have to be checked out on the host: .dockerignore drops .git/, so
 # an in-image `git submodule update` has no metadata to work from.
 COPY . /workspace/Lumen
+
+# aiter is not editable against this tree, so a moved submodule pin needs to be
+# carried over explicitly. The compiled extensions stay: only Python is
+# refreshed, and reinstalling would cost the PREBUILD_KERNELS .so.
+RUN cp -a /workspace/Lumen/third_party/aiter/aiter/. /opt/aiter/aiter/
 
 # Lumen's swiglu Triton kernels, which aiter does not carry at the pinned
 # submodule commit. lumen/ops/fused_swiglu.py imports swiglu_fwd/swiglu_bwd from
@@ -23,10 +29,15 @@ COPY . /workspace/Lumen
 # probe fails, the fused-swiglu patch is skipped and LUMEN_FUSED_SWIGLU=1 becomes
 # a no-op. Both files are supersets of the submodule's, appending only the two
 # kernels and their wrappers, so they have to be refreshed when aiter moves.
+#
+# These land on /opt/aiter, which is where the base image installed aiter and
+# which no launcher's bind mount covers. Overlaid into the submodule under
+# /workspace/Lumen they were masked by the mount of the host checkout, so the
+# image carried the kernels and the container could not see them.
 COPY third_party/aiter_vendor/aiter/ops/triton/activation.py \
-     /workspace/Lumen/third_party/aiter/aiter/ops/triton/activation.py
+     /opt/aiter/aiter/ops/triton/activation.py
 COPY third_party/aiter_vendor/aiter/ops/triton/_triton_kernels/activation.py \
-     /workspace/Lumen/third_party/aiter/aiter/ops/triton/_triton_kernels/activation.py
+     /opt/aiter/aiter/ops/triton/_triton_kernels/activation.py
 
 # Tokenizer and dataset deps; the base only installs the top-level requirements.
 RUN pip install -r /workspace/Lumen/examples/qwen3/requirements.txt -q
