@@ -71,6 +71,62 @@ def install_mxfp4_weight_cache_hook() -> None:
     _mt_training.setup_model_and_optimizer = _setup_with_mxfp4_hook
 
 
+def install_gc_freeze_hook(warmup_steps: int = 20) -> None:
+    """Take the process's permanent Python objects out of the collector's reach.
+
+    A step allocates enough short-lived Python objects to reach a generation-2
+    collection every few steps, and that collection walks *every* tracked object
+    in the process: the imported modules, the Triton and AITER kernel caches,
+    every parameter and every autograd node. Here it measures ~1.2 s, landing on
+    whichever step it happens to fall in — the run's step time is fine at the
+    median and has a tail of steps that take twice as long.
+
+    Almost all of what it walks is alive for the whole run. ``gc.freeze()`` moves
+    the objects that exist when it is called into a permanent generation the
+    collector never visits, so later collections scan only the step's own
+    garbage. It runs after ``warmup_steps`` so that the kernel caches, which fill
+    in on the shapes' first call, are frozen too.
+
+    Objects created after the freeze are still collected normally, but anything
+    alive at that moment is never revisited, so a reference cycle formed during
+    warmup is retained for the rest of the run.
+
+    Set ``LUMEN_GC_FREEZE=0`` to keep stock collector behaviour.
+    """
+    if os.environ.get("LUMEN_GC_FREEZE", "1") == "0":
+        return
+
+    import gc
+
+    import megatron.training.training as _mt_training
+    from megatron.training import print_rank_0
+
+    current_train_step = _mt_training.train_step
+    if getattr(current_train_step, "_lumen_gc_freeze_hook", False):
+        return
+
+    state = {"calls": 0}
+
+    def _train_step_with_gc_freeze(*args, **kwargs):
+        out = current_train_step(*args, **kwargs)
+        state["calls"] += 1
+        if state["calls"] == warmup_steps:
+            gc.collect()
+            gc.freeze()
+            print_rank_0(
+                f"> GC: gc.freeze() after {warmup_steps} steps "
+                f"(freeze_count={gc.get_freeze_count()}; later collections skip frozen objects)"
+            )
+            # Only unwrap ourselves. Restoring the snapshot unconditionally would
+            # drop any wrapper installed on top of this one after we did.
+            if _mt_training.train_step is _train_step_with_gc_freeze:
+                _mt_training.train_step = current_train_step
+        return out
+
+    _train_step_with_gc_freeze._lumen_gc_freeze_hook = True
+    _mt_training.train_step = _train_step_with_gc_freeze
+
+
 def install_val_loss_early_stop_hook() -> None:
     """Stop training when reduced validation loss reaches ``val_loss_target``."""
     try:
@@ -228,6 +284,14 @@ register_patch(
     tags=frozenset({"mxfp4", "training", "megatron"}),
     default=False,
 )(install_mxfp4_weight_cache_hook)
+
+register_patch(
+    "gc_freeze_hook",
+    PatchPhase.TRAINING,
+    description="gc.freeze() the long-lived objects after warmup to cut gen-2 pauses",
+    tags=frozenset({"training", "megatron"}),
+    default=False,
+)(install_gc_freeze_hook)
 
 register_patch(
     "fp8_param_storage_hook",

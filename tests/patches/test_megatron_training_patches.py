@@ -37,6 +37,7 @@ class TestMegatronTrainingPatches:
             "fp8_param_gather_hook",
             "mxfp4_weight_cache_hook",
             "fp8_param_storage_hook",
+            "gc_freeze_hook",
             "hip_graphs_hook",
             "val_loss_early_stop_hook",
         }
@@ -202,3 +203,45 @@ class TestMegatronTrainingPatches:
         training_mod.setup_model_and_optimizer()
 
         register.assert_not_called()
+
+    def test_gc_freeze_hook_skips_when_disabled(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_GC_FREEZE", "0")
+        # Returns before importing megatron, so this passes without it installed.
+        self.hooks.install_gc_freeze_hook()
+
+    def test_gc_freeze_hook_only_unwraps_itself(self, monkeypatch):
+        """A wrapper installed after the hook must survive the hook's unwrap."""
+        mt = types.ModuleType("megatron.training.training")
+        calls = {"base": 0, "outer": 0}
+
+        def _base_train_step(*args, **kwargs):
+            calls["base"] += 1
+            return "out"
+
+        mt.train_step = _base_train_step
+
+        # ``import megatron.training.training`` walks the whole chain, so every
+        # parent has to be importable and carry the child as an attribute.
+        mt_pkg = types.ModuleType("megatron.training")
+        mt_pkg.print_rank_0 = lambda *a, **k: None
+        mt_pkg.training = mt
+        meg_pkg = types.ModuleType("megatron")
+        meg_pkg.training = mt_pkg
+        monkeypatch.setitem(sys.modules, "megatron", meg_pkg)
+        monkeypatch.setitem(sys.modules, "megatron.training", mt_pkg)
+        monkeypatch.setitem(sys.modules, "megatron.training.training", mt)
+
+        self.hooks.install_gc_freeze_hook(warmup_steps=1)
+        gc_wrapped = mt.train_step
+
+        def _outer(*args, **kwargs):
+            calls["outer"] += 1
+            return gc_wrapped(*args, **kwargs)
+
+        mt.train_step = _outer
+
+        _outer()
+        assert calls == {"base": 1, "outer": 1}
+        # The freeze fired on that call. Restoring the install-time snapshot
+        # would have dropped _outer; it must still be in place.
+        assert mt.train_step is _outer
