@@ -1,13 +1,32 @@
 .git/
 .github/
-third_party/aiter/csrc/ck_gemm*/
-third_party/aiter/csrc/ck_batched*/
-third_party/aiter/csrc/py_itfs_cu/
-third_party/aiter/csrc/hsa/
+# csrc/ is a build input, not payload: aiter JIT-compiles its modules from these
+# sources on first call. Excluding py_itfs_cu cost module_fmha_v3_fwd its
+# asm_mha_fwd.cu, and the prebuilt .so then loaded with fmha_v3_fwd undefined
+# and took down every attention forward; ck_gemm*/ also matched
+# ck_gemm_a4w4_blockscale. Together they are ~1.3 MB, so there is nothing to
+# save here.
 third_party/aiter/aiter/jit/build/
+# Host-built extensions. They are ABI-bound to the host torch, and a stale one
+# is worse than none: aiter loads whatever .so is already sitting here instead
+# of building, so a July module_aiter_core.so reaches the image and fails on
+# the MlaVersion enum that postdates it.
+third_party/aiter/aiter/jit/*.so
 third_party/aiter/op_tests/
 third_party/aiter/benchmarks/
 third_party/aiter/docker/
+# Run artifacts, 14 GB of them, and the COPY carries the whole context into
+# every layer that has one: they made the base image 40 GB and the qwen3 image
+# 55 GB. Nothing here is a build or runtime input — the launchers bind-mount a
+# results dir over RESULTS_ROOT.
+examples/*/results/
+examples/*/wandb/
+wandb/
+outputs/
+runs/
+**/*.pt.trace.json
+**/events.out.tfevents.*
+
 **/__pycache__/
 **/*.pyc
 **/.pytest_cache/
