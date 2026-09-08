@@ -52,6 +52,11 @@ class PretrainTextDataset(Dataset):
         rank: Zero-based data-parallel rank. Each rank tokenizes only its
             assigned input lines instead of duplicating preprocessing.
         world_size: Number of data-parallel dataset shards.
+        allow_repeat: Serve ``max_samples`` samples even when this shard holds
+            fewer, wrapping back to chunk 0. Off by default so a dataset never
+            silently trains on repeated data; turn it on for a training set that
+            must reach a fixed step count on a corpus smaller than one epoch,
+            which otherwise ends in a ``StopIteration`` mid-run.
     """
 
     def __init__(
@@ -63,9 +68,11 @@ class PretrainTextDataset(Dataset):
         max_samples: Optional[int] = None,
         rank: int = 0,
         world_size: int = 1,
+        allow_repeat: bool = False,
     ):
         if world_size < 1 or not 0 <= rank < world_size:
             raise ValueError(f"Invalid dataset shard rank={rank}, world_size={world_size}")
+        self._allow_repeat = allow_repeat
         self.seq_length = seq_length
         self.tokenizer = tokenizer
         self.is_hf_tokenizer = is_hf_tokenizer
@@ -98,15 +105,25 @@ class PretrainTextDataset(Dataset):
 
         self._max_samples = max_samples
 
+        if allow_repeat and max_samples is not None and n_chunks and max_samples > n_chunks:
+            logger.warning(
+                "Corpus holds %d samples but %d were requested: data repeats %.2f times",
+                n_chunks,
+                max_samples,
+                max_samples / n_chunks,
+            )
+
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
 
     def __len__(self) -> int:
         n = len(self._chunks)
-        if self._max_samples is not None:
-            return min(n, self._max_samples)
-        return n
+        if self._max_samples is None:
+            return n
+        if self._allow_repeat and n:
+            return self._max_samples
+        return min(n, self._max_samples)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         idx = idx % len(self._chunks)
