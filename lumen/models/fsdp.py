@@ -22,6 +22,7 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from lumen.models.training_contract import (
+    add_fsdp_fp4_contract_args,
     add_fsdp_fp8_contract_args,
     add_fsdp_runtime_contract_args,
     add_shared_checkpoint_args,
@@ -34,6 +35,39 @@ logger = logging.getLogger(__name__)
 def _rank0_print(msg: str) -> None:
     if not dist.is_initialized() or dist.get_rank() == 0:
         logger.info(msg)
+
+
+def freeze_gc(warmup_steps: int = 20) -> None:
+    """Take the process's permanent Python objects out of the collector's reach.
+
+    A step allocates enough short-lived Python objects to reach a generation-2
+    collection every few steps, and that collection walks *every* tracked object
+    in the process: the imported modules, the Triton and AITER kernel caches,
+    every parameter and every autograd node. It lands on whichever step it falls
+    in, so the run's step time is fine at the median and has a tail of steps that
+    cost half again as much.
+
+    Almost all of what it walks is alive for the whole run. ``gc.freeze()`` moves
+    the objects that exist when it is called into a permanent generation the
+    collector never visits, so later collections scan only the step's own
+    garbage. Call it after warmup so the kernel caches, which fill in on the
+    shapes' first call, are frozen too.
+
+    This is the FSDP counterpart of ``install_gc_freeze_hook`` in
+    ``lumen/models/megatron.py``, which cannot be reused because it patches
+    Megatron's ``train_step``. Set ``LUMEN_GC_FREEZE=0`` for stock behaviour.
+    """
+    if os.environ.get("LUMEN_GC_FREEZE", "1") == "0":
+        return
+
+    import gc
+
+    gc.collect()
+    gc.freeze()
+    _rank0_print(
+        f"> GC: froze {gc.get_freeze_count()} objects after {warmup_steps} "
+        f"steps (later collections skip them)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +153,18 @@ def add_common_fsdp_args(parser):
         action="store_false",
         help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
     )
-    lfp8.add_argument(
+
+    # -- Linear FP4 training --
+    lfp4 = parser.add_argument_group("linear-fp4")
+    add_fsdp_fp4_contract_args(lfp4)
+
+    grad_quant = parser.add_argument_group("gradient-quantization")
+    grad_quant.add_argument(
         "--grad-quant-type",
         type=str,
         default=None,
-        choices=["fp8", "mxfp8", "fp4"],
-        help="Gradient quantization type (None=disabled). " "Applies to Linear, Attention, and RMSNorm.",
+        choices=["fp8", "mxfp8", "mxfp4"],
+        help="Gradient quantization type (None=disabled). Applies to Linear, Attention, and RMSNorm.",
     )
     lfp8.add_argument(
         "--first-last-layers-bf16",
@@ -524,6 +564,48 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
     return count
 
 
+def _wrap_params_as_mxfp4_comm(
+    model: nn.Module, block_size: int = 32, world_size: int = 1
+) -> int:
+    """Wrap each MXFP4-patched weight in an MXFP4CommTensor for FP4 all-gather.
+
+    The wrapper holds the BF16 master weight. FSDP2 shards it like any BF16
+    param. During all-gather, the local shard is quantized to packed MXFP4
+    (4x less bytes on the wire), then dequantized back to BF16 after gather.
+    Optimizer and gradients see normal BF16 — only communication is compressed.
+
+    Works for both trainable and frozen weights.
+
+    Alignment: ``N % (block_size × world_size) == 0`` and ``K % block_size == 0``.
+    """
+    from lumen.quantize.comm_tensor import MXFP4CommTensor
+
+    count = 0
+    skipped = 0
+    for module in model.modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        if getattr(module, "_quant_scaling_type", None) != "mxfp4":
+            continue
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2:
+            continue
+        if isinstance(w, MXFP4CommTensor):
+            continue
+        if w.shape[0] % (block_size * world_size) or w.shape[1] % block_size:
+            skipped += 1
+            continue
+        module.weight = nn.Parameter(
+            MXFP4CommTensor(w.data, block_size), requires_grad=w.requires_grad,
+        )
+        count += 1
+    if skipped:
+        _rank0_print(
+            f"> MXFP4CommTensor: skipped {skipped} weights (alignment) — kept BF16"
+        )
+    return count
+
+
 def apply_fsdp2(
     model: nn.Module,
     args,
@@ -536,7 +618,8 @@ def apply_fsdp2(
 
     Args:
         model: The model to shard.
-        args: CLI arguments (needs ``linear_fp8``, ``sharding_strategy``).
+        args: CLI arguments (needs the linear quantization gates and
+            ``sharding_strategy``).
         dp_group: Data-parallel process group (used to derive DeviceMesh size).
 
     Returns:
@@ -563,15 +646,23 @@ def apply_fsdp2(
     world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
     mesh = init_device_mesh("cuda", (world_size,))
 
-    if getattr(args, "fsdp_fp8_param_storage", False):
-        # param_dtype MUST stay None here: a non-None param_dtype makes FSDP2 cast
-        # every param (incl. the frozen FP8 Blockwise2DFP8Param) to that dtype before
-        # sharding, which collapses the FP8 subclass to a plain BF16 DTensor and
-        # bypasses its all-gather extension (the scale is then never applied). With
-        # param_dtype=None each param keeps its own dtype — FP8 base stays FP8 (its
-        # extension drives the all-gather), LoRA adapters stay BF16.
-        mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
-    elif getattr(args, "linear_fp8", False):
+    _use_mxfp4_comm = getattr(args, "fsdp_mxfp4_comm", False)
+
+    # The quantized paths inherited reduce_dtype=float32 from the FP8 work while
+    # the BF16 path below reduces in bfloat16. The model is bfloat16 either way,
+    # so float32 does not preserve any precision the gradient had: it only makes
+    # the reduce-scatter move twice the bytes, and only on the quantized arm.
+    _reduce_dtype = {
+        "fp32": torch.float32,
+        "bf16": torch.bfloat16,
+    }[getattr(args, "fsdp_reduce_dtype", "fp32") or "fp32"]
+
+    if _use_mxfp4_comm:
+        # Same as fsdp_fp8_param_storage: param_dtype=None preserves subclass
+        mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=_reduce_dtype)
+    elif getattr(args, "fsdp_fp8_param_storage", False):
+        mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=_reduce_dtype)
+    elif getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
@@ -596,17 +687,21 @@ def apply_fsdp2(
         n_stored = _wrap_frozen_base_as_blockwise2d_fp8(model, fp8_dtype, world_size=world_size)
         _rank0_print(f"> Blockwise2DFP8Param storage: {n_stored} frozen base weights")
 
-    sharded_layers = False
+    if _use_mxfp4_comm:
+        n_mxfp4 = _wrap_params_as_mxfp4_comm(model, block_size=32, world_size=world_size)
+        _rank0_print(f"> MXFP4CommTensor wrapping: {n_mxfp4} weights (4x comm reduction)")
+
+    layers = None
     for module in model.modules():
         if hasattr(module, "layers") and isinstance(module.layers, nn.ModuleList):
-            for layer in module.layers:
+            layers = list(module.layers)
+            for layer in layers:
                 fully_shard(
                     layer,
                     mesh=mesh,
                     mp_policy=mp_policy,
                     reshard_after_forward=reshard,
                 )
-            sharded_layers = True
             break
 
     fully_shard(
@@ -616,13 +711,19 @@ def apply_fsdp2(
         reshard_after_forward=reshard,
     )
 
-    n_layers = "unknown"
-    if sharded_layers:
-        for m in model.modules():
-            if hasattr(m, "layers") and isinstance(m.layers, nn.ModuleList):
-                n_layers = len(m.layers)
-                break
+    prefetch = int(getattr(args, "fsdp_forward_prefetch", 0) or 0)
+    if prefetch and layers:
+        # FSDP2 implicitly prefetches one layer ahead. Going deeper issues the
+        # all-gather earlier, which only helps when the copy-out wait is latency
+        # rather than bandwidth: each extra layer in flight costs one more
+        # unsharded parameter buffer of peak memory.
+        for i, layer in enumerate(layers):
+            ahead = layers[i + 1 : i + 1 + prefetch]
+            if ahead:
+                layer.set_modules_to_forward_prefetch(ahead)
+        _rank0_print(f"> FSDP2 forward prefetch: {prefetch} layers ahead")
 
+    n_layers = len(layers) if layers else "unknown"
     _rank0_print(f"> FSDP2 applied (fully_shard, {n_layers} layers, " f"reshard={reshard}, mp_policy={mp_policy})")
     return model
 

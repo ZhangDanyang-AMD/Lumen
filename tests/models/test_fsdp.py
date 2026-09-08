@@ -127,6 +127,7 @@ class TestAddCommonFsdpArgs:
     def test_linear_fp8_defaults(self):
         args = self._parse()
         assert args.linear_fp8 is False
+        assert args.linear_fp4 is False
         assert args.linear_fp8_format == "fp8_e4m3"
         assert args.linear_fp8_scaling == "delayed"
         assert args.linear_fp8_block_size == 128
@@ -143,6 +144,15 @@ class TestAddCommonFsdpArgs:
             args = self._parse(["--linear-fp8-format", fmt])
             assert args.linear_fp8_format == fmt
 
+    def test_linear_fp4_has_dedicated_switch(self):
+        args = self._parse(["--linear-fp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+
+    def test_fp8_format_rejects_mxfp4(self):
+        with pytest.raises(SystemExit):
+            self._parse(["--linear-fp8-format", "mxfp4"])
+
     def test_no_linear_fp8_activation(self):
         args = self._parse(["--no-linear-fp8-activation"])
         assert args.linear_fp8_activation is False
@@ -152,9 +162,15 @@ class TestAddCommonFsdpArgs:
         assert args.linear_fp8_wgrad is False
 
     def test_grad_quant_type_choices(self):
-        for gq in ["fp8", "mxfp8", "fp4"]:
+        for gq in ["fp8", "mxfp8", "mxfp4"]:
             args = self._parse(["--grad-quant-type", gq])
             assert args.grad_quant_type == gq
+
+    def test_grad_quant_type_rejects_unimplemented_fp4(self):
+        # ScalingManager still accepts "fp4" so it can raise a clear
+        # NotImplementedError, but offering it on the CLI only buys a crash.
+        with pytest.raises(SystemExit):
+            self._parse(["--grad-quant-type", "fp4"])
 
     def test_first_last_layers_bf16(self):
         args = self._parse(
@@ -532,6 +548,8 @@ class TestNormBenchmark:
 class TestApplyFP8Training:
     def _make_args(self, **overrides):
         defaults = dict(
+            linear_fp8=True,
+            linear_fp4=False,
             linear_fp8_format="fp8_e4m3",
             linear_fp8_scaling="delayed",
             linear_fp8_block_size=128,
@@ -576,6 +594,26 @@ class TestApplyFP8Training:
             config = mock_enable.call_args[1]["config"]
             assert config.format.value == "mxfp8"
             assert config.scaling.value == "blockwise"
+
+    @mock.patch("lumen.models.fsdp.dist")
+    def test_mxfp4_uses_dedicated_fp4_gate(self, mock_dist):
+        mock_dist.is_initialized.return_value = False
+        model = nn.Sequential(nn.Linear(16, 16))
+        args = self._make_args(linear_fp8=False, linear_fp4=True)
+
+        with mock.patch("lumen.quantize.enable") as mock_enable:
+            apply_fp8_training(model, args)
+            config = mock_enable.call_args[1]["config"]
+            assert config.format.value == "mxfp4"
+            assert config.scaling.value == "blockwise"
+            assert config.block_size == 32
+
+    def test_fp8_and_fp4_gates_are_mutually_exclusive(self):
+        model = nn.Sequential(nn.Linear(16, 16))
+        args = self._make_args(linear_fp8=True, linear_fp4=True)
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            apply_fp8_training(model, args)
 
     @mock.patch("lumen.models.fsdp.dist")
     def test_reduce_amax_uses_dp_group(self, mock_dist):
