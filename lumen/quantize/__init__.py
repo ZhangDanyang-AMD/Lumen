@@ -136,6 +136,69 @@ def get_quant_backend(prefer: str = "auto") -> str:
 # Quantization enablement
 # ---------------------------------------------------------------------------
 
+# MXFP4 is supported on gfx950 (MI350/MI355) and nowhere else.
+#
+# The FP4 conversion has two implementations. gfx950 has the arithmetic in
+# hardware -- ``v_cvt_scalef32_[sr_]pk_fp4_{f32,bf16}``, which round correctly
+# and whose SR is unbiased by construction -- and that is the path this feature
+# was built, measured and trained on. Every other architecture lands in the
+# Triton software fallback in ``lumen.kernels.mxfp4._pack_fp4``, which is not
+# equivalent to it:
+#
+#   - SR's dither is one-sided. ``tl.randint4x`` returns signed int32, so the
+#     noise lands in [-0.5, 0.5) and ``(noise - 0.5) * 0.01`` is never
+#     positive: a debiasing term with mean -0.005, and about 200x too small.
+#   - RTN breaks ties away from even. All seven boundaries use ``>=``, and
+#     E2M1's even codes are 0.0/1.0/2.0/4.0, so 0.25, 1.25, 2.50 and 5.00 all
+#     round the wrong way. They err in the same direction, so they do not
+#     cancel -- the result is systematic magnitude inflation.
+#   - The dither pattern repeats every BLOCK_M x BLOCK_N, because the Philox
+#     offset carries no program id. Rounding errors at the same position in
+#     each tile are then fully correlated, which is exactly the correlation the
+#     reduction along K is supposed to average away.
+#   - A block whose amax is subnormal is off by 2x: the scale is clamped up for
+#     packing, but the unclamped byte is what gets stored.
+#
+# Fixing those is a numerics change that needs the precision harness behind it,
+# and until it has one, a fallback with no test that forces ``use_asm=False``
+# must not be presented as MI300X support. So the support matrix is gfx950, and
+# this is where it is enforced rather than discovered as a quiet accuracy loss.
+_MXFP4_SUPPORTED_ARCHS = ("gfx950",)
+
+_MXFP4_ARCH_OVERRIDE_ENV = "LUMEN_MXFP4_ALLOW_UNVALIDATED_ARCH"
+
+
+def assert_mxfp4_arch_supported() -> None:
+    """Refuse MXFP4 on an architecture whose FP4 conversion is not validated.
+
+    A no-op when the format is not MXFP4, when no GPU is visible (the arch is
+    not knowable then, and nothing will run either), or when
+    ``LUMEN_MXFP4_ALLOW_UNVALIDATED_ARCH=1`` opts in deliberately.
+    """
+    if _os.environ.get(_MXFP4_ARCH_OVERRIDE_ENV) == "1":
+        return
+    if not torch.cuda.is_available():
+        return
+
+    from lumen.ops.quantize.ops import triton_arch
+
+    arch = triton_arch()
+    # An unreadable arch is not evidence of an unsupported one; the GEMM
+    # dispatch will still refuse a chip that has no FP4 kernel.
+    if not arch or arch in _MXFP4_SUPPORTED_ARCHS:
+        return
+
+    raise RuntimeError(
+        f"MXFP4 is supported on {'/'.join(_MXFP4_SUPPORTED_ARCHS)} and this is "
+        f"{arch}. The hardware FP4 conversion instructions only exist on gfx950; "
+        "elsewhere the Triton software fallback takes over, and its rounding is "
+        "known to be wrong (one-sided SR dither, ties rounded away from even, a "
+        "dither pattern that repeats per tile, and a 2x error on subnormal-amax "
+        "blocks). It has no test that exercises it, so it is not MI300X support. "
+        f"Set {_MXFP4_ARCH_OVERRIDE_ENV}=1 to run it anyway, for kernel work "
+        "rather than for training."
+    )
+
 
 def enable(
     model,
@@ -174,6 +237,9 @@ def enable(
         if recipe is not None:
             scaling = recipe
         config = QuantConfig.from_str(format=format, scaling=scaling, **kwargs)
+
+    if config.format == QuantFormat.MXFP4:
+        assert_mxfp4_arch_supported()
 
     resolved_backend = get_quant_backend(backend)
     manager = ScalingManager(config)

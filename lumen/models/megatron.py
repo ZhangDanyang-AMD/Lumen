@@ -598,8 +598,13 @@ def enable_fp4_for_parallel_linear(
     quant_config=None,
 ):
     """Enable MXFP4 GEMMs on Lumen parallel linear modules."""
+    from lumen.quantize import assert_mxfp4_arch_supported
+
     if scaling_type != "mxfp4":
         raise ValueError(f"FP4 enablement requires scaling_type='mxfp4', got {scaling_type!r}")
+    # This entry point patches the linears directly rather than going through
+    # quantize.enable, so the support matrix has to be checked here too.
+    assert_mxfp4_arch_supported()
     if block_size != _MXFP4_BLOCK_SIZE:
         raise ValueError(f"MXFP4 requires block_size={_MXFP4_BLOCK_SIZE}, got {block_size}")
     if quant_config is None:

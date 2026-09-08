@@ -290,7 +290,16 @@ def _pack_fp4(
         y = (y & 0xFF).to(tl.uint8)
         y = y.reshape(BLOCK_M, HALF_BLOCK_N)
     else:
-        # Software fallback: manual FP4 E2M1 conversion
+        # Software fallback: manual FP4 E2M1 conversion.
+        #
+        # NOT a validated path, and not equivalent to the ASM one above:
+        # ``quantize.assert_mxfp4_arch_supported`` refuses any architecture that
+        # would land here, because its rounding is wrong in four ways that no
+        # test covers (see that function for the list, and note the scale
+        # clamped at the top of this kernel is not the byte the caller stores,
+        # so a subnormal-amax block is off by 2x). Correcting them is a numerics
+        # change that needs the precision harness behind it. Until then this
+        # exists to be read and developed against, not trained on.
         x_scaled = x / scales_fp32.expand_dims(axis=2).broadcast_to(
             BLOCK_M, HALF_BLOCK_N, 2
         ).reshape(BLOCK_M, BLOCK_N)
