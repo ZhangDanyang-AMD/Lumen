@@ -74,6 +74,27 @@ class TestMXFP4WeightCacheHook:
 
         assert not any(hasattr(layer.weight, "_mxfp4_w_cache") for layer in model)
 
+    def test_grouped_expert_weights_are_cleared(self):
+        """A grouped MoE layer holds its experts as weight0..weightN.
+
+        The linear's forward takes the weight as an argument, so the cache
+        lands on a Parameter the module does not expose as ``.weight``. Sweeping
+        only that name left every expert quantized from the step-0 masters for
+        the whole run while the dense layers updated.
+        """
+        experts = nn.Module()
+        for i in range(3):
+            experts.register_parameter(f"weight{i}", nn.Parameter(torch.zeros(8, 8)))
+            getattr(experts, f"weight{i}")._mxfp4_w_cache = ((False, False), "fp4", "scale")
+        optimizer = _MegatronStyleOptimizer()
+        register_mxfp4_weight_optimizer_hooks(experts, optimizer)
+
+        optimizer.step()
+
+        assert not any(
+            hasattr(getattr(experts, f"weight{i}"), "_mxfp4_w_cache") for i in range(3)
+        )
+
     def test_wrapped_step_returns_original_result(self):
         optimizer = _MegatronStyleOptimizer()
         register_mxfp4_weight_optimizer_hooks(_model_with_cache(), optimizer)

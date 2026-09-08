@@ -17,6 +17,8 @@ Covers:
   - Edge cases: format=HYBRID bwd dtype differs from fwd
 """
 
+import pytest
+
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -179,6 +181,34 @@ class TestQuantConfigProperties:
     def test_recipe_mxfp8(self):
         cfg = QuantConfig(format=QuantFormat.MXFP8, scaling=ScalingType.BLOCKWISE)
         assert cfg.recipe == "mxfp8"
+
+
+# ===================================================================
+# MXFP4 block size
+# ===================================================================
+
+
+class TestMXFP4BlockSize:
+    """MXFP4's block size is fixed by the format, not a config knob.
+
+    A config carrying the FP8 default of 128 computed scales over 128 elements
+    while every consumer read them as 32-element blocks -- not a precision
+    trade-off but wrong arithmetic, and nothing checked.
+    """
+
+    def test_mxfp4_defaults_to_32(self):
+        assert QuantConfig(format=QuantFormat.MXFP4).block_size == 32
+
+    def test_mxfp4_refuses_another_block_size(self):
+        with pytest.raises(ValueError, match="32-element blocks"):
+            QuantConfig(format=QuantFormat.MXFP4, block_size=128)
+
+    def test_from_str_mxfp4_refuses_another_block_size(self):
+        with pytest.raises(ValueError, match="32-element blocks"):
+            QuantConfig.from_str("mxfp4", "blockwise", block_size=128)
+
+    def test_fp8_still_takes_any_block_size(self):
+        assert QuantConfig(format=QuantFormat.FP8_E4M3, block_size=128).block_size == 128
 
 
 # ===================================================================

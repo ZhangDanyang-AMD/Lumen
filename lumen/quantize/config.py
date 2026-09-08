@@ -83,6 +83,11 @@ class QuantFormat(Enum):
     FP4 = "fp4"
 
 
+# The MXFP4 block size is fixed by the format, not chosen per config: the E8M0
+# scale layout and the AITER kernels both assume 32.
+MXFP4_BLOCK_SIZE = 32
+
+
 class ScalingType(Enum):
     """How scaling factors are computed."""
 
@@ -239,6 +244,19 @@ class QuantConfig:
     # dot-product attention + output projection) in FP8, eliminating BF16
     # casts at module boundaries.
     fp8_mha: bool = False
+
+    def __post_init__(self):
+        # MXFP4's block size is not a tuning knob: the E8M0 scale layout, the
+        # AITER kernels and the swizzle tilings are all defined at 32. A config
+        # carrying the FP8 default of 128 computed scales over 128 elements
+        # while every consumer read them as 32-element blocks, which is not a
+        # precision trade-off but wrong arithmetic, and nothing checked.
+        if self.format == QuantFormat.MXFP4 and self.block_size != MXFP4_BLOCK_SIZE:
+            raise ValueError(
+                f"MXFP4 is defined at {MXFP4_BLOCK_SIZE}-element blocks; got "
+                f"block_size={self.block_size}. The scale layout and every AITER "
+                "MXFP4 kernel assume 32."
+            )
 
     @classmethod
     def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed", **kwargs) -> "QuantConfig":

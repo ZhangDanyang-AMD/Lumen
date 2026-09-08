@@ -788,6 +788,21 @@ class ScalingManager:
         ``quant.enable()`` patching) and registers their ``.weight``
         parameters for FP8 lifecycle management.
         """
+        # This cache holds per-tensor / blockwise FP8 descriptors, and every
+        # reader of it is on an FP8 path: MXFP4's forward quantizes the weight
+        # in quantize_input and its backward works off the saved tensors, so
+        # nothing here would ever be read back. Enabling it under MXFP4 was not
+        # inert though -- it spent a full quantization pass per weight per
+        # optimizer step, and stored the result with row-wise scales where an
+        # MXFP4 consumer expects 2D tiles, so the first reader to appear would
+        # have gotten a silently wrong layout rather than an error.
+        if self.config.format == QuantFormat.MXFP4:
+            raise ValueError(
+                "The FP8 param cache (--fp8-param-gather / LUMEN_WEIGHT_QUANT_ONCE) "
+                "does not apply to MXFP4: its descriptors are never read back, and "
+                "the layout would not match. MXFP4 already caches the quantized "
+                "weight per optimizer step in lumen.quantize._mxfp4_cached_weight."
+            )
         count = 0
         for _name, module in model.named_modules():
             tensor_id = getattr(module, "_quant_tensor_id", None)
@@ -984,6 +999,11 @@ class ScalingManager:
 
         if scale is None and self.config.format == QuantFormat.MXFP4:
             from lumen.ops.quantize.ops import convert_to_mxfp4
+            # Row-wise scales along the reduction axis: the activation
+            # convention, matching quantize_input(is_weight=False). Weights use
+            # 2D tiles and are quantized by quantize_input, never here --
+            # enable_fp8_params refuses MXFP4 so the weight paths cannot reach
+            # this branch and pick up the wrong one of the two layouts.
             # RTN for weights (SR only for gradients per NVFP4 paper §4.4)
             fp4_tensor, mx_scale = convert_to_mxfp4(
                 tensor,

@@ -965,10 +965,17 @@ def register_mxfp4_weight_optimizer_hooks(
                     del m._mxfp4_w_cache
                 # Native Lumen parallel linears cache on their Parameter because
                 # they call the shared _do_gemm helper rather than the patched
-                # module forward above.
-                weight = getattr(m, "weight", None)
-                if weight is not None and hasattr(weight, "_mxfp4_w_cache"):
-                    del weight._mxfp4_w_cache
+                # module forward above. Every parameter the module owns has to be
+                # swept, not just ``.weight``: a grouped MoE layer holds its
+                # experts as weight0..weightN and hands them to the linear's
+                # forward one at a time, so the cache lands on a Parameter that
+                # is not reachable under that name. Those entries were never
+                # cleared, leaving the experts quantized from the step-0 master
+                # weights for the whole run while the dense layers updated -- and
+                # nothing raises, the loss just stops moving.
+                for param in m._parameters.values():
+                    if param is not None and hasattr(param, "_mxfp4_w_cache"):
+                        del param._mxfp4_w_cache
 
     # Megatron's ChainedOptimizer / DistributedOptimizer are not
     # torch.optim.Optimizer subclasses and lack register_step_post_hook, so

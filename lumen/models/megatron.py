@@ -73,12 +73,13 @@ _ATTN_NORM_ATTRS = ("q_layernorm", "k_layernorm")
 # ---------------------------------------------------------------------------
 
 from lumen.patches.builders.megatron_args import TE_FORCE_OVERRIDES as _TE_FORCE_OVERRIDES
+from lumen.quantize.config import MXFP4_BLOCK_SIZE
 
 _FP8_FORMAT_MAP = {"e4m3": "fp8_e4m3", "hybrid": "hybrid"}
 
 # MX FP4 scales one block of 32 elements (OCP Microscaling spec); the FP4 GEMM
 # and quantization kernels all assume that block length.
-_MXFP4_BLOCK_SIZE = 32
+_MXFP4_BLOCK_SIZE = MXFP4_BLOCK_SIZE
 
 _BACKEND_MAP = {
     "auto": ("aiter_csrc", "aiter_triton_fp8"),

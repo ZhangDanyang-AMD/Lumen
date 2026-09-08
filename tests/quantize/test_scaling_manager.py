@@ -273,6 +273,22 @@ class TestFP8ParamLifecycle:
         mgr.check_and_mark_fp8_stale(0)
         assert "layer.weight" not in mgr._fp8_param_stale
 
+    def test_mxfp4_is_refused(self):
+        """The param cache is an FP8 mechanism; no MXFP4 path reads it back.
+
+        Under MXFP4 it was not inert: it spent a quantization pass per weight
+        per optimizer step and stored row-wise scales where an MXFP4 consumer
+        expects 2D tiles, so the first reader to appear would have gotten a
+        silently wrong layout rather than an error.
+        """
+        cfg = QuantConfig(format=QuantFormat.MXFP4, scaling=ScalingType.BLOCKWISE)
+        mgr = ScalingManager(cfg)
+        model = torch.nn.Linear(8, 8)
+        model._quant_tensor_id = "layer.weight"
+
+        with pytest.raises(ValueError, match="does not apply to MXFP4"):
+            mgr.enable_fp8_params(model)
+
 
 # ===================================================================
 # Gradient quantization (static method)
