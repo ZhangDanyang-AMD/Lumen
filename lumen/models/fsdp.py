@@ -22,6 +22,7 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from lumen.models.training_contract import (
+    add_fsdp_fp4_contract_args,
     add_fsdp_fp8_contract_args,
     add_fsdp_runtime_contract_args,
     add_shared_checkpoint_args,
@@ -119,12 +120,18 @@ def add_common_fsdp_args(parser):
         action="store_false",
         help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
     )
-    lfp8.add_argument(
+
+    # -- Linear FP4 training --
+    lfp4 = parser.add_argument_group("linear-fp4")
+    add_fsdp_fp4_contract_args(lfp4)
+
+    grad_quant = parser.add_argument_group("gradient-quantization")
+    grad_quant.add_argument(
         "--grad-quant-type",
         type=str,
         default=None,
         choices=["fp8", "mxfp8", "mxfp4"],
-        help="Gradient quantization type (None=disabled). " "Applies to Linear, Attention, and RMSNorm.",
+        help="Gradient quantization type (None=disabled). Applies to Linear, Attention, and RMSNorm.",
     )
     lfp8.add_argument(
         "--first-last-layers-bf16",
@@ -578,7 +585,8 @@ def apply_fsdp2(
 
     Args:
         model: The model to shard.
-        args: CLI arguments (needs ``linear_fp8``, ``sharding_strategy``).
+        args: CLI arguments (needs the linear quantization gates and
+            ``sharding_strategy``).
         dp_group: Data-parallel process group (used to derive DeviceMesh size).
 
     Returns:
@@ -612,7 +620,7 @@ def apply_fsdp2(
         mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
     elif getattr(args, "fsdp_fp8_param_storage", False):
         mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
-    elif getattr(args, "linear_fp8", False):
+    elif getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,

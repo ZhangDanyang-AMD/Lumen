@@ -52,6 +52,7 @@ from lumen.models.megatron import (  # noqa: E402
     _patch_mla_attention,
     _patch_norms_in_spec,
     add_common_megatron_args,
+    enable_fp4_for_parallel_linear,
     enable_fp8_for_parallel_linear,
     reset_fp8_state,
 )
@@ -885,6 +886,15 @@ class TestAddCommonMegatronArgs:
         args = self._parse()
         assert args.lumen_attn_backend == "auto"
 
+    def test_linear_fp4_has_dedicated_switch(self):
+        args = self._parse(["--linear-fp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+
+    def test_fp8_format_rejects_mxfp4(self):
+        with pytest.raises(SystemExit):
+            self._parse(["--linear-fp8-format", "mxfp4"])
+
     def test_lumen_attn_backend_choices(self):
         for backend in ["auto", "triton", "csrc", "asm"]:
             args = self._parse(["--lumen-attn-backend", backend])
@@ -1193,6 +1203,22 @@ class TestEnableFP8ForParallelLinear:
 
         assert mock_linear.enable_fp8.call_args.kwargs["block_size"] == 32
 
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_dedicated_fp4_enable_uses_mxfp4_recipe(self, mock_print):
+        from lumen.modules.parallel_linear import LumenColumnParallelLinear
+
+        class _MockLumenCol(LumenColumnParallelLinear):
+            def __init__(self):
+                nn.Module.__init__(self)
+                self.enable_fp8 = mock.MagicMock()
+
+        mock_linear = _MockLumenCol()
+        enable_fp4_for_parallel_linear(nn.Sequential(mock_linear))
+
+        mock_linear.enable_fp8.assert_called_once()
+        assert mock_linear.enable_fp8.call_args.kwargs["scaling_type"] == "mxfp4"
+        assert mock_linear.enable_fp8.call_args.kwargs["block_size"] == 32
+
 
 # ===================================================================
 # model_provider -> parallel linear recipe
@@ -1212,11 +1238,12 @@ class TestModelProviderParallelLinearRecipe:
     @staticmethod
     def _args(fmt):
         return SimpleNamespace(
-            linear_fp8=True,
+            linear_fp8=fmt != "mxfp4",
+            linear_fp4=fmt == "mxfp4",
             lumen_linear=True,
-            linear_fp8_format=fmt,
+            linear_fp8_format=None if fmt == "mxfp4" else fmt,
             linear_fp8_scaling="blockwise",
-            linear_fp8_block_size=32,
+            linear_fp8_block_size=128,
             lora_rank=0,
             num_layers=4,
         )
@@ -1232,6 +1259,9 @@ class TestModelProviderParallelLinearRecipe:
         captured = {}
         with mock.patch("lumen.models.megatron.get_args", return_value=self._args(fmt)), mock.patch(
             "lumen.models.megatron.enable_fp8_for_parallel_linear",
+            side_effect=lambda model, **kw: captured.update(kw),
+        ), mock.patch(
+            "lumen.models.megatron.enable_fp4_for_parallel_linear",
             side_effect=lambda model, **kw: captured.update(kw),
         ):
             provider()

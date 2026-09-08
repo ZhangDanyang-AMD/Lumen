@@ -55,7 +55,7 @@ def install_mxfp4_weight_cache_hook() -> None:
         train_args = get_args()
 
         if (
-            getattr(train_args, "linear_fp8", False)
+            getattr(train_args, "linear_fp4", False)
             and resolve_quant_format(train_args) == "mxfp4"
             and os.environ.get("LUMEN_MXFP4_DISABLE_WEIGHT_CACHE") != "1"
             and model

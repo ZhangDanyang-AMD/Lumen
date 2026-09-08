@@ -238,8 +238,7 @@ else
 fi
 
 # ---- quantization flags -----------------------------------------------------
-# MXFP4 is selected with --linear-fp8-format because Megatron's own --fp8-format
-# has no MX formats among its choices. The last TAIL_BF16 layers stay BF16: both
+# MXFP4 has its own --linear-fp4 enable switch. The last TAIL_BF16 layers stay BF16: both
 # FP4 papers find the tail layers are the sensitive ones, and 8B diverged around
 # step 1300 without this (docs/mxfp4_training_report.md §1.5, §6.3).
 #
@@ -262,10 +261,7 @@ QUANT_ARGS=()
 case "${PRECISION}" in
     mxfp4)
         QUANT_ARGS=(
-            --linear-fp8
-            --linear-fp8-format mxfp4
-            --linear-fp8-scaling blockwise
-            --linear-fp8-block-size 32
+            --linear-fp4
             --lumen-linear
             --first-last-layers-bf16
             --num-layers-at-start-in-bf16 0

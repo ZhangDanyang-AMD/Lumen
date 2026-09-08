@@ -16,7 +16,7 @@
 # Rope fusion still runs: the body asks for AITER's kernel, which needs neither.
 #
 # Differences from run_pretrain_qwen3_8b.sh (BF16 / FP8 delayed):
-#   * MXFP4 is selected with --linear-fp8-format, not Megatron's --fp8-format.
+#   * MXFP4 is selected with its dedicated --linear-fp4 switch.
 #   * Last 5 of 36 layers stay BF16 (docs/mxfp4_training_report.md §1.5, §6.3).
 #   * --qk-layernorm is on, matching HF Qwen3's per-head q_norm/k_norm. The
 #     BF16/FP8 script leaves it off, so its loss curve is not comparable here.

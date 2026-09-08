@@ -181,6 +181,7 @@ def main():
     from lumen.rl.verl.config import VerlLumenArgs
 
     lumen_fp8 = os.environ.get("LUMEN_FP8", "0") == "1"
+    lumen_fp4 = os.environ.get("LUMEN_FP4", "0") == "1"
     lumen_norm = os.environ.get("LUMEN_NORM", "0") == "1"
     lumen_fp8_attn = os.environ.get("LUMEN_FP8_ATTN", "none")
     lumen_fp8_weight_cache = os.environ.get("LUMEN_FP8_WEIGHT_CACHE", "0") == "1"
@@ -195,7 +196,7 @@ def main():
     lora_dropout = float(os.environ.get("LORA_DROPOUT", "0.0"))
 
     any_lumen = (
-        lumen_fp8 or lumen_norm or lumen_fp8_attn != "none"
+        lumen_fp8 or lumen_fp4 or lumen_norm or lumen_fp8_attn != "none"
         or lumen_fp8_weight_cache or lumen_fp8_activation_store
         or lumen_fp8_param_gather or fp8_param_manager
         or lora_rank > 0
@@ -204,6 +205,7 @@ def main():
         lumen_args = VerlLumenArgs(
             model_name_or_path=model_path,
             linear_fp8=lumen_fp8,
+            linear_fp4=lumen_fp4,
             lumen_norm=lumen_norm,
             lumen_fp8_attn=lumen_fp8_attn,
             lumen_fp8_weight_cache=lumen_fp8_weight_cache,

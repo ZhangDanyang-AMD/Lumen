@@ -37,6 +37,6 @@ def maybe_run_synthetic_warmup(model, args, *, device):
         outputs.loss.backward()
         optimizer.step()
 
-    if getattr(args, "linear_fp8", False):
+    if getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
         reset_fp8_state(model)
     return warmup_steps

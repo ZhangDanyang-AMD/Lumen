@@ -271,9 +271,9 @@ def add_common_megatron_args(parser):
         "--linear-fp8-format",
         type=str,
         default=None,
-        choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8", "mxfp4"],
-        help="Quantisation format for Linear layers. Takes precedence over "
-        "Megatron's --fp8-format, which cannot express the MX formats. "
+        choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"],
+        help="FP8 quantisation format for Linear layers. Takes precedence over "
+        "Megatron's --fp8-format. MXFP4 is enabled separately with --linear-fp4. "
         "Default None means --fp8-format decides; do not give this a "
         "non-None default or it would silently override --fp8-format.",
     )
@@ -309,8 +309,19 @@ def add_common_megatron_args(parser):
         default=False,
         help="Cache FP8-quantised frozen base weights to avoid re-quantisation on every forward/recompute.",
     )
+
+    lfp4 = parser.add_argument_group(title="linear-fp4")
     safe_add_argument(
-        lfp8,
+        lfp4,
+        "--linear-fp4",
+        action="store_true",
+        default=False,
+        help="Enable MXFP4 quantised training for Linear layers (32-element blocks).",
+    )
+
+    grad_quant = parser.add_argument_group(title="gradient-quantization")
+    safe_add_argument(
+        grad_quant,
         "--grad-quant-type",
         type=str,
         default=None,

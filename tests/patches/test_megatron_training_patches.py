@@ -157,8 +157,8 @@ class TestMegatronTrainingPatches:
     def _stub_mxfp4_hook_deps(self, monkeypatch, register):
         """Avoid importing real lumen.quantize / megatron.py (AITER, ROCm)."""
         megatron_compat = types.ModuleType("lumen.models.megatron")
-        megatron_compat.resolve_quant_format = lambda args: getattr(
-            args, "linear_fp8_format", None
+        megatron_compat.resolve_quant_format = lambda args: (
+            "mxfp4" if getattr(args, "linear_fp4", False) else getattr(args, "linear_fp8_format", None)
         )
         quant = types.ModuleType("lumen.quantize")
         quant.register_mxfp4_weight_optimizer_hooks = register
@@ -170,7 +170,7 @@ class TestMegatronTrainingPatches:
         training_mod = self._stub_megatron_training(
             monkeypatch,
             setup=lambda *a, **k: (model, optimizer, None),
-            get_args=lambda: SimpleNamespace(linear_fp8=True, linear_fp8_format="mxfp4"),
+            get_args=lambda: SimpleNamespace(linear_fp4=True),
         )
         register = mock.MagicMock()
         self._stub_mxfp4_hook_deps(monkeypatch, register)
@@ -184,7 +184,7 @@ class TestMegatronTrainingPatches:
     def test_mxfp4_weight_cache_hook_skips_when_disabled(self, monkeypatch):
         training_mod = self._stub_megatron_training(
             monkeypatch,
-            get_args=lambda: SimpleNamespace(linear_fp8=True, linear_fp8_format="mxfp4"),
+            get_args=lambda: SimpleNamespace(linear_fp4=True),
         )
         register = mock.MagicMock()
         self._stub_mxfp4_hook_deps(monkeypatch, register)
@@ -198,7 +198,7 @@ class TestMegatronTrainingPatches:
     def test_mxfp4_weight_cache_hook_skips_non_mxfp4_format(self, monkeypatch):
         training_mod = self._stub_megatron_training(
             monkeypatch,
-            get_args=lambda: SimpleNamespace(linear_fp8=True, linear_fp8_format="fp8_e4m3"),
+            get_args=lambda: SimpleNamespace(linear_fp8=True, linear_fp4=False, linear_fp8_format="fp8_e4m3"),
         )
         register = mock.MagicMock()
         self._stub_mxfp4_hook_deps(monkeypatch, register)

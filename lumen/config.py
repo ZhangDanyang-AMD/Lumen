@@ -98,7 +98,7 @@ class LumenConfig:
     * **Tier 0 — Weight storage & adapters:** ``fp8_param_manager``,
       ``lora_rank`` / ``lora_alpha`` / ``lora_dropout``.  Applied first
       (FP8ParamManager before LoRA) so adapter weights stay BF16.
-    * **Tier 1 — Linear FP8:** ``format``, ``scaling``, ``block_size``, etc.
+    * **Tier 1 — Linear quantization:** ``format``, ``scaling``, ``block_size``, etc.
       These are forwarded to :class:`~lumen.quantize.QuantConfig`.
     * **Tier 2 — Attention FP8 & norms:** ``fp8_attn``, ``attn_backend``,
       ``attn_quant_type``, ``lumen_norm``.
@@ -108,7 +108,7 @@ class LumenConfig:
       read by the trainer to select 8-bit Adam from bitsandbytes.
     """
 
-    # -- Tier 1: Linear FP8 (forwarded to QuantConfig) --
+    # -- Tier 1: Linear quantization (forwarded to QuantConfig) --
     format: str = "fp8_e4m3"
     scaling: str = "delayed"
     block_size: int = 128
@@ -235,7 +235,7 @@ class LumenConfig:
           0b. LoRA (PEFT) — wrap linears with trainable adapters
           1.  Norm patching (before quant so new norm modules get patched)
           2.  Pre-quant module flags (delay_wgrad, grad-accum fusion, etc.)
-          3.  ``quant.enable()`` — FP8 linear patching
+          3.  ``quant.enable()`` — low-precision linear patching
           4.  Post-quant features (fp8_checkpoint, fp8_param_gather)
           5.  Attach config to model for downstream reads
 
@@ -273,7 +273,7 @@ class LumenConfig:
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
 
-        # 3. FP8 linear quantization
+        # 3. Linear quantization
         qcfg = self.quant_config
         manager = None
         if qcfg.is_quantized:
@@ -656,11 +656,15 @@ class LumenConfig:
         Iterates :data:`_ARG_MAP` to find matching attributes on *args*.
         Unknown / missing attributes are silently skipped (defaults apply).
 
-        Respects the ``linear_fp8`` boolean gate: when it is ``False``, the
-        FP8 Linear quantization fields (format, scaling, etc.) are suppressed
-        so that ``quant_config.is_quantized`` remains ``False``.
+        ``linear_fp8`` and ``linear_fp4`` are independent, mutually exclusive
+        public gates. ``linear_fp4`` selects the fixed MXFP4 recipe; MXFP4 is
+        deliberately not accepted through the FP8 format selector.
         """
         linear_fp8_enabled = getattr(args, "linear_fp8", None)
+        linear_fp4_enabled = getattr(args, "linear_fp4", False)
+
+        if linear_fp8_enabled and linear_fp4_enabled:
+            raise ValueError("--linear-fp8 and --linear-fp4 are mutually exclusive")
 
         kwargs: dict = {}
         for field_name, arg_names in _ARG_MAP.items():
@@ -670,7 +674,14 @@ class LumenConfig:
                     kwargs[field_name] = val
                     break
 
-        if linear_fp8_enabled is False:
+        if linear_fp4_enabled:
+            kwargs["format"] = "mxfp4"
+            kwargs["scaling"] = "blockwise"
+            kwargs["block_size"] = 32
+        elif linear_fp8_enabled:
+            if kwargs.get("format") == "mxfp4":
+                raise ValueError("MXFP4 must be enabled with --linear-fp4, not --linear-fp8-format")
+        elif linear_fp8_enabled is False:
             kwargs["scaling"] = "none"
 
         return cls(**kwargs)

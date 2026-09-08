@@ -15,6 +15,7 @@ A comprehensive inventory of all Lumen features organized by domain: **Quantizat
 | `quant.enable()` | One-call FP8 enablement -- patches all `nn.Linear` modules for FP8 training | `quant.enable(model)` | All | SUPPORTED |
 | FP8 Quantization Kernels | Per-tensor, blockwise, MXFP8 quantization primitives | `lumen.ops.quantize.ops` | delayed, dynamic, per_token, blockwise, mxfp8 | SUPPORTED |
 | FP8 Linear (Forward + Backward) | Quantized linear with 7 scaling modes, full forward/dgrad/wgrad dispatch | `--linear-fp8` | delayed, dynamic, per_token, blockwise, mxfp8, blockwise2d, none | SUPPORTED |
+| MXFP4 Linear (Forward + Backward) | Dedicated MXFP4 linear training path with 32-element block scales | `--linear-fp4` | mxfp4 | SUPPORTED |
 | Fused Norm + Quantize | RMSNorm/LayerNorm with fused FP8 output -- single kernel pass | `--lumen-norm` | delayed, dynamic, per_token, blockwise, mxfp8 | SUPPORTED |
 | FP8 Attention | FP8 quantized QKV in dot-product attention (DPA) or multi-head attention (MHA) | `--lumen-fp8-attn dpa\|mha` | blockwise, dynamic, delayed, per_token, mxfp8, blockwise2d | SUPPORTED |
 | FP8 Grouped GEMM (MoE) | FP8 expert GEMM for MoE layers, fused and sequential fallback | `--moe-grouped-gemm` | delayed, dynamic, per_token, blockwise, mxfp8 | SUPPORTED |
@@ -522,6 +523,7 @@ A flat, searchable table of all Lumen CLI flags.
 | CLI Flag | Feature | Category | Values / Notes |
 |----------|---------|----------|----------------|
 | `--linear-fp8` | FP8 Linear GEMM (forward + dgrad) | Quantization | Enable FP8 linear |
+| `--linear-fp4` | MXFP4 Linear GEMM (forward + dgrad + wgrad) | Quantization | Dedicated MXFP4 enable switch; mutually exclusive with `--linear-fp8` |
 | `--linear-fp8-wgrad` | FP8 weight gradient GEMM | Quantization | MXFP8 only |
 | `--linear-fp8-scaling` | FP8 scaling type for linear | Quantization | `delayed\|dynamic\|per_token\|blockwise\|blockwise2d\|mxfp8` |
 | `--lumen-fp8-attn` | FP8 attention | Quantization | `none\|dpa\|mha` |

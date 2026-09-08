@@ -64,6 +64,7 @@ class TrlLumenArgs:
     lora_alpha: float = 32.0
     lora_dropout: float = 0.1
     linear_fp8: bool = False
+    linear_fp4: bool = False
     linear_fp8_format: str = "fp8_e4m3"
     linear_fp8_scaling: str = "delayed"
     linear_fp8_block_size: int = 128

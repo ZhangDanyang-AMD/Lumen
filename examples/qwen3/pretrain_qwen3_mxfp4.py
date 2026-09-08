@@ -256,11 +256,11 @@ def main():
     # --- Lumen quantization ---
     if args.mode == "mxfp4":
         _configure_mxfp4_dispatch(args)
-        use_quant, fmt, scaling, blk = True, "mxfp4", "blockwise", 32
+        use_fp8, use_fp4, fmt, scaling, blk = False, True, "mxfp4", "blockwise", 32
     elif args.mode == "fp8_blockwise2d":
-        use_quant, fmt, scaling, blk = True, "fp8_e4m3", "blockwise2d", 128
+        use_fp8, use_fp4, fmt, scaling, blk = True, False, "fp8_e4m3", "blockwise2d", 128
     else:
-        use_quant, fmt, scaling, blk = False, "fp8_e4m3", "delayed", 128
+        use_fp8, use_fp4, fmt, scaling, blk = False, False, "fp8_e4m3", "delayed", 128
 
     # MXFP4: keep last ~15% layers in BF16 (NVFP4 paper §4:末尾层最敏感)
     tail_bf16 = args.mode == "mxfp4"
@@ -268,7 +268,8 @@ def main():
     tail_count = max(1, round(num_layers * 0.15)) if tail_bf16 else 0
 
     cfg = LumenConfig.from_args(Namespace(
-        linear_fp8=use_quant, linear_fp8_format=fmt, linear_fp8_scaling=scaling,
+        linear_fp8=use_fp8, linear_fp4=use_fp4,
+        linear_fp8_format="fp8_e4m3", linear_fp8_scaling=scaling,
         linear_fp8_block_size=blk, linear_fp8_amax_algo="max", linear_fp8_amax_history=16,
         linear_fp8_reduce_amax=False, linear_fp8_activation=True, linear_fp8_wgrad=True,
         linear_fp8_cache_frozen_weight=False, linear_fp8_bpreshuffle=False,
@@ -290,7 +291,7 @@ def main():
     if args.fsdp_version == 2:
         from lumen.models.fsdp import apply_fsdp2
         apply_fsdp2(model, Namespace(
-            linear_fp8=use_quant, sharding_strategy=args.sharding,
+            linear_fp8=use_fp8, linear_fp4=use_fp4, sharding_strategy=args.sharding,
             fsdp_fp8_param_storage=False,
             fsdp_mxfp4_comm=(args.mode == "mxfp4" and not args.no_mxfp4_comm),
         ))
