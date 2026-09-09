@@ -20,6 +20,35 @@ paths.
 
 ### 1.1 Final conclusions
 
+> **This report reproduces the FlyDSL convolution speedup and verifies that the
+> gain carries through to the complete VAE encode: 1.92× for Qwen-Image and
+> 1.27× for Wan2.1.** The VAE is only one component of the current training
+> step, however. Its measured share limits the theoretical end-to-end training
+> gain to about 0.40% and 2.05%, both below repeat-run variation. The supported
+> claim is therefore “the VAE stage is faster,” not “training is measurably
+> faster end to end.”
+
+| Result level | Conclusion | Evidence |
+|---|---|---|
+| Convolution operator | **The operator speedup is reproduced** | Up to 4.97× for Qwen at 1024; 1.59× for Wan's real 81-frame T>1/cache Conv3d path |
+| Whole VAE | **The operator gain produces a real VAE speedup** | Qwen encode `33.05 → 17.22 ms` (1.92×); Wan encode `705.8 → 556.1 ms` (1.27×) |
+| End-to-end training | **The improvement is not distinguishable in the current runs** | Theoretical savings of only 0.40% / 2.05%, below approximately ±6% / 2.2–4.3% repeat-run variation |
+
+This distinction matters: the gain is not being lost inside the VAE. Wan saves
+153.04 ms of convolution time; its measured convolution share predicts a whole
+encode time of roughly 553 ms, close to the observed 556.1 ms. The end-to-end
+effect is small because DiT forward/backward, the optimizer, and distributed
+communication dominate the rest of the step—not because the convolution
+optimization failed.
+
+The optimization is consequently a better fit for VAE-heavy preprocessing,
+latent generation, or standalone VAE services. Full generative inference still
+requires a dedicated VAE-decode measurement: this report validates encode only,
+so its encode speedups must not be quoted directly as T2I/T2V end-to-end latency
+improvements.
+
+Key measurements:
+
 | Item | Qwen-Image | Wan2.1 |
 |---|---|---|
 | Proof the kernel ran | `backend for conv2d: FLYDSL` | `backend for conv2d: FLYDSL` and `backend for conv3d: FLYDSL` |
@@ -31,11 +60,19 @@ paths.
 
 The conclusions supported by the data are:
 
-1. The FlyDSL kernels execute inside real 8-GPU training and offline-embedding jobs; these are not silent torch fallbacks.
-2. BF16 encode accuracy does not regress relative to FP32 for either Qwen-Image or Wan.
-3. Whole VAE encode improves by 1.92× and 1.27× respectively.
-4. FlyDSL's independent step-time effect is smaller than run-to-run noise in the current training configurations.
-5. Wan's reproducible `4.31 → 3.42 s/step` gain (−20.6%) comes from changing the VAE from FP32 to BF16, **not from the FlyDSL kernel**. A `bf16-only` control is therefore mandatory.
+1. The FlyDSL kernels execute inside real 8-GPU training and offline-embedding
+   jobs rather than silently falling back to torch, and the convolution speedup
+   is reproduced on real model shapes.
+2. The operator gain carries through to the complete VAE rather than appearing
+   only in an isolated microbenchmark: Qwen-Image and Wan encode improve by
+   1.92× and 1.27× respectively.
+3. BF16 encode accuracy does not regress relative to FP32 for either Qwen-Image or Wan.
+4. FlyDSL's independent step-time effect is smaller than run-to-run noise in the
+   current training configurations. The VAE speedup is established, but a stable
+   end-to-end training speedup is not.
+5. Wan's reproducible `4.31 → 3.42 s/step` gain (−20.6%) comes from changing the
+   VAE from FP32 to BF16, **not from the FlyDSL kernel**. A `bf16-only` control is
+   therefore mandatory.
 
 ### 1.2 Why a large operator gain becomes a small training gain
 
