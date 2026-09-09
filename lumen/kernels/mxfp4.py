@@ -155,17 +155,23 @@ def _generate_randval(m: tl.constexpr, n: tl.constexpr, philox_seed, philox_offs
     requirement, so it can go lower -- but that is a numerics change and belongs
     in the precision harness, not here.
     """
+    # A launch-level offset alone repeats the same Philox counters in every
+    # program. Give each tile a disjoint counter range so reduction axes see
+    # independent rounding errors instead of one repeated dither pattern.
+    tile_id = tl.program_id(0) * tl.num_programs(1) + tl.program_id(1)
     if n % 4 == 0:
         QN: tl.constexpr = n // 4
         ms = tl.arange(0, m)
         ns = tl.arange(0, QN)
-        rng_offsets = philox_offset + ms[:, None] * QN + ns[None, :]
+        tile_offset = philox_offset + tile_id * m * QN
+        rng_offsets = tile_offset + ms[:, None] * QN + ns[None, :]
         r0, r1, r2, r3 = tl.randint4x(philox_seed, rng_offsets, SR_PHILOX_ROUNDS_C)
         return tl.join(tl.join(r0, r1), tl.join(r2, r3)).reshape(m, n)
     # Narrow tiles can't be quartered; fall back to one round per element.
     ms = tl.arange(0, m)
     ns = tl.arange(0, n)
-    rng_offsets = philox_offset + ms[:, None] * n + ns[None, :]
+    tile_offset = philox_offset + tile_id * m * n
+    rng_offsets = tile_offset + ms[:, None] * n + ns[None, :]
     r1, _, _, _ = tl.randint4x(philox_seed, rng_offsets, SR_PHILOX_ROUNDS_C)
     return r1
 

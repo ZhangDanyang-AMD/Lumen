@@ -211,6 +211,24 @@ def _residual_std(draws=DRAWS):
     return (resid.std() / denom).item()
 
 
+@pytest.mark.skipif(not _is_gfx950(), reason="gfx950 SR packing")
+def test_sr_dither_does_not_repeat_between_tiles():
+    from lumen.ops.quantize.ops import convert_to_mxfp4
+
+    torch.manual_seed(9)
+    tile = torch.randn((64, 64), dtype=torch.bfloat16, device="cuda")
+    x = tile.repeat(2, 1)
+
+    packed, scales = convert_to_mxfp4(
+        x, BLOCK, axis=-1, use_sr=True, philox_seed=1234, philox_offset=0,
+    )
+
+    torch.testing.assert_close(scales[:64], scales[64:], atol=0, rtol=0)
+    assert not torch.equal(packed[:64], packed[64:]), (
+        "identical input tiles reused the same stochastic-rounding stream"
+    )
+
+
 def test_default_round_count_is_the_documented_default(rebuild_at_rounds):
     os.environ.pop("LUMEN_SR_PHILOX_ROUNDS", None)
     module = importlib.reload(mxfp4_kernels)
