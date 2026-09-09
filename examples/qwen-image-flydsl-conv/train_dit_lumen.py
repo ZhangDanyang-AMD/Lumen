@@ -18,6 +18,16 @@ Which ops get replaced is set by LUMEN_PATCH (comma-separated):
              DiT, and the one the FlyDSL kernel was written for: the VAE is
              frozen and runs under no_grad, which matches the kernel's
              forward-only limit.
+    vae_conv_video
+             vae_conv plus the shapes the T=1 rewrite cannot take. On a clip
+             the T=1 identity holds only for the encoder's first chunk -- every
+             later chunk carries a feature cache, so its leading frames are
+             real data rather than zeros. This mode also rebinds the kernel
+             underneath the module's own causal padding, which covers those,
+             and takes the plain 2-D resamplers, which are faster through Lumen
+             at video resolutions and slower at 256^2. Use it for Wan, LTX-2,
+             MiniMax-H3; on Qwen-Image it adds nothing, because there every call
+             is already reducible.
     vae_bf16 Cast the frozen VAE to BF16. NOT a Lumen patch and not free --
              it changes what the trainer computes. It is here because
              VeOmni loads this VAE in FP32
@@ -40,8 +50,12 @@ online_training, never meta-initialised (dit_trainer.py:320).
 
     LUMEN_PATCH=vae_conv bash train.sh $EXAMPLE_DIR/train_dit_lumen.py <cfg> ...
 
-Use run_10steps.sh rather than invoking this directly; it sets every variable
-the comparison needs to hold fixed.
+LUMEN_TIME_VAE=1 additionally times vae.encode and reports its share of the
+trainer's wall clock. It synchronises on every call, so it is for a separate
+diagnostic run, not for a run whose step time will be quoted.
+
+Use run_10steps.sh or run_wan_10steps.sh rather than invoking this directly;
+they set every variable the comparison needs to hold fixed.
 """
 
 import os
@@ -86,9 +100,10 @@ def _cast_vae_bf16(trainer):
     Casting the module alone breaks training a few lines downstream. The
     condition model derives the diffusion timestep from the latents' dtype
     (``timesteps[ids].to(dtype=sample_latents.dtype)``,
-    modeling_qwen_image_condition.py:335), and ``scale_noise`` then looks that
-    timestep up in the FP32 schedule by exact equality. A BF16 timestep matches
-    nothing, so the lookup returns an empty index tensor:
+    modeling_qwen_image_condition.py:335, and the same line in
+    modeling_wan_condition.py), and ``scale_noise`` then looks that timestep up
+    in the FP32 schedule by exact equality. A BF16 timestep matches nothing, so
+    the lookup returns an empty index tensor:
 
         IndexError: index 0 is out of bounds for dimension 0 with size 0
 
@@ -114,24 +129,83 @@ def _cast_vae_bf16(trainer):
     _rank0(f"vae_bf16: condition_model.vae cast {before} -> {vae.dtype}, encode() upcasts latents back to float32")
 
 
-def _patch_vae_conv(trainer):
+def _patch_vae_conv(trainer, video):
     import torch
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from lumen_vae_conv import patch_vae_convs
 
-    vae = _get_vae(trainer, "vae_conv")
+    who = "vae_conv_video" if video else "vae_conv"
+    vae = _get_vae(trainer, who)
     if vae.dtype is not torch.bfloat16:
         _rank0(
-            f"vae_conv WARNING: vae dtype is {vae.dtype}, but the FlyDSL kernel is BF16-only. "
+            f"{who} WARNING: vae dtype is {vae.dtype}, but the FlyDSL kernel is BF16-only. "
             "Lumen will demote every call to torch, so this measures the conv3d->conv2d "
             "rewrite alone. Add vae_bf16 to LUMEN_PATCH to exercise the kernel."
         )
 
-    stats = patch_vae_convs(vae, verbose=_rank0)
+    stats = patch_vae_convs(vae, video=video, verbose=_rank0)
     if not stats["patched"]:
-        raise SystemExit("[lumen] vae_conv patched nothing -- refusing to run a comparison that changes nothing")
-    _rank0(f"vae_conv skipped (left on torch): {[n for n, _ in stats['skipped']]}")
+        raise SystemExit(f"[lumen] {who} patched nothing -- refusing to run a comparison that changes nothing")
+    _rank0(f"{who} skipped (left on torch): {[n for n, _ in stats['skipped']]}")
+
+
+_VAE_TIME = {"per_call": [], "shapes": []}
+
+
+def _time_vae_encode(trainer):
+    """Time every ``vae.encode``, to size it against the step.
+
+    Set LUMEN_TIME_VAE=1. Off by default and deliberately not part of an A/B
+    run: it synchronises on every call, which perturbs the step it is measuring.
+    Run it once per mode on its own and read the share, not the step time.
+
+    Without this the VAE's share of a step is an inference from a standalone
+    encode benchmark, which ignores whatever else the condition model and the
+    dataloader are doing in the same step, and assumes a clip shape the
+    preprocessing may not actually produce. On Qwen-Image that inference put the
+    convolutions at 0.07% of a step; on a video clip it is a different order of
+    magnitude, and worth measuring rather than assuming.
+
+    Calls are kept individually rather than summed. The first one carries
+    FlyDSL's JIT and torch's autotune, which on a video VAE's ~66 distinct
+    shapes is large enough to swamp nine steady calls and invert the mean -- a
+    total alone reported this patch as slower than the run it speeds up.
+    """
+    import torch
+
+    vae = _get_vae(trainer, "LUMEN_TIME_VAE")
+    original_encode = vae.encode
+
+    def timed_encode(x, *args, **kwargs):
+        start, end = (torch.cuda.Event(enable_timing=True) for _ in range(2))
+        start.record()
+        out = original_encode(x, *args, **kwargs)
+        end.record()
+        torch.cuda.synchronize()
+        _VAE_TIME["per_call"].append(start.elapsed_time(end))
+        shape = tuple(x.shape) if hasattr(x, "shape") else None
+        if shape not in _VAE_TIME["shapes"]:
+            _VAE_TIME["shapes"].append(shape)
+        return out
+
+    vae.encode = timed_encode
+    _rank0(f"timing vae.encode (dtype {vae.dtype}); this synchronises, so do not read step time from this run")
+
+
+def _report_vae_time(wall_seconds):
+    calls = _VAE_TIME["per_call"]
+    if not calls:
+        return
+    _rank0(f"vae.encode input shapes seen: {_VAE_TIME['shapes']}")
+    total = sum(calls)
+    rest = calls[1:] or calls
+    steady = sum(rest) / len(rest)
+    _rank0(f"vae.encode: {len(calls)} calls, {total / 1000:.1f} s total")
+    _rank0(f"vae.encode: first {calls[0]:.0f} ms (JIT + autotune), steady {steady:.0f} ms over {len(rest)}")
+    if wall_seconds:
+        _rank0(f"vae.encode is {total / 1000 / wall_seconds * 100:.1f}% of {wall_seconds:.0f} s of trainer wall clock")
+        _rank0(f"  at the steady rate that would be {steady * len(calls) / 1000 / wall_seconds * 100:.1f}%")
 
 
 def _report_backends():
@@ -158,13 +232,16 @@ def _report_backends():
 
 
 def _install_hook():
-    if not _PATCH:
+    time_vae = os.environ.get("LUMEN_TIME_VAE", "") not in ("", "0")
+    if not _PATCH and not time_vae:
         _rank0("LUMEN_PATCH empty -- running unmodified VeOmni (baseline)")
         return
 
-    unknown = set(_PATCH) - {"linear", "norm", "vae_conv", "vae_bf16"}
+    unknown = set(_PATCH) - {"linear", "norm", "vae_conv", "vae_conv_video", "vae_bf16"}
     if unknown:
         raise SystemExit(f"[lumen] unknown LUMEN_PATCH entries: {sorted(unknown)}")
+    if {"vae_conv", "vae_conv_video"} <= set(_PATCH):
+        raise SystemExit("[lumen] vae_conv_video is a superset of vae_conv; pick one")
     if "norm" in _PATCH:
         raise SystemExit(
             "[lumen] refusing LUMEN_PATCH=norm on this model: the DiT's 241 LayerNorms "
@@ -183,17 +260,24 @@ def _install_hook():
         # has to happen first or the cached slices keep the old dtype.
         if "vae_bf16" in _PATCH:
             _cast_vae_bf16(self)
-        if "vae_conv" in _PATCH:
-            _patch_vae_conv(self)
+        if "vae_conv" in _PATCH or "vae_conv_video" in _PATCH:
+            _patch_vae_conv(self, video="vae_conv_video" in _PATCH)
 
         if "linear" in _PATCH:
             _patch_linear(self.base.model)
 
+        # Last, so the timer wraps the patched encode rather than being wrapped
+        # by it -- otherwise vae_bf16's own encode wrapper hides the timing.
+        if time_vae:
+            _time_vae_encode(self)
+
     DiTTrainer._build_model = _build_model_then_patch
-    _rank0(f"hook installed for LUMEN_PATCH={','.join(_PATCH)}")
+    _rank0(f"hook installed for LUMEN_PATCH={','.join(_PATCH) or '<none>'}, time_vae={time_vae}")
 
 
 if __name__ == "__main__":
+    import time
+
     from veomni.arguments import parse_args
     from veomni.trainer.dit_trainer import DiTTrainer, VeOmniDiTArguments
 
@@ -201,5 +285,7 @@ if __name__ == "__main__":
 
     args = parse_args(VeOmniDiTArguments)
     trainer = DiTTrainer(args)
+    _t0 = time.time()
     trainer.train()
+    _report_vae_time(time.time() - _t0)
     _report_backends()

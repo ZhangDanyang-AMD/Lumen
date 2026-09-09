@@ -12,6 +12,10 @@
 : "${VEOMNI_DIR:=$WORK/VeOmni}"
 : "${QWEN_IMAGE_DIR:=$WORK/models/Qwen-Image}"
 : "${DATA_DIR:=$WORK/data/qwen_image_smoke}"
+# Wan2.1-T2V-1.3B and the Tom-and-Jerry clips, for the video (T>1) comparison.
+# Only needed by run_wan_10steps.sh; the image example does not touch them.
+: "${WAN_DIR:=$WORK/models-extra/Wan2.1-T2V-1.3B}"
+: "${WAN_DATA_DIR:=$WORK/data/tom-and-jerry-parquet}"
 : "${OUT_DIR:=$WORK/outputs}"
 : "${LOG_DIR:=$WORK/logs}"
 : "${HF_HOME:=$WORK/hf-cache}"
@@ -28,6 +32,7 @@
 : "${VEOMNI_COMMIT:=573848a00fcd7329c2411346c6f4a983e9f67e3f}"
 
 export WORK LUMEN_DIR VEOMNI_DIR QWEN_IMAGE_DIR DATA_DIR OUT_DIR LOG_DIR HF_HOME
+export WAN_DIR WAN_DATA_DIR
 export FLYDSL_SIDECAR FLYDSL_VERSION EXAMPLE_DIR VEOMNI_COMMIT
 
 # Put the sidecar ahead of the image's flydsl, and the cloned Lumen ahead of any

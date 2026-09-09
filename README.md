@@ -88,6 +88,7 @@ pip install -e ".[dev]"
 |---------|-------------|------|
 | **LLaMA2 SFT** | Fine-tuning / LoRA on LLaMA2 7B–70B with FP8 attention, packed sequences, early stopping | [`examples/llama2/`](examples/llama2/) |
 | **LLaMA 3.1 Pretrain** | Pretraining LLaMA 3.1 8B with FP8 hybrid training and MXFP8 attention (MLPerf-aligned) | [`examples/llama31/`](examples/llama31/) |
+| **Qwen-Image / Wan2.1 VAE convolution** | FlyDSL integration in VeOmni on 8× MI355X: Qwen-Image encode 1.92×; Wan 81-frame encode 1.27×. Repeated Wan training and offline-embedding runs do not resolve an additional step-time benefit from FlyDSL over BF16 alone. | [中文](examples/qwen-image-flydsl-conv/README.md) / [English](examples/qwen-image-flydsl-conv/README_EN.md) |
 
 ## Testing
 

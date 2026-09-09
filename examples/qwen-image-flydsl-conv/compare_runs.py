@@ -9,13 +9,20 @@ decimals, which is useless for a loss of order 1e-2, and wandb records a
 ``_timestamp`` per step, giving per-step wall time without the progress bar's
 1-second quantisation.
 
-Read the loss columns, not the step time. With one run per mode the step time is
-not interpretable -- see the warning this prints and the README section
-"What a single run can and cannot tell you".
+Pass every repeat, not one run per mode:
+
+    compare_runs.py wan-baseline-r1 wan-baseline-r2 wan-baseline-r3 \
+                    wan-flydsl-r1 wan-flydsl-r2 wan-flydsl-r3
+
+Runs whose names differ only by a trailing -repN or -rN are grouped, and the
+spread within a mode is printed next to the gap between modes. That comparison
+is the whole point: with one run per mode the step time is not interpretable --
+see the README section "What a single run can and cannot tell you".
 """
 
 import glob
 import os
+import re
 import sys
 
 LOG_DIR = os.environ.get("LOG_DIR", "/work/logs")
@@ -98,6 +105,15 @@ def step_times(rows):
     return rows[steps[0]].get("_runtime"), sum(gaps[1:]) / len(gaps[1:])
 
 
+def _group_repeats(names):
+    """{mode: [run names]}, stripping a trailing -rep1 / -r2 style suffix."""
+    groups = {}
+    for n in names:
+        base = re.sub(r"-(rep|r)\d+$", "", n)
+        groups.setdefault(base, []).append(n)
+    return groups
+
+
 def main():
     modes = sys.argv[1:] or ["baseline", "flydsl"]
     data = {}
@@ -135,10 +151,16 @@ def main():
             for s in steps
             if base[s].get("training/total_loss")
         ]
+        if not devs:
+            # offline_embedding computes no loss: it returns before the DiT runs.
+            print(f"  {m:12} no loss to compare (control's total_loss is 0 at every step)")
+            continue
         print(f"  {m:12} max {max(devs):.3%}   mean {sum(devs) / len(devs):.3%}")
-    print("  For scale: two runs of the *same* mode differ by ~0.28% mean / ~0.86% max")
-    print("  on this setup (enable_full_determinism is false). Deviations of that")
-    print("  order mean the patch did not change the arithmetic meaningfully.")
+    print("  Read these against the control's own repeats, which are the noise floor")
+    print("  (enable_full_determinism is false). If a repeat of the control deviates")
+    print("  as much as a patched run does, the patch did not change the arithmetic")
+    print("  meaningfully. On Qwen-Image that floor measured 0.28% mean / 0.86% max;")
+    print("  do not carry that number to another model, measure it again.")
 
     print("\n=== grad_norm, first and last step ===")
     for s in (steps[0], steps[-1]):
@@ -149,15 +171,32 @@ def main():
     for m in modes:
         first, steady = step_times(data[m])
         print(f"  {m:12}{first:>9.1f}s{steady:>9.2f}s{meta(m, 'WALL_SECONDS') or '?':>8}s")
-    print()
-    print("  !! Do not read a speedup out of the steady column with one run per mode.")
-    print("     Repeat runs of an identical configuration vary by about +/-6% here,")
-    print("     while the VAE convolutions are 0.56% of a step at 1024 (0.07% at 256),")
-    print("     so the noise is an order of magnitude larger than anything this patch")
-    print("     can move. The measurement that does resolve the kernel is")
-    print("     verify_vae_patch.py, which times the encode itself with internal repeats.")
-    print("  Step 1 carries kernel autotune plus, for the FlyDSL run, JIT compilation.")
-    print("  That cost is one-time, and small enough that it is not always visible.")
+    reps = _group_repeats(modes)
+    if any(len(v) > 1 for v in reps.values()):
+        print("\n=== steady step time grouped by mode, over repeats ===")
+        for mode, names in sorted(reps.items()):
+            vals = [step_times(data[n])[1] for n in names if step_times(data[n])[1] is not None]
+            if not vals:
+                continue
+            spread = (max(vals) - min(vals)) / (sum(vals) / len(vals)) * 100
+            print(
+                f"  {mode:14} n={len(vals)}  mean {sum(vals) / len(vals):.2f}s  "
+                f"range {min(vals):.2f}-{max(vals):.2f}s  spread {spread:.1f}%"
+            )
+        print("  Compare the gap between modes against the spread within a mode.")
+        print("  A gap smaller than the spread is not a result.")
+    else:
+        print()
+        print("  !! Do not read a speedup out of the steady column with one run per mode.")
+        print("     Repeat runs of an identical configuration vary by about +/-6% here.")
+        print("     Pass several -repN runs of each mode to get the spread printed.")
+    print("\n  How much of a step the convolutions are is model-dependent and has to be")
+    print("  measured, not assumed: 0.07% of a Qwen-Image step at 256, and a different")
+    print("  order of magnitude on a video clip. LUMEN_TIME_VAE=1 measures it directly;")
+    print("  verify_vae_patch.py and verify_video_vae_patch.py time the encode itself.")
+    print("  Step 1 carries kernel autotune plus, for a FlyDSL run, JIT compilation --")
+    print("  ~11 s on Qwen-Image's 11 shapes, minutes on a video VAE's 66. One-time,")
+    print("  and cached on disk, so only the first run of a shape set pays it.")
 
     print("\n=== peak memory (torch max_memory_allocated) ===")
     for m in modes:

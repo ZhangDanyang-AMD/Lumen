@@ -1,12 +1,22 @@
-# Qwen-Image DiT SFT on Lumen's FlyDSL 3D convolution — integration report and runbook
+# Qwen-Image / Wan2.1 on Lumen's FlyDSL convolution — integration report and runbook
 
 > 中文版（默认）：[README.md](README.md)
 
-A record of one complete operator integration: the convolutions in the frozen
-Qwen-Image VAE are handed to Lumen's FlyDSL implicit-GEMM kernel, run inside a
-real 8-GPU VeOmni training job, and compared item by item against the same run
-without it. Everything runs from committed code; reproducing it involves no
-editing.
+A record of the image and video operator integrations: convolutions in the
+frozen Qwen-Image / Wan2.1 VAEs are handed to Lumen's FlyDSL implicit-GEMM
+kernel, run inside real 8-GPU VeOmni jobs, and compared item by item against the
+same runs without it. Sections 1–6 cover the Qwen-Image report and runbook;
+[section 7](#wan-results) gives the measured Wan video-path, training, and
+offline-embedding results.
+
+**Test coverage, checked 2026-09-09:** Qwen-Image completed 2-, 10-, and
+500-step full-parameter SFT at 256×256, repeated 10-step FlyDSL comparisons,
+plus an independent 1024×1024 reproduction and 10-step A/B. Over 500 steps,
+mean loss fell from 0.02083 to 0.00621 (−70.2%), but the dataset is only eight
+repeated images, so this demonstrates plumbing and overfitting rather than
+generalization. Wan completed single-GPU checks at 17 and 81 frames, 18 formal
+10-step comparisons, and six VAE-timing diagnostic runs. No long Wan convergence
+run or generated-video quality evaluation has been performed.
 
 ---
 
@@ -498,14 +508,16 @@ for the same reason.
 |---|---|
 | `env.sh` | every path, one place |
 | `setup_env.sh` | flydsl directory, aiter files, VeOmni install |
-| `lumen_vae_conv.py` | **the patch** — T=1 causal rewrite and layer selection |
-| `train_dit_lumen.py` | VeOmni entry point; `LUMEN_PATCH` = `vae_conv` / `vae_bf16` / `linear` |
+| `lumen_vae_conv.py` | **the patch** — T=1 causal rewrite, T>1/cache kernel replacement, and layer selection |
+| `train_dit_lumen.py` | VeOmni entry point; `LUMEN_PATCH` = `vae_conv` / `vae_conv_video` / `vae_bf16` / `linear` |
 | `run_10steps.sh` | one training run, `baseline` / `flydsl` / `bf16-only`, `RES` picks resolution |
+| `run_wan_10steps.sh`, `wan_video.yaml` | Wan full-parameter SFT; `WAN_TASK=offline_embedding` selects offline embedding; same three modes |
 | `compare_runs.py` | per-step loss, timing, memory across runs |
 | `verify_lumen_conv.py` | the op on its own |
 | `verify_vae_patch.py` | patch numerics, and proof FlyDSL ran |
 | `trace_vae_convs.py` | real per-layer convolution inventory and timings (image VAE) |
-| `trace_video_vae_convs.py` | the same for a video VAE, split into the T=1 and T>1 shares |
+| `trace_video_vae_convs.py` | per-layer video-VAE timings split into T=1/no-cache, T>1/cache, plain Conv2d, and spatial-kernel-1 buckets |
+| `verify_video_vae_patch.py` | Wan 17-/81-frame numerics, whole-encode timing, and proof of the conv3d backend |
 | `overlay_aiter.py`, `aiter_overlay/` | the nine files Lumen needs from its aiter fork |
 | `qwen_image_1024.yaml` | **the default config**, 1024×1024 with `max_sequence_length` 512 |
 | `make_data.py`, `qwen_image_smoke.yaml` | smoke dataset, and the 256 config (`RES=256`) |
@@ -529,23 +541,176 @@ for the same reason.
 
 In priority order:
 
-1. **Extend the patch to the T>1 video path.** Already quantified: VeOmni's Wan
-   uses `AutoencoderKLWan`, and at 17 frames of 480×832 **78.6 % of one
-   encode's convolution time is in shapes whose time extent exceeds 1**, which
-   this example's patch does not touch — while FlyDSL is already **1.54x**
-   torch on them. `lumen.ops.conv3d` takes 5-D filters; the obstacle is one
-   precondition in the patch, since the T=1 identity does not hold for video.
-   Lifting it means keeping the module's causal `F.pad` and making a real 3-D
-   call. `trace_video_vae_convs.py` reproduces the measurement.
+1. **Increase the Wan sample count and control cold start and run drift.** The
+   T>1/cache path is complete; see [section 7](#wan-results). The repeated
+   training and offline-embedding intervals still overlap, so more repeats and
+   a longer steady-state window are needed to resolve FlyDSL's independent
+   effect on step time.
 2. **FP32 support in the FlyDSL conv.** Removes the `vae_bf16` complication
    entirely and makes the kernel usable in this trainer as configured.
-3. **A VAE-dominated workload.** At 0.56 % of a step even at 1024, the kernel
-   cannot show up in training no matter how fast it gets. VeOmni's
-   `offline_embedding` task, batch encoding and VAE-only serving are where it
-   would.
+3. **Continue evaluating batched encoding and VAE-only workloads.** Wan's
+   `offline_embedding` task has three repeats, but the kernel's independent
+   contribution remains below the run-to-run spread. It also includes text
+   encoding, data handling, and embedding writes, so a whole-VAE encode speedup
+   cannot be applied directly to the complete step.
 4. **Keep the whole VAE stage in channels-last.** NHWC is another 38 % over
    NCHW (6.115 → 3.778 ms), but only if the transposes are not paid per layer.
 5. **Upstream the conv3d→conv2d rewrite to diffusers.** It benefits every T=1
    (image) user, needs no FlyDSL, and changes no numerics.
 6. **Backward kernels**, if the VAE ever needs training. Frozen today, so not
    blocking.
+
+---
+
+<a id="wan-results"></a>
+
+## 7. Wan2.1: T>1 video, 8-GPU training, and offline embedding
+
+The runs in this section completed on 2026-09-08, and the raw logs were checked
+again on 2026-09-09. They use the same ROCm image, flydsl 0.3.2, VeOmni commit
+`573848a00fcd7329c2411346c6f4a983e9f67e3f`, and 8× MI355X as above. VeOmni
+itself is unmodified; the Wan extension lives entirely in this example.
+
+### 7.1 Scope and actual inputs
+
+| Test | Configuration | Completion |
+|---|---|---|
+| Single-GPU convolution trace / VAE encode | `AutoencoderKLWan`, BF16, 17 and 81 frames, 480×832 | Per-layer timing, whole-encode timing, and FP32-reference numerics passed; five internal encode repeats each |
+| FP32 fallback check | 17 frames, 480×832 | Empty FlyDSL backend cache confirms that FP32 does not invoke the kernel |
+| `online_training` | Full-parameter `Wan2.1-T2V-1.3B` DiT SFT, FSDP2, three modes × three repeats × 10 steps | 9/9 exit 0 and complete all 10 steps |
+| `offline_embedding` | Same condition model, data, and eight ranks; three modes × three repeats × 10 steps | 9/9 exit 0 and complete all 10 steps; no DiT, optimizer, or backward pass |
+| `LUMEN_TIME_VAE=1` | Both tasks × three modes, one 10-step run each | 6/6 exit 0; diagnostic encode timing only |
+
+Both tasks use a 400-record Tom-and-Jerry parquet dataset, 81 frames, global
+batch 8, and per-rank batch 1. The measured VAE input is
+**`(1, 3, 81, 368, 544)`**. This differs from the single-GPU benchmark's
+**480×832**, so their absolute times must not be mixed. `wan_video.yaml` uses
+full-parameter SFT rather than LoRA, eager attention / RoPE, enabled FSDP2 mixed
+precision, gradient checkpointing, disabled torch compile, and no model
+checkpoint writes. Offline embedding does write embedding data.
+
+### 7.2 Video patch and proof that the kernel executes
+
+`vae_conv_video` preserves the module's own causal padding and feature-cache
+concatenation, replacing only the underlying convolution by rebinding
+`_conv_forward`. It uses the image path's conv3d→conv2d identity only when
+**T=1 and no feature cache is present**; a cached T=1 call still requires a real
+3-D convolution. The patch takes over 58 convolution modules and skips 13 whose
+spatial kernel is 1. Every formal FlyDSL training and offline-embedding run
+contains:
+
+```text
+[lumen] vae_conv_video: patched 58 convolutions, skipped 13
+[lumen] backend for conv2d: FLYDSL
+[lumen] backend for conv3d: FLYDSL
+```
+
+VeOmni also loads the Wan VAE in FP32, so `flydsl` mode requires
+`LUMEN_PATCH=vae_bf16,vae_conv_video`. `vae_bf16` computes inside the VAE in
+BF16 and restores the encode output to FP32. The `bf16-only` control is required
+to separate the dtype effect from the kernel effect.
+
+### 7.3 Single GPU: convolutions, whole encode, and numerics
+
+All entries below are BF16 at 480×832. The convolution totals are isolated-op
+measurements; whole encode is timed separately.
+
+| Metric | 17 frames | 81 frames |
+|---|---|---|
+| T>1 or cached calls as a share of stock convolution time | 83.3 % | 91.2 % |
+| Those calls, torch → Lumen | 75.64 → 47.41 ms (1.60×) | 377.97 → 237.23 ms (1.59×) |
+| All convolutions, torch → video patch | 90.81 → 54.69 ms (1.66×) | 414.38 → 261.34 ms (1.59×) |
+| **Whole VAE encode, stock → video patch** | **153.2 → 117.1 ms (1.31×)** | **705.8 → 556.1 ms (1.27×)** |
+| Stock BF16 vs FP32 (SNR) | 50.2 dB | 49.7 dB |
+| Video-patched BF16 vs FP32 (SNR) | 50.4 dB | 50.2 dB |
+
+Numerical accuracy did not regress on these inputs. As a negative control,
+incorrectly replacing causal padding with symmetric padding gives only
+**−2.1 dB** on one layer, showing that the check detects this class of error;
+this is not a generated-video quality evaluation. Calls that the old image
+patch can actually reduce to 2-D account for only **10.4 % / 2.3 %** of
+convolution time at 17 / 81 frames. The earlier 21.4 % estimate grouped cached
+and other non-reducible calls by temporal shape and should be replaced by this
+measurement.
+
+### 7.4 Formal repeated comparisons: training and offline embedding
+
+The steady-state definition follows `compare_runs.py`: use the wandb timestamp
+intervals for **steps 3–10**, average them within a run, then summarize the
+three repeats. The interval is the min–max of those run means, and spread is
+`(max−min)/mean`; it is not a confidence interval. Step 1 JIT / autotune is
+excluded, and the formal matrix uses a warmed FlyDSL disk cache.
+
+| Task / mode | n | Steady mean | Range | Spread | Peak torch memory |
+|---|---:|---:|---:|---:|---:|
+| Training: baseline (FP32 VAE) | 3 | 4.31 s | 4.24–4.36 s | 2.9 % | 21.19 GB |
+| Training: bf16-only | 3 | 3.42 s | 3.38–3.46 s | 2.2 % | 20.95 GB |
+| Training: BF16 + FlyDSL | 3 | 3.44 s | 3.35–3.50 s | 4.3 % | 21.16 GB |
+| Offline embedding: baseline | 3 | 2.73 s | 2.65–2.78 s | 4.8 % | 14.73 GB |
+| Offline embedding: bf16-only | 3 | 1.82 s | 1.78–1.87 s | 4.6 % | 12.79 GB |
+| Offline embedding: BF16 + FlyDSL | 3 | 1.76 s | 1.65–1.90 s | 14.4 % | 12.85 GB |
+
+**The resolvable training gain comes from changing the VAE from FP32 to BF16:
+step time falls by about 20.6 %.** Adding FlyDSL changes 3.42 to 3.44 s, less
+than the within-mode spread, so it supports neither a speedup nor a regression
+claim. The dtype gain in offline embedding is about 33 %. Adding the kernel
+moves the mean from 1.82 to 1.76 s, but the intervals overlap and the FlyDSL
+group's spread is 14.4 %, so there is still **no evidence for an independent
+whole-step speedup**.
+
+For training, mean / maximum per-step loss deviation from baseline-r1 is
+0.335 % / 0.648 % and 0.680 % / 3.658 % for the repeated baselines,
+0.670 % / 2.170 % for bf16-only, and 0.689 % / 2.354 % for BF16 + FlyDSL. The
+patch's mean deviation is close to the repeated-baseline floor, and its maximum
+is below the maximum seen between two baseline runs. Ten steps are not evidence
+of long-run training equivalence. Loss and grad norm are always zero in the
+offline-embedding logs and cannot establish numerical equivalence or
+convergence.
+
+### 7.5 VAE timing explains the scale and must separate cold start
+
+The diagnostic runs synchronize the GPU around each encode. The table reports
+the mean of the nine calls after the first. **Do not use these diagnostic runs'
+own step times for performance comparisons**, because synchronization changes
+scheduling and overlap.
+
+| Task | FP32 encode | BF16 encode | BF16 + FlyDSL encode | Kernel saving |
+|---|---:|---:|---:|---:|
+| Training | 1272 ms | 380 ms | 310 ms | 70 ms, about 2.0 % of the uninstrumented BF16 step |
+| Offline embedding | 1268 ms | 381 ms | 307 ms | 74 ms, about 4.1 % of the uninstrumented BF16 step |
+
+In training, VAE encode occupies about **29.5 % / 11.1 % / 9.0 %** of the
+corresponding uninstrumented step. These are whole-encode shares, not
+"convolution shares." The kernel saving is comparable to the run-to-run spread.
+One exploratory cold-cache run spent about 4.5 minutes in its first step; that
+run is excluded from the formal three-repeat matrix. The first encode also pays
+JIT / autotune costs and must not be averaged together with steady calls.
+
+### 7.6 Result sources and reproduction entry points
+
+The formal summaries come from `compare_online.log` / `compare_embed.log`, over
+the logs, metadata, and offline wandb runs named
+`wan-{baseline,bf16-only,flydsl}-r{1,2,3}` and
+`wanemb-{baseline,bf16-only,flydsl}-r{1,2,3}`. Diagnostics come from
+`timevae_online.log` / `timevae_embed.log`; single-GPU measurements come from
+`trace_wan_17f_v2.log`, `trace_wan_81f.log`, `verify_wan_bf16.log`,
+`verify_wan_bf16_81f.log`, and `verify_wan_fp32.log`. These names identify the
+experiment artifacts; raw logs are not distributed with the repository. The
+first `discarded-pass1` matrix was edited while its shell script was running and
+is excluded from every formal performance table.
+
+After the earlier container and dependency setup, point `WAN_DIR` at a
+Wan2.1-T2V-1.3B Diffusers model and `WAN_DATA_DIR` at a parquet dataset in
+VeOmni's Wan format with at least 80 records. Run `run_wan_10steps.sh` serially
+for the three modes. Use `RUN_SUFFIX=r1`, `r2`, and `r3` to retain repeats, and
+set `WAN_TASK=offline_embedding` for the offline task. All modes must share the
+same sidecar environment; baseline must leave `LUMEN_PATCH` unset, and formal
+timing must leave `LUMEN_TIME_VAE` unset. Enable `LUMEN_TIME_VAE=1` only for the
+separate diagnostic. Pass every repeat name to `compare_runs.py`; do not select
+only the fastest run.
+
+**Scope boundary:** the trained model here is Wan2.1-T2V-1.3B. Wan 14B, I2V,
+and LoRA were not run; a single-GPU result for the shared VAE is not a training
+result for those models. This work validates encode forward on a frozen VAE,
+not VAE-training backward, decode performance, long-run convergence, or
+generated-video quality.

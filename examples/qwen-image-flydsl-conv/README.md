@@ -1,10 +1,17 @@
-# Qwen-Image DiT SFT 接入 Lumen FlyDSL 3D 卷积 —— 集成验证报告与复现手册
+# Qwen-Image / Wan2.1 接入 Lumen FlyDSL 卷积 —— 集成验证报告与复现手册
 
 > English version: [README_EN.md](README_EN.md)
 
-本文记录一次完整的算子集成验证：把冻结的 Qwen-Image VAE 中的卷积改由 Lumen 的
+本文记录图像与视频两条算子集成验证：把冻结的 Qwen-Image / Wan2.1 VAE 中的卷积改由 Lumen 的
 FlyDSL implicit-GEMM 内核承担，在真实的 8 卡 VeOmni 训练中运行，并与未接入的
-同配置运行逐项对照。全部步骤基于已提交的代码，复现过程中无需修改任何文件。
+同配置运行逐项对照。第一至六节是 Qwen-Image 的报告与复现步骤，
+[第七节](#wan-results) 是 Wan 视频路径、训练与离线 embedding 的实测结果。
+
+**测试覆盖（2026-09-09 核对）**：Qwen-Image 已完成 256×256 下 2 / 10 / 500 步
+全参数 SFT、FlyDSL 10 步重复对照，以及 1024×1024 下独立复现与 10 步 A/B；
+500 步 mean loss 从 0.02083 降至 0.00621（−70.2 %），但数据仅为 8 张循环图像，
+这是优化链路与过拟合验证。Wan 已完成 17 / 81 帧单卡验证，以及 18 次 10 步正式对照
+和 6 次 VAE 计时诊断；尚无 Wan 长程收敛或生成质量评估。
 
 ---
 
@@ -458,14 +465,16 @@ conv3d(pad(x), w)  ==  conv2d(x, w[:, :, -1])
 |---|---|
 | `env.sh` | 全部路径的唯一来源 |
 | `setup_env.sh` | flydsl 独立安装、aiter 补齐、VeOmni 安装 |
-| `lumen_vae_conv.py` | **patch 本体**，T=1 因果重写与层选择策略 |
-| `train_dit_lumen.py` | VeOmni 入口，`LUMEN_PATCH` = `vae_conv` / `vae_bf16` / `linear` |
+| `lumen_vae_conv.py` | **patch 本体**，T=1 因果重写、T>1/cache 卷积替换与层选择策略 |
+| `train_dit_lumen.py` | VeOmni 入口，`LUMEN_PATCH` = `vae_conv` / `vae_conv_video` / `vae_bf16` / `linear` |
 | `run_10steps.sh` | 单次训练，`baseline` / `flydsl` / `bf16-only`，`RES` 选分辨率 |
+| `run_wan_10steps.sh`、`wan_video.yaml` | Wan 全参数 SFT；`WAN_TASK=offline_embedding` 切换离线 embedding，同样支持三模式 |
 | `compare_runs.py` | 多运行的逐步 loss、步时、显存对比 |
 | `verify_lumen_conv.py` | 算子自身验证 |
 | `verify_vae_patch.py` | patch 数值验证，及 FlyDSL 已执行的证据 |
 | `trace_vae_convs.py` | 真实逐层卷积清单与计时（图像 VAE） |
-| `trace_video_vae_convs.py` | 视频 VAE 的卷积清单，按时间维拆分已覆盖/未覆盖部分 |
+| `trace_video_vae_convs.py` | 视频 VAE 的逐层计时，区分 T=1 无 cache、T>1/cache、普通 Conv2d 与空间 kernel=1 |
+| `verify_video_vae_patch.py` | Wan 17 / 81 帧数值、完整 encode 计时和 conv3d 后端验证 |
 | `overlay_aiter.py`、`aiter_overlay/` | Lumen 所需、来自其 aiter fork 的 9 个文件 |
 | `qwen_image_1024.yaml` | **默认配置**，1024×1024 + `max_sequence_length` 512 |
 | `make_data.py`、`qwen_image_smoke.yaml` | smoke 数据集，及 256 配置（`RES=256`） |
@@ -489,20 +498,144 @@ conv3d(pad(x), w)  ==  conv2d(x, w[:, :, -1])
 
 按优先级排列：
 
-1. **将 patch 扩展到 T>1 的视频路径。** 收益已量化：VeOmni 的 Wan 使用
-   `AutoencoderKLWan`，17 帧 480×832 下一次 encode 的卷积耗时中，
-   **78.6 % 落在时间维大于 1 的形状上**，本例的 patch 完全够不着；
-   而 FlyDSL 在这些形状上已比 torch 快 **1.54×**。`lumen.ops.conv3d` 本身支持
-   5D 滤波器，阻碍仅在于本例 patch 的一句前提判断——T=1 恒等式对视频不成立，
-   需保留模块原有的 causal `F.pad` 并直接发起 3D 调用。
-   用 `trace_video_vae_convs.py` 可复现该数据。
+1. **扩大 Wan 性能测量的样本量，并控制冷启动与运行漂移。** T>1/cache 路径已完成，
+   见[第七节](#wan-results)。当前训练与离线 embedding 的重复区间仍重叠，
+   需更多重复和更长的稳态窗口才能判断 FlyDSL 对步时的独立贡献。
 2. **使 FlyDSL conv 支持 FP32。** 可彻底消除 `vae_bf16` 带来的复杂度，
    使内核在该 trainer 的现有配置下直接可用。
-3. **转向以 VAE 为主的负载。** 即使在 1024 下卷积也仅占单步 0.56 %，
-   内核再快也不会在训练中显现。VeOmni 的 `offline_embedding` 任务、
-   批量离线编码、VAE-only 推理服务才是其适用场景。
+3. **继续评估批量编码与 VAE-only 负载。** Wan 的 `offline_embedding` 已做三次重复，
+   内核独立贡献仍未超出散布；它还包含文本编码、数据处理和 embedding 写出，
+   不能将完整 VAE encode 的加速比直接套到整步。
 4. **使整段 VAE 保持 channels-last。** NHWC 较 NCHW 再快约 38 %
    （6.115 → 3.778 ms），前提是转置开销不按层重复支付。
 5. **将 conv3d→conv2d 重写提交至 diffusers 上游。** 对所有 T=1（图像）用户
    均有收益，不依赖 FlyDSL，不改变数值。
 6. **实现反向 kernel**，若将来需要训练 VAE。当前 VAE 冻结，非阻塞项。
+
+---
+
+<a id="wan-results"></a>
+
+## 七、Wan2.1：T>1 视频、8 卡训练与离线 embedding
+
+本节数据来自 2026-09-08 的已完成运行，2026-09-09 核对原始日志。
+环境沿用上述 ROCm 镜像、flydsl 0.3.2 与 VeOmni commit
+`573848a00fcd7329c2411346c6f4a983e9f67e3f`，8× MI355X。
+VeOmni 源码未修改；Wan 扩展在本例脚本内实现。
+
+### 1. 测试范围与实际输入
+
+| 测试 | 配置 | 完成情况 |
+|---|---|---|
+| 单卡卷积 trace / VAE encode | `AutoencoderKLWan`，BF16，17 与 81 帧，480×832 | 逐层计时、完整 encode 与 FP32 参照数值验证通过；encode 各取 5 次内部重复 |
+| FP32 回退检查 | 17 帧，480×832 | FlyDSL 后端 cache 为空，确认 FP32 不会启用内核 |
+| `online_training` | `Wan2.1-T2V-1.3B` 全参数 DiT SFT，FSDP2，三模式各 3 次 × 10 步 | 9/9 exit 0，均完成 10 步 |
+| `offline_embedding` | 同一 condition model、数据、8 个 rank，三模式各 3 次 × 10 步 | 9/9 exit 0，均完成 10 步；不创建 DiT / optimizer，不做 backward |
+| `LUMEN_TIME_VAE=1` | 两种任务 × 三模式，各 1 次 × 10 步 | 6/6 exit 0，单独诊断 encode 时间 |
+
+两种任务均使用 400 条 Tom-and-Jerry parquet 数据、81 帧、global batch 8、
+每卡 batch 1，实测 VAE 输入为 **`(1, 3, 81, 368, 544)`**。
+这与单卡 benchmark 的 **480×832** 不同，不能混用计时。
+采用 `wan_video.yaml`：全参数 SFT（不是 LoRA）、eager attention / RoPE、
+FSDP2 mixed precision 开启、gradient checkpointing 开启、torch compile 关闭，
+所有模型 checkpoint 保存关闭。离线 embedding 会写出 embedding 数据。
+
+### 2. 视频 patch 与内核执行证据
+
+`vae_conv_video` 保留模块原有的 causal padding 和 feature cache 拼接，
+通过改绑 `_conv_forward` 替换其底层卷积。仅在 **T=1 且无 cache** 时沿用图像的
+conv3d→conv2d 恒等式；带 cache 的 T=1 也必须保留真正的 3D 卷积。
+共接管 58 个卷积模块，跳过 13 个空间 kernel=1 的模块。
+训练和离线 embedding 的全部 FlyDSL 正式运行均包含：
+
+```text
+[lumen] vae_conv_video: patched 58 convolutions, skipped 13
+[lumen] backend for conv2d: FLYDSL
+[lumen] backend for conv3d: FLYDSL
+```
+
+VeOmni 同样以 FP32 加载 Wan VAE；因此 `flydsl` 模式需要
+`LUMEN_PATCH=vae_bf16,vae_conv_video`。`vae_bf16` 在 VAE 内部使用 BF16，
+并将 encode 的输出恢复为 FP32。必须用 `bf16-only` 对照，才能区分 dtype 与内核收益。
+
+### 3. 单卡：卷积、完整 encode 与数值
+
+以下均为 BF16、480×832；卷积合计是孤立算子计时，完整 encode 是另一次直接计时。
+
+| 指标 | 17 帧 | 81 帧 |
+|---|---|---|
+| T>1 或带 cache 占原生卷积时间 | 83.3 % | 91.2 % |
+| 上述卷积 torch → Lumen | 75.64 → 47.41 ms（1.60×） | 377.97 → 237.23 ms（1.59×） |
+| 所有卷积合计 torch → 视频 patch | 90.81 → 54.69 ms（1.66×） | 414.38 → 261.34 ms（1.59×） |
+| **完整 VAE encode：原生 → 视频 patch** | **153.2 → 117.1 ms（1.31×）** | **705.8 → 556.1 ms（1.27×）** |
+| 原生 BF16 vs FP32（SNR） | 50.2 dB | 49.7 dB |
+| 视频 patch BF16 vs FP32（SNR） | 50.4 dB | 50.2 dB |
+
+在本次输入上数值精度未劣化。将 causal padding 错换为对称 padding 的单层反例
+仅 **−2.1 dB**，说明验证能检出此类错误；这不是生成质量评估。
+旧图像 patch 真正可降维的调用仅占卷积时间 **10.4 % / 2.3 %**（17 / 81 帧）。
+此前按时间维形状估算的 21.4 % 覆盖率包含了带 cache 等不可降维调用，应使用本节新统计。
+
+### 4. 正式重复对照：训练与离线 embedding
+
+稳态口径沿用 `compare_runs.py`：根据 wandb 时间戳取 **step 3–10** 的间隔均值，
+再汇总三次运行；区间是三次运行均值的 min–max，散布为 `(max−min)/mean`，不是置信区间。
+首次调用的 JIT / autotune 不计入稳态，正式矩阵使用已预热的 FlyDSL 磁盘缓存。
+
+| 任务 / 模式 | n | 稳态均值 | 区间 | 散布 | torch 峰值显存 |
+|---|---|---|---|---|---|
+| 训练：baseline（VAE FP32） | 3 | 4.31 s | 4.24–4.36 s | 2.9 % | 21.19 GB |
+| 训练：bf16-only | 3 | 3.42 s | 3.38–3.46 s | 2.2 % | 20.95 GB |
+| 训练：BF16 + FlyDSL | 3 | 3.44 s | 3.35–3.50 s | 4.3 % | 21.16 GB |
+| 离线 embedding：baseline | 3 | 2.73 s | 2.65–2.78 s | 4.8 % | 14.73 GB |
+| 离线 embedding：bf16-only | 3 | 1.82 s | 1.78–1.87 s | 4.6 % | 12.79 GB |
+| 离线 embedding：BF16 + FlyDSL | 3 | 1.76 s | 1.65–1.90 s | 14.4 % | 12.85 GB |
+
+**训练中可分辨的收益来自 VAE 的 FP32→BF16：步时约减少 20.6 %。**
+再加 FlyDSL 的 3.42→3.44 s 差异小于组内散布，不能据此判断加速或回退。
+离线 embedding 的 dtype 收益约为 33 %；再加内核的均值从 1.82→1.76 s，
+但区间重叠且 FlyDSL 组散布达 14.4 %，**仍不能主张独立的整步加速**。
+
+训练逐步 loss 相对 baseline-r1 的 mean / max 偏差：baseline 重复为
+0.335 % / 0.648 % 和 0.680 % / 3.658 %；bf16-only 为 0.670 % / 2.170 %，
+BF16 + FlyDSL 为 0.689 % / 2.354 %。patch 的平均偏差与重复基线相近，
+最大偏差低于基线重复中观察到的最大值；10 步不足以证明长期训练等价。
+离线 embedding 日志中的 loss / grad_norm 恒为 0，不能作为数值一致性或收敛证据。
+
+### 5. VAE 计时解释了量级，也必须分离冷启动
+
+独立诊断运行对 encode 做 GPU 同步；下表为首次调用之后 9 次的均值。
+**不使用这些诊断运行自身的步时做性能对照**，同步会影响调度与重叠。
+
+| 任务 | FP32 encode | BF16 encode | BF16 + FlyDSL encode | 内核节省 |
+|---|---|---|---|---|
+| 训练 | 1272 ms | 380 ms | 310 ms | 70 ms，约为未插桩 BF16 步时的 2.0 % |
+| 离线 embedding | 1268 ms | 381 ms | 307 ms | 74 ms，约为未插桩 BF16 步时的 4.1 % |
+
+训练中 VAE encode 占对应未插桩步时约 **29.5 % / 11.1 % / 9.0 %**。
+这些是完整 encode 占比，不能称为“卷积占比”。内核收益与运行散布处于相近量级。
+另一次冷缓存探索运行的首步约需 4.5 分钟；正式三重复矩阵不包含该运行。
+首次 encode 还会受到 JIT / autotune 影响，不能将其与后续调用混算为稳态均值。
+
+### 6. 结果来源与复查入口
+
+正式结果来自 `compare_online.log` / `compare_embed.log`，对应
+`wan-{baseline,bf16-only,flydsl}-r{1,2,3}` 与
+`wanemb-{baseline,bf16-only,flydsl}-r{1,2,3}` 的日志、meta 和 offline wandb。
+诊断来自 `timevae_online.log` / `timevae_embed.log`；单卡数据来自
+`trace_wan_17f_v2.log`、`trace_wan_81f.log`、`verify_wan_bf16.log`、
+`verify_wan_bf16_81f.log`、`verify_wan_fp32.log`。
+这些是实验产物名，原始日志不随仓库分发。首轮 `discarded-pass1` 在运行期间改过脚本，
+不纳入正式性能表。
+
+在前述容器与依赖准备完成、`WAN_DIR` 指向 Wan2.1-T2V-1.3B Diffusers 模型、
+`WAN_DATA_DIR` 指向按 VeOmni Wan 数据格式准备的 parquet（至少 80 条）后，
+可用 `run_wan_10steps.sh` 串行运行三模式。设 `RUN_SUFFIX=r1` / `r2` / `r3`
+保留重复结果，`WAN_TASK=offline_embedding` 切换离线任务。
+三模式必须共用 sidecar 环境，baseline 的 `LUMEN_PATCH` 应未设置，正式计时的
+`LUMEN_TIME_VAE` 应未设置；单独诊断时才设 `LUMEN_TIME_VAE=1`。
+用 `compare_runs.py` 传入全部重复名汇总，勿只选最快的一次。
+
+**范围边界**：本节训练对象是 Wan2.1-T2V-1.3B，未跑 Wan 14B / I2V / LoRA；
+同一 VAE 的单卡结果不等于这些模型的训练结果。当前验证针对冻结 VAE 的 encode 前向，
+没有验证 VAE 训练反向、decode 性能、长程收敛或视频生成质量。

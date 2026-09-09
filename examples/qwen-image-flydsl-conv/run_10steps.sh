@@ -94,7 +94,11 @@ mkdir -p "$WANDB_DIR"
 # diffusers probes aiter when choosing an attention backend. Keeping the
 # environment fixed keeps that out of the comparison.
 export PYTHONPATH="$LUMEN_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
-[ -n "$PATCH" ] && export LUMEN_PATCH="$PATCH"
+if [ -n "$PATCH" ]; then
+    export LUMEN_PATCH="$PATCH"
+else
+    unset LUMEN_PATCH
+fi
 
 TASK="$EXAMPLE_DIR/train_dit_lumen.py"
 META="$LOG_DIR/$RUN.meta.txt"
