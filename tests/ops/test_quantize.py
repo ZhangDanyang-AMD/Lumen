@@ -2223,6 +2223,34 @@ def test_mxfp4_choose_backend_rechecks_a_cached_decision(monkeypatch):
         linear_mod._mxfp4_legality_cache.clear()
 
 
+def test_mxfp4_remeasure_excludes_plain_for_shuffled_weight(monkeypatch):
+    """A lapsed decision must not remeasure a shuffled operand as row-major."""
+    from lumen.ops.quantize import linear as linear_mod
+
+    key = (2048, 4096, 14336)
+    a = torch.empty((key[0], key[2] // 2), dtype=torch.uint8)
+    w = torch.empty((key[1], key[2] // 2), dtype=torch.uint8)
+    linear_mod._mark_mxfp4_data_shuffled(w)
+
+    mxfp4_autotune.clear()
+    linear_mod._mxfp4_legality_cache.clear()
+    try:
+        mxfp4_autotune._choice[key] = "asm"
+        monkeypatch.setattr(linear_mod, "_mxfp4_backend_legality", lambda k, x, y: (False, True))
+        monkeypatch.setattr(linear_mod, "_mxfp4_preshuffle_eligible", lambda x, y: False)
+
+        def _pick(_key, candidates, fallback=None):
+            assert [name for name, _fn in candidates] == ["shuffled"]
+            assert fallback == "shuffled"
+            return "shuffled"
+
+        monkeypatch.setattr(linear_mod.mxfp4_autotune, "pick_backend", _pick)
+        assert linear_mod._mxfp4_choose_backend(a, w, None, None) == "shuffled"
+    finally:
+        mxfp4_autotune.clear()
+        linear_mod._mxfp4_legality_cache.clear()
+
+
 def test_mxfp4_dispatch_fallback_lock_is_scoped_to_shape(monkeypatch):
     """One shape's BF16 verdict must not bypass another shape's working kernel."""
     from lumen.ops import dispatch as dispatch_mod

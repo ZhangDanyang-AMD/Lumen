@@ -1578,6 +1578,7 @@ def _mxfp4_choose_backend(a_fp4, w_fp4, scale_a, scale_w):
     _mxfp4_probe_backends()
     key = (a_fp4.shape[0], w_fp4.shape[0], a_fp4.shape[1] * 2)
     asm_ok, shuf_ok = _mxfp4_backend_legality(key, a_fp4, w_fp4)
+    shuffled_b = _is_mxfp4_data_shuffled(w_fp4)
 
     name = mxfp4_autotune.cached(key)
     if name is not None:
@@ -1606,14 +1607,20 @@ def _mxfp4_choose_backend(a_fp4, w_fp4, scale_a, scale_w):
         candidates.append(
             ("shuffled", lambda: _gemm_mxfp4_aiter_preshuffle(a_fp4, w_fp4, scale_a, scale_w))
         )
-    candidates.append(("plain", lambda: _gemm_mxfp4_aiter(a_fp4, w_fp4, scale_a, scale_w)))
+    if not shuffled_b:
+        candidates.append(("plain", lambda: _gemm_mxfp4_aiter(a_fp4, w_fp4, scale_a, scale_w)))
+    if not candidates:
+        raise AssertionError(
+            "MXFP4 B operand is pre-shuffled but no shuffled-data backend is legal "
+            f"for shape {key}"
+        )
 
     if asm_ok and _mxfp4_asm_eligible(a_fp4, w_fp4):
         static = "asm"
     elif shuf_ok and _mxfp4_preshuffle_eligible(a_fp4, w_fp4):
         static = "shuffled"
     else:
-        static = "plain"
+        static = candidates[0][0] if shuffled_b else "plain"
 
     name = mxfp4_autotune.pick_backend(key, candidates, fallback=static)
     mxfp4_autotune.record_shape(key, tuned=asm_ok, backend=name)
