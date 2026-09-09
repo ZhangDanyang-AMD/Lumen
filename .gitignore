@@ -16,6 +16,7 @@ wandb/
 runs/
 train_*.log
 .claude/worktrees/
+.claude/tmp-training-bugs.md
 
 # Datasets staged by the Megatron launchers
 examples/*/results/mock_data/

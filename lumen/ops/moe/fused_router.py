@@ -4,12 +4,11 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Fused MoE token routing and Megatron score-function operations.
+"""Fused MoE token routing operations — AITER backend only.
 
 Provides fused top-k with softmax, token-to-expert permute, and reverse
-unpermute through AITER ASM/HIP kernels. The Megatron score-function surface
-uses AITER softmax/aux-loss helpers when present and exact PyTorch reductions
-otherwise.
+unpermute.  Dispatches to AITER ASM/HIP kernels.  No PyTorch fallback;
+AITER must be available.
 
 AITER kernel mapping:
   fused_topk      -> aiter.topk_softmax      (ASM, fused softmax + top-k + renorm)
@@ -40,22 +39,17 @@ works, but the weighted sum for that token will be approximate.
 """
 
 import functools
-import logging
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
-from torch import Tensor
 
 from lumen.ops.dispatch import (
     _probe_aiter_moe_sorting,
     _probe_aiter_moe_sum,
     _probe_aiter_moe_topk_softmax,
-    _probe_aiter_softmax_topk,
-    _probe_aiter_triton_moe_aux_loss,
 )
 
 BLOCK_SIZE_M = 32
-logger = logging.getLogger(__name__)
 
 
 # ── Lazy AITER getters ──────────────────────────────────────────────────────
@@ -328,249 +322,3 @@ def fused_unpermute(
     moe_sum(input_3d, output)
     torch.cuda.synchronize()
     return output
-
-
-# ── Megatron score-function router surface ──────────────────────────────────
-
-
-def _aiter_softmax_topk(logits_fp32: Tensor, k: int, need_renorm: bool):
-    """Call AITER HIP softmax_topk, allocating its output buffers."""
-    n, num_experts = logits_fp32.shape
-    device = logits_fp32.device
-    scores = torch.empty(n, num_experts, dtype=torch.float32, device=device)
-    topk_weights = torch.empty(n, k, dtype=torch.float32, device=device)
-    topk_indices = torch.empty(n, k, dtype=torch.int32, device=device)
-    token_expert_indices = torch.empty(n, k, dtype=torch.int32, device=device)
-
-    from aiter.ops.moe_op import softmax_topk
-
-    softmax_topk(
-        scores,
-        topk_weights,
-        topk_indices,
-        token_expert_indices,
-        logits_fp32.contiguous(),
-        k,
-        need_renorm,
-    )
-    return scores, topk_weights, topk_indices
-
-
-def _pytorch_softmax_topk(logits_fp32: Tensor, k: int, need_renorm: bool):
-    """PyTorch fallback for AITER builds without ``softmax_topk``."""
-    scores = torch.softmax(logits_fp32, dim=-1)
-    topk_weights, topk_indices = scores.topk(k, dim=-1, largest=True, sorted=True)
-    if need_renorm:
-        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    return scores, topk_weights, topk_indices
-
-
-def _softmax_topk(logits_fp32: Tensor, k: int, need_renorm: bool):
-    if _probe_aiter_softmax_topk():
-        return _aiter_softmax_topk(logits_fp32, k, need_renorm)
-    # The HIP binding is absent on CPU and in AITER builds without this op.
-    logger.debug("fused_router: AITER softmax_topk unavailable, using PyTorch")
-    return _pytorch_softmax_topk(logits_fp32, k, need_renorm)
-
-
-class LumenFusedComputeScoreForMoEAuxLoss(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, logits: Tensor, topk: int) -> Tuple[Tensor, Tensor]:
-        scores, _, topk_indices = _softmax_topk(logits.float(), topk, False)
-        n, num_experts = scores.shape
-        routing_map = torch.zeros(n, num_experts, dtype=torch.bool, device=logits.device)
-        routing_map.scatter_(1, topk_indices.long(), True)
-        ctx.save_for_backward(scores)
-        return routing_map, scores
-
-    @staticmethod
-    def backward(ctx, _grad_routing_map, grad_scores):
-        (scores,) = ctx.saved_tensors
-        dot = (grad_scores * scores).sum(dim=-1, keepdim=True)
-        return scores * (grad_scores - dot), None
-
-
-class LumenFusedTopkWithScoreFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx,
-        logits: Tensor,
-        topk: int,
-        use_pre_softmax: bool,
-        scaling_factor: Optional[float],
-    ) -> Tuple[Tensor, Tensor]:
-        n, num_experts = logits.shape
-
-        if use_pre_softmax:
-            scores, weights, topk_indices = _softmax_topk(logits.float(), topk, True)
-            selected_scores = scores.gather(1, topk_indices.long())
-            selected_sum = selected_scores.sum(dim=-1, keepdim=True)
-            if scaling_factor is not None:
-                weights = weights * scaling_factor
-
-            routing_probs = torch.zeros(
-                n, num_experts, dtype=weights.dtype, device=logits.device,
-            )
-            routing_probs.scatter_(1, topk_indices.long(), weights)
-            routing_map = torch.zeros(
-                n, num_experts, dtype=torch.bool, device=logits.device,
-            )
-            routing_map.scatter_(1, topk_indices.long(), True)
-            ctx.save_for_backward(
-                scores, selected_scores, topk_indices.long(), selected_sum,
-            )
-            ctx.scaling_factor = scaling_factor
-            ctx.use_pre_softmax = True
-            return routing_map, routing_probs
-
-        ctx.use_pre_softmax = False
-        logits_fp32 = logits.float().detach().requires_grad_(True)
-        with torch.enable_grad():
-            _, topk_indices = logits_fp32.topk(topk, dim=-1)
-            weights = torch.softmax(logits_fp32.gather(1, topk_indices), dim=-1)
-            if scaling_factor is not None:
-                weights = weights * scaling_factor
-            routing_probs = torch.zeros(
-                n, num_experts, dtype=weights.dtype, device=logits.device,
-            )
-            routing_probs.scatter_(1, topk_indices, weights)
-
-        routing_map = torch.zeros(
-            n, num_experts, dtype=torch.bool, device=logits.device,
-        )
-        routing_map.scatter_(1, topk_indices, True)
-        ctx.save_for_backward(logits_fp32, routing_probs)
-        return routing_map, routing_probs.detach()
-
-    @staticmethod
-    def backward(ctx, _grad_routing_map, grad_routing_probs):
-        if ctx.use_pre_softmax:
-            scores, selected_scores, topk_indices, selected_sum = ctx.saved_tensors
-            n, num_experts = scores.shape
-            grad_weights = grad_routing_probs.gather(1, topk_indices)
-            if ctx.scaling_factor is not None:
-                grad_weights = grad_weights * ctx.scaling_factor
-
-            weights = selected_scores / selected_sum
-            grad_selected = (
-                grad_weights - (grad_weights * weights).sum(dim=-1, keepdim=True)
-            ) / selected_sum
-            grad_scores = torch.zeros(
-                n, num_experts, dtype=scores.dtype, device=scores.device,
-            )
-            grad_scores.scatter_add_(1, topk_indices, grad_selected)
-            dot = (grad_scores * scores).sum(dim=-1, keepdim=True)
-            return scores * (grad_scores - dot), None, None, None
-
-        logits_fp32, routing_probs = ctx.saved_tensors
-        routing_probs.backward(grad_routing_probs)
-        return logits_fp32.grad, None, None, None
-
-
-class LumenFusedMoEAuxLoss(torch.autograd.Function):
-    @staticmethod
-    def forward(
-        ctx,
-        probs: Tensor,
-        tokens_per_expert: Tensor,
-        total_num_tokens: int,
-        num_experts: int,
-        topk: int,
-        coeff: float,
-    ) -> Tensor:
-        scale = num_experts * coeff / (
-            topk * total_num_tokens * total_num_tokens
-        )
-        ctx.save_for_backward(tokens_per_expert)
-        ctx.scale = scale
-        ctx.n = probs.shape[0]
-        ctx.num_experts = num_experts
-
-        if _probe_aiter_triton_moe_aux_loss():
-            from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_fwd
-
-            return moe_aux_loss_fwd(
-                probs.float(), tokens_per_expert.float(), scale,
-            )
-        # Switch load balancing is a single reduction, so this is an exact
-        # functional fallback when AITER's Triton helper is unavailable.
-        logger.debug("fused_router: AITER moe_aux_loss unavailable, using PyTorch")
-        return (
-            probs.float().sum(dim=0) * tokens_per_expert.float()
-        ).sum() * scale
-
-    @staticmethod
-    def backward(ctx, grad_aux_loss: Tensor):
-        (tokens_per_expert,) = ctx.saved_tensors
-        if _probe_aiter_triton_moe_aux_loss():
-            from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_bwd
-
-            grad_probs = moe_aux_loss_bwd(
-                tokens_per_expert.float(),
-                ctx.scale,
-                grad_aux_loss,
-                ctx.n,
-                ctx.num_experts,
-            )
-        else:
-            logger.debug(
-                "fused_router: AITER moe_aux_loss_bwd unavailable, using PyTorch",
-            )
-            grad_probs = (
-                tokens_per_expert.float()
-                .unsqueeze(0)
-                .expand(ctx.n, ctx.num_experts)
-                * ctx.scale
-                * grad_aux_loss
-            )
-        return grad_probs, None, None, None, None, None
-
-
-def fused_topk_with_score_function(
-    logits: Tensor,
-    topk: int,
-    use_pre_softmax: bool,
-    num_groups: Optional[int],
-    group_topk: Optional[int],
-    scaling_factor: Optional[float],
-    score_function: str,
-    expert_bias: Optional[Tensor],
-) -> Tuple[Tensor, Tensor]:
-    if score_function != "softmax":
-        raise NotImplementedError(
-            f"score_function={score_function!r} not supported, only 'softmax'",
-        )
-    if num_groups and num_groups > 0:
-        raise NotImplementedError("Group routing (num_groups > 0) not supported")
-    if group_topk and group_topk > 0:
-        raise NotImplementedError("Group top-k not supported")
-    if expert_bias is not None:
-        raise NotImplementedError("expert_bias not supported")
-    return LumenFusedTopkWithScoreFunction.apply(
-        logits, topk, use_pre_softmax, scaling_factor,
-    )
-
-
-def fused_compute_score_for_moe_aux_loss(
-    logits: Tensor,
-    topk: int,
-    score_function: str,
-) -> Tuple[Tensor, Tensor]:
-    if score_function != "softmax":
-        raise NotImplementedError(
-            f"score_function={score_function!r} not supported, only 'softmax'",
-        )
-    return LumenFusedComputeScoreForMoEAuxLoss.apply(logits, topk)
-
-
-def fused_moe_aux_loss(
-    probs: Tensor,
-    tokens_per_expert: Tensor,
-    total_num_tokens: int,
-    num_experts: int,
-    topk: int,
-    coeff: float,
-) -> Tensor:
-    return LumenFusedMoEAuxLoss.apply(
-        probs, tokens_per_expert, total_num_tokens, num_experts, topk, coeff,
-    )
