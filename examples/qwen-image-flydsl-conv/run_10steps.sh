@@ -14,10 +14,11 @@
 # config. 1024 is the default because the kernel's advantage is much larger
 # there and, measured on this node, it costs neither step time nor memory.
 #
-# Writes, with the resolution in the name so the two never overwrite each other:
-#   $LOG_DIR/<mode>-<res>.log       the training log
-#   $LOG_DIR/<mode>-<res>.meta.txt  command, commit, exit code, wall clock
-#   $OUT_DIR/wandb-<mode>-<res>/    offline wandb, full-precision per-step metrics
+# RUN_SUFFIX optionally preserves repeats, for example RUN_SUFFIX=r1.
+# Writes, with the resolution and optional suffix in the name:
+#   $LOG_DIR/<mode>-<res>[-<suffix>].log       the training log
+#   $LOG_DIR/<mode>-<res>[-<suffix>].meta.txt  command, commit, exit code, wall clock
+#   $OUT_DIR/wandb-<mode>-<res>[-<suffix>]/    offline wandb metrics
 set -o pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
@@ -38,7 +39,7 @@ case "$RES" in
     256)  CONFIG="$EXAMPLE_DIR/qwen_image_smoke.yaml" ;;
     *) echo "unknown RES: $RES (expected 1024 or 256)" >&2; exit 2 ;;
 esac
-RUN="$MODE-$RES"
+RUN="$MODE-$RES${RUN_SUFFIX:+-$RUN_SUFFIX}"
 
 STEPS="${STEPS:-10}"
 NPROC="${NPROC_PER_NODE:-8}"
