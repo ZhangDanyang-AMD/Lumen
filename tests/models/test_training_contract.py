@@ -120,6 +120,11 @@ class TestSharedTrainingContractArgs:
         args = self._parse_fsdp(["--fp8-training"])
         assert args.linear_fp8 is True
 
+    def test_fsdp_linear_fp4_switch(self):
+        args = self._parse_fsdp(["--linear-fp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+
     def test_fsdp_fp8_format_legacy_alias_sets_linear_fp8_format(self):
         args = self._parse_fsdp(["--fp8-format", "hybrid"])
         assert args.linear_fp8_format == "hybrid"

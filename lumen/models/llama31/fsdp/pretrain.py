@@ -55,6 +55,7 @@ from lumen.models.fsdp import (  # noqa: F401
     apply_fp8_training,
     apply_lora,
     build_cosine_warmup_scheduler,
+    register_quant_optimizer_hooks,
     reset_fp8_state,
     save_fsdp_checkpoint,
     should_run_eval_step,
@@ -126,6 +127,9 @@ class FSDPTrainer:
 
     def __init__(self, args):
         self.args = args
+        from lumen.models.fsdp import validate_fsdp_quant_args
+
+        validate_fsdp_quant_args(args)
         self._setup_distributed()
 
         if args.use_ckpt:
@@ -158,6 +162,7 @@ class FSDPTrainer:
             eps=1e-5,
             weight_decay=args.weight_decay,
         )
+        register_quant_optimizer_hooks(self.model, self.optimizer, args)
         self.scheduler = self._build_scheduler()
         sync_scheduler_to_ckpt_step(self.scheduler, args)
 
@@ -196,7 +201,9 @@ class FSDPTrainer:
         )
         mp = MixedPrecision(
             param_dtype=torch.bfloat16,
-            reduce_dtype=torch.float32 if self.args.linear_fp8 else torch.bfloat16,
+            reduce_dtype=torch.float32
+            if (self.args.linear_fp8 or getattr(self.args, "linear_fp4", False))
+            else torch.bfloat16,
             buffer_dtype=torch.bfloat16,
         )
         sharding = _SHARDING_MAP.get(self.args.sharding_strategy, ShardingStrategy.FULL_SHARD)
@@ -254,7 +261,8 @@ class FSDPTrainer:
                 logger.info("Running %d synthetic warmup steps ...", args.warmup_steps)
             for _ in range(args.warmup_steps):
                 self._synthetic_warmup_step()
-            if args.linear_fp8:
+            # MXFP4 counts here too, matching the Megatron and TRL warmups.
+            if args.linear_fp8 or getattr(args, "linear_fp4", False):
                 reset_fp8_state(self.model)
             if dist.is_initialized():
                 dist.barrier()

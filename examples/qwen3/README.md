@@ -9,7 +9,7 @@ applies FP8 blockwise2d linear quant + LoRA; attention and norm stay BF16.
 
 | Path | Purpose |
 |---|---|
-| `train_qwen3_fsdp_fp8_blockwise2d.py` | Training script (FSDP + `LumenConfig.enable`) |
+| `train_qwen3_fsdp.py` | Training script (FSDP + `LumenConfig.enable`; `--mode bf16|fp8_blockwise2d|mxfp4`) |
 | `run_qwen3_fsdp_mi308.sh` | Docker launcher for 8×MI308X |
 | `scripts/download_model.py` | Fetch the HF model checkpoint |
 | `scripts/download_dataset.py` | Fetch an alpaca-style dataset as jsonl |
@@ -47,11 +47,57 @@ Overridable env: `HOST_MODEL`, `HOST_DATA`, `HOST_RESULTS`, `TRAIN_FILE`,
 Direct `torchrun` (inside the container):
 
 ```bash
-torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
+torchrun --nproc_per_node=8 train_qwen3_fsdp.py \
   --model-name-or-path /model-qwen3 \
   --train-data-path /data/train.jsonl --val-data-path /data/validation.jsonl \
   --seq-length 2048 --max-steps 200 --eval-interval 50 --seed 1234
 ```
+
+MXFP4 mode requires gfx950. The MI308X launcher is gfx942-only and rejects
+`MODE=mxfp4`; run the trainer directly on a gfx950 host instead. Packed-FP4
+parameter all-gather is opt-in and requires FSDP2:
+
+```bash
+torchrun --nproc_per_node=8 train_qwen3_fsdp.py \
+  --model-name-or-path /model-qwen3 \
+  --train-data-path /data/train.jsonl \
+  --mode mxfp4 --fsdp-version 2 --fsdp-mxfp4-comm
+```
+
+Without `--fsdp-mxfp4-comm`, MXFP4 still quantizes Linear compute but FSDP
+communicates the BF16 master weights.
+
+A weight is eligible for FP4 communication only if it is 2D, MXFP4-patched, and
+shaped so each rank's row shard stays block-aligned (`N % (32 * world_size) == 0`
+and `K % 32 == 0`); Qwen3-8B's `lm_head` fails this and stays BF16. If the flag
+matches no weight at all, `apply_fsdp2` raises rather than quietly all-gathering
+BF16 under a config whose logs read as compressed.
+
+### Full-parameter pretraining
+
+`run_qwen3_fsdp_mxfp4_pretrain.sh` runs full-parameter (non-LoRA) causal-LM
+pretraining on raw text or `{"text": ...}` jsonl:
+
+```bash
+MODEL_PATH=/data/Qwen3-8B TRAIN_DATA_PATH=/data/c4_train.jsonl \
+PRECISION=mxfp4 SEQ_LEN=8192 TRAIN_STEPS=50 \
+  bash examples/qwen3/run_qwen3_fsdp_mxfp4_pretrain.sh
+```
+
+Overridable env: `PRECISION` (`mxfp4|bf16`), `MXFP4_COMM`, `NPROC`, `MBS`, `GBS`,
+`SEQ_LEN`, `TRAIN_STEPS`, `LR`, `WARMUP_STEPS`, `INIT_FROM_SCRATCH`,
+`TRAIN_SAMPLES`, `RESULTS_DIR`. `TRAIN_SAMPLES` defaults to what the requested
+step count consumes, so startup does not tokenize a corpus far larger than the
+run needs. `--task pretrain` requires `--lora-rank 0` and defaults the MXFP4
+recipe's BF16 tail to the last 5 layers, matching the Megatron runs.
+
+Any FSDP trainer that enables MXFP4 must call
+`lumen.models.fsdp.register_quant_optimizer_hooks` after building its optimizer.
+The MXFP4 weight cache otherwise falls back to keying on the parameter's
+`_version`, which under FSDP tracks a reused all-gather buffer rather than the
+sharded parameter the optimizer updates — every quantized layer then keeps
+training against its step-0 weights, with no error and a loss and grad norm that
+simply stop moving.
 
 ## Optimizations
 

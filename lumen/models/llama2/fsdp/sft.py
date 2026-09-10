@@ -57,6 +57,7 @@ from lumen.models.fsdp import (  # noqa: F401
     apply_fp8_training,
     apply_lora,
     build_cosine_warmup_scheduler,
+    register_quant_optimizer_hooks,
     reset_fp8_state,
     save_fsdp_checkpoint,
     should_run_eval_step,
@@ -157,6 +158,9 @@ class FSDPTrainer:
 
     def _build_and_wrap_model(self) -> nn.Module:
         args = self.args
+        from lumen.models.fsdp import validate_fsdp_quant_args
+
+        validate_fsdp_quant_args(args)
         model = build_model(args)
 
         if getattr(args, "gradient_checkpointing", True):
@@ -192,7 +196,9 @@ class FSDPTrainer:
             )
             mixed_precision = MixedPrecision(
                 param_dtype=torch.bfloat16,
-                reduce_dtype=torch.float32 if args.linear_fp8 else torch.bfloat16,
+                reduce_dtype=torch.float32
+                if (args.linear_fp8 or getattr(args, "linear_fp4", False))
+                else torch.bfloat16,
                 buffer_dtype=torch.bfloat16,
             )
             sharding = ShardingStrategy.FULL_SHARD
@@ -222,13 +228,15 @@ class FSDPTrainer:
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
         args = self.args
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=args.lr,
             betas=(0.9, 0.95),
             eps=1e-5,
             weight_decay=args.weight_decay,
         )
+        register_quant_optimizer_hooks(self.model, optimizer, args)
+        return optimizer
 
     def _build_scheduler(self):
         return build_cosine_warmup_scheduler(self.optimizer, self.args)
@@ -360,7 +368,8 @@ class FSDPTrainer:
             _rank0_print(f"> Running {args.warmup_steps} synthetic warmup steps ...")
             for _ in range(args.warmup_steps):
                 self._synthetic_warmup_step()
-            if args.linear_fp8:
+            # MXFP4 counts here too, matching the Megatron and TRL warmups.
+            if args.linear_fp8 or getattr(args, "linear_fp4", False):
                 reset_fp8_state(self.model)
             if dist.is_initialized():
                 dist.barrier()

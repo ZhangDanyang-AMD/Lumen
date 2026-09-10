@@ -7,9 +7,15 @@
 import torch
 import torch.utils._pytree as pytree
 
+from lumen.quantize.config import MXFP4_BLOCK_SIZE
 from lumen.quantize.fp8_params import quantize_param_to_fp8
 
-__all__ = ["FP8CommTensor", "Blockwise2DFP8Param", "Blockwise2DFP8Gathered"]
+__all__ = [
+    "FP8CommTensor",
+    "Blockwise2DFP8Param",
+    "Blockwise2DFP8Gathered",
+    "MXFP4CommTensor",
+]
 
 
 class FP8CommTensor(torch.Tensor):
@@ -279,6 +285,144 @@ class Blockwise2DFP8Param(torch.Tensor):
                 and t.dtype == source._tensor.dtype
             ):
                 return Blockwise2DFP8Param(t, source._fp8_dtype, source._block_size)
+            return t
+
+        return pytree.tree_map(_wrap, result)
+
+
+# ---------------------------------------------------------------------------
+# MXFP4 FSDP2 all-gather: BF16 shard → FP4 on wire → BF16 dequantized
+# ---------------------------------------------------------------------------
+
+
+class MXFP4CommTensor(torch.Tensor):
+    """FSDP2 parameter wrapper for MXFP4 all-gather communication.
+
+    Wraps a BF16 parameter and provides FSDP2 hooks that quantize the
+    local shard to packed MXFP4 (2D 32×32 block scales) before all-gather,
+    then dequantize back to BF16 after. This reduces all-gather bandwidth
+    by ~4x (0.5 byte/element + E8M0 scales vs 2 bytes/element for BF16)
+    while keeping optimizer storage and the module-facing weight in BF16.
+
+    Works for both trainable and frozen weights.
+
+    Alignment: ``N % (32 × world_size) == 0`` and ``K % 32 == 0`` so each
+    rank's dim-0 shard is 32-row aligned for 2D block quantization.
+    """
+
+    _block_size: int
+    _FSDP2_SAFE_OPS = {
+        torch.ops.aten.copy_.default,
+        torch.ops.aten.split.Tensor,
+        torch.ops.aten.split_with_sizes.default,
+        torch.ops.aten.view.default,
+        torch.ops.aten.clone.default,
+        torch.ops.aten.empty_like.default,
+        torch.ops.aten.new_zeros.default,
+        torch.ops.aten._to_copy.default,
+        torch.ops.aten.detach.default,
+        torch.ops.aten.slice.Tensor,
+        torch.ops.aten.narrow.default,
+        torch.ops.aten.alias.default,
+        torch.ops.aten.as_strided.default,
+    }
+
+    @staticmethod
+    def __new__(cls, data: torch.Tensor, block_size: int = MXFP4_BLOCK_SIZE):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data: torch.Tensor, block_size: int = MXFP4_BLOCK_SIZE):
+        self._data = data
+        self._block_size = block_size
+
+    def __repr__(self):
+        return f"MXFP4CommTensor(shape={list(self.shape)}, dtype={self.dtype})"
+
+    def __tensor_flatten__(self):
+        return ["_data"], {"block_size": self._block_size}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, metadata, outer_size, outer_stride):
+        return cls(inner_tensors["_data"], metadata["block_size"])
+
+    # FSDP2 introspects the bound method and passes the DeviceMesh to the
+    # one-argument compatibility signature. Keep this as an instance method;
+    # a static method would receive the mesh in place of the tensor.
+    def fsdp_pre_all_gather(self, mesh) -> tuple[tuple[torch.Tensor, ...], dict]:
+        from lumen.ops.quantize.ops import convert_to_mxfp4_2d
+
+        shard = self._data.contiguous()
+        fp4, scale = convert_to_mxfp4_2d(shard, block_size=self._block_size)
+        return (fp4, scale), {"block_size": self._block_size}
+
+    def fsdp_post_all_gather(
+        self,
+        all_gather_outputs: tuple[torch.Tensor, ...],
+        metadata: dict,
+        param_dtype: torch.dtype,
+        *,
+        out: torch.Tensor | None = None,
+    ):
+        from lumen.ops.quantize.ops import convert_from_mxfp4_2d
+
+        fp4_gathered, scales_gathered = all_gather_outputs
+        block_size = metadata["block_size"]
+        result = convert_from_mxfp4_2d(
+            fp4_gathered, scales_gathered,
+            output_dtype=param_dtype, block_size=block_size,
+        )
+        if out is not None:
+            if out.shape != result.shape or out.dtype != result.dtype:
+                raise ValueError(
+                    "MXFP4 FSDP all-gather output buffer mismatch: "
+                    f"expected shape={tuple(result.shape)}, dtype={result.dtype}; "
+                    f"got shape={tuple(out.shape)}, dtype={out.dtype}"
+                )
+            # FSDP passes its persistent unsharded Parameter here. Updating its
+            # backing storage is framework bookkeeping, not an autograd op.
+            with torch.no_grad():
+                out.copy_(result)
+            return
+        # FSDP owns this backing tensor and frees it when the unsharded
+        # parameter is resharded.
+        return result, (result,)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        kwargs = kwargs or {}
+
+        def _unwrap(x):
+            return x._data if isinstance(x, MXFP4CommTensor) else x
+
+        source = next(
+            (a for a in pytree.tree_leaves(args) if isinstance(a, MXFP4CommTensor)),
+            None,
+        )
+        unwrapped_args = pytree.tree_map(_unwrap, args)
+        unwrapped_kwargs = pytree.tree_map(_unwrap, kwargs)
+        result = func(*unwrapped_args, **unwrapped_kwargs)
+        if source is None:
+            return result
+
+        # Only FSDP storage/sharding transforms may carry the extension. Compute
+        # ops such as add must return plain tensors; propagating the wrapper there
+        # can attach an all-gather hook to a derived tensor instead of the shard.
+        if func not in cls._FSDP2_SAFE_OPS:
+            return result
+
+        def _wrap(t):
+            if (
+                isinstance(t, torch.Tensor)
+                and not isinstance(t, MXFP4CommTensor)
+                and t.dtype == source._data.dtype
+            ):
+                return MXFP4CommTensor(t, source._block_size)
             return t
 
         return pytree.tree_map(_wrap, result)
