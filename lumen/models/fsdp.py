@@ -123,7 +123,7 @@ def add_common_fsdp_args(parser):
         "--grad-quant-type",
         type=str,
         default=None,
-        choices=["fp8", "mxfp8", "fp4"],
+        choices=["fp8", "mxfp8", "mxfp4", "fp4"],
         help="Gradient quantization type (None=disabled). " "Applies to Linear, Attention, and RMSNorm.",
     )
     lfp8.add_argument(
@@ -263,6 +263,13 @@ def add_common_fsdp_args(parser):
         help="FSDP2 only: store the LoRA-frozen blockwise2d base weight as FP8 and "
         "all-gather it as FP8 (no per-step re-quant). Requires --fsdp-version 2 + "
         "--linear-fp8-scaling blockwise2d.",
+    )
+    fp8p.add_argument(
+        "--fsdp-mxfp4-comm",
+        action="store_true",
+        default=False,
+        help="FSDP2 only: all-gather MXFP4-patched weights as packed FP4 "
+        "(~4x fewer bytes on the wire). Requires --fsdp-version 2 + --linear-fp4.",
     )
 
     # -- Fused RoPE --
@@ -436,6 +443,33 @@ def apply_fp8_training(model: nn.Module, args, dp_group=None) -> None:
     _manager, model = cfg.enable(model, dp_group=dp_group)
 
 
+def register_quant_optimizer_hooks(model: nn.Module, optimizer, args) -> bool:
+    """Wire quantization caches to ``optimizer.step()`` for FSDP training.
+
+    MXFP4 caches each layer's quantized weight so the micro-batches of one
+    gradient-accumulation step do not re-quantize an unchanged weight. The cache
+    falls back to keying on the parameter's ``_version``, which is enough when
+    forward reads the parameter the optimizer updates. Under FSDP it does not:
+    forward reads an all-gather buffer, and that buffer's version says nothing
+    about the sharded parameter behind it. Without this hook every quantized
+    layer keeps training against its step-0 weights, and nothing raises -- the
+    loss and grad norm simply stop moving.
+
+    Returns whether a hook was registered (i.e. whether MXFP4 is in use).
+    """
+    if not getattr(args, "linear_fp4", False):
+        return False
+
+    from lumen.quantize import register_mxfp4_weight_optimizer_hooks
+
+    unwrapped = model
+    while hasattr(unwrapped, "module"):
+        unwrapped = unwrapped.module
+    register_mxfp4_weight_optimizer_hooks(unwrapped, optimizer)
+    _rank0_print("> MXFP4 weight cache invalidation registered on optimizer step")
+    return True
+
+
 def reset_fp8_state(model: nn.Module) -> None:
     """Reset FP8 scaling state after warmup.
 
@@ -524,6 +558,73 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
     return count
 
 
+def validate_fsdp_quant_args(args) -> None:
+    """Validate FSDP-only low-precision option combinations."""
+    linear_fp4 = getattr(args, "linear_fp4", False)
+    linear_fp8 = getattr(args, "linear_fp8", False)
+    mxfp4_comm = getattr(args, "fsdp_mxfp4_comm", False)
+    fp8_param_storage = getattr(args, "fsdp_fp8_param_storage", False)
+    fp8_param_gather = getattr(args, "lumen_fp8_param_gather", False)
+
+    from lumen.config import check_linear_quant_exclusive
+
+    check_linear_quant_exclusive(linear_fp8, linear_fp4)
+    if mxfp4_comm and not linear_fp4:
+        raise ValueError("--fsdp-mxfp4-comm requires --linear-fp4")
+    if mxfp4_comm and getattr(args, "fsdp_version", 1) != 2:
+        raise ValueError("--fsdp-mxfp4-comm requires --fsdp-version 2")
+    if linear_fp4 and fp8_param_storage:
+        raise ValueError("--fsdp-fp8-param-storage cannot be combined with --linear-fp4")
+    if mxfp4_comm and fp8_param_gather:
+        raise ValueError("--fsdp-mxfp4-comm cannot be combined with --lumen-fp8-param-gather")
+
+
+def _wrap_params_as_mxfp4_comm(
+    model: nn.Module, block_size: int, world_size: int = 1
+) -> int:
+    """Wrap each MXFP4-patched weight in an MXFP4CommTensor for FP4 all-gather.
+
+    The wrapper holds the BF16 master weight. FSDP2 shards it like any BF16
+    param. During all-gather, the local shard is quantized to packed MXFP4
+    (4x less bytes on the wire), then dequantized back to BF16 after gather.
+    Optimizer and gradients see normal BF16 — only communication is compressed.
+
+    Alignment: ``N % (block_size × world_size) == 0`` and ``K % block_size == 0``.
+    """
+    from lumen.quantize.comm_tensor import MXFP4CommTensor
+
+    count = 0
+    skipped = []
+    for module_name, module in model.named_modules():
+        if not getattr(module, "_quant_enabled", False):
+            continue
+        if getattr(module, "_quant_scaling_type", None) != "mxfp4":
+            continue
+        w = getattr(module, "weight", None)
+        if w is None or not isinstance(w, nn.Parameter) or w.dim() != 2:
+            continue
+        if isinstance(w, MXFP4CommTensor):
+            continue
+        if w.shape[0] % (block_size * world_size) or w.shape[1] % block_size:
+            weight_name = f"{module_name}.weight" if module_name else "weight"
+            skipped.append(f"{weight_name}{tuple(w.shape)}")
+            continue
+        module.weight = nn.Parameter(
+            MXFP4CommTensor(w.data, block_size), requires_grad=w.requires_grad,
+        )
+        count += 1
+    if skipped:
+        examples = ", ".join(skipped[:8])
+        if len(skipped) > 8:
+            examples += f", ... (+{len(skipped) - 8} more)"
+        _rank0_print(
+            f"> MXFP4CommTensor: skipped {len(skipped)} weights not divisible by "
+            f"({block_size}*world_size={block_size * world_size}, {block_size}); "
+            f"kept BF16 communication: {examples}"
+        )
+    return count
+
+
 def apply_fsdp2(
     model: nn.Module,
     args,
@@ -542,6 +643,8 @@ def apply_fsdp2(
     Returns:
         The same model (in-place sharding).
     """
+    validate_fsdp_quant_args(args)
+
     try:
         from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
@@ -563,15 +666,17 @@ def apply_fsdp2(
     world_size = dist.get_world_size(dp_group) if dp_group is not None else dist.get_world_size()
     mesh = init_device_mesh("cuda", (world_size,))
 
-    if getattr(args, "fsdp_fp8_param_storage", False):
+    _use_mxfp4_comm = getattr(args, "fsdp_mxfp4_comm", False)
+
+    if _use_mxfp4_comm or getattr(args, "fsdp_fp8_param_storage", False):
         # param_dtype MUST stay None here: a non-None param_dtype makes FSDP2 cast
-        # every param (incl. the frozen FP8 Blockwise2DFP8Param) to that dtype before
-        # sharding, which collapses the FP8 subclass to a plain BF16 DTensor and
-        # bypasses its all-gather extension (the scale is then never applied). With
-        # param_dtype=None each param keeps its own dtype — FP8 base stays FP8 (its
-        # extension drives the all-gather), LoRA adapters stay BF16.
+        # every param (incl. the frozen FP8 Blockwise2DFP8Param / MXFP4CommTensor)
+        # to that dtype before sharding, which collapses the subclass to a plain
+        # BF16 DTensor and bypasses its all-gather extension. With param_dtype=None
+        # each param keeps its own dtype — FP8/FP4 wrappers stay as themselves,
+        # LoRA adapters stay BF16.
         mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
-    elif getattr(args, "linear_fp8", False):
+    elif getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,
@@ -595,6 +700,27 @@ def apply_fsdp2(
         fp8_dtype = _get_float8_e4m3()
         n_stored = _wrap_frozen_base_as_blockwise2d_fp8(model, fp8_dtype, world_size=world_size)
         _rank0_print(f"> Blockwise2DFP8Param storage: {n_stored} frozen base weights")
+
+    if _use_mxfp4_comm:
+        from lumen.quantize.config import MXFP4_BLOCK_SIZE
+
+        n_mxfp4 = _wrap_params_as_mxfp4_comm(
+            model, block_size=MXFP4_BLOCK_SIZE, world_size=world_size
+        )
+        if n_mxfp4 == 0:
+            # Silently gathering BF16 is the one outcome this flag must not
+            # produce: the run pays the FP4 policy (param_dtype=None) and the
+            # per-step re-quant, reports nothing, and looks like the compressed
+            # configuration in every log a later comparison would read.
+            raise ValueError(
+                f"--fsdp-mxfp4-comm wrapped 0 weights at world_size={world_size}, so "
+                "parameter all-gather stays BF16. Either no MXFP4-patched 2D Linear "
+                "weight exists (check that quantization ran before apply_fsdp2), or "
+                f"every candidate failed alignment (N % {MXFP4_BLOCK_SIZE * world_size} "
+                f"== 0 and K % {MXFP4_BLOCK_SIZE} == 0) — see the skip list above. "
+                "Drop the flag to train with BF16 communication deliberately."
+            )
+        _rank0_print(f"> MXFP4CommTensor wrapping: {n_mxfp4} weights (4x comm reduction)")
 
     sharded_layers = False
     for module in model.modules():

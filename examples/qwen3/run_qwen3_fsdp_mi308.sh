@@ -5,7 +5,7 @@
 #
 # Launches the lumen/llama2 container, overlays the host Lumen package and
 # examples (keeping the image's compiled third_party AITER/mori), mounts the HF
-# model + alpaca jsonl dataset, and runs train_qwen3_fsdp_fp8_blockwise2d.py.
+# model + alpaca jsonl dataset, and runs train_qwen3_fsdp.py.
 #
 # Overridable env: HOST_MODEL, HOST_DATA, HOST_RESULTS, TRAIN_FILE, VAL_FILE,
 # SEQ_LENGTH, MAX_STEPS, EVAL_INTERVAL, IMAGE, CONTAINER_NAME.
@@ -25,6 +25,10 @@ HOST_RESULTS="${HOST_RESULTS:-/mnt/raid0/leiwu/mlperf/results/qwen3_fsdp_fp8_blo
 TRAIN_FILE="${TRAIN_FILE:-alpaca_zh-train-general.jsonl}"
 VAL_FILE="${VAL_FILE:-alpaca_zh-valid-general.jsonl}"
 MODE="${MODE:-fp8_blockwise2d}"        # bf16 | fp8_blockwise2d
+if [[ "${MODE}" == "mxfp4" ]]; then
+    echo "ERROR: MXFP4 training requires gfx950; MI308X is gfx942." >&2
+    exit 2
+fi
 SEQ_LENGTH="${SEQ_LENGTH:-2048}"
 MAX_STEPS="${MAX_STEPS:-200}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-50}"
@@ -112,7 +116,7 @@ EXTRA=""
 [[ -n "${AITER_ATTN}" ]] && EXTRA="${EXTRA} --aiter-attn"
 [[ -n "${LUMEN_NORM}" ]] && EXTRA="${EXTRA} --lumen-norm"
 [[ -n "${FUSE_ROPE}" ]] && EXTRA="${EXTRA} --fuse-rope"
-torchrun --nproc_per_node=8 train_qwen3_fsdp_fp8_blockwise2d.py \
+torchrun --nproc_per_node=8 train_qwen3_fsdp.py \
     --model-name-or-path /model-qwen3 \
     --train-data-path "/data/${TRAIN_FILE}" \
     --val-data-path "/data/${VAL_FILE}" \

@@ -78,7 +78,16 @@ def add_fsdp_fp8_contract_args(parser_or_group):
         dest="linear_fp8",
         action="store_true",
         default=False,
-        help="Enable FP8 quantised training for Linear layers.",
+        help="Enable FP8 quantised training for Linear layers. Excludes --linear-fp4.",
+    )
+    safe_add_argument(
+        parser_or_group,
+        "--linear-fp4",
+        dest="linear_fp4",
+        action="store_true",
+        default=False,
+        help="Enable MXFP4 quantised training for Linear layers (32-element blocks). "
+        "Excludes --linear-fp8.",
     )
     safe_add_argument(
         parser_or_group,

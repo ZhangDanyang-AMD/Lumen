@@ -127,6 +127,7 @@ class TestAddCommonFsdpArgs:
     def test_linear_fp8_defaults(self):
         args = self._parse()
         assert args.linear_fp8 is False
+        assert args.linear_fp4 is False
         assert args.linear_fp8_format == "fp8_e4m3"
         assert args.linear_fp8_scaling == "delayed"
         assert args.linear_fp8_block_size == 128
@@ -151,8 +152,26 @@ class TestAddCommonFsdpArgs:
         args = self._parse(["--no-linear-fp8-wgrad"])
         assert args.linear_fp8_wgrad is False
 
+    def test_linear_fp4_switch(self):
+        args = self._parse(["--linear-fp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+
+    def test_linear_fp4_from_args_selects_mxfp4_recipe(self):
+        from lumen.config import LumenConfig
+
+        args = self._parse(["--linear-fp4"])
+        cfg = LumenConfig.from_args(args)
+        assert cfg.format == "mxfp4"
+        assert cfg.block_size == 32
+        assert cfg.quant_config.is_quantized
+
+    def test_fsdp_mxfp4_comm_flag(self):
+        args = self._parse(["--fsdp-mxfp4-comm"])
+        assert args.fsdp_mxfp4_comm is True
+
     def test_grad_quant_type_choices(self):
-        for gq in ["fp8", "mxfp8", "fp4"]:
+        for gq in ["fp8", "mxfp8", "mxfp4", "fp4"]:
             args = self._parse(["--grad-quant-type", gq])
             assert args.grad_quant_type == gq
 
@@ -577,18 +596,30 @@ class TestApplyFP8Training:
             assert config.format.value == "mxfp8"
             assert config.scaling.value == "blockwise"
 
-    @mock.patch("lumen.models.fsdp.dist")
-    def test_reduce_amax_uses_dp_group(self, mock_dist):
-        mock_dist.is_initialized.return_value = True
-        mock_dist.group.WORLD = "world_group"
+    def test_reduce_amax_uses_dp_group(self, tmp_path):
+        """With no explicit group, amax reduction falls back to WORLD.
+
+        The fallback lives in ``LumenConfig.enable``, which reads
+        ``torch.distributed`` directly, so patching a ``dist`` name inside
+        ``lumen.models.fsdp`` would assert nothing. ``group.WORLD`` is a
+        metaclass property that ``mock.patch`` cannot restore either (it leaks
+        into every later test), so this stands up a real single-rank group.
+        """
+        import torch.distributed as dist
+
         model = nn.Sequential(nn.Linear(16, 16))
         args = self._make_args(linear_fp8_reduce_amax=True)
 
-        with mock.patch("lumen.quantize.enable") as mock_enable:
-            apply_fp8_training(model, args)
+        store = dist.FileStore(str(tmp_path / "amax_store"), 1)
+        dist.init_process_group(backend="gloo", store=store, rank=0, world_size=1)
+        try:
+            with mock.patch("lumen.quantize.enable") as mock_enable:
+                apply_fp8_training(model, args)
             config = mock_enable.call_args[1]["config"]
             assert config.reduce_amax is True
-            assert mock_enable.call_args[1]["dp_group"] == "world_group"
+            assert mock_enable.call_args[1]["dp_group"] is dist.group.WORLD
+        finally:
+            dist.destroy_process_group()
 
     @mock.patch("lumen.models.fsdp.dist")
     def test_explicit_dp_group_overrides(self, mock_dist):
@@ -647,16 +678,21 @@ class TestApplyFP8Training:
         args = self._make_args(lumen_norm=True)
 
         call_order = []
-        orig_patch_norms = patch_norms
+        from lumen.config import LumenConfig
 
-        def _tracking_patch_norms(*a, **kw):
+        orig_patch_norms = LumenConfig._patch_norms
+
+        # apply_fp8_training delegates to LumenConfig.enable, so the ordering
+        # guarantee is observable there rather than on the module-level
+        # patch_norms shim this test used to wrap.
+        def _tracking_patch_norms(self, *a, **kw):
             call_order.append("patch_norms")
-            return orig_patch_norms(*a, **kw)
+            return orig_patch_norms(self, *a, **kw)
 
         def _tracking_enable(*a, **kw):
             call_order.append("quant_enable")
 
-        with mock.patch("lumen.models.fsdp.patch_norms", side_effect=_tracking_patch_norms), mock.patch(
+        with mock.patch.object(LumenConfig, "_patch_norms", _tracking_patch_norms), mock.patch(
             "lumen.quantize.enable", side_effect=_tracking_enable
         ):
             apply_fp8_training(model, args)
@@ -852,3 +888,208 @@ class TestUseSdmaArg:
         add_common_fsdp_args(parser)
         args = parser.parse_args(["--use-sdma"])
         assert args.use_sdma is True
+
+
+class TestWrapMxfp4Comm:
+    def test_wraps_aligned_mxfp4_linear(self):
+        from lumen.models.fsdp import _wrap_params_as_mxfp4_comm
+        from lumen.quantize.comm_tensor import MXFP4CommTensor
+
+        m = nn.Linear(64, 64, bias=False)
+        m._quant_enabled = True
+        m._quant_scaling_type = "mxfp4"
+        n = _wrap_params_as_mxfp4_comm(m, block_size=32, world_size=1)
+        assert n == 1
+        assert isinstance(m.weight, MXFP4CommTensor)
+
+    def test_skips_misaligned_and_non_mxfp4(self):
+        from lumen.models.fsdp import _wrap_params_as_mxfp4_comm
+
+        misaligned = nn.Linear(64, 31, bias=False)
+        misaligned._quant_enabled = True
+        misaligned._quant_scaling_type = "mxfp4"
+        assert _wrap_params_as_mxfp4_comm(misaligned, block_size=32, world_size=1) == 0
+
+        fp8 = nn.Linear(64, 64, bias=False)
+        fp8._quant_enabled = True
+        fp8._quant_scaling_type = "blockwise"
+        assert _wrap_params_as_mxfp4_comm(fp8, block_size=32, world_size=1) == 0
+
+    def test_world_size_alignment_skip_names_weight(self):
+        from lumen.models.fsdp import _wrap_params_as_mxfp4_comm
+
+        model = nn.Module()
+        model.proj = nn.Linear(64, 32, bias=False)
+        model.proj._quant_enabled = True
+        model.proj._quant_scaling_type = "mxfp4"
+
+        with mock.patch("lumen.models.fsdp._rank0_print") as rank0_print:
+            assert _wrap_params_as_mxfp4_comm(model, block_size=32, world_size=2) == 0
+
+        message = rank0_print.call_args.args[0]
+        assert "proj.weight(32, 64)" in message
+        assert "32*world_size=64" in message
+
+
+class TestValidateFsdpQuantArgs:
+    def _validate(self, **overrides):
+        from lumen.models.fsdp import validate_fsdp_quant_args
+
+        args = SimpleNamespace(
+            linear_fp8=False,
+            linear_fp4=True,
+            fsdp_version=2,
+            fsdp_mxfp4_comm=True,
+            fsdp_fp8_param_storage=False,
+            lumen_fp8_param_gather=False,
+        )
+        for name, value in overrides.items():
+            setattr(args, name, value)
+        validate_fsdp_quant_args(args)
+
+    def test_valid_mxfp4_comm(self):
+        self._validate()
+
+    @pytest.mark.parametrize(
+        "overrides,match",
+        [
+            ({"linear_fp4": False}, "requires --linear-fp4"),
+            ({"fsdp_version": 1}, "requires --fsdp-version 2"),
+            ({"fsdp_fp8_param_storage": True}, "cannot be combined"),
+            ({"lumen_fp8_param_gather": True}, "cannot be combined"),
+        ],
+    )
+    def test_rejects_invalid_mxfp4_comm(self, overrides, match):
+        with pytest.raises(ValueError, match=match):
+            self._validate(**overrides)
+
+    def test_rejects_fp8_storage_with_plain_mxfp4(self):
+        with pytest.raises(ValueError, match="cannot be combined"):
+            self._validate(fsdp_mxfp4_comm=False, fsdp_fp8_param_storage=True)
+
+    def test_rejects_fp8_and_fp4_together(self):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            self._validate(linear_fp8=True)
+
+    def test_missing_fsdp_version_does_not_assume_fsdp2(self):
+        from lumen.models.fsdp import validate_fsdp_quant_args
+
+        args = SimpleNamespace(
+            linear_fp8=False,
+            linear_fp4=True,
+            fsdp_mxfp4_comm=True,
+            fsdp_fp8_param_storage=False,
+            lumen_fp8_param_gather=False,
+        )
+        with pytest.raises(ValueError, match="requires --fsdp-version 2"):
+            validate_fsdp_quant_args(args)
+
+
+class TestApplyFSDP2MXFP4CommRefusesNoOp:
+    """`--fsdp-mxfp4-comm` matching nothing must not look like a compressed run."""
+
+    def _args(self):
+        return SimpleNamespace(
+            linear_fp8=False,
+            linear_fp4=True,
+            fsdp_version=2,
+            sharding_strategy="full_shard",
+            fsdp_mxfp4_comm=True,
+            fsdp_fp8_param_storage=False,
+            lumen_fp8_param_gather=False,
+        )
+
+    @mock.patch("torch.distributed.fsdp.fully_shard")
+    @mock.patch("torch.distributed.device_mesh.init_device_mesh")
+    @mock.patch("lumen.models.fsdp.dist")
+    def test_raises_when_nothing_wrapped(self, mock_dist, _mesh, _shard):
+        from lumen.models.fsdp import apply_fsdp2
+
+        mock_dist.get_world_size.return_value = 8
+        # Unquantized model: no module carries the MXFP4 patch markers.
+        model = nn.Sequential(nn.Linear(64, 64, bias=False))
+
+        with pytest.raises(ValueError, match="wrapped 0 weights"):
+            apply_fsdp2(model, self._args())
+
+    @mock.patch("torch.distributed.fsdp.fully_shard")
+    @mock.patch("torch.distributed.device_mesh.init_device_mesh")
+    @mock.patch("lumen.models.fsdp.dist")
+    def test_reports_alignment_rule_in_error(self, mock_dist, _mesh, _shard):
+        from lumen.models.fsdp import apply_fsdp2
+
+        mock_dist.get_world_size.return_value = 8
+        # Patched but misaligned: 32 rows cannot split across 8 ranks by 32.
+        model = nn.Sequential(nn.Linear(64, 32, bias=False))
+        model[0]._quant_enabled = True
+        model[0]._quant_scaling_type = "mxfp4"
+
+        with pytest.raises(ValueError, match=r"N % 256 == 0 and K % 32 == 0"):
+            apply_fsdp2(model, self._args())
+
+    @mock.patch("torch.distributed.fsdp.fully_shard")
+    @mock.patch("torch.distributed.device_mesh.init_device_mesh")
+    @mock.patch("lumen.models.fsdp.dist")
+    def test_accepts_aligned_mxfp4_weight(self, mock_dist, _mesh, _shard):
+        from lumen.models.fsdp import apply_fsdp2
+
+        mock_dist.get_world_size.return_value = 2
+        model = nn.Sequential(nn.Linear(64, 64, bias=False))
+        model[0]._quant_enabled = True
+        model[0]._quant_scaling_type = "mxfp4"
+
+        apply_fsdp2(model, self._args())
+
+
+class TestRegisterQuantOptimizerHooks:
+    """FSDP forward reads an all-gather buffer, so the MXFP4 weight cache's
+    ``_version`` fallback cannot see optimizer steps. Losing this registration
+    leaves quantized layers training against step-0 weights, silently."""
+
+    def _model_and_optimizer(self):
+        model = nn.Sequential(nn.Linear(8, 8))
+        return model, torch.optim.SGD(model.parameters(), lr=0.1)
+
+    def test_registers_for_mxfp4(self):
+        from lumen.models.fsdp import register_quant_optimizer_hooks
+
+        model, optimizer = self._model_and_optimizer()
+        with mock.patch("lumen.quantize.register_mxfp4_weight_optimizer_hooks") as reg:
+            assert register_quant_optimizer_hooks(
+                model, optimizer, SimpleNamespace(linear_fp4=True)
+            ) is True
+        reg.assert_called_once_with(model, optimizer)
+
+    def test_skips_when_not_mxfp4(self):
+        from lumen.models.fsdp import register_quant_optimizer_hooks
+
+        model, optimizer = self._model_and_optimizer()
+        with mock.patch("lumen.quantize.register_mxfp4_weight_optimizer_hooks") as reg:
+            assert register_quant_optimizer_hooks(
+                model, optimizer, SimpleNamespace(linear_fp8=True, linear_fp4=False)
+            ) is False
+        reg.assert_not_called()
+
+    def test_unwraps_fsdp1_module_before_registering(self):
+        from lumen.models.fsdp import register_quant_optimizer_hooks
+
+        inner, optimizer = self._model_and_optimizer()
+        wrapper = nn.Module()
+        wrapper.module = inner
+
+        with mock.patch("lumen.quantize.register_mxfp4_weight_optimizer_hooks") as reg:
+            register_quant_optimizer_hooks(
+                wrapper, optimizer, SimpleNamespace(linear_fp4=True)
+            )
+        reg.assert_called_once_with(inner, optimizer)
+
+    def test_hook_clears_cache_on_step(self):
+        from lumen.models.fsdp import register_quant_optimizer_hooks
+
+        model, optimizer = self._model_and_optimizer()
+        model[0]._mxfp4_w_cache = ((False, False), "fp4", "scale")
+        register_quant_optimizer_hooks(model, optimizer, SimpleNamespace(linear_fp4=True))
+
+        optimizer.step()
+
+        assert not hasattr(model[0], "_mxfp4_w_cache")

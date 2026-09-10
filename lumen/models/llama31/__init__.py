@@ -24,22 +24,8 @@ For backward compatibility, the Megatron APIs are re-exported at this level::
 """
 
 from lumen.models.llama31.dataset import PretrainTextDataset
-from lumen.models.llama31.megatron import (
-    add_pretrain_args,
-    apply_fp8_training,
-    apply_lora,
-    forward_step,
-    get_batch,
-    loss_func,
-    lumen_gpt_builder,
-    reset_fp8_state,
-    train_valid_test_datasets_provider,
-)
 
-__all__ = [
-    # Shared
-    "PretrainTextDataset",
-    # Megatron (re-exports)
+_MEGATRON_EXPORTS = (
     "add_pretrain_args",
     "apply_fp8_training",
     "apply_lora",
@@ -49,4 +35,18 @@ __all__ = [
     "reset_fp8_state",
     "lumen_gpt_builder",
     "train_valid_test_datasets_provider",
-]
+)
+
+__all__ = ["PretrainTextDataset", *_MEGATRON_EXPORTS]
+
+
+def __getattr__(name):
+    """Load optional Megatron APIs only when a caller requests one."""
+    if name not in _MEGATRON_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    from lumen.models.llama31 import megatron
+
+    value = getattr(megatron, name)
+    globals()[name] = value
+    return value

@@ -2332,6 +2332,44 @@ def test_mxfp4_configure_wires_tuned_table_and_cache(tmp_path):
         mxfp4_autotune.clear()
 
 
+def test_mxfp4_configure_keeps_table_order_and_skips_missing(tmp_path):
+    """Several tables stay in the given order, and a missing one is dropped.
+
+    Order is what decides which row wins for a shape both tables carry, so a
+    model's own table has to stay ahead of the generic one.
+    """
+    model = tmp_path / "model.csv"
+    generic = tmp_path / "generic.csv"
+    for f in (model, generic):
+        f.write_text("gfx,cu_num,M,N,K,kernelId,splitK,us\n")
+
+    original_env = os.environ.get(mxfp4_autotune.AITER_TUNED_CONFIG_ENV)
+    original_cache = mxfp4_autotune._CACHE_PATH
+    os.environ.pop(mxfp4_autotune.AITER_TUNED_CONFIG_ENV, None)
+    mxfp4_autotune._CACHE_PATH = ""
+    mxfp4_autotune.clear()
+    try:
+        applied = mxfp4_autotune.configure(tuned_config=[str(model), str(generic)])
+        listed = applied["tuned_config"].split(":")
+        assert listed[:2] == [str(model), str(generic)]
+
+        # One unusable entry must not cost the others.
+        os.environ.pop(mxfp4_autotune.AITER_TUNED_CONFIG_ENV, None)
+        applied = mxfp4_autotune.configure(
+            tuned_config=[str(tmp_path / "nope.csv"), str(generic)]
+        )
+        listed = applied["tuned_config"].split(":")
+        assert listed[0] == str(generic)
+        assert "nope.csv" not in applied["tuned_config"]
+    finally:
+        if original_env is None:
+            os.environ.pop(mxfp4_autotune.AITER_TUNED_CONFIG_ENV, None)
+        else:
+            os.environ[mxfp4_autotune.AITER_TUNED_CONFIG_ENV] = original_env
+        mxfp4_autotune._CACHE_PATH = original_cache
+        mxfp4_autotune.clear()
+
+
 def test_mxfp4_shape_log_records_all_three_gemms(tmp_path):
     """The collector must see fprop, dgrad and wgrad from a single linear.
 

@@ -4,7 +4,7 @@
 
 Thin CLI wrapper around :func:`lumen.models.utils.download_hf_dataset`.
 
-The training script (``train_qwen3_fsdp_fp8_blockwise2d.py``) consumes
+The training script (``train_qwen3_fsdp.py``) consumes
 alpaca-style rows ``{instruction, input, output}``. ``tatsu-lab/alpaca`` (and the
 common Chinese variants) already expose that schema, so each saved ``{split}.jsonl``
 is directly usable as ``--train-data-path`` / ``--val-data-path``.

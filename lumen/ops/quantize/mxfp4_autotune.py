@@ -31,7 +31,7 @@ import json
 import logging as _logging
 import os
 import threading
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 
@@ -377,11 +377,15 @@ def _aiter_config_already_resolved() -> bool:
 
 
 def configure(
-    tuned_config: Optional[str] = None,
+    tuned_config: Optional[Union[str, Sequence[str]]] = None,
     autotune_cache: Optional[str] = None,
     merge_aiter_default: bool = True,
 ) -> Dict[str, str]:
     """Point AITER at extra tuned A4W4 rows, and persist autotune decisions.
+
+    ``tuned_config`` takes one path or several, highest priority first; a model's
+    own table has to come ahead of the generic one, since AITER keeps the first
+    row it finds for a shape.
 
     Call once at process start. It does not have to precede ``import aiter`` --
     AITER reads the variable when it first looks up a config, not at import --
@@ -397,11 +401,15 @@ def configure(
     global _CACHE_PATH
 
     if tuned_config and not os.environ.get(AITER_TUNED_CONFIG_ENV):
-        if not os.path.exists(tuned_config):
-            _logger.warning("MXFP4 tuned config %s does not exist, ignoring", tuned_config)
-        else:
-            paths = [os.path.abspath(tuned_config)]
-            # Keep AITER's own table; the two cover different shapes.
+        requested = [tuned_config] if isinstance(tuned_config, str) else list(tuned_config)
+        paths = []
+        for path in requested:
+            if not os.path.exists(path):
+                _logger.warning("MXFP4 tuned config %s does not exist, ignoring", path)
+            else:
+                paths.append(os.path.abspath(path))
+        if paths:
+            # Keep AITER's own table; the tables cover different shapes.
             default = _aiter_default_tuned_config() if merge_aiter_default else None
             if default and os.path.exists(default):
                 paths.append(default)
