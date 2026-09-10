@@ -4,7 +4,7 @@ A lightweight, AMD-native quantized training engine for large language models.
 
 Lumen manages the **quantized training lifecycle** — the vertical path a low-precision tensor takes through forward, backward, optimizer, and communication.
 
-- **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and FP4 (Not supported yet) with a unified `QuantConfig` interface
+- **Quantized Formats** — FP8 (E4M3 / E5M2), MXFP8, and MXFP4 with a unified `QuantConfig` interface
 - **[AITER Kernels](https://github.com/ROCm/aiter)** — high-performance GPU kernels for attention, GEMM, normalization, RoPE, MoE, fused MLP, cross-entropy, and quantization
 - **[MORI](https://github.com/ROCm/mori)** — high-performance RDMA + GPU communication library for distributed training (MORI-CCL: all-gather, reduce-scatter, all-reduce; MORI-EP: MoE expert dispatch)
 
@@ -44,14 +44,6 @@ loss.backward()             # Lumen handles quantized gradients
 optimizer.step()
 ```
 
-### FP8 Attention (module API)
-
-See [`lumen/modules/`](lumen/modules/) for the full module API with usage examples.
-
-### Functional API
-
-See [`lumen/ops/`](lumen/ops/) for the stateless functional API with usage examples.
-
 ### Training Backends
 
 See [`lumen/models/`](lumen/models/) for Megatron and FSDP stack documentation and usage examples.
@@ -86,51 +78,30 @@ pip install -e ".[dev]"
 
 | Example | Description | Docs |
 |---------|-------------|------|
-| **LLaMA2 SFT** | Fine-tuning / LoRA on LLaMA2 7B–70B with FP8 attention, packed sequences, early stopping | [`examples/llama2/`](examples/llama2/) |
-| **LLaMA 3.1 Pretrain** | Pretraining LLaMA 3.1 8B with FP8 hybrid training and MXFP8 attention (MLPerf-aligned) | [`examples/llama31/`](examples/llama31/) |
+| **LLaMA2 SFT** | Full fine-tuning / LoRA on LLaMA2 7B–70B with FP8 attention, packed sequences, early stopping (Megatron + FSDP) | [`examples/llama2/`](examples/llama2/) |
+| **LLaMA 3.1 Pretrain** | Pretraining LLaMA 3.1 8B with FP8 hybrid training and MXFP8 attention, MLPerf-aligned (Megatron + FSDP) | [`examples/llama31/`](examples/llama31/) |
+| **Qwen3-8B LoRA SFT** | LoRA SFT on Qwen3-8B with PyTorch FSDP + Lumen FP8 blockwise2d quantization on 8×MI308X | [`examples/qwen3/`](examples/qwen3/) |
+| **Qwen3-8B MXFP4 Pretrain** | Pretraining Qwen3-8B with MXFP4 quantized training on MI308X | [`examples/qwen3/`](examples/qwen3/) |
+| **Qwen3-30B-A3B MoE** | Qwen3-30B-A3B (128 experts) MoE training with FSDP2 + 2D parallelism (DP×EP) on multi-node MI308X | [`examples/qwen3-30b-a3b/`](examples/qwen3-30b-a3b/) |
+| **DeepSeek-V4** | DeepSeek-V4 full finetune / pretrain with native torchrun + Lumen + GRPO policy loss on MI308X | [`examples/dsv4/`](examples/dsv4/) |
 
-## Testing
+## LumenRL Integration
 
-See [`tests/`](tests/) for test instructions.
+Lumen provides the quantized training engine for [LumenRL](https://github.com/ZhangDanyang-AMD/Lumen-RL.git), an AMD-native RL training framework. LumenRL uses Lumen for:
 
-## Project Structure
+- **Megatron training backend** — FP8/MXFP8 quantized forward and backward through Lumen's Megatron spec patching (`lumen/models/megatron.py`)
+- **MoE expert parallelism** — Lumen's grouped linear modules and MoE dispatch for models like Qwen3-30B-A3B (128 experts, EP=8)
+- **FP8 KV cache** — Lumen's quantization support for ATOM/vLLM rollout inference with FP8 KV cache
+- **HIP C++ extensions** — Fused quant-transpose and FP8 dispatch kernels compiled from `lumen/csrc/`
 
+```bash
+# LumenRL depends on Lumen as an editable install
+pip install -e /path/to/Lumen
+# Then run LumenRL training
+pip install -e /path/to/Lumen-RL
 ```
-Lumen/
-├── lumen/                     # Main Python package
-│   ├── core/                  #   FP8 dtype helpers, gradient quantization, device detection
-│   ├── kernels/               #   AITER kernel wrappers (FP8/MXFP8 flash attention impl)
-│   ├── ops/                   #   Stateless ops API — all backed by AITER
-│   │   ├── attention/         #     MHA/MLA/GQA + Context Parallelism (A2A, P2P)
-│   │   ├── quantize/          #     Quantized linear, GEMM primitives, quant/dequant ops
-│   │   ├── gemm/              #     Grouped GEMM, MoE GEMM dispatch
-│   │   ├── normalization/     #     LayerNorm, RMSNorm (ASM, CK, Triton + fused FP8)
-│   │   ├── mlp/               #     Fused gated & ungated feed-forward
-│   │   ├── moe/               #     Fused routing, sorting, aux loss, fused MoE
-│   │   ├── rope.py            #     Fused RoPE (SBHD, THD, 2D, 3D)
-│   │   ├── cross_entropy.py   #     Vocab-parallel cross-entropy
-│   │   └── dispatch.py        #     ASM → CK → Triton fallback dispatcher
-│   ├── modules/               #   nn.Module wrappers (drop-in for Megatron / FSDP)
-│   │   ├── attention*.py      #     LumenAttention, LumenDotProductAttention, MLA
-│   │   ├── parallel_linear.py #     TP column/row parallel linear + FP8
-│   │   ├── grouped_linear.py  #     MoE grouped linear + TP variants
-│   │   ├── fused_mlp.py       #     LumenFusedMLP, LumenGatedMLP
-│   │   ├── cross_entropy.py   #     Vocab-parallel cross-entropy module
-│   │   └── comm_overlap.py    #     AG/GEMM and GEMM/RS overlap
-│   ├── quantize/              #   Quantization lifecycle (enable/disable, config, scaling manager)
-│   └── models/                #   Training utilities & model definitions
-│       ├── megatron.py        #     Shared Megatron stack (spec patching, FP8, LoRA)
-│       ├── fsdp.py            #     Shared FSDP stack (FP8, LoRA, state mgmt)
-│       ├── llama2/            #     LLaMA2 SFT (dataset, megatron/, fsdp/)
-│       └── llama31/           #     LLaMA 3.1 Pretrain (dataset, megatron/, fsdp/)
-├── third_party/               # Git submodules
-│   ├── aiter/                 #   AMD AITER — GPU kernel provider (ASM, CK, Triton)
-│   └── mori/                  #   MORI — RDMA + GPU communication
-├── examples/                  # End-to-end training examples (Dockerfile, launcher, scripts)
-│   ├── llama2/                #   LLaMA2 SFT
-│   └── llama31/               #   LLaMA 3.1 Pretrain
-└── tests/                     # Test suite
-```
+
+See the [LumenRL repository](https://github.com/ZhangDanyang-AMD/Lumen-RL.git) for GRPO, GSPO, and agentic RL training examples.
 
 ## License
 
