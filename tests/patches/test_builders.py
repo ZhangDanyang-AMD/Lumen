@@ -79,6 +79,21 @@ class TestBuilderPatches:
         args = parser.parse_args([])
         assert args.backend == "megatron"
 
+    def test_common_megatron_args_has_dedicated_fp4_switch(self):
+        parser = ArgumentParser()
+        apply_args_patches(parser, names={"common_megatron_args"})
+        args = parser.parse_args(["--linear-fp4", "--grad-quant-type", "mxfp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+        assert args.grad_quant_type == "mxfp4"
+        assert args.linear_fp8_block_size == 128
+
+    def test_common_megatron_args_rejects_mxfp4_as_fp8_format(self):
+        parser = ArgumentParser()
+        apply_args_patches(parser, names={"common_megatron_args"})
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--linear-fp8-format", "mxfp4"])
+
     def test_llama_pretrain_args_registered(self):
         names = {spec.name for spec in list_patches(PatchPhase.ARGS, tags={"llama", "pretrain"})}
         assert "llama_pretrain_args" in names

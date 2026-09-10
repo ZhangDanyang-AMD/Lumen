@@ -51,6 +51,7 @@ class VerlLumenArgs:
     ])
 
     linear_fp8: bool = False
+    linear_fp4: bool = False
     linear_fp8_format: str = "fp8_e4m3"
     linear_fp8_scaling: str = "delayed"
     linear_fp8_activation: bool = True
@@ -77,6 +78,9 @@ class VerlLumenArgs:
                 f"Unsupported rollout_backend {self.rollout_backend!r}; "
                 f"v1 only supports {_VALID_ROLLOUT_BACKENDS}"
             )
+        from lumen.config import check_linear_quant_exclusive
+
+        check_linear_quant_exclusive(self.linear_fp8, self.linear_fp4)
         validate_backend_matrix(self)
 
 
@@ -120,7 +124,7 @@ def from_verl_config(cfg: Any) -> VerlLumenArgs:
         kwargs["lora_alpha"] = lora_cfg.get("alpha", 32.0)
 
     for key in (
-        "linear_fp8", "linear_fp8_format", "linear_fp8_scaling",
+        "linear_fp8", "linear_fp4", "linear_fp8_format", "linear_fp8_scaling",
         "lumen_norm", "lumen_fp8_attn", "lumen_fp8_activation_store",
         "lumen_fp8_param_gather", "lumen_fp8_weight_cache",
         "fp8_param_manager", "use_8bit_adam",

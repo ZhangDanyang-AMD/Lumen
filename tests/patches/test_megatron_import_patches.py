@@ -79,6 +79,67 @@ class TestMegatronImportPatches:
         monkeypatch.setattr(builtins, "__import__", _block_moe_utils_import)
         self.moe_fused_router.install_moe_fused_router()
 
+    def _stub_moe_utils(self):
+        moe_utils = types.ModuleType("megatron.core.transformer.moe.moe_utils")
+        for name in (
+            "megatron",
+            "megatron.core",
+            "megatron.core.transformer",
+            "megatron.core.transformer.moe",
+        ):
+            sys.modules.setdefault(name, types.ModuleType(name))
+        sys.modules["megatron.core.transformer.moe.moe_utils"] = moe_utils
+        return moe_utils
+
+    def _raise_on_router_import(self, monkeypatch, exc):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _fake(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "lumen.ops.moe.fused_router":
+                raise exc
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", _fake)
+
+    def test_skips_when_its_own_ops_are_missing(self, monkeypatch):
+        """The expected failure: the module is there, the three names are not.
+
+        That is a plain ImportError rather than ModuleNotFoundError, and it has
+        to be tolerated -- this is an IMPORT-phase patch with default=True, so a
+        dense run would otherwise die on its way to GPTModel.
+        """
+        moe_utils = self._stub_moe_utils()
+        self._raise_on_router_import(
+            monkeypatch,
+            ImportError(
+                "cannot import name 'fused_moe_aux_loss'",
+                name="lumen.ops.moe.fused_router",
+            ),
+        )
+
+        self.moe_fused_router.install_moe_fused_router()
+
+        # Marked handled, so a later pass neither retries nor warns again.
+        assert getattr(moe_utils, "_lumen_fused_router_patched") is True
+
+    def test_reraises_when_another_module_is_broken(self, monkeypatch):
+        """A broken AITER must not read as "no fused router available"."""
+        moe_utils = self._stub_moe_utils()
+        self._raise_on_router_import(
+            monkeypatch,
+            ModuleNotFoundError(
+                "No module named 'aiter.ops.triton.moe'",
+                name="aiter.ops.triton.moe",
+            ),
+        )
+
+        with pytest.raises(ModuleNotFoundError):
+            self.moe_fused_router.install_moe_fused_router()
+
+        assert not getattr(moe_utils, "_lumen_fused_router_patched", False)
+
 
 def _load_megatron_import():
     for key in (

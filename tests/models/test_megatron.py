@@ -52,6 +52,7 @@ from lumen.models.megatron import (  # noqa: E402
     _patch_mla_attention,
     _patch_norms_in_spec,
     add_common_megatron_args,
+    enable_fp4_for_parallel_linear,
     enable_fp8_for_parallel_linear,
     reset_fp8_state,
 )
@@ -885,6 +886,15 @@ class TestAddCommonMegatronArgs:
         args = self._parse()
         assert args.lumen_attn_backend == "auto"
 
+    def test_linear_fp4_has_dedicated_switch(self):
+        args = self._parse(["--linear-fp4"])
+        assert args.linear_fp4 is True
+        assert args.linear_fp8 is False
+
+    def test_fp8_format_rejects_mxfp4(self):
+        with pytest.raises(SystemExit):
+            self._parse(["--linear-fp8-format", "mxfp4"])
+
     def test_lumen_attn_backend_choices(self):
         for backend in ["auto", "triton", "csrc", "asm"]:
             args = self._parse(["--lumen-attn-backend", backend])
@@ -898,6 +908,45 @@ class TestAddCommonMegatronArgs:
         for scope in ["none", "dpa", "mha"]:
             args = self._parse(["--lumen-fp8-attn", scope])
             assert args.lumen_fp8_attn == scope
+
+    def test_grad_quant_type_choices(self):
+        # Kept in step with the FSDP parser's --grad-quant-type: a recipe that
+        # reaches only one of the two backends is the harder bug to spot.
+        for gq in ["fp8", "mxfp8", "mxfp4"]:
+            args = self._parse(["--grad-quant-type", gq])
+            assert args.grad_quant_type == gq
+
+    def test_grad_quant_type_still_accepts_the_retired_fp4_spelling(self):
+        """Scripts written against "fp4" must not die at argparse.
+
+        "fp4" has never computed anything -- ScalingManager raises
+        NotImplementedError for it -- so dropping it from choices broke no
+        working configuration, only moved the failure earlier and made it less
+        legible. Keeping it means the error still arrives from the place that
+        can name mxfp4 as the replacement. It is deliberately *not* aliased to
+        mxfp4, which would quietly start quantizing gradients to a format the
+        flag does not name.
+        """
+        from lumen.quantize.scaling_manager import ScalingManager
+
+        args = self._parse(["--grad-quant-type", "fp4"])
+        assert args.grad_quant_type == "fp4"
+
+        with pytest.raises(NotImplementedError, match="mxfp4"):
+            ScalingManager.quantize_grad_tensor(
+                torch.zeros(4, 4), grad_quant_type="fp4", block_size=32,
+            )
+
+    def test_linear_fp8_and_fp4_are_exclusive_at_the_parser(self):
+        """Both gates at once has to fail before a model is built.
+
+        The exclusion lived only in LumenConfig.from_args, which the FSDP and
+        RL call sites bypass by reading args.linear_fp4 off the namespace.
+        """
+        assert self._parse(["--linear-fp4"]).linear_fp4 is True
+        assert self._parse(["--linear-fp8"]).linear_fp8 is True
+        with pytest.raises(SystemExit):
+            self._parse(["--linear-fp8", "--linear-fp4"])
 
     def test_lumen_fp8_quant_type_default(self):
         args = self._parse()
@@ -1164,6 +1213,128 @@ class TestEnableFP8ForParallelLinear:
         enable_fp8_for_parallel_linear(model)
         mock_print.assert_not_called()
 
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_block_size_taken_from_quant_config_when_unset(self, mock_print):
+        from lumen.modules.parallel_linear import LumenColumnParallelLinear
+        from lumen.quantize.config import QuantConfig
+
+        class _MockLumenCol(LumenColumnParallelLinear):
+            def __init__(self):
+                nn.Module.__init__(self)
+                self.enable_fp8 = mock.MagicMock()
+
+        mock_linear = _MockLumenCol()
+        model = nn.Sequential(mock_linear)
+
+        enable_fp8_for_parallel_linear(
+            model,
+            scaling_type="mxfp4",
+            block_size=None,
+            quant_config=QuantConfig(block_size=32),
+        )
+
+        assert mock_linear.enable_fp8.call_args.kwargs["block_size"] == 32
+
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_dedicated_fp4_enable_uses_mxfp4_recipe(self, mock_print):
+        from lumen.modules.parallel_linear import LumenColumnParallelLinear
+
+        class _MockLumenCol(LumenColumnParallelLinear):
+            def __init__(self):
+                nn.Module.__init__(self)
+                self.enable_fp8 = mock.MagicMock()
+
+        mock_linear = _MockLumenCol()
+        enable_fp4_for_parallel_linear(nn.Sequential(mock_linear))
+
+        mock_linear.enable_fp8.assert_called_once()
+        assert mock_linear.enable_fp8.call_args.kwargs["scaling_type"] == "mxfp4"
+        assert mock_linear.enable_fp8.call_args.kwargs["block_size"] == 32
+
+
+# ===================================================================
+# model_provider -> parallel linear recipe
+# ===================================================================
+
+
+class TestModelProviderParallelLinearRecipe:
+    """The native parallel linears must be configured from the resolved recipe.
+
+    MX formats carry their scaling inside the format, so --linear-fp8-scaling
+    still reads "blockwise" on an MXFP4 run. Forwarding that raw string made the
+    native linears execute FP8 blockwise while the launcher believed it had
+    asked for MXFP4 — a silent precision swap that raises nothing and only shows
+    up as an unexplained loss curve.
+    """
+
+    @staticmethod
+    def _args(fmt):
+        return SimpleNamespace(
+            linear_fp8=fmt != "mxfp4",
+            linear_fp4=fmt == "mxfp4",
+            lumen_linear=True,
+            linear_fp8_format=None if fmt == "mxfp4" else fmt,
+            linear_fp8_scaling="blockwise",
+            linear_fp8_block_size=128,
+            lora_rank=0,
+            num_layers=4,
+        )
+
+    def _captured_kwargs(self, fmt):
+        from lumen.models.megatron import make_lumen_model_provider
+
+        provider = make_lumen_model_provider(
+            lambda args, pre_process, post_process, vp_stage, config=None: nn.Sequential(
+                nn.Linear(16, 16)
+            )
+        )
+        captured = {}
+        with mock.patch("lumen.models.megatron.get_args", return_value=self._args(fmt)), mock.patch(
+            "lumen.models.megatron.enable_fp8_for_parallel_linear",
+            side_effect=lambda model, **kw: captured.update(kw),
+        ), mock.patch(
+            "lumen.models.megatron.enable_fp4_for_parallel_linear",
+            side_effect=lambda model, **kw: captured.update(kw),
+        ):
+            provider()
+        return captured
+
+    def test_mxfp4_run_configures_linears_for_mxfp4(self):
+        assert self._captured_kwargs("mxfp4")["scaling_type"] == "mxfp4"
+
+    def test_mxfp8_run_configures_linears_for_mxfp8(self):
+        assert self._captured_kwargs("mxfp8")["scaling_type"] == "mxfp8"
+
+    def test_fp8_run_still_uses_its_scaling_string(self):
+        assert self._captured_kwargs("fp8_e4m3")["scaling_type"] == "blockwise"
+
+    def test_mxfp4_run_forwards_block_size_32(self):
+        # Omitting block_size leaves the linears at their init default of 128,
+        # which silently disables the MXFP4 scale-swizzle fusion.
+        assert self._captured_kwargs("mxfp4")["block_size"] == 32
+
+    @pytest.mark.parametrize("fmt", ["mxfp4", "fp8_e4m3"])
+    def test_quantized_linears_without_lumen_linear_are_refused(self, fmt):
+        """A half-quantized model must not start.
+
+        The native pass is gated on --lumen-linear but cfg.enable() is not, so
+        asking for FP8/FP4 linears without it left norms patched and parameters
+        wrapped while every GEMM stayed BF16 -- and said nothing, so the run
+        looked like a working quantized run.
+        """
+        from lumen.models.megatron import make_lumen_model_provider
+
+        args = self._args(fmt)
+        args.lumen_linear = False
+        provider = make_lumen_model_provider(
+            lambda args, pre_process, post_process, vp_stage, config=None: nn.Sequential(
+                nn.Linear(16, 16)
+            )
+        )
+        with mock.patch("lumen.models.megatron.get_args", return_value=args):
+            with pytest.raises(ValueError, match="requires --lumen-linear"):
+                provider()
+
 
 # ===================================================================
 # Constants
@@ -1254,20 +1425,25 @@ class TestLossFuncEarlyStop:
 
 class TestPatchCrossEntropy:
     def test_patches_idempotently(self):
+        # megatron._patch_cross_entropy is a backward-compatible alias now; the
+        # guard flag it used to own lives with install_cross_entropy in the
+        # patch registry, and megatron's copy is never written. Assert on the
+        # registry's flag so this still tests the alias rather than a leftover.
         import lumen.models.megatron as meg_mod
+        import lumen.patches.runtime.megatron_import as import_patches
 
-        orig = meg_mod._cross_entropy_patched
-        meg_mod._cross_entropy_patched = False
+        orig = import_patches._cross_entropy_patched
+        import_patches._cross_entropy_patched = False
 
         try:
-            with mock.patch("lumen.models.megatron.print_rank_0"):
+            with mock.patch("megatron.training.print_rank_0"):
                 meg_mod._patch_cross_entropy()
-                assert meg_mod._cross_entropy_patched is True
+                assert import_patches._cross_entropy_patched is True
 
                 meg_mod._patch_cross_entropy()
-                assert meg_mod._cross_entropy_patched is True
+                assert import_patches._cross_entropy_patched is True
         finally:
-            meg_mod._cross_entropy_patched = orig
+            import_patches._cross_entropy_patched = orig
 
 
 # ===================================================================

@@ -273,6 +273,40 @@ class TestFP8ParamLifecycle:
         mgr.check_and_mark_fp8_stale(0)
         assert "layer.weight" not in mgr._fp8_param_stale
 
+    def test_mxfp4_is_refused(self):
+        """The param cache is an FP8 mechanism; no MXFP4 path reads it back.
+
+        Under MXFP4 it was not inert: it spent a quantization pass per weight
+        per optimizer step and stored row-wise scales where an MXFP4 consumer
+        expects 2D tiles, so the first reader to appear would have gotten a
+        silently wrong layout rather than an error.
+        """
+        cfg = QuantConfig(format=QuantFormat.MXFP4, scaling=ScalingType.BLOCKWISE)
+        mgr = ScalingManager(cfg)
+        model = torch.nn.Linear(8, 8)
+        model._quant_tensor_id = "layer.weight"
+
+        with pytest.raises(ValueError, match="does not apply to MXFP4"):
+            mgr.enable_fp8_params(model)
+
+    def test_fp8_weight_cache_is_refused_for_mxfp4(self):
+        """Same defect as the param cache, in the sibling feature.
+
+        store_weights_fp8 leaves per-tensor FP8 with a scalar scale on the
+        module, and the forward hands a populated cache straight to the GEMM --
+        _mxfp4_cached_weight passes it through and quantize_input is skipped.
+        The MXFP4 GEMM then got e4m3 bytes where it wanted packed FP4 and died
+        unpacking an empty shape, several frames from the cause.
+        """
+        import lumen.quantize as quant
+        from lumen.quantize.config import QuantConfig as _QC
+
+        model = torch.nn.Linear(64, 64).cuda().to(torch.bfloat16)
+        quant.enable(model, config=_QC(format=QuantFormat.MXFP4, scaling=ScalingType.BLOCKWISE))
+
+        with pytest.raises(ValueError, match="does not apply to MXFP4"):
+            quant.store_weights_fp8(model)
+
 
 # ===================================================================
 # Gradient quantization (static method)
@@ -307,6 +341,22 @@ class TestGradQuantStatic:
         golden, _ = fp8_quant_dequant_ref(t)
         snr = compute_snr(golden, result)
         assert snr > 20, f"Grad quant vs golden SNR: {snr:.1f} dB"
+
+    def test_mxfp4_ignores_an_fp8_recipe_block_size(self, monkeypatch):
+        import lumen.quantize.scaling_manager as sm_mod
+
+        seen = {}
+
+        def _round(tensor, block_size):
+            seen["block_size"] = block_size
+            return tensor
+
+        monkeypatch.setattr(sm_mod, "_round_to_mxfp4", _round)
+        tensor = torch.zeros(2, 32)
+        assert ScalingManager.quantize_grad_tensor(
+            tensor, "mxfp4", block_size=128,
+        ) is tensor
+        assert seen["block_size"] == 32
 
     def test_invalid_raises(self):
         t = torch.randn(4, 8, device="cuda")

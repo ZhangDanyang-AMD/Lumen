@@ -9,5 +9,30 @@ build/
 /docs/
 outputs/2026-*/
 tunableop_results*.csv
+.rocprofv3/
 data/
 *.parquet
+wandb/
+runs/
+train_*.log
+.claude/worktrees/
+.claude/tmp-training-bugs.md
+
+# Datasets staged by the Megatron launchers
+examples/*/results/mock_data/
+examples/*/results/c4_data/
+
+# Run output: logs, autotune cache, shape dumps
+examples/*/results/lumen_*.log
+examples/qwen3/results/*.log
+examples/*/results/mxfp4_autotune_*.json
+examples/*/results/*.shapes.csv
+examples/*/results/*.untuned.csv
+
+# Profiler and tensorboard artifacts. Matched by extension, not directory, so
+# the curated summaries alongside them stay tracked.
+examples/*/results/tensorboard/
+examples/*/results/**/events.out.tfevents.*
+examples/*/results/**/*.pt.trace.json
+
+examples/precision_matrix_runs.tsv

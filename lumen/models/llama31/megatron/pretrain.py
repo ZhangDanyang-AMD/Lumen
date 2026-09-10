@@ -44,7 +44,7 @@ from megatron.training.utils import (
 from lumen.models.llama31.dataset import PretrainTextDataset
 
 # Re-export shared symbols so existing callers are not broken.
-from lumen.models.megatron import enable_fp8_for_parallel_linear  # noqa: F401
+from lumen.models.megatron import enable_fp4_for_parallel_linear, enable_fp8_for_parallel_linear  # noqa: F401
 from lumen.models.megatron import (  # noqa: F401
     add_common_megatron_args,
     apply_fp8_training,

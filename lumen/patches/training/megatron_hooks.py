@@ -31,6 +31,46 @@ def install_fp8_param_gather_hook() -> None:
     _mt_training.setup_model_and_optimizer = _setup_with_fp8_hook
 
 
+def install_mxfp4_weight_cache_hook() -> None:
+    """Install the Megatron optimizer hook that invalidates MXFP4 weight caches.
+
+    The MXFP4 linear path caches each layer's quantized weight so that
+    gradient-accumulation micro-batches (and gradient-checkpoint recomputes)
+    reuse it instead of re-deriving an identical FP4 tensor.  The cache is
+    keyed on nothing but the module, so it has to be dropped once the BF16
+    master weight changes — otherwise the run silently trains against the
+    step-0 weights.
+    """
+    import megatron.training.training as _mt_training
+    from megatron.training import get_args, print_rank_0
+
+    from lumen.models.megatron import resolve_quant_format
+
+    current_setup = _mt_training.setup_model_and_optimizer
+    if getattr(current_setup, "_lumen_mxfp4_weight_cache_hook", False):
+        return
+
+    def _setup_with_mxfp4_hook(*args, **kwargs):
+        model, optimizer, scheduler = current_setup(*args, **kwargs)
+        train_args = get_args()
+
+        if (
+            getattr(train_args, "linear_fp4", False)
+            and resolve_quant_format(train_args) == "mxfp4"
+            and os.environ.get("LUMEN_MXFP4_DISABLE_WEIGHT_CACHE") != "1"
+            and model
+        ):
+            from lumen.quantize import register_mxfp4_weight_optimizer_hooks
+
+            register_mxfp4_weight_optimizer_hooks(model, optimizer)
+            print_rank_0("> MXFP4 weight cache enabled (invalidated on optimizer step)")
+
+        return model, optimizer, scheduler
+
+    _setup_with_mxfp4_hook._lumen_mxfp4_weight_cache_hook = True
+    _mt_training.setup_model_and_optimizer = _setup_with_mxfp4_hook
+
+
 def install_val_loss_early_stop_hook() -> None:
     """Stop training when reduced validation loss reaches ``val_loss_target``."""
     try:
@@ -180,6 +220,14 @@ register_patch(
     tags=frozenset({"fp8", "training", "megatron"}),
     default=False,
 )(install_fp8_param_gather_hook)
+
+register_patch(
+    "mxfp4_weight_cache_hook",
+    PatchPhase.TRAINING,
+    description="Invalidate the per-module MXFP4 weight cache on each optimizer step",
+    tags=frozenset({"mxfp4", "training", "megatron"}),
+    default=False,
+)(install_mxfp4_weight_cache_hook)
 
 register_patch(
     "fp8_param_storage_hook",

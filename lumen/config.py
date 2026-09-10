@@ -89,6 +89,22 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
 }
 
 
+def check_linear_quant_exclusive(linear_fp8, linear_fp4) -> None:
+    """Refuse a config that asks for FP8 and FP4 linears at once.
+
+    Lives here rather than only inside ``from_args`` because not every consumer
+    goes through it: the RL dataclasses are constructed directly and several
+    call sites read ``args.linear_fp4`` off the namespace. With the check in one
+    place they all reach it, and the two flags are also mutually exclusive at
+    the Megatron parser so the common case fails before any model is built.
+    """
+    if linear_fp8 and linear_fp4:
+        raise ValueError(
+            "--linear-fp8 and --linear-fp4 are mutually exclusive: FP4 selects the "
+            "fixed MXFP4 recipe and cannot share the FP8 format selector. Pick one."
+        )
+
+
 @dataclass
 class LumenConfig:
     """Unified configuration for all Lumen training features.
@@ -98,7 +114,7 @@ class LumenConfig:
     * **Tier 0 — Weight storage & adapters:** ``fp8_param_manager``,
       ``lora_rank`` / ``lora_alpha`` / ``lora_dropout``.  Applied first
       (FP8ParamManager before LoRA) so adapter weights stay BF16.
-    * **Tier 1 — Linear FP8:** ``format``, ``scaling``, ``block_size``, etc.
+    * **Tier 1 — Linear quantization:** ``format``, ``scaling``, ``block_size``, etc.
       These are forwarded to :class:`~lumen.quantize.QuantConfig`.
     * **Tier 2 — Attention FP8 & norms:** ``fp8_attn``, ``attn_backend``,
       ``attn_quant_type``, ``lumen_norm``.
@@ -108,10 +124,14 @@ class LumenConfig:
       read by the trainer to select 8-bit Adam from bitsandbytes.
     """
 
-    # -- Tier 1: Linear FP8 (forwarded to QuantConfig) --
+    # -- Tier 1: Linear quantization (forwarded to QuantConfig) --
     format: str = "fp8_e4m3"
     scaling: str = "delayed"
-    block_size: int = 128
+    # ``None`` means the format default: 128 for FP8 block recipes and the
+    # spec-mandated 32 for MXFP4. Keeping the sentinel is what lets an explicit
+    # invalid MXFP4 value reach QuantConfig and fail instead of being silently
+    # rewritten to 32.
+    block_size: Optional[int] = None
     amax_algo: str = "max"
     margin: int = 0
     reduce_amax: bool = False
@@ -177,11 +197,19 @@ class LumenConfig:
     def quant_config(self):
         """Build the inner :class:`~lumen.quantize.QuantConfig`."""
         from lumen.quantize import QuantConfig
+        from lumen.quantize.config import MXFP4_BLOCK_SIZE
+
+        # Hand-built configs use the format default, while an explicit value is
+        # preserved so QuantConfig can enforce MXFP4's fixed 32-element blocks.
+        if self.block_size is None:
+            block_size = MXFP4_BLOCK_SIZE if self.format == "mxfp4" else 128
+        else:
+            block_size = self.block_size
 
         return QuantConfig.from_str(
             format=self.format,
             scaling=self.scaling,
-            block_size=self.block_size,
+            block_size=block_size,
             amax_algo=self.amax_algo,
             margin=self.margin,
             reduce_amax=self.reduce_amax,
@@ -235,7 +263,7 @@ class LumenConfig:
           0b. LoRA (PEFT) — wrap linears with trainable adapters
           1.  Norm patching (before quant so new norm modules get patched)
           2.  Pre-quant module flags (delay_wgrad, grad-accum fusion, etc.)
-          3.  ``quant.enable()`` — FP8 linear patching
+          3.  ``quant.enable()`` — low-precision linear patching
           4.  Post-quant features (fp8_checkpoint, fp8_param_gather)
           5.  Attach config to model for downstream reads
 
@@ -248,6 +276,14 @@ class LumenConfig:
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
         import torch
+
+        if self.fp8_param_manager and self.format == "mxfp4":
+            raise ValueError(
+                "fp8_param_manager cannot be combined with MXFP4: it replaces "
+                "nn.Linear weights with FP8 storage before MXFP4 quantization, "
+                "which requires BF16/FP32 masters. Disable fp8_param_manager; "
+                "MXFP4 already caches packed FP4 weights per master-weight version."
+            )
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
@@ -273,7 +309,7 @@ class LumenConfig:
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
 
-        # 3. FP8 linear quantization
+        # 3. Linear quantization
         qcfg = self.quant_config
         manager = None
         if qcfg.is_quantized:
@@ -656,11 +692,14 @@ class LumenConfig:
         Iterates :data:`_ARG_MAP` to find matching attributes on *args*.
         Unknown / missing attributes are silently skipped (defaults apply).
 
-        Respects the ``linear_fp8`` boolean gate: when it is ``False``, the
-        FP8 Linear quantization fields (format, scaling, etc.) are suppressed
-        so that ``quant_config.is_quantized`` remains ``False``.
+        ``linear_fp8`` and ``linear_fp4`` are independent, mutually exclusive
+        public gates. ``linear_fp4`` selects the fixed MXFP4 recipe; MXFP4 is
+        deliberately not accepted through the FP8 format selector.
         """
         linear_fp8_enabled = getattr(args, "linear_fp8", None)
+        linear_fp4_enabled = getattr(args, "linear_fp4", False)
+
+        check_linear_quant_exclusive(linear_fp8_enabled, linear_fp4_enabled)
 
         kwargs: dict = {}
         for field_name, arg_names in _ARG_MAP.items():
@@ -670,7 +709,14 @@ class LumenConfig:
                     kwargs[field_name] = val
                     break
 
-        if linear_fp8_enabled is False:
+        if linear_fp4_enabled:
+            kwargs["format"] = "mxfp4"
+            kwargs["scaling"] = "blockwise"
+            kwargs["block_size"] = 32
+        elif linear_fp8_enabled:
+            if kwargs.get("format") == "mxfp4":
+                raise ValueError("MXFP4 must be enabled with --linear-fp4, not --linear-fp8-format")
+        elif linear_fp8_enabled is False:
             kwargs["scaling"] = "none"
 
         return cls(**kwargs)

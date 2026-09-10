@@ -46,7 +46,7 @@ def _run_megatron():
         lora_applier=apply_lora,
         fp8_applier=apply_fp8_training,
     )
-    apply_training_patches(names={"fp8_param_gather_hook"})
+    apply_training_patches(names={"fp8_param_gather_hook", "mxfp4_weight_cache_hook"})
 
     train_valid_test_datasets_provider.is_distributed = True
 

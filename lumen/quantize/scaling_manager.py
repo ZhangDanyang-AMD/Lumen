@@ -14,6 +14,7 @@ import torch.nn as nn
 
 from lumen.quantize.config import (
     AmaxAlgo,
+    MXFP4_BLOCK_SIZE,
     QuantConfig,
     QuantFormat,
     ScalingType,
@@ -155,7 +156,7 @@ def _get_quant_ops():
 # Gradient quantization helpers
 # ---------------------------------------------------------------------------
 
-GRAD_QUANT_TYPES = (None, "fp8", "mxfp8", "fp4")
+GRAD_QUANT_TYPES = (None, "fp8", "mxfp8", "mxfp4", "fp4")
 
 
 def _round_to_fp8(tensor: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
@@ -189,6 +190,27 @@ def _round_to_mxfp8(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
         block_size=block_size,
         axis=-1,
     )
+
+    data_hp = data_hp[:orig_m, :orig_n]
+
+    return data_hp.reshape(orig_shape).to(orig_dtype)
+
+
+def _round_to_mxfp4(tensor: torch.Tensor, block_size: int = 32) -> torch.Tensor:
+    """Microscaling FP4 quant-dequant round-trip."""
+    from lumen.ops.quantize.ops import convert_from_mxfp4, convert_to_mxfp4
+    from lumen.ops.quantize.padding import pad_to_block
+
+    orig_dtype = tensor.dtype
+    orig_shape = tensor.shape
+
+    flat = tensor.reshape(-1, orig_shape[-1]).contiguous()
+    flat, orig_m = pad_to_block(flat, block_size, dim=0)
+    flat, orig_n = pad_to_block(flat, block_size, dim=-1)
+
+    data_bf16 = flat.to(torch.bfloat16)
+    data_lp, scales = convert_to_mxfp4(data_bf16, block_size=block_size, axis=-1, use_sr=True)
+    data_hp = convert_from_mxfp4(data_lp, scales, output_dtype=torch.bfloat16, block_size=block_size, axis=-1)
 
     data_hp = data_hp[:orig_m, :orig_n]
 
@@ -767,6 +789,23 @@ class ScalingManager:
         ``quant.enable()`` patching) and registers their ``.weight``
         parameters for FP8 lifecycle management.
         """
+        # This cache holds per-tensor / blockwise FP8 descriptors, and every
+        # reader of it is on an FP8 path: MXFP4's forward quantizes the weight
+        # in quantize_input and its backward works off the saved tensors, so
+        # nothing here would ever be read back. Enabling it under MXFP4 was not
+        # inert though -- it spent a full quantization pass per weight per
+        # optimizer step, and stored the result with row-wise scales where an
+        # MXFP4 consumer expects 2D tiles, so the first reader to appear would
+        # have gotten a silently wrong layout rather than an error.
+        if self.config.format == QuantFormat.MXFP4:
+            raise ValueError(
+                "The FP8 param cache (--lumen-fp8-param-gather, or "
+                "LUMEN_WEIGHT_QUANT_ONCE=1) does not apply to MXFP4: its "
+                "descriptors are never read back, and the layout would not match. "
+                "Nothing is lost by turning it off: MXFP4 caches its own FP4 "
+                "weight per optimizer step unconditionally "
+                "(lumen.quantize._mxfp4_cached_weight)."
+            )
         count = 0
         for _name, module in model.named_modules():
             tensor_id = getattr(module, "_quant_tensor_id", None)
@@ -960,6 +999,22 @@ class ScalingManager:
         )
         fp8_max = self._fp8_max_bwd if backward else self._fp8_max
         dtype = self.fp8_dtype_bwd if backward else self.fp8_dtype
+
+        if scale is None and self.config.format == QuantFormat.MXFP4:
+            from lumen.ops.quantize.ops import convert_to_mxfp4
+            # Row-wise scales along the reduction axis: the activation
+            # convention, matching quantize_input(is_weight=False). Weights use
+            # 2D tiles and are quantized by quantize_input, never here --
+            # enable_fp8_params refuses MXFP4 so the weight paths cannot reach
+            # this branch and pick up the wrong one of the two layouts.
+            # RTN for weights (SR only for gradients per NVFP4 paper §4.4)
+            fp4_tensor, mx_scale = convert_to_mxfp4(
+                tensor,
+                block_size=self.config.block_size,
+                axis=-1,
+                use_sr=False,
+            )
+            return FP8Descriptor(data=fp4_tensor, scale=mx_scale, fp8_dtype=None)
 
         if scale is None and self.config.format == QuantFormat.MXFP8:
             convert_to_mxfp8, _, _ = _get_quant_ops()
@@ -1285,10 +1340,10 @@ class ScalingManager:
 
         Args:
             tensor: The gradient tensor.
-            grad_quant_type: ``"fp8"``, ``"mxfp8"``, ``"fp4"``, or ``None``.
+            grad_quant_type: ``"fp8"``, ``"mxfp8"``, ``"mxfp4"``, ``"fp4"``, or ``None``.
             fp8_dtype: Explicit FP8 dtype for the ``"fp8"`` path.  Auto-detects
                 when ``None``.
-            block_size: Block size for ``"mxfp8"`` quantization.
+            block_size: Block size for ``"mxfp8"`` / ``"mxfp4"`` quantization.
         """
         if grad_quant_type is None:
             return tensor
@@ -1301,9 +1356,16 @@ class ScalingManager:
         if grad_quant_type == "mxfp8":
             return _round_to_mxfp8(tensor, block_size=block_size)
 
+        if grad_quant_type == "mxfp4":
+            # MXFP4's E8M0 scale belongs to exactly 32 elements. ``block_size``
+            # may come from an otherwise-FP8 linear recipe (normally 128), so
+            # gradient format selection must not inherit that unrelated knob.
+            return _round_to_mxfp4(tensor, block_size=MXFP4_BLOCK_SIZE)
+
         if grad_quant_type == "fp4":
             raise NotImplementedError(
-                "FP4 gradient quantization is not yet implemented. " "Use 'fp8' or 'mxfp8' for now."
+                "Unscaled FP4 gradient quantization is not implemented. Use "
+                "'mxfp4' for block-scaled FP4, or 'fp8'/'mxfp8'."
             )
 
         raise ValueError(f"Unknown grad_quant_type={grad_quant_type!r}. " f"Valid options: {GRAD_QUANT_TYPES}")

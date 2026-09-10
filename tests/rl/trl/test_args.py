@@ -53,6 +53,23 @@ class TestTrlArgs:
                 beta=0.1,
             )
 
+    def test_fp8_and_fp4_linears_cannot_both_be_asked_for(self):
+        """The RL dataclasses are built directly, never through from_args.
+
+        That is where the exclusion used to live, so this config accepted both
+        gates and let the run decide later which one won.
+        """
+        mod = _load_args_module()
+
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            mod.TrlLumenArgs(
+                model_name_or_path="hf-internal-testing/tiny-random-LlamaForCausalLM",
+                dataset_name="trl-lib/Capybara",
+                output_dir="out",
+                linear_fp8=True,
+                linear_fp4=True,
+            )
+
     def test_fsdp_version_selects_expected_accelerate_file(self):
         mod = _load_args_module()
         args = mod.TrlLumenArgs(

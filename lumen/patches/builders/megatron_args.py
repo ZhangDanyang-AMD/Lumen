@@ -259,12 +259,28 @@ def add_common_megatron_args(parser):
     )
 
     lfp8 = parser.add_argument_group(title="linear-fp8")
+    # The two gates are mutually exclusive at the parser, not just inside
+    # LumenConfig.from_args: the FSDP and RL call sites read args.linear_fp4 off
+    # the namespace without going through it, so a config asking for both used
+    # to get as far as building a model.
+    _linear_quant_gate = parser.add_mutually_exclusive_group()
     safe_add_argument(
-        lfp8,
+        _linear_quant_gate,
         "--linear-fp8",
         action="store_true",
         default=False,
-        help="Enable FP8 quantised training for Linear layers.",
+        help="Enable FP8 quantised training for Linear layers. Excludes --linear-fp4.",
+    )
+    safe_add_argument(
+        lfp8,
+        "--linear-fp8-format",
+        type=str,
+        default=None,
+        choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"],
+        help="FP8 quantisation format for Linear layers. Takes precedence over "
+        "Megatron's --fp8-format. MXFP4 is enabled separately with --linear-fp4. "
+        "Default None means --fp8-format decides; do not give this a "
+        "non-None default or it would silently override --fp8-format.",
     )
     safe_add_argument(
         lfp8,
@@ -298,12 +314,30 @@ def add_common_megatron_args(parser):
         default=False,
         help="Cache FP8-quantised frozen base weights to avoid re-quantisation on every forward/recompute.",
     )
+
     safe_add_argument(
-        lfp8,
+        _linear_quant_gate,
+        "--linear-fp4",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable MXFP4 quantised training for Linear layers (32-element blocks). "
+            "Excludes --linear-fp8."
+        ),
+    )
+
+    grad_quant = parser.add_argument_group(title="gradient-quantization")
+    safe_add_argument(
+        grad_quant,
         "--grad-quant-type",
         type=str,
         default=None,
-        choices=["fp8", "mxfp8", "fp4"],
+        # "fp4" stays accepted so scripts written against it still parse. It has
+        # never computed anything -- ScalingManager raises NotImplementedError
+        # for it -- so this is not an alias for mxfp4: aliasing would quietly
+        # start quantizing gradients to a format the flag does not name. The
+        # failure just keeps arriving from the place that can explain it.
+        choices=["fp8", "mxfp8", "mxfp4", "fp4"],
         help="Gradient quantization type (None=disabled). Applies to Linear, Attention, and RMSNorm.",
     )
 

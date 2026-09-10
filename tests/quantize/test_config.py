@@ -17,6 +17,8 @@ Covers:
   - Edge cases: format=HYBRID bwd dtype differs from fwd
 """
 
+import pytest
+
 from lumen.quantize.config import (
     AmaxAlgo,
     QuantConfig,
@@ -38,6 +40,7 @@ class TestQuantFormat:
             QuantFormat.FP8_E5M2,
             QuantFormat.HYBRID,
             QuantFormat.MXFP8,
+            QuantFormat.MXFP4,
             QuantFormat.FP4,
         }
 
@@ -178,6 +181,57 @@ class TestQuantConfigProperties:
     def test_recipe_mxfp8(self):
         cfg = QuantConfig(format=QuantFormat.MXFP8, scaling=ScalingType.BLOCKWISE)
         assert cfg.recipe == "mxfp8"
+
+
+# ===================================================================
+# MXFP4 block size
+# ===================================================================
+
+
+class TestMXFP4BlockSize:
+    """MXFP4's block size is fixed by the format, not a config knob.
+
+    A config carrying the FP8 default of 128 computed scales over 128 elements
+    while every consumer read them as 32-element blocks -- not a precision
+    trade-off but wrong arithmetic, and nothing checked.
+    """
+
+    def test_mxfp4_defaults_to_32(self):
+        assert QuantConfig(format=QuantFormat.MXFP4).block_size == 32
+
+    def test_mxfp4_refuses_another_block_size(self):
+        with pytest.raises(ValueError, match="32-element blocks"):
+            QuantConfig(format=QuantFormat.MXFP4, block_size=128)
+
+    def test_from_str_mxfp4_refuses_another_block_size(self):
+        with pytest.raises(ValueError, match="32-element blocks"):
+            QuantConfig.from_str("mxfp4", "blockwise", block_size=128)
+
+    def test_fp8_still_takes_any_block_size(self):
+        assert QuantConfig(format=QuantFormat.FP8_E4M3, block_size=128).block_size == 128
+
+    def test_lumen_config_uses_format_default_but_refuses_explicit_mismatch(self):
+        from lumen.config import LumenConfig
+
+        assert LumenConfig(format="mxfp4", scaling="blockwise").quant_config.block_size == 32
+        assert LumenConfig(format="fp8_e4m3", scaling="blockwise").quant_config.block_size == 128
+        with pytest.raises(ValueError, match="32-element blocks"):
+            LumenConfig(
+                format="mxfp4", scaling="blockwise", block_size=128,
+            ).quant_config
+
+    def test_fp8_param_manager_is_refused_before_mxfp4_patching(self):
+        import torch.nn as nn
+
+        from lumen.config import LumenConfig
+
+        cfg = LumenConfig(
+            format="mxfp4",
+            scaling="blockwise",
+            fp8_param_manager=True,
+        )
+        with pytest.raises(ValueError, match="fp8_param_manager cannot be combined"):
+            cfg.enable(nn.Linear(32, 32))
 
 
 # ===================================================================
