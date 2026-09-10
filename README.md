@@ -90,9 +90,9 @@ pip install -e ".[dev]"
 Lumen provides the quantized training engine for [LumenRL](https://github.com/ZhangDanyang-AMD/Lumen-RL.git), an AMD-native RL training framework. LumenRL uses Lumen for:
 
 - **Megatron training backend** — FP8/MXFP8 quantized forward and backward through Lumen's Megatron spec patching (`lumen/models/megatron.py`)
+- **FSDP training backend** — FP8 quantized training with PyTorch FSDP/FSDP2 through Lumen's FSDP integration (`lumen/models/fsdp.py`)
 - **MoE expert parallelism** — Lumen's grouped linear modules and MoE dispatch for models like Qwen3-30B-A3B (128 experts, EP=8)
-- **FP8 KV cache** — Lumen's quantization support for ATOM/vLLM rollout inference with FP8 KV cache
-- **HIP C++ extensions** — Fused quant-transpose and FP8 dispatch kernels compiled from `lumen/csrc/`
+- **Per-block FP8 quantization** — Lumen's per-block FP8 quantization for ATOM/vLLM rollout inference
 
 ```bash
 # LumenRL depends on Lumen as an editable install
