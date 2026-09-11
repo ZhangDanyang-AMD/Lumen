@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 import torch
 from torch.utils.data import Dataset
 
-__all__ = ["PretrainTextDataset"]
+__all__ = ["PretrainTextDataset", "check_sample_budget"]
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,9 @@ class PretrainTextDataset(Dataset):
         world_size: Number of data-parallel dataset shards.
         allow_repeat: Serve ``max_samples`` samples even when this shard holds
             fewer, wrapping back to chunk 0. Off by default so a dataset never
-            silently trains on repeated data; turn it on for a training set that
-            must reach a fixed step count on a corpus smaller than one epoch,
-            which otherwise ends in a ``StopIteration`` mid-run.
+            silently trains on repeated data. Callers that turn it on own
+            telling the user: the class does not warn, because it is built once
+            per rank and would say it once per rank.
     """
 
     def __init__(
@@ -105,17 +105,23 @@ class PretrainTextDataset(Dataset):
 
         self._max_samples = max_samples
 
-        if allow_repeat and max_samples is not None and n_chunks and max_samples > n_chunks:
-            logger.warning(
-                "Corpus holds %d samples but %d were requested: data repeats %.2f times",
-                n_chunks,
-                max_samples,
-                max_samples / n_chunks,
-            )
-
     # ------------------------------------------------------------------
     # Dataset interface
     # ------------------------------------------------------------------
+
+    @property
+    def n_samples_read(self) -> int:
+        """Distinct samples this shard built, before ``max_samples`` or repeat.
+
+        ``__len__`` reports what the sampler is served, which under
+        ``allow_repeat`` says nothing about how much distinct data there is.
+
+        Reading stops once ``max_samples`` worth of tokens are in hand, so this
+        is samples read, not corpus size: a corpus at least as long as the
+        budget yields ``n_samples_read >= max_samples``, and anything less
+        means the corpus ran out.
+        """
+        return len(self._chunks)
 
     def __len__(self) -> int:
         n = len(self._chunks)
@@ -174,3 +180,37 @@ class PretrainTextDataset(Dataset):
                     break
 
         return all_ids
+
+
+def check_sample_budget(available: int, requested: int, allow_repeat: bool) -> Optional[str]:
+    """Settle a training corpus too short for the requested run before step 0.
+
+    Returns the message to report when the run proceeds on repeated data, and
+    ``None`` when there is nothing to say. Raises when the shortfall is real
+    and repeating was not asked for: a corpus that runs out partway through
+    surfaces as a ``StopIteration`` far from its cause, which reads as a crash
+    rather than the configuration problem it is.
+
+    ``available`` comes from :attr:`PretrainTextDataset.n_samples_read`, which
+    undercounts a sufficient corpus but never overcounts a short one, so this
+    never reports a corpus as short when it is not.
+
+    The remedies name Megatron flags even though this module imports nothing
+    from Megatron; the flag name is the actionable half of the message and
+    every caller reaches here from the same CLI.
+    """
+    if not available or requested <= available:
+        return None
+
+    if not allow_repeat:
+        raise ValueError(
+            f"The training corpus holds {available} samples but --train-iters and "
+            f"--global-batch-size ask for {requested}. Supply more data, shorten "
+            f"the run, or pass --lumen-repeat-corpus to train on repeated data."
+        )
+
+    return (
+        f"training corpus holds {available} samples but {requested} were requested; "
+        f"--lumen-repeat-corpus is set, so the data repeats "
+        f"{requested / available:.2f} times"
+    )

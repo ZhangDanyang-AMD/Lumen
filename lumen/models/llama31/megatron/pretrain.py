@@ -41,7 +41,7 @@ from megatron.training.utils import (
     is_first_or_last_pipeline_stage,
 )
 
-from lumen.models.llama31.dataset import PretrainTextDataset
+from lumen.models.llama31.dataset import PretrainTextDataset, check_sample_budget
 
 # Re-export shared symbols so existing callers are not broken.
 from lumen.models.megatron import enable_fp4_for_parallel_linear, enable_fp8_for_parallel_linear  # noqa: F401
@@ -127,18 +127,26 @@ def train_valid_test_datasets_provider(train_val_test_num_samples):
 
     print_rank_0("> building train, validation, and test pretraining datasets ...")
 
-    # Only the training set wraps: --train-iters fixes how many samples training
-    # asks for, and a corpus shorter than that would otherwise end the run early
-    # with a StopIteration. Validation stays capped at one pass so a held-out loss
-    # is never averaged over duplicated samples.
+    # Only the training set can wrap. Validation and test never do: a held-out
+    # loss averaged over duplicated samples is not a held-out loss.
+    repeat_corpus = getattr(args, "lumen_repeat_corpus", False)
     train_ds = PretrainTextDataset(
         train_path,
         args.seq_length,
         raw_tokenizer,
         is_hf,
         max_samples=train_val_test_num_samples[0],
-        allow_repeat=True,
+        allow_repeat=repeat_corpus,
     )
+    # Safe to raise from here only because this provider is marked
+    # is_distributed, so every rank builds its own shard and reaches the same
+    # verdict. Were Megatron to build on rank 0 and broadcast, raising here
+    # would hang the other ranks in that broadcast instead of failing the job.
+    budget_note = check_sample_budget(
+        train_ds.n_samples_read, train_val_test_num_samples[0], repeat_corpus
+    )
+    if budget_note:
+        print_rank_0(f"> WARNING: {budget_note}")
     valid_ds = PretrainTextDataset(
         valid_path,
         args.seq_length,
@@ -230,6 +238,14 @@ def add_pretrain_args(parser):
         default="blockwise",
         choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"],
         help="FP8 quantisation type for FP8 attention backends.",
+    )
+    safe_add_argument(
+        parser,
+        "--lumen-repeat-corpus",
+        action="store_true",
+        help="Let the training set wrap to fill --train-iters when the corpus is "
+        "shorter than the run. Off by default: without it a short corpus is a "
+        "startup error rather than a run that silently repeats data.",
     )
     safe_add_argument(parser, "--linear-fp8-amax-algo", type=str, default="most_recent", choices=["max", "most_recent"])
     safe_add_argument(parser, "--linear-fp8-amax-history", type=int, default=4)
