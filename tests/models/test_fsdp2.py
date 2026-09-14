@@ -361,24 +361,32 @@ _MXFP4_COMM_SCRIPT = textwrap.dedent(
 
     try:
         for step in range(2):
-            out = model(x)
-            if step == 0:
-                num = y_ref.square().mean()
-                den = (out.float() - y_ref).square().mean().clamp(min=1e-12)
-                snr = 10 * torch.log10(num / den).item()
-                assert snr > 8, f"MXFP4 FSDP2 SNR too low: {snr:.1f} dB"
-            loss = out.float().square().mean()
-            assert torch.isfinite(loss), loss
-            loss.backward()
-            optimizer.step()
             optimizer.zero_grad()
+            # Two micro-batches with the parameters retained across the
+            # accumulation window, as --fsdp-retain-accumulated-params does.
+            for micro in range(2):
+                final_micro = micro == 1
+                model.set_requires_gradient_sync(final_micro, recurse=True)
+                model.set_reshard_after_backward(final_micro, recurse=True)
+                for layer in model.layers:
+                    layer.set_reshard_after_forward(final_micro, recurse=False)
+                out = model(x)
+                if step == 0 and micro == 0:
+                    num = y_ref.square().mean()
+                    den = (out.float() - y_ref).square().mean().clamp(min=1e-12)
+                    snr = 10 * torch.log10(num / den).item()
+                    assert snr > 8, f"MXFP4 FSDP2 SNR too low: {snr:.1f} dB"
+                loss = out.float().square().mean() / 2
+                assert torch.isfinite(loss), loss
+                loss.backward()
+            optimizer.step()
         updated_local_weight = model.layers[0].proj.weight.to_local()._data
         assert torch.isfinite(updated_local_weight).all()
         assert not torch.equal(updated_local_weight, initial_local_weight), (
             "trainable MXFP4CommTensor shard was not updated by the optimizer"
         )
         if rank == 0:
-            print("PASS: trainable MXFP4 FSDP2 communication hook forward/backward/update")
+            print("PASS: trainable MXFP4 FSDP2 retained-parameter accumulation/update")
     finally:
         if dist.is_initialized():
             dist.destroy_process_group()

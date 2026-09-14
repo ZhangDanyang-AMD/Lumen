@@ -20,9 +20,24 @@
 # together on Qwen3-8B, 8x MI350X, GBS 16 (grad accum 1), seq 8192, median of
 # steps 21-250: 1310 ms against 1844 ms for MXFP4 alone (1.41x) and 1951 ms for
 # BF16 (1.49x). Held-out val loss stayed inside the band that two identical
-# MXFP4 baselines span, so this buys step time without a precision trade. Both
-# figures are grad accum 1; GBS 128 amortizes the optimizer step over eight
-# micro-batches and has not been measured.
+# MXFP4 baselines span, so this buys step time without a precision trade.
+#
+# MXFP4 communication compression is opt-in. At this shape it repeats weight
+# format conversion around every all-gather and loses to BF16 communication:
+# with the three swaps above, steps 21-60 at GBS 128 measured 10441 ms with
+# MXFP4_COMM=1 versus 8008 ms with the default below (1.30x faster). Set it to
+# 1 only when measuring a topology where the reduced wire volume repays that
+# conversion cost.
+#
+# RETAIN_ACCUM_PARAMS=1 keeps parameters unsharded across the gradient
+# accumulation window instead of re-gathering them per micro-batch. At GBS 128
+# (grad accum 8) it cuts parameter all-gathers from 592 to 81 per step and
+# measured 8082 -> 7535 ms over three runs per arm, i.e. 1.07x against the same
+# recipe without it, for 12.9 GiB more peak memory per GPU. Off by default
+# because that memory scales with model size, not with the accumulation count.
+# That ratio holds for gradient checkpointing on, SHARDING=full_shard and an
+# unset AITER_CONFIG_CACHE_DIR; shard_grad_op already keeps parameters
+# unsharded, so there it saves close to nothing.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +54,8 @@ SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 LR="${LR:-1.0e-4}"
 WARMUP_STEPS="${WARMUP_STEPS:-50}"
-MXFP4_COMM="${MXFP4_COMM:-1}"
+MXFP4_COMM="${MXFP4_COMM:-0}"
+RETAIN_ACCUM_PARAMS="${RETAIN_ACCUM_PARAMS:-0}"
 INIT_FROM_SCRATCH="${INIT_FROM_SCRATCH:-1}"
 SHARDING="${SHARDING:-full_shard}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-150}"
@@ -75,6 +91,14 @@ if [[ "${PRECISION}" == "mxfp4" ]]; then
     fi
 else
     EXTRA_ARGS+=(--mode bf16)
+fi
+# Precision-independent: the saved all-gathers are FSDP's, not MXFP4's.
+if [[ "${RETAIN_ACCUM_PARAMS}" != "0" ]]; then
+    if (( GRAD_ACCUM > 1 )); then
+        EXTRA_ARGS+=(--fsdp-retain-accumulated-params)
+    else
+        echo "WARN: RETAIN_ACCUM_PARAMS ignored, grad accum is 1" >&2
+    fi
 fi
 if [[ -n "${VALID_DATA_PATH}" ]]; then
     EXTRA_ARGS+=(--val-data-path "${VALID_DATA_PATH}")

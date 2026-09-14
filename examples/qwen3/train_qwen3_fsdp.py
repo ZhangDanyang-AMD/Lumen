@@ -311,6 +311,14 @@ def build_parser():
                    help="FSDP2 only: all-gather MXFP4-patched weights as packed FP4 "
                         "(requires --mode mxfp4 --fsdp-version 2)")
     p.add_argument(
+        "--fsdp-retain-accumulated-params",
+        action="store_true",
+        help="FSDP2 gradient accumulation only: keep parameters unsharded across "
+             "the accumulation window and reshard on the final micro-batch. "
+             "Trades the memory of one unsharded model for the per-micro-batch "
+             "all-gathers.",
+    )
+    p.add_argument(
         "--first-last-layers-bf16",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -352,6 +360,8 @@ def parse_args(argv=None):
         raise ValueError("--train-samples must be >= 0")
     if args.eval_batches < 1:
         raise ValueError("--eval-batches must be >= 1")
+    if args.fsdp_retain_accumulated_params and args.fsdp_version != 2:
+        raise ValueError("--fsdp-retain-accumulated-params requires --fsdp-version 2")
     if args.first_last_layers_bf16 is None:
         args.first_last_layers_bf16 = args.task == "pretrain" and args.mode == "mxfp4"
     args.linear_fp8 = args.mode == "fp8_blockwise2d"
@@ -366,6 +376,51 @@ def _set_fsdp2_gradient_sync(model, enabled):
     if setter is None:
         raise RuntimeError("FSDP2 model does not expose set_requires_gradient_sync")
     setter(enabled, recurse=True)
+
+
+def _set_fsdp2_reshard_after_backward(model, enabled):
+    """Free the unsharded parameters after backward, or keep them for reuse."""
+    setter = getattr(model, "set_reshard_after_backward", None)
+    if setter is None:
+        raise RuntimeError("FSDP2 model does not expose set_reshard_after_backward")
+    setter(enabled, recurse=True)
+
+
+def _set_fsdp2_reshard_after_forward(model, enabled):
+    """Set the post-forward reshard policy on every wrapped submodule.
+
+    The root is skipped on purpose: fully_shard already keeps the root
+    unsharded after forward so backward does not re-gather it immediately,
+    and overwriting that would change behaviour outside accumulation.
+    """
+    applied = 0
+    for module in model.modules():
+        if module is model:
+            continue
+        setter = getattr(module, "set_reshard_after_forward", None)
+        if setter is None:
+            continue
+        setter(enabled, recurse=False)
+        applied += 1
+    if applied == 0:
+        raise RuntimeError("No FSDP2 submodule exposes set_reshard_after_forward")
+
+
+def _set_fsdp2_accumulation_state(
+    model, final_micro, retain_params, reshard_after_forward
+):
+    """Configure communication and parameter lifetime for one micro-batch.
+
+    reshard_after_forward is the policy the model was wrapped with, so the
+    final micro-batch restores it instead of assuming full_shard.
+    """
+    _set_fsdp2_gradient_sync(model, final_micro)
+    if not retain_params:
+        return
+    _set_fsdp2_reshard_after_backward(model, final_micro)
+    _set_fsdp2_reshard_after_forward(
+        model, reshard_after_forward if final_micro else False
+    )
 
 
 def _pretrain_loss(model, batch, device):
@@ -487,6 +542,7 @@ def main():
         rank0(f"> FSDP2 model ready (sharding={args.sharding}, "
               f"fp8_param_storage={args.fsdp_fp8_param_storage}, "
               f"mxfp4_comm={args.fsdp_mxfp4_comm}, grad_ckpt={args.grad_checkpointing}, "
+              f"retain_accumulated_params={args.fsdp_retain_accumulated_params}, "
               f"world_size={world_size})")
     else:
         _shard = {
@@ -601,7 +657,12 @@ def main():
                 it = iter(train_loader); b = next(it)
             final_micro = micro == ga - 1
             if args.fsdp_version == 2 and ga > 1:
-                _set_fsdp2_gradient_sync(model, final_micro)
+                _set_fsdp2_accumulation_state(
+                    model,
+                    final_micro,
+                    args.fsdp_retain_accumulated_params,
+                    args.sharding != "shard_grad_op",
+                )
                 sync_context = nullcontext()
             elif args.fsdp_version == 1 and not final_micro:
                 sync_context = model.no_sync()
