@@ -211,6 +211,43 @@ def _residual_std(draws=DRAWS):
     return (resid.std() / denom).item()
 
 
+def test_recomputed_forward_is_bit_identical_and_leaves_the_rng_alone():
+    """What makes recompute a performance knob and not a numerics change.
+
+    Gradient checkpointing runs the forward a second time, so dropping it
+    (``--grad-checkpoint-layers``) can only be precision-neutral if two things
+    hold: the forward reproduces itself exactly, and it does not advance the
+    Python RNG that the gradient's stochastic rounding draws from. Forward
+    quantization is RTN for both operands, and the RTN paths skip the draw on
+    purpose; the SR call below is the positive control showing the RNG
+    assertion has teeth.
+    """
+    from lumen.ops.quantize.ops import convert_to_mxfp4
+
+    torch.manual_seed(23)
+    x = torch.randn(512, 1024, device="cuda", dtype=torch.bfloat16)
+    w = torch.randn(256, 1024, device="cuda", dtype=torch.bfloat16)
+
+    def forward():
+        with torch.no_grad():
+            return QuantizedLinearFunction.apply(
+                x, w, None, None, "mxfp4", None, 32, "weight"
+            )
+
+    try:
+        first = forward()
+        state = random.getstate()
+        second = forward()
+    except (AssertionError, RuntimeError) as e:
+        pytest.skip(f"Lumen MXFP4 path unavailable: {e}")
+
+    torch.testing.assert_close(second, first, rtol=0, atol=0)
+    assert random.getstate() == state, "RTN forward advanced the SR RNG stream"
+
+    convert_to_mxfp4(x, BLOCK, axis=-1, use_sr=True)
+    assert random.getstate() != state, "SR quantization did not draw a counter"
+
+
 @pytest.mark.skipif(not _is_gfx950(), reason="gfx950 SR packing")
 def test_sr_dither_does_not_repeat_between_tiles():
     from lumen.ops.quantize.ops import convert_to_mxfp4

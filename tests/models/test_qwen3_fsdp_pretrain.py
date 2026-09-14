@@ -3,15 +3,21 @@
 
 import os
 import subprocess
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from transformers.modeling_layers import (
+    GradientCheckpointingLayer as _GRAD_CKPT_LAYER,
+)
 
 from examples.qwen3.train_qwen3_fsdp import (
+    _apply_selective_grad_checkpointing,
     _pretrain_loss,
+    _select_recompute_layers,
     _set_fsdp2_accumulation_state,
     _set_fsdp2_gradient_sync,
     _set_fsdp2_reshard_after_backward,
@@ -254,6 +260,115 @@ def test_fsdp2_retain_accumulated_params_requires_fsdp2():
         _BASE + ["--fsdp-version", "2", "--fsdp-retain-accumulated-params"]
     )
     assert args.fsdp_retain_accumulated_params is True
+
+
+@pytest.mark.parametrize(
+    ("num_layers", "requested", "expected"),
+    [
+        (36, 36, list(range(36))),
+        (36, 40, list(range(36))),
+        (36, 0, []),
+        (36, -1, []),
+        # Spread across the depth rather than a prefix: every layer costs the
+        # same recompute, so a prefix would only bias where memory is held.
+        (36, 9, [0, 4, 8, 12, 16, 20, 24, 28, 32]),
+        (36, 1, [0]),
+    ],
+)
+def test_select_recompute_layers_spreads_across_depth(
+    num_layers, requested, expected
+):
+    assert _select_recompute_layers(num_layers, requested) == expected
+
+
+class _CountingLayer(_GRAD_CKPT_LAYER):
+    """A layer that records how many times its forward actually runs."""
+
+    def __init__(self, dim, counter):
+        super().__init__()
+        self.lin = torch.nn.Linear(dim, dim)
+        self.counter = counter
+
+    def forward(self, x):
+        self.counter["forwards"] += 1
+        return torch.tanh(self.lin(x))
+
+
+class _CountingStack(torch.nn.Module):
+    def __init__(self, dim, depth, counter):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            _CountingLayer(dim, counter) for _ in range(depth)
+        )
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+def _run_counting_stack(requested, depth=4, dim=8):
+    """Train-mode forward/backward with `requested` layers recomputed."""
+    torch.manual_seed(0)
+    counter = {"forwards": 0}
+    model = _CountingStack(dim, depth, counter)
+    model.train()
+    for layer in model.layers:
+        layer.gradient_checkpointing = True
+        layer._gradient_checkpointing_func = partial(
+            torch.utils.checkpoint.checkpoint, use_reentrant=False
+        )
+    if requested is not None:
+        _apply_selective_grad_checkpointing(model, requested)
+
+    x = torch.randn(2, dim, requires_grad=True)
+    model(x).square().sum().backward()
+    grads = [layer.lin.weight.grad.clone() for layer in model.layers]
+    return counter["forwards"], grads
+
+
+@pytest.mark.parametrize("requested", [0, 2, 4])
+def test_selective_recompute_runs_exactly_the_selected_layers_twice(requested):
+    depth = 4
+    forwards, grads = _run_counting_stack(requested, depth=depth)
+
+    # One forward per layer, plus one extra for each recomputed layer. This is
+    # what fails if the per-layer flag is set but never read, or if the whole
+    # stack keeps recomputing.
+    assert forwards == depth + requested
+
+    _, reference = _run_counting_stack(0, depth=depth)
+    for grad, expected in zip(grads, reference):
+        torch.testing.assert_close(grad, expected)
+
+
+def test_selective_recompute_rejects_layers_without_the_flag():
+    model = SimpleNamespace()
+    layers = torch.nn.ModuleList([torch.nn.Linear(4, 4)])
+    model.modules = lambda: [SimpleNamespace(layers=layers)]
+
+    with pytest.raises(RuntimeError, match="gradient_checkpointing"):
+        _apply_selective_grad_checkpointing(model, 1)
+
+
+def test_selective_recompute_requires_a_transformer_layer_list():
+    model = SimpleNamespace(modules=lambda: [SimpleNamespace()])
+
+    with pytest.raises(RuntimeError, match="ModuleList"):
+        _apply_selective_grad_checkpointing(model, 1)
+
+
+def test_grad_checkpoint_layers_conflicts_with_disabled_checkpointing():
+    with pytest.raises(ValueError, match="--no-grad-checkpointing"):
+        parse_args(
+            _BASE + ["--no-grad-checkpointing", "--grad-checkpoint-layers", "9"]
+        )
+
+    with pytest.raises(ValueError, match=">= 0"):
+        parse_args(_BASE + ["--grad-checkpoint-layers", "-2"])
+
+    assert parse_args(_BASE).grad_checkpoint_layers is None
+    assert parse_args(_BASE + ["--grad-checkpoint-layers", "9"]).grad_checkpoint_layers == 9
 
 
 def test_pretrain_loss_does_not_shift_dataset_labels_twice():

@@ -394,6 +394,110 @@ _MXFP4_COMM_SCRIPT = textwrap.dedent(
 )
 
 
+_SELECTIVE_RECOMPUTE_SCRIPT = textwrap.dedent(
+    """\
+    import argparse
+    import os
+    from functools import partial
+
+    import torch
+    import torch.nn as nn
+    import torch.distributed as dist
+    from transformers.modeling_layers import GradientCheckpointingLayer
+
+    dist.init_process_group("nccl")
+    rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(rank)
+    torch.manual_seed(0)
+
+    FORWARDS = []
+
+    class Block(GradientCheckpointingLayer):
+        def __init__(self):
+            super().__init__()
+            self.proj = nn.Linear(64, 64, bias=False)
+
+        def forward(self, x):
+            FORWARDS.append(1)
+            return torch.nn.functional.gelu(self.proj(x))
+
+    class ToyTransformer(nn.Module):
+        def __init__(self, depth):
+            super().__init__()
+            self.layers = nn.ModuleList([Block() for _ in range(depth)])
+
+        def forward(self, x):
+            for layer in self.layers:
+                x = layer(x)
+            return x
+
+    DEPTH, RECOMPUTED = 4, 2
+    model = ToyTransformer(DEPTH).to(torch.bfloat16).cuda()
+    model.train()
+    x = torch.randn(8, 64, device="cuda", dtype=torch.bfloat16)
+
+    from lumen.config import LumenConfig
+    _, model = LumenConfig.from_args(argparse.Namespace(
+        linear_fp8=False,
+        linear_fp4=True,
+        lora_rank=0,
+    )).enable(model)
+
+    # full_shard with comm compression off: the shipped default, and the case
+    # where recompute must re-all-gather because forward already resharded.
+    from lumen.models.fsdp import apply_fsdp2
+    apply_fsdp2(model, argparse.Namespace(
+        linear_fp8=False,
+        linear_fp4=True,
+        fsdp_version=2,
+        sharding_strategy="full_shard",
+        fsdp_mxfp4_comm=False,
+        fsdp_fp8_param_storage=False,
+        lumen_fp8_param_gather=False,
+    ))
+
+    for layer in model.layers:
+        layer.gradient_checkpointing = True
+        layer._gradient_checkpointing_func = partial(
+            torch.utils.checkpoint.checkpoint, use_reentrant=False
+        )
+
+    from examples.qwen3.train_qwen3_fsdp import _apply_selective_grad_checkpointing
+    selected = _apply_selective_grad_checkpointing(model, RECOMPUTED)
+    assert selected == [0, 2], selected
+
+    # lr 1.0: a bf16 weight of order 0.1 rounds away an lr=1e-3 update, so a
+    # smaller step would make the update check pass vacuously.
+    optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
+    before = model.layers[0].proj.weight.to_local().detach().clone()
+
+    try:
+        FORWARDS.clear()
+        loss = model(x).float().square().mean()
+        assert torch.isfinite(loss), loss
+        loss.backward()
+
+        # One forward per layer plus one recompute per selected layer. A
+        # recompute that failed to re-unshard would raise instead, which is the
+        # FSDP2 interaction this case exists to pin.
+        assert len(FORWARDS) == DEPTH + RECOMPUTED, len(FORWARDS)
+        for idx, layer in enumerate(model.layers):
+            grad = layer.proj.weight.grad
+            assert grad is not None, idx
+            assert torch.isfinite(grad.to_local()).all(), idx
+
+        optimizer.step()
+        after = model.layers[0].proj.weight.to_local()
+        assert not torch.equal(after, before), "recomputed layer was not updated"
+        if rank == 0:
+            print("PASS: selective recompute under FSDP2 full_shard + MXFP4")
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
+"""
+)
+
+
 _MXFP4_COMM_NUMERICS_SCRIPT = textwrap.dedent(
     """\
     import argparse
@@ -783,6 +887,20 @@ class TestFSDP2Integration:
         result = self._run_training_script(_MXFP4_COMM_SCRIPT)
         assert result.returncode == 0, (
             f"MXFP4 communication failed (rc={result.returncode}):\n"
+            f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+
+    @_MXFP4_DIST
+    def test_mxfp4_selective_recompute_fsdp2(self):
+        """2-GPU selective recompute: only the chosen layers run forward twice.
+
+        Under full_shard the forward reshards, so a recomputed layer has to
+        re-all-gather its parameters; the counted forwards and the finite
+        gradients together say the per-layer flag reached FSDP's hooks.
+        """
+        result = self._run_training_script(_SELECTIVE_RECOMPUTE_SCRIPT)
+        assert result.returncode == 0, (
+            f"Selective recompute failed (rc={result.returncode}):\n"
             f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
         )
 

@@ -298,6 +298,15 @@ def build_parser():
                    help="replace HF apply_rotary_pos_emb with AITER autograd RoPE (fwd+bwd)")
     p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
                    help="disable activation checkpointing (no backward forward-recompute; more memory)")
+    p.add_argument(
+        "--grad-checkpoint-layers",
+        type=int,
+        default=None,
+        help="Recompute only this many transformer layers instead of every "
+             "one. The recompute forward is a quarter of the MXFP4 GEMMs and "
+             "half the attention forwards per step, so this dials that cost "
+             "against activation memory. Unset means every layer.",
+    )
     p.add_argument("--no-limit-all-gathers", dest="limit_all_gathers", action="store_false",
                    help="allow FSDP to overlap consecutive all-gathers with compute (more memory)")
     p.add_argument("--forward-prefetch", action="store_true",
@@ -362,6 +371,13 @@ def parse_args(argv=None):
         raise ValueError("--eval-batches must be >= 1")
     if args.fsdp_retain_accumulated_params and args.fsdp_version != 2:
         raise ValueError("--fsdp-retain-accumulated-params requires --fsdp-version 2")
+    if args.grad_checkpoint_layers is not None:
+        if not args.grad_checkpointing:
+            raise ValueError(
+                "--grad-checkpoint-layers conflicts with --no-grad-checkpointing"
+            )
+        if args.grad_checkpoint_layers < 0:
+            raise ValueError("--grad-checkpoint-layers must be >= 0")
     if args.first_last_layers_bf16 is None:
         args.first_last_layers_bf16 = args.task == "pretrain" and args.mode == "mxfp4"
     args.linear_fp8 = args.mode == "fp8_blockwise2d"
@@ -376,6 +392,49 @@ def _set_fsdp2_gradient_sync(model, enabled):
     if setter is None:
         raise RuntimeError("FSDP2 model does not expose set_requires_gradient_sync")
     setter(enabled, recurse=True)
+
+
+def _transformer_layers(model):
+    """The decoder-layer list, found the way apply_fsdp2 finds it to wrap."""
+    for module in model.modules():
+        if hasattr(module, "layers") and isinstance(module.layers, nn.ModuleList):
+            return module.layers
+    raise RuntimeError("No transformer layer ModuleList found on the model")
+
+
+def _select_recompute_layers(num_layers, requested):
+    """Evenly spaced indices of the layers to recompute.
+
+    Every layer costs about the same recompute and holds about the same
+    activation memory, so the only dial that matters is how many. Spreading
+    them keeps the subset from being an arbitrary prefix.
+    """
+    if requested >= num_layers:
+        return list(range(num_layers))
+    if requested <= 0:
+        return []
+    stride = num_layers / requested
+    return [int(i * stride) for i in range(requested)]
+
+
+def _apply_selective_grad_checkpointing(model, requested):
+    """Recompute only `requested` transformer layers; return their indices.
+
+    transformers keeps ``gradient_checkpointing`` on each layer, so this only
+    clears the flag where recompute is not wanted. The checkpoint function and
+    the module call it wraps stay as ``gradient_checkpointing_enable`` left
+    them, which is what keeps FSDP's unshard hooks running on recompute.
+    """
+    layers = _transformer_layers(model)
+    selected = set(_select_recompute_layers(len(layers), requested))
+    for idx, layer in enumerate(layers):
+        if not hasattr(layer, "gradient_checkpointing"):
+            raise RuntimeError(
+                "Transformer layer has no gradient_checkpointing attribute; "
+                "selective recompute needs the per-layer flag"
+            )
+        layer.gradient_checkpointing = idx in selected
+    return sorted(selected)
 
 
 def _set_fsdp2_reshard_after_backward(model, enabled):
@@ -490,7 +549,13 @@ def main():
         rank0("> Fused RoPE: HF apply_rotary_pos_emb -> AITER autograd RoPE")
     if args.grad_checkpointing:
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-        rank0("> Gradient checkpointing enabled")
+        if args.grad_checkpoint_layers is None:
+            rank0("> Gradient checkpointing enabled")
+        else:
+            recomputed = _apply_selective_grad_checkpointing(
+                model, args.grad_checkpoint_layers
+            )
+            rank0(f"> Gradient checkpointing on {len(recomputed)} layers: {recomputed}")
     else:
         rank0("> Gradient checkpointing DISABLED (more activation memory, no backward recompute)")
 

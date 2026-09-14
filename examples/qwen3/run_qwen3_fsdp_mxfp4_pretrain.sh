@@ -38,6 +38,21 @@
 # That ratio holds for gradient checkpointing on, SHARDING=full_shard and an
 # unset AITER_CONFIG_CACHE_DIR; shard_grad_op already keeps parameters
 # unsharded, so there it saves close to nothing.
+#
+# Recompute is the next dial, through EXTRA_TRAIN_ARGS. Measured on top of
+# RETAIN_ACCUM_PARAMS=1 at GBS 128, SHARDING=full_shard, AITER_CONFIG_CACHE_DIR
+# unset, median of steps 21-60, peak memory per GPU out of 251.7 GiB:
+#
+#   36 of 36 layers recomputed (default)   7535 ms   89.0 GiB   1.00x
+#   --grad-checkpoint-layers 18            6810 ms  130.9 GiB   1.11x (10 steps)
+#   --grad-checkpoint-layers 9             6551 ms  151.8 GiB   1.15x
+#   --no-grad-checkpointing                6103 ms  172.8 GiB   1.23x (3 runs)
+#
+# Those ratios are against the retain-params arm above, i.e. 1.72x against BF16
+# for the last row. Held-out loss moved +0.018 nats at 40 and 60 steps, 0.25x
+# the spread three same-config runs span, so it is not resolvable here. All of
+# it is activation memory, which scales with sequence length and model size:
+# the intermediate rows exist for the shapes where 172.8 GiB does not fit.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,8 +75,8 @@ INIT_FROM_SCRATCH="${INIT_FROM_SCRATCH:-1}"
 SHARDING="${SHARDING:-full_shard}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-150}"
 # Word-split on purpose: this is how a caller reaches the trainer's optional
-# flags (--aiter-attn, --lumen-norm, --fuse-rope, --no-grad-checkpointing)
-# without a launcher variable per flag.
+# flags (--aiter-attn, --lumen-norm, --fuse-rope, --no-grad-checkpointing,
+# --grad-checkpoint-layers N) without a launcher variable per flag.
 read -r -a EXTRA_TRAIN_ARGS <<< "${EXTRA_TRAIN_ARGS:-}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
 
