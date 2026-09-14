@@ -53,6 +53,12 @@
 # the spread three same-config runs span, so it is not resolvable here. All of
 # it is activation memory, which scales with sequence length and model size:
 # the intermediate rows exist for the shapes where 172.8 GiB does not fit.
+#
+# --fused-cross-entropy pays some of that memory back. At vocab 151936 the FP32
+# logits copy and the log-softmax output are ~10 GiB each; routing the loss
+# through AITER's online-softmax kernel took peak memory 172.8 -> 154.2 GiB in
+# every run of the last row above. Its step-time effect (56 ms) sits inside the
+# 138-192 ms that same-config medians span, so treat it as memory, not speed.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

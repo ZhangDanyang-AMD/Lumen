@@ -230,15 +230,14 @@ _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs"
 def _configure_mxfp4_dispatch():
     """Hand Lumen the Qwen3 tuned A4W4 tables before the first MXFP4 GEMM.
 
-    Widens which shapes can reach the prebuilt ASM kernels. Every MXFP4 backend
-    is bit-identical, so this affects speed only. Skipped if the environment
-    variable is already set.
+    Widens which shapes can reach the prebuilt ASM kernels: Lumen only lets a
+    shape reach ASM when the tuned table has a row for it, so an unlisted shape
+    runs Triton instead. Every MXFP4 backend is bit-identical, so this affects
+    speed only. Skipped if the environment variable is already set.
 
-    The per-model table was tuned for Megatron's fused QKV and gate_up, so it
-    misses this path's unfused projections -- but three of its rows are shapes
-    the two paths share (the wgrad pair at K=16384 and the K=12288 dgrad), and
-    without it those fall back to Triton, since Lumen only lets a shape reach
-    ASM when the tuned table has a row for it.
+    The per-model table was tuned for Megatron's fused QKV and gate_up, so only
+    the few rows whose shapes this path's unfused projections happen to share
+    apply here.
     """
     from lumen.ops.quantize import mxfp4_autotune
 
@@ -298,6 +297,13 @@ def build_parser():
                    help="replace HF apply_rotary_pos_emb with AITER autograd RoPE (fwd+bwd)")
     p.add_argument("--no-grad-checkpointing", dest="grad_checkpointing", action="store_false",
                    help="disable activation checkpointing (no backward forward-recompute; more memory)")
+    p.add_argument(
+        "--fused-cross-entropy",
+        action="store_true",
+        help="Compute the pretraining loss with AITER's online-softmax kernel "
+             "instead of an FP32 log-softmax. Avoids materializing three "
+             "logit-sized tensors, so it saves both time and peak memory.",
+    )
     p.add_argument(
         "--grad-checkpoint-layers",
         type=int,
@@ -371,6 +377,11 @@ def parse_args(argv=None):
         raise ValueError("--eval-batches must be >= 1")
     if args.fsdp_retain_accumulated_params and args.fsdp_version != 2:
         raise ValueError("--fsdp-retain-accumulated-params requires --fsdp-version 2")
+    if args.fused_cross_entropy and args.task != "pretrain":
+        # The kernel's reduction divides by every row. Only the packed
+        # pretraining labels have no ignored positions; the SFT path weights by
+        # its own loss mask and would silently get a different denominator.
+        raise ValueError("--fused-cross-entropy requires --task pretrain")
     if args.grad_checkpoint_layers is not None:
         if not args.grad_checkpointing:
             raise ValueError(
@@ -482,13 +493,26 @@ def _set_fsdp2_accumulation_state(
     )
 
 
-def _pretrain_loss(model, batch, device):
+def _pretrain_loss(model, batch, device, fused=False):
     """Compute next-token loss for an already shifted pretraining batch."""
     input_ids = batch["input_ids"].to(device, non_blocking=True)
     labels = batch["labels"].to(device, non_blocking=True)
+    logits = model(input_ids=input_ids).logits
+    if fused:
+        from lumen.ops.cross_entropy import parallel_cross_entropy
+
+        # The online-softmax kernel reads the BF16 logits and writes the
+        # gradient back into them, so the FP32 copy below, the log-softmax
+        # output and that output's gradient never exist -- three tensors the
+        # size of the logits, which at vocab 151936 and 16384 tokens is ~10 GiB
+        # each. Its mean divides by every row, which equals
+        # nn.functional.cross_entropy's mean over unignored rows only because
+        # packed pretraining labels have no ignored positions; parse_args
+        # rejects the flag for the masked SFT loss.
+        return parallel_cross_entropy(logits, labels, 0.0, True, None, -100)
     # Match HuggingFace's causal-LM loss: log-softmax and its backward need
     # FP32 even when model activations are BF16.
-    logits = model(input_ids=input_ids).logits.float()
+    logits = logits.float()
     return nn.functional.cross_entropy(
         logits.reshape(-1, logits.size(-1)),
         labels.reshape(-1),
@@ -562,8 +586,13 @@ def main():
     # ---- Lumen full-parameter/LoRA training (+ optional quantised linears) ----
     if args.mode == "mxfp4":
         _configure_mxfp4_dispatch()
+    # Reached only by --linear-fp8: from_args overwrites format/scaling/
+    # block_size with mxfp4/blockwise/32 whenever linear_fp4 is set.
     fmt, scaling, blk = "fp8_e4m3", args.fp8_scaling, 128
     use_fp8, use_fp4 = args.linear_fp8, args.linear_fp4
+    # linear_fp8_* are LumenConfig's argument names, not a precision. Activation,
+    # wgrad, cache_frozen_weight and bpreshuffle reach the MXFP4 path as well;
+    # the amax fields stay inert there because fp4 forces blockwise scaling.
     cfg = LumenConfig.from_args(Namespace(
         linear_fp8=use_fp8, linear_fp4=use_fp4,
         linear_fp8_format=fmt, linear_fp8_scaling=scaling,
@@ -678,7 +707,7 @@ def main():
             # PretrainTextDataset already pairs token[t] with token[t+1].
             # HuggingFace's labels= path shifts internally, so use explicit CE
             # to avoid accidentally learning token[t+2].
-            return _pretrain_loss(model, b, local_rank)
+            return _pretrain_loss(model, b, local_rank, args.fused_cross_entropy)
         ids = b["input_ids"][:, :-1].to(local_rank, non_blocking=True)
         labels = b["input_ids"][:, 1:].to(local_rank, non_blocking=True)
         lm = b["loss_mask"][:, 1:].to(local_rank, non_blocking=True).float()

@@ -400,6 +400,53 @@ def test_pretrain_loss_upcasts_bf16_logits_for_cross_entropy():
     assert loss.dtype == torch.float32
 
 
+_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+
+
+@_CUDA
+def test_fused_cross_entropy_matches_the_fp32_reference():
+    """The fused loss and its logit gradient must track the FP32 reference.
+
+    Both arms read the same BF16 logits; the kernel accumulates the softmax in
+    FP32 internally, so this is a rounding difference, not a precision change.
+    """
+    torch.manual_seed(0)
+    batch = {
+        "input_ids": torch.randint(0, 4096, (2, 128), device="cuda"),
+        "labels": torch.randint(0, 4096, (2, 128), device="cuda"),
+    }
+    base = torch.randn(2, 128, 4096, device="cuda", dtype=torch.bfloat16)
+
+    def run(fused):
+        leaf = base.detach().clone().requires_grad_(True)
+        # Non-leaf logits, as the real lm_head produces: the fused path writes
+        # its gradient into that buffer in place.
+        model = MagicMock(return_value=SimpleNamespace(logits=leaf * 1.0))
+        loss = _pretrain_loss(model, batch, "cuda", fused=fused)
+        loss.backward()
+        return loss.detach(), leaf.grad
+
+    try:
+        fused_loss, fused_grad = run(True)
+    except (ImportError, RuntimeError) as e:
+        pytest.skip(f"AITER cross-entropy unavailable: {e}")
+    ref_loss, ref_grad = run(False)
+
+    torch.testing.assert_close(fused_loss.float(), ref_loss, rtol=1e-3, atol=1e-3)
+    err = (fused_grad.float() - ref_grad.float()).pow(2).sum()
+    snr = 10 * torch.log10(ref_grad.float().pow(2).sum() / err.clamp(min=1e-30))
+    assert snr > 30, f"logit-gradient SNR {snr:.1f} dB"
+
+
+def test_fused_cross_entropy_rejects_the_masked_sft_loss():
+    with pytest.raises(ValueError, match="requires --task pretrain"):
+        parse_args(_BASE + ["--task", "sft", "--fused-cross-entropy"])
+
+    pretrain = _BASE + ["--task", "pretrain", "--lora-rank", "0"]
+    assert parse_args(pretrain + ["--fused-cross-entropy"]).fused_cross_entropy is True
+    assert parse_args(pretrain).fused_cross_entropy is False
+
+
 def test_eval_batches_must_be_positive():
     with pytest.raises(ValueError, match="--eval-batches must be >= 1"):
         parse_args(_BASE + ["--eval-batches", "0"])
