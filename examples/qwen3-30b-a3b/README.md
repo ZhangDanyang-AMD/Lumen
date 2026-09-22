@@ -33,6 +33,23 @@ process. Anything the Python job must see (`LUMEN_ATTN_BACKEND`,
 in `run_docker.sh --env` (already true for the table above) **or**
 `export`ed again inside `COMMAND`.
 
+### Experimental FlyDSL gemm1/gemm2 + grouped backward
+
+`SONIC_MOE_GEMM_BACKEND=flydsl` keeps Megatron routing and EP all-to-all, then
+runs FlyDSL gfx950 **gemm1/gemm2** (MFMA-preshuffled weights, fused SwiGLU and
+score scatter) for the pre-routed expert forward and FlyDSL grouped NN/TN
+kernels for dgrad/wgrad. Do not use this with `FP8_MODE=blockwise2d`.
+
+```bash
+MOE_IMPL=sonic \
+SONIC_MOE_GEMM_BACKEND=flydsl \
+FLYDSL_ROOT=/home/leiwu/FlyDSL \
+FP8_MODE=bf16 \
+CUDA_GRAPH_SCOPE=none \
+TRAIN_STEPS=2 GBS=16 \
+./run_docker.sh
+```
+
 ### Production e2e (real weights + FineWeb)
 
 Image: `zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream`.

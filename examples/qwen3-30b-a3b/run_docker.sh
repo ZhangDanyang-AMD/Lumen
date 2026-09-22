@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME=${IMAGE_NAME:-zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream}
 COMMAND=${COMMAND:-"bash run_qwen3_30b_a3b_megatron.sh"}
 HOST_ASSET_ROOT=${HOST_ASSET_ROOT:-/dev/shm/qwen3-30b-a3b}
+FLYDSL_ROOT=${FLYDSL_ROOT:-/home/leiwu/FlyDSL}
 
 NCCL_ENV_ARGS=()
 for _v in \
@@ -20,8 +21,21 @@ do
     fi
 done
 
+FLYDSL_ARGS=()
+if [[ "${SONIC_MOE_GEMM_BACKEND:-triton}" == flydsl* ]]; then
+    if [ ! -f "${FLYDSL_ROOT}/kernels/moe/sonic.py" ]; then
+        echo "ERROR: FlyDSL SonicMoE not found under ${FLYDSL_ROOT}" >&2
+        exit 2
+    fi
+    FLYDSL_ARGS+=(
+        --volume "${FLYDSL_ROOT}:/workspace/FlyDSL"
+        --volume lumen-qwen3-flydsl-cache:/root/.flydsl
+    )
+fi
+
 docker run --rm --init \
     "${NCCL_ENV_ARGS[@]}" \
+    "${FLYDSL_ARGS[@]}" \
     --device=/dev/kfd \
     --device=/dev/dri \
     --group-add video \
@@ -48,6 +62,7 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/ops/gemm/grouped_gemm.py:/workspace/Lumen/lumen/ops/gemm/grouped_gemm.py" \
     --volume "${REPO_ROOT}/lumen/ops/gemm/__init__.py:/workspace/Lumen/lumen/ops/gemm/__init__.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/__init__.py:/workspace/Lumen/lumen/ops/moe/__init__.py" \
+    --volume "${REPO_ROOT}/lumen/ops/moe/flydsl_grouped.py:/workspace/Lumen/lumen/ops/moe/flydsl_grouped.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_layout.py:/workspace/Lumen/lumen/ops/moe/dispatch_layout.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_overlap.py:/workspace/Lumen/lumen/ops/moe/dispatch_overlap.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/fused_router.py:/workspace/Lumen/lumen/ops/moe/fused_router.py" \
@@ -58,7 +73,7 @@ docker run --rm --init \
     --volume "${HOST_ASSET_ROOT}:/nobackup" \
     --volume lumen-qwen3-triton-cache:/root/.triton \
     --workdir /workspace/Lumen/examples/qwen3-30b-a3b \
-    --env PYTHONPATH=/workspace/Lumen:/workspace/Lumen/third_party/aiter:/workspace/Megatron-LM \
+    --env PYTHONPATH=/workspace/Lumen:/workspace/Lumen/third_party/aiter:/workspace/FlyDSL:/workspace/Megatron-LM \
     --env MOE_IMPL="${MOE_IMPL:-sequential}" \
     --env TRAIN_STEPS="${TRAIN_STEPS:-20}" \
     --env SEQ_LEN="${SEQ_LEN:-4096}" \
@@ -81,6 +96,7 @@ docker run --rm --init \
     --env MOE_GLOBAL_EXPERT_LAYOUT="${MOE_GLOBAL_EXPERT_LAYOUT:-0}" \
     --env PYTORCH_TUNABLEOP_ENABLED="${PYTORCH_TUNABLEOP_ENABLED:-0}" \
     --env SONIC_MOE_GEMM_BACKEND="${SONIC_MOE_GEMM_BACKEND:-triton}" \
+    --env SONIC_MOE_FLYDSL_NATIVE="${SONIC_MOE_FLYDSL_NATIVE:-1}" \
     --env SONIC_MOE_GROUPED_GEMM_BACKEND="${SONIC_MOE_GROUPED_GEMM_BACKEND:-triton}" \
     --env SONIC_MOE_USE_QWEN3_TUNED_GEMM="${SONIC_MOE_USE_QWEN3_TUNED_GEMM:-1}" \
     --env SONIC_MOE_MULTISTREAM_PRIORITY="${SONIC_MOE_MULTISTREAM_PRIORITY:-0}" \

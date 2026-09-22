@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from lumen.config import LumenConfig
 from lumen.modules.sonic_moe import SonicMoEExperts
@@ -177,6 +178,112 @@ def test_sonic_rejects_legacy_python_blas_backend(monkeypatch):
     monkeypatch.setenv("SONIC_MOE_GEMM_BACKEND", "blas")
     with pytest.raises(ValueError, match="SONIC_MOE_GROUPED_GEMM_BACKEND"):
         SonicMoEExperts(_SequentialExperts())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+def test_flydsl_sonic_pre_routed_matches_torch(monkeypatch):
+    try:
+        from lumen.ops.moe.flydsl_grouped import install_flydsl_grouped_gemm_backend
+
+        install_flydsl_grouped_gemm_backend()
+    except ImportError:
+        pytest.skip("FlyDSL grouped kernels are not available")
+    try:
+        from flydsl.runtime.device import get_rocm_arch
+    except ImportError:
+        pytest.skip("FlyDSL is not available")
+    arch = str(get_rocm_arch())
+    if "gfx950" not in arch:
+        pytest.skip(f"FlyDSL grouped GEMMs require gfx950, found {arch}")
+
+    hidden = intermediate = 128
+
+    class _WideExpert(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear_fc1 = _Linear(2 * intermediate, hidden, 0.02)
+            self.linear_fc2 = _Linear(hidden, intermediate, 0.03)
+
+    class _WideExperts(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(
+                add_bias_linear=False,
+                gated_linear_unit=True,
+                expert_tensor_parallel_size=1,
+            )
+            self.num_local_experts = 2
+            self.local_experts = nn.ModuleList([_WideExpert(), _WideExpert()])
+
+    monkeypatch.setenv("SONIC_MOE_GEMM_BACKEND", "flydsl")
+    sonic = SonicMoEExperts(_WideExperts()).to(device="cuda", dtype=torch.bfloat16)
+    counts = torch.tensor([17, 15], dtype=torch.int32)
+    tokens = int(counts.sum())
+    hidden_states = torch.randn(
+        tokens,
+        hidden,
+        dtype=torch.bfloat16,
+        device="cuda",
+        requires_grad=True,
+    )
+    scores = torch.rand(
+        tokens, dtype=torch.float32, device="cuda", requires_grad=True
+    )
+
+    actual, extra = sonic(hidden_states, counts, scores)
+    assert extra is None
+    grad = torch.randn_like(actual)
+    actual.backward(grad)
+
+    ref_hidden = hidden_states.detach().clone().requires_grad_(True)
+    ref_scores = scores.detach().clone().requires_grad_(True)
+    ref_w1 = sonic.w1.detach().clone().requires_grad_(True)
+    ref_w2 = sonic.w2.detach().clone().requires_grad_(True)
+    ref_w1_kn = (
+        ref_w1.transpose(1, 2) if sonic.native_weight_layout else ref_w1
+    )
+    ref_w2_kn = (
+        ref_w2.transpose(1, 2) if sonic.native_weight_layout else ref_w2
+    )
+    outputs = []
+    offset = 0
+    for expert, count in enumerate(counts.tolist()):
+        projection = ref_hidden[offset : offset + count] @ ref_w1_kn[expert]
+        gate, up = projection.chunk(2, dim=-1)
+        output = (F.silu(gate) * up) @ ref_w2_kn[expert]
+        outputs.append(
+            output * ref_scores[offset : offset + count, None].to(output.dtype)
+        )
+        offset += count
+    reference = torch.cat(outputs)
+    reference.backward(grad)
+
+    for value, expected in (
+        (actual, reference),
+        (hidden_states.grad, ref_hidden.grad),
+        (scores.grad, ref_scores.grad),
+        (sonic.w1.grad, ref_w1.grad),
+        (sonic.w2.grad, ref_w2.grad),
+    ):
+        torch.testing.assert_close(value, expected, rtol=3e-2, atol=3e-2)
+
+    repeated, _ = sonic(hidden_states.detach(), counts, scores.detach())
+    torch.testing.assert_close(repeated, reference.detach(), rtol=3e-2, atol=3e-2)
+
+    sonic.zero_grad(set_to_none=True)
+    empty_hidden = torch.empty(
+        0, hidden, dtype=torch.bfloat16, device="cuda", requires_grad=True
+    )
+    empty_scores = torch.empty(
+        0, dtype=torch.float32, device="cuda", requires_grad=True
+    )
+    empty_output, _ = sonic(
+        empty_hidden, torch.zeros(2, dtype=torch.int32), empty_scores
+    )
+    empty_output.sum().backward()
+    assert empty_output.shape == (0, hidden)
+    assert sonic.w1.grad is not None and not sonic.w1.grad.count_nonzero()
+    assert sonic.w2.grad is not None and not sonic.w2.grad.count_nonzero()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
