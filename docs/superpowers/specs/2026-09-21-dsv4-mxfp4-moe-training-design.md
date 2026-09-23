@@ -1,1400 +1,1792 @@
-# MXFP4 DeepSeek V4 MoE 训练链路 — Design Spec
+# Lumen MXFP4 A4W4 for DeepSeek-V4 Routed Experts — Training Design Spec
 
 **Date:** 2026-09-21
 
-**Status:** Draft
+**Last updated:** 2026-09-23
 
-**Lifecycle:** Spec developing
+**Status:** Design frozen for implementation planning
 
-**Scope:** gfx950 上 DeepSeek V4 routed-expert FC1/FC2 的 MXFP4 A4W4 训练链路；覆盖 Megatron expert-parallel 接线、前向、DGrad、WGrad、权重缓存、回退、测试与性能验收
+**Lifecycle:** Spec developing; Q1–Q34 review decisions incorporated
+
+**Scope:** gfx950 上 DeepSeek-V4 routed-expert FC1/FC2 的 Lumen-native MXFP4 A4W4 experimental training path
 
 **Primary repositories:** Lumen + AITER
 
-**Review rule:** 用户审核前不得将状态改为 Approved
+**Implementation status:** Not started
+
+本文中的 MUST / MUST NOT / SHOULD / MAY 分别表示强制要求、强制禁止、推荐要求和可选能力。未经对应验收门禁，不得把设计项描述为已支持能力。
 
 ---
 
-## 1. 摘要
+## 1. 结论
 
-当前 DSV4 的“FP8 MoE”链路已经能在 Megatron 的路由与通信外壳中运行，但计算核心并不是真正的 grouped FP8 training operator：
+当前 DeepSeek-V4（下文简称 DSV4）的 FP8 MoE 训练链路是：
 
-1. Megatron 完成 router、两次 permutation、EP all-to-all 和本地 expert sorting。
-2. `TEGroupedMLP` 只作为上层 MoE 语义外壳，FC1/FC2 被替换成 Lumen grouped linear。
-3. `LumenGroupedLinear.forward()` 在 Python 中按 expert 切片，并为每个非空 expert 单独调用 `quantized_linear()`。
-4. 默认 FP8 recipe 是 blockwise、block size 128。Forward 和 DGrad 可走 FP8；WGrad 只有在单个 expert 的动态 token 数 `M_e` 可被 128 整除时才走 FP8，否则回退 BF16。
-5. DSV4 在模型构建完成后通过环境变量开启 Lumen FP8，没有设置 Megatron `config.fp8`，因此 `TEGroupedMLP` 的 FP8 padding 和 router padding 默认都不会生效。
+~~~text
+Megatron router / permutation / EP all-to-all / local expert sorting
+  -> LumenGroupedLinear
+  -> Python 逐 expert 调用 blockwise FP8 quantized_linear
+  -> FC1、BF16 clamp/SwiGLU/probability、FC2
+  -> Megatron unsort / combine
+~~~
 
-所以，当前链路应准确描述为：
+它不是单次 grouped FP8 training operator，WGrad 对动态 M_e 的对齐限制还会使部分 expert 回退 BF16。因此现状不能作为 grouped、全低精度 backward 或 strict zero-fallback 的证据。
 
-> Megatron expert-sorted MoE + Lumen 逐 expert blockwise FP8 linear；它不是单次 grouped FP8 kernel，也不是端到端全 FP8 backward。
+本 spec 冻结的目标是：
 
-本设计选择以下目标方案：
+> **Lumen-native FP4 A4W4 training for DeepSeek-V4 routed-expert shapes — experimental pretraining/continued-training.**
 
-> 保留 Megatron 的 router、dispatch/combine 和 BF16 数学语义，在 dispatch 后的 expert-sorted 边界引入 AITER grouped MXFP4 A4W4 training primitives，由 Lumen 负责 module/autograd、缓存、dispatch、fallback、checkpoint 和 optimizer 生命周期。
+该名称只表示模型结构、shape 和集成位置，不表示复现或数值等价于 DeepSeek-V4 报告中的 QAT recipe。目标链路保留 Megatron 的 router、dispatch/combine、SwiGLU/clamp、routing probability gradient、checkpoint/recompute 语义，只在 expert-sorted tensor 边界替换 routed-expert FC1/FC2 的 GEMM。
 
-首版不直接给 AITER inference `fused_moe` 包 autograd。当前 AITER 的 DSV4 tuned rows 是 A8W4，而不是本设计的 A4W4；gfx950 A4W4 inference 路径也没有可直接复用的 EP training backward。
+交付按三个阶段推进：
+
+1. **M0 / prerequisites:** 从 Lumen、AITER dirty workspace 中抽取最小必要前置提交，逐项测试并建立唯一 clean lineage。
+2. **P0 / sequential:** 使用与 P1 完全相同的数值 recipe、layout、RNG、cache 和输出 dtype，逐 expert 建立 correctness reference。
+3. **P1 / grouped:** AITER 提供 grouped Fprop/DGrad/WGrad，Lumen 提供 autograd、事务式绑定、cache、optimizer/checkpoint 生命周期、dispatch、ledger 和 Megatron 集成。
+
+最终 promotion 不是“能训练”或“loss 有限”。它要求 strict zero-fallback、全拓扑/恢复门禁、预注册质量统计、真实 routing bucket certification 和端到端性能门槛同时通过。即使全部通过，V1 仍是 opt-in experimental、仅对已测试配置有效，不称通用 production/convergence parity。
 
 ---
 
-## 2. 证据与状态标记
+## 2. 定位、允许声明与非目标
 
-本文使用四类标记，避免把实验能力写成已交付能力：
+### 2.1 产品定位
 
-| 标记 | 含义 |
-|---|---|
-| **[Current]** | 当前 checkout 中已经存在并可由源码直接确认 |
-| **[Reusable]** | 已在别的 Lumen/AITER 路径存在，但尚未接入 DSV4 grouped MoE |
-| **[Design]** | 本 spec 冻结的实现要求 |
-| **[Unverified]** | 需要 GPU、分布式或训练实验验证，当前不得作能力声明 |
+V1 的正式名称固定为：
 
-源码基线：
+~~~text
+Lumen MXFP4 A4W4 for DeepSeek-V4 routed experts
+~~~
 
-| Repository | Branch | Commit |
+允许的最高级别声明是：
+
+~~~text
+experimental, opt-in, qualified for the exact tested
+DSV4 routed-expert recipe/topology/horizon on gfx950
+~~~
+
+在完成第 17 节的统计门禁前，只能称为 stability 或 short-horizon quality-regression 结果。V1 不得声称：
+
+- DSV4 QAT reproduction；
+- 与 DSV4 报告数值等价；
+- convergence parity；
+- production quality；
+- downstream quality parity；
+- 任意 topology、任意 shape 或任意 GPU 支持。
+
+### 2.2 V1 scope
+
+V1 MUST 覆盖：
+
+- GPU architecture：gfx950；
+- expert tensor parallel：ETP=1；
+- EP8 / local-E32；
+- EP4 / local-E64；
+- FC1：[M,4096] x [4096,4096]；
+- FC2：[M,2048] x [2048,4096]；
+- Fprop、DGrad、WGrad；
+- 动态 expert token 数、empty expert、负载倾斜和 extreme token count；
+- gradient accumulation；
+- full activation recompute；
+- warm_start、exact_continue 和 reshard_continue 的明确语义。
+
+V1 MUST NOT 扩展到：
+
+- gfx942/gfx1250；
+- ETP>1；
+- router、routing logits/probabilities、dispatch/combine 通信量化；
+- shared expert、attention、embedding、lm-head；
+- 训练化完整 AITER inference fused_moe；
+- deferred/delay WGrad；
+- 动态 routing 的端到端 CUDA graph replay；
+- FP4 checkpoint 主表示、FP4 optimizer state 或 rollout/export；
+- 把 A8W4 或 BF16 当作 strict A4W4 的静默 fallback。
+
+### 2.3 DSV4 报告与本设计的差异
+
+DSV4 报告的 MoE 数值链路是：
+
+~~~text
+FP32 optimizer master
+  -> MXFP4 E2M1 weight, 1x32 scale
+  -> exact FP4-to-E4M3 representation
+  -> FP8 activation x FP8 effective weight
+  -> STE to FP32 master
+  -> same native packed FP4 weight for rollout
+~~~
+
+本设计则是：
+
+~~~text
+BF16 model Parameter as quantization source
+  -> weight E2M1 + E8M0 tile32x32/S1024
+  -> Fprop A4 x W4
+  -> DGrad dY4 x W4-transpose-view
+  -> WGrad dY4^T x X4
+  -> FP32 main_grad accumulation
+~~~
+
+两者的 activation precision、weight scale granularity、训练 kernel、gradient quantization 和 rollout/export contract 均不同。DSV4 的 S32/A8W4 路径若实现，MUST 使用独立 recipe/spec，不能作为本设计的别名或运行时选项。
+
+---
+
+## 3. 审计基线与 clean-lineage 要求
+
+### 3.1 已审计 snapshot
+
+原始源码审计基于以下 snapshot：
+
+| Repository | Branch / source | Commit |
 |---|---|---|
-| Lumen | `dev/mxfp4` | `9d85c8adb5159cc5765680bbc4c2230bb00e74e4` |
-| AITER（runtime checkout） | `bench/ecfff3f-lumen` | `e35bb17f4f815903bf73598facedbb321e15af28` |
-| Megatron-LM | `core_r0.15.0_rocm` | `1b754411c7777799fb17e260baa7145c0c6d71a2` |
+| Lumen | dev/mxfp4 audit snapshot | 9d85c8adb5159cc5765680bbc4c2230bb00e74e4 |
+| AITER runtime checkout | bench/ecfff3f-lumen | e35bb17f4f815903bf73598facedbb321e15af28 |
+| Megatron-LM | core_r0.15.0_rocm | 1b754411c7777799fb17e260baa7145c0c6d71a2 |
+| Lumen AITER gitlink | dependency pointer | ecfff3fa80f906c5c421a35a7f5e52842f000559 |
 
-Lumen HEAD 中 `third_party/aiter` gitlink 指向 `ecfff3fa80f906c5c421a35a7f5e52842f000559`，但当前 Python 实际导入 `/home/xdai/aiter/aiter/__init__.py`，其 checkout 为上表的 `e35bb17f4f815903bf73598facedbb321e15af28`。两者不是同一 revision。后续启动日志、测试报告和 benchmark 结果必须记录 `aiter.__file__`、runtime AITER commit、Lumen gitlink commit、GPU arch 和实际 kernel/config key；只记录 Lumen commit 或 submodule gitlink 不足以复现实验。
+runtime AITER 与 Lumen gitlink 不一致，且 Lumen/AITER workspace 均含未提交改动。该 snapshot 只可用于需求审计，不可用于正式 correctness、quality 或 performance certification。
 
-本次 Lumen 与 runtime AITER checkout 均包含未提交修改，Megatron-LM checkout 为 clean；因此本文证据对应 **dirty workspace snapshot**，不能只靠上述 commit 重建。任何用于验收的 run 必须归档三个仓库的 `git status --porcelain=v1`、tracked binary diff 的 SHA256，以及相关 untracked 文件清单与内容摘要；正式报告应附可恢复的 patch/artifact。
+### 3.2 M0：唯一 clean lineage
 
-本文审计时的 snapshot fingerprint（不包含本文件，因为 `docs/` 被 ignore）：
+任何实现前 MUST：
 
-| Repository | `git diff --binary` SHA256 | sorted untracked-content aggregate SHA256 |
+1. 分别列出 Lumen、AITER 的 tracked 与 untracked dirty diff。
+2. 只抽取 MXFP4 MoE 所需的最小前置改动；不得把整个 dirty workspace 打成一个 baseline commit。
+3. 每个前置提交独立审查、独立测试，记录它解决的具体 prerequisite。
+4. 固定 Lumen、AITER、Megatron、ROCm、compiler、PyTorch 和容器版本。
+5. 使 Lumen gitlink、实际 import 的 AITER source 和实际加载 extension build-id 指向同一 lineage。
+6. 在 clean baseline 上完成 P0/P1；ABI 冻结后再 forward-port 到最新 AITER，并重复 conformance、kernel correctness 和最小训练门禁。
+
+正式 manifest 至少包含：
+
+~~~text
+Lumen/AITER/Megatron commit
+Lumen AITER gitlink
+source tree/content digest
+dirty=false
+aiter.__file__ / lumen.__file__
+loaded .so or wheel digest and build-id
+ABI version / numeric recipe ID / layout IDs
+ROCm / driver / compiler / PyTorch / RCCL
+GPU arch / CU count / topology / rank mapping
+build flags / tuning database digest
+~~~
+
+仅检查工作区路径或 git commit 不足以证明实际加载的二进制与源码一致。
+
+### 3.3 当前链路的关键事实
+
+源码审计确认：
+
+- Megatron 已正确拥有 router、token permutation/local sorting、EP all-to-all、SwiGLU/clamp、combine、router gradient 和 recompute。
+- LumenGroupedLinear 当前按 expert Python loop 调 quantized_linear，不是 grouped kernel。
+- 默认 DSV4 blockwise FP8 的 Fprop/DGrad 可低精度执行，但 WGrad 对 M_e % 128 的限制会触发 BF16。
+- DSV4 的 post-build FP8 enable 没有使 Megatron config.fp8 为真，因此不能假定 Megatron FP8 padding 已启用。
+- dense MXFP4 已有可复用的 A4W4、dual-layout、H16、SR 和 weight-cache 能力，但不能直接证明 grouped MoE correctness/performance。
+- AITER 现有 DSV4 tuned rows 是 A8W4 inference rows，且 local-E/训练 backward contract 不匹配。
+- AITER 当前没有本 spec 所需的完整 grouped MXFP4 training backward。
+- 当前 Python random 生成 SR seed/offset 的路径不满足 exact replay，MUST 移除出本链路。
+- distributed checkpoint 可原位恢复 Parameter bytes，而 Parameter identity 与 _version 不变；因此 _version 不能作为 cache correctness authority。
+
+### 3.4 Current FP8 MoE evidence map
+
+| Observation | Source area | Consequence |
 |---|---|---|
-| Lumen | `76720f664b318bfd1cbaec17f6f49debea949f3d6e1118089d978a1622a71202` | `f3f2c9554e67cbdd896d2864c27e90f0cfdbc3c11454b655fd7846b2bf63bf2d` |
-| runtime AITER | `8f103472cb2af7a96bb27ce7db583397ae0e389627dd0a672bc279d94fc275a1` | `9f853d876724c2f1ae3811c0f3f0957358e8682d00e7129bc398c60832c826d1` |
-| Megatron-LM | clean | none |
-
-untracked aggregate 的计算口径是：按路径排序后逐文件计算 SHA256，再对完整的 `hash + path` 清单计算一次 SHA256。
-
-行号基于 2026-09-21 的工作区快照，后续修改可能使其漂移。
-
----
-
-## 3. 目标、非目标与成功条件
-
-### 3.1 Goals
-
-1. 为 DSV4 routed experts 的 FC1/FC2 提供完整 MXFP4 A4W4 forward、DGrad、WGrad 训练闭环。
-2. 以 Megatron 已排序的本地 expert token 段为接口，不重写 router、top-k、EP all-to-all 或 combine。
-3. 保留 BF16 model/checkpoint weight、现有 `weight0..weightN` 参数名和 distributed checkpoint 布局；optimizer precision 完全沿用对应 BF16 baseline，不因 MXFP4 改变。
-4. 对 empty expert、ragged `M_e`、长尾路由分布、gradient accumulation、activation recompute 和 deferred WGrad 给出确定语义。
-5. 新 GPU kernel 位于 AITER；Lumen 只负责集成、autograd、dispatch、缓存和可观测 fallback。
-6. 基准必须调用真实生产 API，并验证实际 selected backend，不能用 PyTorch 模拟结果代替 kernel 性能。
-
-### 3.2 Non-goals
-
-以下内容不属于 v1：
-
-- 量化 router、routing logits/probabilities、dispatch/combine 通信、shared expert、attention、embedding 或 lm-head。
-- 修改 top-k=6、routing probability 作用位置、SwiGLU/clamp 数学语义。
-- 直接训练化 AITER 的完整 inference `fused_moe`。
-- 支持 expert tensor parallel，v1 固定 `ETP=1`。
-- 支持 gfx942、gfx1250 或任意模型 shape；v1 production target 为 gfx950 上的 DSV4 shape。
-- 把 A8W4 自动当作 A4W4 的 fallback，或按 shape 静默切换 A4W4/A8W4。
-- 在没有 profile 证据前融合 router、permutation、weighted SwiGLU 与 FC2 activation quant，或融合通信。
-
-### 3.3 成功条件
-
-功能成功与性能成功分开判定：
-
-- **P0 baseline-ready:** 顺序逐 expert MXFP4 路径通过外部数值语义、该路径自身的 cache lifecycle、checkpoint、EP smoke 和 fallback 可观测性测试。
-- **P1 correctness-ready:** grouped 路径通过相同的外部数值/训练语义门槛、其自身的 grouped cache lifecycle 测试，并相对 P0 通过同 operands parity。
-- **Production-ready:** P1 在 strict 模式下完成 DSV4 4-layer 与 43-layer 训练验收，所有 routed-expert FC1/FC2 的 fwd/dgrad/wgrad fallback counter 为 0，并达到第 17.6 节的性能门槛。
-- **不成立的成功声明:** “能启动”“loss 有限”“某个 AITER inference shape 有 tuned row”均不足以证明 DSV4 MXFP4 MoE training 已完成。
+| DSV4 provider keeps Megatron grouped-expert shell and substitutes Lumen FC1/FC2 | lumen/models/dsv4/megatron/spec_provider.py | integration boundary can remain at sorted tensors |
+| Grouped module loops experts and calls quantized_linear separately | lumen/modules/grouped_linear.py | current path is sequential, not grouped execution |
+| Current grouped GEMM op has no MXFP4 training branch | lumen/ops/gemm/grouped_gemm.py | P1 needs a new AITER public operator and Lumen adapter |
+| DSV4 enables FP8 after model construction | lumen/models/dsv4/megatron/fp8.py and pretrain.py | Megatron config.fp8 padding cannot be assumed |
+| Blockwise backward re-quantizes a transpose and WGrad has token-axis alignment constraints | lumen/ops/quantize/linear.py | dynamic M_e can trigger BF16 WGrad |
+| Dense MXFP4 has reusable F/D/W and cache pieces | lumen/ops/quantize/linear.py, lumen/ops/quantize/ops.py, lumen/quantize/__init__.py | reuse only after numeric/lifecycle conformance |
+| Existing AITER DSV4 table is FP8-activation/FP4-weight inference | aiter/configs/model_configs/dsv4_fp8fp4_tuned_fmoe.csv | it is not an A4W4 training tuning source |
+| Existing AITER MoE WGrad is not the required MXFP4 operand contract | aiter/ops/triton/moe/moe_wgrad.py | new or extended public training API is required |
 
 ---
 
-## 4. 术语与固定精度定义
+## 4. 固定 shape、边界与数据流
 
-### 4.1 本文中的 MXFP4
+### 4.1 Shape
 
-本文的 `MXFP4` 固定指：
+对本地 expert e：
 
-- activation operand: FP4 E2M1 packed，1×32 E8M0 scale；
-- weight operand: FP4 E2M1 packed，32×32 E8M0 tile scale；
-- GEMM recipe: **A4W4**；
-- GEMM accumulator: FP32；forward/DGrad output storage: BF16；
-- WGrad accumulator: FP32；普通 parameter grad storage 为 BF16，gradient accumulation fusion 写入目标 `main_grad` dtype，当前 DSV4 baseline 为 FP32；
-- model/checkpoint parameter: BF16；optimizer precision 保持对应 BF16 baseline。
+~~~text
+E_l       local expert count, 32 or 64
+M_e       routed rows for expert e
+M         sum(M_e)
+P_e       ceil(M_e / 32) * 32
+K         input width
+N         output width
+~~~
 
-`A8W4` 指 activation 为 FP8 E4M3、weight 为 FP4 E2M1；外部资料有时称其为 `W4A8`，但本项目的日志、配置和报告只使用 canonical 名称 `A8W4`。它是不同 recipe，必须使用不同 capability、配置文件和统计项。
+| Role | Input | Weight | Output | K | N |
+|---|---|---|---|---:|---:|
+| FC1 gate+up | [M,4096] | [E_l,4096,4096] logically | [M,4096] | 4096 | 4096 |
+| FC2 down | [M,2048] | [E_l,4096,2048] logically | [M,4096] | 2048 | 4096 |
 
-### 4.2 Shape 符号
+FC1 前半/后半继续按 Megatron 现有 gate/up 顺序解释。
 
-对本地 expert `e`：
+### 4.2 Integration boundary
 
-- `E_l`: 当前 rank 的 local expert 数；
-- `M_e`: 当前 microbatch 中分配给 expert `e` 的 token 数；
-- `M = sum(M_e)`；
-- `K`: linear 输入宽度；
-- `N`: linear 输出宽度；
-- `P_e = ceil(M_e / 32) * 32`: WGrad 对 expert `e` 独立 padding 后的 token 维。
+MXFP4 层只消费：
 
-DSV4 v1 精确 shape：
+~~~text
+x_sorted
+group_sizes / expert_offsets
+expert weights
+~~~
 
-| Stage | `K` | `N` | 每 expert weight |
-|---|---:|---:|---|
-| FC1 gate+up | 4096 | 4096 | `[4096, 4096]` |
-| FC2 down projection | 2048 | 4096 | `[4096, 2048]` |
+端到端路径固定为：
 
-FC1 的 `N=4096` 来自 `2 × moe_ffn_hidden_size`；输出前半和后半仍按 Megatron 当前 `torch.chunk(..., 2)` 的 gate/up 顺序解释。
-
----
-
-## 5. 当前 DSV4 FP8 MoE 链路审计
-
-### 5.1 模型与并行拓扑
-
-**[Current]**
-
-`examples/dsv4/dsv4_megatron_args.sh:44-105` 固定：
-
-- hidden size 4096；
-- 256 个 routed experts；
-- top-k 6；
-- expert FFN hidden size 2048；
-- SwiGLU；
-- all-to-all token dispatcher；
-- `--moe-grouped-gemm`。
-
-默认并行：
-
-| Profile | TP | PP | EP | ETP | Local experts/rank |
-|---|---:|---:|---:|---:|---:|
-| 4-layer | 8 | 1 | 8 | 1 | 32 |
-| 43-layer Flash | 4 | 4 | 4 | 1 | 64 |
-
-证据：
-
-- 4-layer: `examples/dsv4/dsv4_megatron_args.sh:11-24`
-- 43-layer: `examples/dsv4/dsv4_flash_mi300x_parallel.sh:2-14`
-- expert/top-k/FFN: `examples/dsv4/dsv4_megatron_args.sh:75-86`
-
-### 5.2 真实数据流
-
-**[Current]**
-
-```text
-TopK router
-  │
-  ├─ local permutation
-  ├─ EP all-to-all dispatch
-  ├─ TP gather（如 dispatcher 配置需要）
-  └─ local-expert sorting
-       │
-       ▼
-  TEGroupedMLP 语义外壳
-       │
-       ├─ LumenColumnParallelGroupedLinear / FC1
-       ├─ clamp + SwiGLU
-       ├─ × routing probability
-       └─ LumenRowParallelGroupedLinear / FC2
-       │
-       ▼
-  local-expert unsort
-  ├─ TP reduce-scatter（如适用）
-  ├─ EP all-to-all combine
-  └─ final unpermute
-```
-
-源码边界：
-
-- DSV4 provider 在 `lumen/models/dsv4/megatron/spec_provider.py:26-35` 选择 `TEGroupedMLP`，并注入 Lumen grouped FC1/FC2。
-- Megatron grouped MLP 在 `megatron/core/transformer/moe/experts.py:842-963` 执行 FC1、activation/probability 和 FC2。
-- dispatch 的 local permutation、EP all-to-all、TP gather/local sort 位于 `token_dispatcher.py:552-704`。
-- combine 的 local unsort、TP reduce-scatter、EP all-to-all 和 final unpermute 位于 `token_dispatcher.py:706-803`。
-
-### 5.3 当前 grouped linear 实际不是 grouped kernel
-
-**[Current]**
-
-`lumen/modules/grouped_linear.py:126-167`：
-
-1. 在 Python 中遍历 `num_gemms`；
-2. 根据 `m_splits[i]` 切出 `x_i`；
-3. 对每个非空 expert 单独调用一次 `quantized_linear()`；
-4. 最后 `torch.cat(outputs)`。
-
-该模块没有调用 `lumen/ops/gemm/grouped_gemm.py`。所以现状是“grouped module API + sequential per-expert GEMM”，不是 grouped execution。
-
-`lumen/ops/gemm/grouped_gemm.py:166-336` 虽有 BF16、FP8 per-tensor/per-token/blockwise 和 MXFP8 forward dispatch，但没有 `mxfp4` 分支；其 `grouped_gemm_wgrad()` 在 quantized mode 下仍把每个 expert 转成 BF16 后顺序计算，见 `:386-440`。
-
-### 5.4 FP8 启用路径
-
-**[Current]**
-
-```text
-LUMEN_DSV4_LINEAR_FP8=1
-  → dsv4_model_provider()
-  → 模型构建完成
-  → enable_fp8_for_dsv4_model()
-  → enable_fp8_for_parallel_linear()
-  → 每个 Lumen grouped module 设置 scaling_type/block_size
-```
-
-- 开关默认关闭：`lumen/models/dsv4/megatron/fp8.py:10-19`。
-- 默认 recipe 为 `blockwise`，block size 128。
-- 模型构建后启用：`lumen/models/dsv4/megatron/pretrain.py:141-160`。
-- grouped modules 被纳入启用扫描：`lumen/models/dsv4/megatron/fp8.py:40-80`。
-
-`LUMEN_DSV4_FP8_WGRAD` 虽被转换成 `linear_fp8_wgrad`（`lumen/models/dsv4/megatron/fp8.py:20-34`），但 `LumenGroupedLinear.forward()` 调用 `quantized_linear()` 时没有传入 `fp8_wgrad`（`lumen/modules/grouped_linear.py:126-154`）；functional API 的默认值又是 `True`（`lumen/ops/quantize/linear.py:3796-3808`）。此外，MXFP4 和 blockwise 专用 backward 分支也没有以该字段决定是否执行低精度 WGrad，见 `linear.py:3013-3030,3104-3122`。因此该环境变量目前不是 DSV4 grouped 路径的可靠行为开关。新 A4W4 contract 不继承这个失效开关；任何可配置 WGrad policy 都必须贯穿 module → op → autograd，并由 selected-kernel 测试证明实际生效。
-
-DSV4 入口目前只在该环境变量打开时安装 `fp8_param_gather_hook`，见：
-
-- `examples/dsv4/pretrain_dsv4_megatron.py:48-53`
-- `examples/dsv4/finetune_dsv4_megatron.py:56-61`
-
-它没有安装 `mxfp4_weight_cache_hook`。通用 `--linear-fp4` CLI 已存在于 `lumen/patches/builders/megatron_args.py:261-327`，但 DSV4 的 `add_dsv4_pretrain_args()` 当前只应用 `dsv4` tags，见 `lumen/patches/builders/dsv4.py:100-105`。`register_dsv4_megatron_cli()` 虽存在于 `lumen/models/dsv4/megatron/fp8.py:84-88`，当前 DSV4 entrypoint 未调用。
-
-### 5.5 当前 FP8 forward/backward 精度行为
-
-**[Current]**
-
-默认 blockwise FP8 下，每个非空 expert 独立执行：
-
-| Pass | 当前行为 | 对 DSV4 shape 的结果 |
-|---|---|---|
-| Forward | activation/weight blockwise FP8，A8W8 GEMM，BF16 output | `K/N` 均为 128 对齐，可走 FP8 |
-| DGrad | `dY` 量化；1D blockwise weight scale 不能直接转置，因此优先从 BF16 model weight 重新量化 `W^T` | `N/K` 对齐时可走 FP8 |
-| WGrad | `dY^T @ X` 的 token 轴要求 `M_e % 128 == 0` | 不对齐的 expert 回退 BF16 |
-
-关键代码为 `lumen/ops/quantize/linear.py:3091-3235`：
-
-- DGrad 对齐条件只要求 `N`、`K` 可被 block size 整除，见 `:3117-3122`。
-- WGrad 要求动态 `M` 可被 block size 整除，见 `:3120-3122`。
-- blockwise DGrad 从 BF16 model weight 构造转置量化 operand，见 `:3172-3193`。
-- WGrad 若没有 columnwise quantized operands 或 kernel 拒绝，则回退 BF16，见 `:3215-3235`。
-
-**[Unverified inference]** expert token 数由 top-k 路由动态决定，通常不会恰好全部满足 `M_e % 128 == 0`。因此当前 DSV4 默认 FP8 路径的 WGrad 预计大量使用 BF16；必须由新增 backend counter 和真实路由直方图确认，不能仅凭静态推断报告具体比例。
-
-### 5.6 Padding 断点
-
-**[Current]**
-
-Megatron 的 grouped MLP padding 仅在 `config.fp8` 为真时构造并执行：
-
-- 初始化：`megatron/core/transformer/moe/experts.py:817-820`
-- forward padding/unpadding：`:859-868,956-958`
-
-router padding 只由 `config.moe_router_padding_for_fp8` 控制：
-
-- `megatron/core/transformer/moe/token_dispatcher.py:577-583`
-
-当前 DSV4 是模型构建后给 Lumen modules 设置 quantization 状态，并未设置 `TransformerConfig.fp8`，脚本也未开启 router padding。因此不能把 Megatron 的 FP8 padding 当作当前 WGrad 对齐保证。
-
-MXFP4 v1 不依赖 router padding。它必须在 WGrad 内对每个 expert segment 独立 pad 到 32，并在输出处按原 segment 截断。
-
-### 5.7 Scaling state 与 cache 风险
-
-**[Current]**
-
-- `_enable_quantization_for_parallel_linear()` 为一个 grouped module 创建一个 `ScalingManager`，见 `lumen/models/megatron.py:486-530`。
-- grouped loop 调用 `quantized_linear()` 时未传 `tensor_id`，因此所有 experts 使用默认 `"weight"`，见 `grouped_linear.py:138-152` 和 `linear.py:3796-3808`。
-- 对默认 blockwise recipe，该 collision 不直接影响 amax history；若改为 delayed scaling，则不同 experts 会共享同一个 history key，语义错误。
-- native dense/parallel MXFP4 路径在 `_do_gemm()` 中使用 per-step weight cache，见 `lumen/modules/parallel_linear.py:334-375`。
-- grouped module 直接调用 `quantized_linear()`，绕过 `_do_gemm()`；若仅把 `scaling_type` 改成 `mxfp4`，会对每个 expert、每个 microbatch 重复量化并构建转置 weight。
-
-### 5.8 当前测试缺口
-
-**[Current]**
-
-- `tests/ops/test_grouped_gemm.py:9-15` 声明的覆盖主要是 BF16 forward/WGrad 和 FP8 forward。
-- 没有 grouped MXFP4、grouped DGrad、完整 module backward、cache、EP integration 测试。
-- `tests/modules/test_grouped_linear.py:45-69` 仍访问 `m.weights/m.biases`，而实现已改为注册 `weight0..weightN`/`bias0..biasN`（`lumen/modules/grouped_linear.py:99-124`）；这表明现有 construction test 与 production API 已漂移，不能作为当前参数布局已覆盖的证据。
-- `tests/modules/test_grouped_linear.py:225-239` 的量化测试只检查 enable 状态。
-- `tests/modules/test_grouped_linear.py:245-272` 的 benchmark test 只断言 elapsed time 大于 0，不能作为性能验收。
-
-### 5.9 当前 recompute 与 overlap 约束
-
-**[Current]**
-
-DSV4 4-layer、43-layer 和 profile 启动脚本默认使用 full activation recompute，例如 `examples/dsv4/run_dsv4_flash_pretrain_inner.sh:63-69`；这些脚本当前也没有打开 EP A2A overlap 或 shared-expert overlap。Megatron 在 `overlap_moe_expert_parallel_comm` 打开时明确要求 `recompute_granularity != 'full'` 且 recompute method/num-layers 均为空，见 `megatron/core/transformer/transformer_config.py:1448-1477`。
-
-因此 v1/P1 不把 EP A2A overlap 作为默认能力或成功条件。它只能在 P2 中以独立配置、显存变化、数值回归和端到端 profile 重新验收，不能为追求 overlap 静默改变当前训练的 recompute 策略。
-
----
-
-## 6. 可复用能力与不可外推结论
-
-### 6.1 Lumen dense MXFP4 training
-
-**[Reusable]**
-
-现有 dense `quantized_linear(..., scaling_type="mxfp4")` 已提供：
-
-- activation 1×32 E8M0 scale、RTN；
-- weight 32×32 E8M0 tile scale、RTN；
-- packed FP4 E2M1；
-- A4W4 forward，BF16 output；
-- gradient stochastic rounding；
-- DGrad 使用 forward weight 的 packed transpose；
-- WGrad 使用 dual-layout quant 和 deterministic H16/RHT，`g=16`；
-- ragged `M` 在 backward 内 pad 到 32，并裁剪 dX；
-- 32-bit operand indexing 的 dispatch 前 fail-closed；
-- 每 optimizer step 的 weight cache 与 Parameter `_version` 校验。
-
-主要证据：
-
-- MXFP4 dispatch: `lumen/ops/quantize/linear.py:2162-2166`
-- int32 guard: `:2179-2216,2599-2609`
-- forward 与 `W^T` operand: `:2219-2331`
-- ragged M、dual-layout gradient、DGrad/WGrad: `:2334-2560`
-- deterministic H16/RHT: `:74-89`
-- 32×32 weight scale 的转置一致性：`lumen/ops/quantize/ops.py:619-645`
-- weight cache: `lumen/quantize/__init__.py:543-653`
-- optimizer invalidation: `lumen/quantize/__init__.py:1176-1245`
-
-这些能力证明 A4W4 训练 recipe 的单 GEMM 数值路径可用，但不证明 grouped MoE 的性能、segment isolation、EP integration 或端到端收敛。
-
-### 6.2 AITER 现有 MoE MXFP4
-
-**[Reusable]**
-
-AITER 已有 gfx950 FlyDSL A4W4 inference forward：
-
-- `aiter/ops/flydsl/test_flydsl_moe_a4w4.py:4-18` 覆盖 stage1、stage2 和 E2E forward；
-- activation 与 weight 都是 FP4，见 `:41-43`；
-- stage1 是 fused gate+up GEMM + activation，见 `aiter/ops/flydsl/moe_kernels.py:1099-1152`；
-- stage2 是 down projection + routed reduction，见 `:1453-1505`。
-
-这些 kernel/layout/quantization 经验可以复用，但其 API 包含 inference routing/sorting/fusion 语义，不是 Megatron 已完成 A2A/local-sort 后需要的裸 grouped linear。
-
-### 6.3 当前 DSV4 tuned config 是 A8W4
-
-**[Current]**
-
-`aiter/configs/model_configs/dsv4_fp8fp4_tuned_fmoe.csv:122-137` 的 DSV4 rows：
-
-- hidden 4096；
-- intermediate 2048；
-- experts 256；
-- top-k 6；
-- activation dtype `torch.float8_e4m3fn`；
-- weight dtype `torch.float4_e2m1fn_x2`。
-
-因此它们是 **A8W4**，不是本 spec 的 **A4W4**。另外，config lookup key 包含 expert 数，见 `aiter/fused_moe.py:1770-1783`；runtime 从本地 weight bank 得到 `E`，见 `:569-570`。EP4/EP8 的 local `E=64/32` 不会命中现有 `E=256` rows。
-
-### 6.4 AITER 当前不存在本 spec 所需 backward
-
-**[Current]**
-
-- `fused_moe` / `fused_moe_2stages` 是 forward API，没有配套 autograd、MXFP4 DGrad 或 MXFP4 WGrad。
-- AITER 存在独立 Triton `moe_wgrad`，见 `aiter/ops/triton/moe/moe_wgrad.py:47-211`，但它接收普通 grad/input，不消费 MXFP4 operands/scales，也未接入 `fused_moe` backward。
-- gfx950 A4W4 inference 的 `output_aux` sort 在有 `expert_mask` 时明确抛出 `NotImplementedError`，见 `aiter/fused_moe.py:702-713`。
-- gfx1250 grouped A4W4/A8W4 测试走完整 public `fused_moe` forward，见 `op_tests/test_flydsl_grouped_gemm_gfx1250.py:6-22`；它不能作为 gfx950 DSV4 training 支持证据。
-
----
-
-## 7. 方案比较
-
-| 方案 | 描述 | 优点 | 缺点 | 结论 |
-|---|---|---|---|---|
-| A. 顺序复用 dense MXFP4 | 沿当前 Python expert loop，对每个 `X_e/W_e` 调 dense MXFP4 autograd | 最小改动；最快建立数值、cache、checkpoint baseline；ragged M 已支持 | 32/64 experts × FC1/FC2 × fwd/dgrad/wgrad，launch 与 Python 开销大；不是 grouped kernel | **选为 P0 correctness baseline，不作为性能完成** |
-| B. 直接给 AITER `fused_moe` 包 autograd | 把 router/sort/stage1/stage2/reduce 全部纳入一个 autograd op | 理论上融合最多 | 与当前 Megatron dispatch 边界冲突；改变概率与 activation 语义风险高；gfx950 A4W4 EP受限；无 backward；现有 DSV4 tuned rows 是 A8W4 | **拒绝作为 v1** |
-| C. Expert-sorted grouped linear training API | 在 Megatron dispatch 后对 FC1/FC2 分别做 grouped A4W4 fwd/dgrad/wgrad | 保留上层语义与 checkpoint；API 边界清晰；可独立测试和调优；兼容 EP local-E | 需要新 AITER grouped training kernels 和 Lumen custom autograd | **选为 P1 目标方案；production 需另过 promotion gate** |
-
-选择 C 的核心理由是：grouped GEMM 是需要加速的最小稳定边界，router、通信和概率加权已经由 Megatron 正确表达，不需要为获取 kernel 融合而重写整条 MoE 数学图。
-
----
-
-## 8. 决策表
-
-| ID | 决策 | 冻结选择 | 理由 |
-|---|---|---|---|
-| D1 | 精度 recipe | MXFP4 A4W4 | 与 dense training 能力一致；不混入 A8W4 |
-| D2 | 集成边界 | dispatch 后的 expert-sorted grouped FC1/FC2 | 保持 Megatron router/EP/combine |
-| D3 | v1 硬件 | gfx950 | 当前 A4W4 kernel 与目标平台 |
-| D4 | 并行范围 | EP4/EP8，ETP=1 | 覆盖 DSV4 43-layer/4-layer 默认拓扑 |
-| D5 | 参数/optimizer 状态 | BF16 model/checkpoint weight；FP32 main param/main grad；moment dtype 沿用 profile baseline | 保留训练、optimizer 与 checkpoint 语义 |
-| D6 | Weight scale | canonical 32×32 E8M0 tile grid | 保证 forward weight 与 DGrad transpose 一致 |
-| D7 | Activation scale | 1×32 E8M0 | 沿用 dense A4W4 recipe |
-| D8 | Rounding | weight/activation RTN，gradient SR | 沿用已验证 dense recipe |
-| D9 | WGrad padding | 每 expert 独立 pad32，H16/RHT 每段重启 | 防止 expert 间数据污染 |
-| D10 | 上层 activation | 保留 BF16 clamp + SwiGLU + routing probability | 不改变模型数学语义 |
-| D11 | 权重缓存 | 每 optimizer step 构造 fwd + DGrad transpose cache | 避免每 microbatch 重复量化/转置 |
-| D12 | Fallback | grouped MXFP4 → sequential MXFP4 → BF16 grouped | correctness 可恢复且路径可观测 |
-| D13 | 用户开关 | 接入标准 `--linear-fp4`，拒绝与 FP8 同开 | 不再增加另一个环境变量格式开关 |
-| D14 | Kernel ownership | AITER | 遵守 Lumen/AITER 边界 |
-| D15 | P0/P1 定义 | P0 顺序正确性 baseline；P1 grouped operator；production 单独 promotion | 防止将正确性 fallback 当性能结果 |
-
----
-
-## 9. 目标架构与数据流
-
-### 9.1 端到端边界
-
-**[Design]**
-
-```text
+~~~text
 BF16 hidden states
-  → Megatron router/top-k (BF16/FP32 as today)
-  → local permutation
-  → EP all-to-all
-  → local expert sorting
-  → X_sorted [sum M_e, 4096], group_sizes[E_l]
-       │
-       ├─ grouped MXFP4 FC1 A4W4
-       │    W1 cache [E_l, 4096, 4096]
-       │    → BF16 gate+up [sum M_e, 4096]
-       │
-       ├─ existing BF16 clamp + SwiGLU
-       ├─ existing BF16 × routing probability
-       │
-       └─ grouped MXFP4 FC2 A4W4
-            W2 cache [E_l, 4096, 2048]
-            → BF16 expert output [sum M_e, 4096]
-  → local unsort
-  → TP reduce-scatter（如适用）
-  → EP all-to-all combine
-  → final unpermute
-```
+  -> Megatron router/top-k
+  -> local permutation
+  -> EP all-to-all
+  -> local expert sorting
+  -> grouped MXFP4 FC1
+  -> existing BF16 clamp + SwiGLU
+  -> existing routing-probability multiply
+  -> grouped MXFP4 FC2
+  -> local unsort
+  -> TP/EP combine
+~~~
 
-以下边界保持不变：
+MXFP4 implementation MUST NOT 接收或重新解释 global router logits、top-k ids、top-k weights 或 expert mask。Probability gradient、dispatch/combine 和 checkpoint keys 继续由 Megatron/Lumen integration layer 拥有。
 
-- `TEGroupedMLP` 对 FC1/activation/probability/FC2 的调用顺序；
-- `activation_func_clamp_value=10` 的 clamp；
-- probability 在 SwiGLU 输出后相乘；
-- all-to-all dispatcher 与 checkpoint key。
+### 4.3 Fprop/DGrad/WGrad
 
-### 9.2 Lumen module contract
+~~~text
+Fprop: X4 [M_e,K] x W4 [N,K]^T -> BF16 Y [M_e,N]
+DGrad: dY4 [M_e,N] x W4-transpose-view -> BF16 dX [M_e,K]
+WGrad: dY4^T [N,P_e] x X4^T [P_e,K] -> FP32 accumulation [N,K]
+~~~
 
-`LumenGroupedLinear` 的对外签名保持兼容：
-
-```python
-forward(
-    x: Tensor,                 # [sum(M_e), K], BF16
-    m_splits: Sequence[int],   # length E_l
-    m_splits_gpu: Tensor | None = None,
-) -> tuple[Tensor, Tensor | None]
-```
-
-要求：
-
-1. `sum(m_splits) == x.shape[0]`，所有值非负。
-2. `m_splits_gpu` 若提供，必须是 CUDA contiguous `int32` 且与 host counts 一致。
-3. 当前 `TEGroupedMLP` 把 counts 转成 Python list。v1 在 `m_splits_gpu is None` 时复用预分配 buffer，把 host list 拷回 CUDA；不得为此再触发一次 D2H 同步。
-4. P1 不改变返回值、bias 语义或 checkpoint layout。
-5. DSV4 v1 的 bias 被 `--disable-bias-linear` 禁用；若收到 bias，auto 模式走 BF16，strict 模式构建时拒绝。
-
-### 9.3 Lumen autograd contract
-
-新增 grouped autograd glue 的逻辑签名：
-
-```python
-GroupedMXFP4LinearFunction.apply(
-    x,
-    group_sizes_gpu,
-    module_metadata,
-    *expert_weights,
-)
-```
-
-Forward：
-
-1. 校验 shape、dtype、arch 和 local-E。
-2. 获取或构建 grouped weight cache。
-3. 对 expert-sorted `x` 做 segment-aware activation quant。
-4. 调用 AITER grouped forward。
-5. 保存 compact MXFP4 operands、group offsets 和 cache generation；不保存额外 BF16 weight bank。
-
-Backward：
-
-1. 对 `dY` 做 segment-aware dual-layout quant，gradient 使用 SR。
-2. grouped DGrad 使用 cached `W^T` operand。
-3. grouped WGrad 使用每 expert 独立 pad32 的 `dY_e^T/X_e^T`。
-4. 普通 autograd 返回与 `weight0..weightN` 一一对应、dtype 与 BF16 model parameter 相同的 gradients。
-5. gradient accumulation fusion 模式直接写入各 expert 的目标 `main_grad` buffer；当前 DSV4 baseline 要求支持 FP32，且相应 autograd 返回 `None`。
-6. deferred WGrad 模式在 backward 时完成量化并捕获 packed operands；延后阶段只执行 GEMM，避免调度顺序改变 stochastic rounding。
-
-### 9.4 AITER public API
-
-**[Design]**
-
-AITER 提供 expert-sorted training primitives，不接受 global router logits、top-k ids、top-k weights 或 expert mask。v1 public contract 固定使用 canonical contiguous storage；任何 kernel-private swizzle/preshuffle 都由 AITER wrapper 从这些字段派生并缓存，不得重新量化 BF16 source。
-
-```python
-from dataclasses import dataclass
-from typing import Literal, Sequence
-from torch import Tensor
-
-
-@dataclass(frozen=True)
-class GroupedMXFP4WeightOperands:
-    data: Tensor          # uint8 CUDA contiguous [E_l, N, K/2], packed E2M1
-    scale: Tensor         # uint8 CUDA contiguous [E_l, N/32, K/32], E8M0
-    data_t: Tensor        # uint8 CUDA contiguous [E_l, K, N/2], packed E2M1
-    scale_t: Tensor       # uint8 CUDA contiguous [E_l, K/32, N/32], E8M0
-    layout_id: Literal["mxfp4_weight_tile32x32_v1"]
-
-
-@dataclass(frozen=True)
-class GroupedMXFP4ActivationOperands:
-    row_data: Tensor      # uint8 CUDA contiguous [M, D/2], packed E2M1
-    row_scale: Tensor     # uint8 CUDA contiguous [M, D/32], E8M0
-    transposed_data: Tensor
-    # uint8 CUDA contiguous [sum_e(D*P_e/2)]; expert e view [D, P_e/2]
-    transposed_scale: Tensor
-    # uint8 CUDA contiguous [sum_e(D*P_e/32)]; expert e view [D, P_e/32], E8M0
-    group_offsets: Tensor # int32 CUDA [E_l+1], prefix sum of M_e
-    padded_offsets: Tensor
-    # int32 CUDA [E_l+1], prefix sum of P_e in token units
-    feature_dim: int      # D = K for X, D = N for dY
-    rounding: Literal["rtn", "sr"]
-    rht_id: Literal["hadamard16_all_plus_v1"]
-    philox_seed: int | None
-    row_philox_offset: int | None
-    transposed_philox_offset: int | None
-    next_philox_offset: int | None
-    layout_id: Literal["mxfp4_segmented_row_and_t_v1"]
-
-
-grouped_mxfp4_weight_quant_2d(
-    weights: Sequence[Tensor], # exactly E_l BF16 CUDA contiguous [N,K]
-) -> GroupedMXFP4WeightOperands
-
-grouped_mxfp4_quant_forward_activation(
-    x_bf16: Tensor,            # BF16 CUDA contiguous [M,K]
-    group_sizes_gpu: Tensor,   # int32 CUDA contiguous [E_l]
-) -> GroupedMXFP4ActivationOperands
-
-grouped_mxfp4_quant_backward_gradient(
-    dy_bf16: Tensor,           # BF16 CUDA contiguous [M,N]
-    group_sizes_gpu: Tensor,   # int32 CUDA contiguous [E_l]
-    *,
-    philox_seed: int,
-    philox_offset: int,        # offset unit: one 32-bit random draw
-) -> GroupedMXFP4ActivationOperands
-
-grouped_mxfp4_linear_fwd(
-    x_operand: GroupedMXFP4ActivationOperands,
-    weight_operand: GroupedMXFP4WeightOperands,
-    *,
-    config_id: str | None = None,
-) -> Tensor                   # BF16 [M,N]
-
-grouped_mxfp4_linear_dgrad(
-    dy_operand: GroupedMXFP4ActivationOperands,
-    weight_operand: GroupedMXFP4WeightOperands,
-    *,
-    config_id: str | None = None,
-) -> Tensor                   # BF16 [M,K]
-
-grouped_mxfp4_linear_wgrad(
-    dy_operand: GroupedMXFP4ActivationOperands,
-    x_operand: GroupedMXFP4ActivationOperands,
-    *,
-    out: Sequence[Tensor],     # exactly E_l contiguous [N,K], all BF16 or all FP32
-    accumulate: bool,
-    config_id: str | None = None,
-) -> None
-```
-
-固定语义：
-
-1. `block_size=32`、weight/forward-activation RTN、gradient SR 和两个 `layout_id` 都是 v1 ABI，不作为可变 keyword。
-2. `grouped_mxfp4_quant_forward_activation()` 的 `row_*` 是不做 RHT 的 1×32 RTN operand；其 `transposed_*` 是逐 expert pad32、逐段重启 H16 后的 RTN WGrad operand。
-3. `grouped_mxfp4_quant_backward_gradient()` 的 `row_*` 是不做 RHT 的 1×32 SR DGrad operand；其 `transposed_*` 是使用同一 H16 约定的逐段 SR WGrad operand。
-4. `X` 与 `dY` 的 `group_offsets`、`padded_offsets`、`rht_id` 必须完全相同，WGrad wrapper 在 launch 前验证。
-5. `config_id=None` 表示按第 13.1 节完整 key 查表；传入字符串表示测试/benchmark 强制指定一个已注册 config。两者都必须在 telemetry 中解析成实际 config ID。
-6. WGrad 只使用 mandatory `out` buffers，不返回二义性的 stacked/sequence variant。普通 autograd 分配 BF16 per-parameter buffers；gradient accumulation fusion 直接传入 FP32 `main_grad` buffers。`accumulate=False` 覆盖写，`True` 原位累加。
-
-API 不持有 `Parameter`、optimizer 或 Python module 状态。AITER wrapper 负责：
-
-- 参数验证；
-- device pointer table；
-- kernel dispatch；
-- layout tag；
-- kernel repr/trace name；
-- tuned config lookup；
-- 同步暴露真实 backend 名。
-
-Lumen 负责 cache 生命周期、Parameter 映射、autograd、fallback 和训练框架接线。
-
-### 9.5 为什么不传 router 数据
-
-进入 grouped FC1 前，Megatron 已经完成：
-
-- top-k expansion；
-- EP dispatch；
-- local-expert sorting。
-
-因此 operator 只需要 `x_sorted + group_sizes`。这样：
-
-- 不依赖 AITER inference `expert_mask`；
-- 不重复 sorting；
-- 不改变 probability gradient；
-- local-E 自然为 32 或 64；
-- 可独立验证每个 linear pass。
+P0 sequential 与 P1 grouped MUST 使用完全相同的 quantizer、scale bytes、physical layouts、RTN/SR、padding、accumulator 和 output dtype。P0 是 executable numerical reference，不是另一套 recipe。
 
 ---
 
-## 10. 数值与布局契约
+## 5. 数值 recipe 与格式版本
 
-### 10.1 Weight cache
+### 5.1 权威 ID 分层
 
-对 expert `e`：
+不得使用 canonical MXFP4 作为含混格式名。V1 将数值语义与物理布局分开：
 
-| 名称 | Shape | 含义 |
-|---|---|---|
-| `W_e` | `[N, K]` BF16 | model/checkpoint weight |
-| `Wq_e` | `[N, K/2]` packed FP4 | forward B operand |
-| `Sw_e` | `[N/32, K/32]` E8M0 | canonical 32×32 tile scale |
-| `Wtq_e` | `[K, N/2]` packed FP4 | DGrad B operand |
-| `Swt_e` | `[K/32, N/32]` E8M0 | `Sw_e.T` 的逻辑布局 |
+~~~text
+numeric_recipe_id
+physical_layout_id
+prepared_layout_id
+~~~
 
-Grouped cache 的逻辑 shape：
+主 weight numeric recipe：
 
-- `Wq`: `[E_l, N, K/2]`
-- `Sw`: `[E_l, N/32, K/32]`
-- `Wtq`: `[E_l, K, N/2]`
-- `Swt`: `[E_l, K/32, N/32]`
+~~~text
+lumen_fp4_e2m1_e8m0_tile32x32_s1024_v1
+lumen_fp4_e2m1_e8m0_row1x32_v1
+~~~
 
-如果 kernel 需要 per-row 展开的 scale 或特殊 swizzle，它必须从 canonical 32×32 grid 派生；不得重新以 1×32 规则量化 BF16 weight。否则 forward 的 `Q(W)` 与 DGrad 使用的 weight 不再是同一量化算子的转置，破坏链式法则一致性。
+它 MUST 完整规定：
 
-### 10.2 Forward
+- E2M1 payload 与 E8M0 scale；
+- 32x32 / 1024-value scale granularity 和 axes；
+- fp4_e2m1_e8m0_selector_v1 的 amax、exponent floor/ceil、tie、encode/clamp；
+- RTN；
+- zero、signed zero、NaN、Inf、subnormal、overflow 和 saturation；
+- byte-exact golden vectors。
 
-对每个 expert：
+physical_layout_id MUST 规定 nibble order、byte encoding/endianness、tile traversal、strides、padding、scale placement、offset/pointer width、H16 matrix/sign/order 和最低 alignment。
 
-```text
-X_e [M_e,K] BF16
-  --RTN, 1×32-->
-Xq_e [M_e,K/2], Sx_e [M_e,K/32]
+V1 公共 physical layout IDs 固定为：
 
-Y_e = GEMM_A4W4(Xq_e, Wq_e, Sx_e, Sw_e)
-  --FP32 accumulate, cast-->
-Y_e [M_e,N] BF16 storage
-```
+~~~text
+mxfp4_weight_tile32x32_v1
+mxfp4_segmented_row_and_t_v1
+hadamard16_all_plus_v1
+~~~
 
-Forward 不要求 `M_e` 对齐到 32；每行独立 1×32 quant，kernel 尾块必须 masked。
+prepared_layout_id 只标识 kernel-private swizzle/preshuffle。它不是公共 interchange format，也不允许改变数值值域或重新量化 BF16 source。
 
-### 10.3 DGrad
+ABI version、numeric recipe version、physical layout version 和 prepared layout version MUST 独立演进。破坏性 ABI 改动发布 _v2。
 
-```text
-dY_e [M_e,N] BF16
-  --SR, 1×32-->
-dYq_e
+### 5.2 Weight source 与双布局
 
-dX_e = GEMM_A4W4(dYq_e, Wtq_e)
-  --FP32 accumulate, cast-->
-dX_e [M_e,K] BF16 storage
-```
+V1 固定：
 
-要求：
+~~~text
+weight_quant_source=model_parameter_bf16_v1
+~~~
 
-- 使用 forward cache 中对应的 `Wtq_e/Swt_e`；
-- 不允许从更新后的 BF16 model weight 临时再量化；
-- ragged `M_e` 不得使 DGrad 静默切换 BF16；
-- kernel 不支持时按第 12 节回退，并计数。
+生命周期是：
 
-### 10.4 WGrad
+~~~text
+FP32 optimizer master update
+  -> sync to BF16 model Parameter
+  -> readiness event completes
+  -> atomically advance committed_weight_epoch
+  -> Q4(BF16 Parameter)
+~~~
 
-```text
-dW_e = dY_e^T @ X_e
+必须公开承认：
 
-P_e = ceil(M_e / 32) * 32
-dY_e^T: [N,P_e] --H16 + SR--> dYtq_e, Sdy_t [N,P_e/32]
-X_e^T : [K,P_e] --H16 + RTN--> Xtq_e,  Sx_t  [K,P_e/32]
-dW_e  : [N,K] --FP32 accumulate--> target grad buffer
-```
+~~~text
+Q4(cast_bf16(W_fp32)) != Q4(W_fp32)
+~~~
 
-强制不变量：
+Forward weight 与 DGrad transpose view MUST 来自同一 BF16 snapshot 和同一量化结果。DGrad 可以使用确定性的 transpose/repack/view，但 MUST NOT 从更新后的 BF16 weight 重新量化，也 MUST NOT 用不同的 scale selector。
 
-1. 每个 expert 独立 pad，不能把 expert `e` 的尾部和 expert `e+1` 的开头放进同一 32-value quant block。
-2. deterministic H16/RHT 的 `g=16` 在每个 expert segment 起点重启；同一 expert 的 `dY_e^T` 与 `X_e^T` 必须使用相同的 `hadamard16_all_plus_v1` sign/order/segment origin，不能独立生成 transform。
-3. `dY` 使用 stochastic rounding，`X` 使用 round-to-nearest。
-4. padding 值为 0，不参与 scale amax，不贡献 dW。
-5. `M_e=0` 不启动 0-M kernel；`accumulate=False` 时该 expert 输出全零，`accumulate=True` 时保持目标 buffer 不变。
-6. `P_e`、group offsets 和 padded offsets 必须由 quant 返回的同一份 metadata 提供，WGrad 不得自行重算。
-7. WGrad 内部使用 FP32 accumulator；普通 autograd 的目标 buffer 为 BF16，gradient accumulation fusion 的 `main_grad` 目标必须支持 FP32。最终存储 dtype 由 mandatory `out` buffer 决定。
+Model/checkpoint Parameter 为 BF16，optimizer master 为 FP32，production WGrad 直接累加 FP32 main_grad。Optimizer moments 的 dtype 沿用对应 BF16 baseline，并作为 manifest 字段；MXFP4 不得静默改变 optimizer state dtype。
 
-### 10.5 Stochastic rounding 与可复现性
+### 5.3 Forward activation 与 WGrad activation
 
-只有 gradient quant 使用 SR。`grouped_mxfp4_quant_backward_gradient()` 的 RNG contract 固定为：
+对同一 BF16 X_e snapshot 独立生成：
 
-- `philox_offset` 的单位是一份 32-bit random draw；
-- row-major `dY` stream 从 `row_philox_offset = philox_offset` 开始，消费 `M × N` 个 draw；
-- transposed H16 `dY^T` stream 从 `transposed_philox_offset = philox_offset + M × N` 开始，按 expert 顺序消费 `sum(P_e × N)` 个 draw，包含 padding 位置；
-- 返回 `next_philox_offset = philox_offset + M × N + sum(P_e × N)`；
-- random draw 到逻辑 `(expert, row, column, layout)` 的映射不得依赖 kernel tile、wave 调度或 expert 是否合并到同一次 launch；
-- 相同 seed、offset、shape 和 `group_sizes` 必须 bitwise 重放 packed gradient operands；row 与 transposed stream 不得重叠。
+~~~text
+X_e_bf16
+  +- RTN -> row-packed FP4 for Fprop
+  +- H16 / transpose / logical-zero pad -> RTN -> FP4 for WGrad
+~~~
 
-deferred WGrad 在原 backward 时生成并保存 packed operands 及上述 metadata，延后执行不得再次消费 RNG 或重新量化。
+禁止从已量化 row operand decode 后再量化 transposed operand。Aligned/ragged shape MUST 具有同一 reference 数学定义；padding 不参与 amax，padded lane 固定 +0。
 
-### 10.6 Routing probability 与 activation
+### 5.4 Gradient quantization
 
-P1 不融合 activation：
+对 dY：
 
-```text
-FC1 BF16 output
-  → clamp(gate≤10, linear∈[-10,10])
-  → SiLU(gate) × linear
-  → × permuted_probs
-  → BF16
-  → FC2 activation quant
-```
+- DGrad row operand：1x32 E8M0，E2M1，SR；
+- WGrad transposed operand：per-expert H16/transpose/pad，E2M1，SR；
+- 两者使用不重叠 RNG subrange；
+- LUMEN_MXFP4_DGRAD_HADAMARD=1 在本模式 MUST 被拒绝；
+- recompute/physical retry MUST 复用逻辑 invocation 的同一 RNG token。
 
-该顺序匹配 `megatron/core/transformer/moe/experts.py:924-940`。routing probability 的梯度继续由 PyTorch/Megatron autograd 计算。
+### 5.5 WGrad output mode
 
-### 10.7 32-bit indexing
+低层 WGrad contract 使用枚举，不使用 accumulate: bool：
 
-每个 grouped API 在 launch 前验证：
-
-- 每个 operand 的元素数；
-- packed byte offset；
-- scale offset；
-- pointer table offset；
-- `sum(P_e)`。
-
-任一 index 可能超过 signed 32-bit 时：
-
-- strict 模式：在 launch 前抛出包含 layer/role/shape 的异常；
-- auto 模式：选择 sequential MXFP4 或 BF16；
-- 禁止“先 launch，再捕获 illegal memory access”，因为 HIP context 可能已经损坏。
-
----
-
-## 11. Cache 与 optimizer 生命周期
-
-### 11.1 保留参数、optimizer 与 checkpoint
-
-**[Design]**
-
-- `weight0..weightN` 继续是独立 BF16 `Parameter`。
-- 不把 checkpoint 主表示改成单一 `[E,N,K]` Parameter。
-- precision-aware optimizer 的 main parameter 默认保持 FP32，见 `megatron/training/arguments.py:3781-3784` 和 `megatron/core/optimizer/optimizer_config.py:72`。
-- DSV4 训练继续使用 `--accumulate-allreduce-grads-in-fp32`（4-layer `run_dsv4_4layer_pretrain_inner.sh:82`；43-layer `run_dsv4_flash_pretrain_inner.sh:113`）；gradient accumulation fusion 因而必须能直接累加到 FP32 `main_grad`。
-- Adam moments 不统一改 dtype：43-layer profile 当前在 `run_dsv4_flash_pretrain_inner.sh:22-23,121-122` 显式默认 BF16，4-layer 未覆盖参数时沿用 Megatron FP32 默认。每个 run 必须记录 main-param、main-grad、exp-avg 与 exp-avg-sq dtype。
-- grouped packed cache 是 non-persistent runtime state，不进入 `state_dict`。
-- 现有 `LumenGroupedLinear._sharded_state_dict_grouped()` 的 global expert 映射保持不变。
-
-### 11.2 Cache key
-
-一个 grouped weight cache entry 至少绑定：
-
-```text
-(
-  tuple(source_parameter_identity),
-  tuple(source_parameter_version),
-  E_l, N, K,
-  device, source_dtype,
-  gfx_arch, cu_count,
-  fc_role,                    # fc1 / fc2
-  quant_recipe,               # mxfp4-a4w4
-  canonical_scale_layout,     # tile32x32
-  packed_data_layout,
-  kernel_layout_signature,
-)
-```
-
-`Parameter._version` 是 correctness 的最终兜底。optimizer hook 只负责尽早释放旧 buffer，正确性不得只依赖 hook 是否被安装。
-
-### 11.3 构造策略
-
-- **P0:** 每个 expert 复用 dense `_mxfp4_cached_weight`，不构造永久 BF16 stack。
-- **P1:** AITER grouped quant 接受独立 source tensors 的 pointer table，直接写连续 packed cache。
-- 允许在 P1 bring-up 期间使用一次性 BF16 stack 作为受控 correctness fallback，但该路径必须有独立 counter，不能进入 production benchmark 或 release 配置。
-
-缓存内容：
-
-- forward packed weights/scales；
-- DGrad packed transposed weights/scales；
-- layout metadata；
-- source versions；
-- backend/config identity。
-
-### 11.4 Invalidation
-
-- BF16 weight 任一 `_version` 改变时，下一次 forward 必须 cache miss。
-- optimizer 成功更新后 eager invalidate。
-- overflow/skipped step 不得推进 cache generation；即使保守 invalidate，也不能把旧 version 标成新 version。
-- checkpoint load、device move、dtype change、module re-shard 后必须 invalidate。
-- activation recompute 在同一个 optimizer step 内复用相同 weight cache。
-
----
-
-## 12. Dispatch、回退与可观测性
-
-### 12.1 Backend 顺序
-
-**[Design]**
-
-```text
-1. AITER grouped MXFP4 training kernel
-2. Lumen sequential per-expert dense MXFP4
-3. AITER/Lumen BF16 grouped GEMM
-```
-
-三条路径必须具有相同 shape、bias、empty-expert、autograd 和 checkpoint 语义。
-
-### 12.2 Capability preflight
-
-模型构建阶段检查：
-
-- device arch 为 gfx950；
-- AITER public grouped MXFP4 training API 可导入；
-- runtime `aiter.__file__` 可解析到预期 checkout，runtime commit 与允许列表一致；
-- `K`、`N` 满足 32 对齐；
-- `ETP=1`；
-- local-E 为 32 或 64；
-- DSV4 bias 关闭；
-- `--linear-fp4` 未与 FP8 开关同时启用；
-- strict 模式下存在对应 FC1/FC2 kernel/config。
-
-strict/release 模式若 runtime AITER import path 或 commit 不在声明的允许集合中，必须在模型构建前失败；开发模式至少输出一次显式 warning，不能只在 benchmark 结束后才暴露依赖漂移。
-
-运行阶段检查：
-
-- `group_sizes` 长度与 local-E 相同；
-- 所有 count 非负且 sum 等于输入行数；
-- host/GPU counts 一致；
-- operand layout tag 与 kernel 要求一致；
-- index 范围安全。
-
-### 12.3 用户配置
-
-格式选择使用现有标准开关：
-
-```text
---linear-fp4
-```
-
-新增的 MoE 参数只控制 backend 和失败策略，不重新定义格式：
-
-```text
---lumen-moe-mxfp4-backend {auto,grouped,sequential}
---lumen-moe-mxfp4-strict
-```
+~~~text
+OVERWRITE
+ACCUMULATE_FP32
+~~~
 
 语义：
 
-- `auto`: grouped 不可用时按 fallback chain 降级；
-- `grouped`: 请求 grouped；非 strict 时仍允许记录后降级；
-- `sequential`: P0/reference 路径；
-- `strict`: 任意 routed-expert FC1/FC2 非预期降级立即失败。
+- OVERWRITE：所有 output buffers 必须统一为 BF16 或统一为 FP32；M_e=0 时清零对应 expert output。
+- ACCUMULATE_FP32：所有 output buffers 必须为 FP32，直接执行 main_grad_e += dW_e；M_e=0 时保持 buffer 不变。
 
-DSV4 v1 中 `--linear-fp4` 的受支持 scope 是 routed expert FC1/FC2。启动日志必须打印 `scope=routed_experts` 和实际 module/expert-bank 数；router、shared expert、attention、embedding、lm-head 保持 BF16。未来扩展到 all-linears 需要独立验收，不由该开关在 DSV4 中静默扩大范围。
+Production path MUST 直接写 FP32 main_grad。禁止先落 BF16 再 cast/add。每个 output 的 shape、stride、device、dtype、capacity、alignment 和 alias 均在 bind/attach 前验证。
 
-兼容要求：
+### 5.6 A8W4 controlled ablation
 
-- 保留 `LUMEN_DSV4_LINEAR_FP8`；
-- 若环境 FP8 与 `--linear-fp4` 同时设置，启动阶段报错；
-- 不增加 `LUMEN_DSV4_LINEAR_MXFP4`；
-- DSV4 parser 必须接入 common Megatron quant args；
-- DSV4 training setup 必须安装 MXFP4 cache invalidation hook。
+正式控制 recipe 名称：
 
-### 12.4 Fallback telemetry
+~~~text
+lumen_w4_s1024_a8_nonweight_operands_v1
+~~~
 
-每次选择路径时可查询：
+它是 matched-scale format lift：
 
-- requested recipe；
-- selected backend；
-- Lumen/Megatron commit、各仓库 dirty flag/patch digest、`aiter.__file__`、runtime AITER commit、Lumen AITER gitlink commit，以及 GPU arch/CU 数；
-- kernel/config name 与完整 tuning key；
-- layer name 与 FC1/FC2 role；
-- `E_l, M, N, K`；
-- non-empty expert 数、`max(M_e)` 和 token bucket；
-- fallback reason enum；
-- grouped/sequential/BF16 累计次数。
+~~~text
+Weight:      E2M1 + E8M0 tile32x32/S1024, unchanged
+Non-weight:  E4M3FN + the same E8M0 bytes selected by
+             fp4_e2m1_e8m0_selector_v1 over each BF16 group
+~~~
 
-日志要求：
+逐 pass：
 
-- 首次发生某个 `(layer, role, reason)` 时 warning；
-- 后续只增加 counter，避免日志洪泛；
-- fallback counters 在所有 TP/PP/EP/DP ranks 上收集并求和，provenance 通过 all-gather 收集；rank 0 只负责展示全局结果，不能只读取本 rank；
-- 所有 rank 的 runtime AITER commit 与 import root 必须一致；GPU arch/CU 和 selected kernel/config 可按 rank 分组展示，但不得省略非零 rank；
-- strict run 中任一 rank 出现 fallback 即判失败：本 rank 不继续用 fallback 结果训练，并在下一安全的分布式同步边界传播 failure flag，使所有 ranks 一致退出，避免单 rank 异常造成 collective hang；
-- 只有 backend 首次探测/warmup 或显式 correctness/debug validation 才同步暴露异步 kernel 错误，再允许 `try_backends()` 进入下一候选；
-- 成功 backend 按完整 op/kernel key 缓存后，steady-state 与 timed path 不增加设备同步；
-- CUDA/HIP graph capture 前必须预热并冻结所有会用到的 backend key，capture 内禁止 fallback probing、JIT/config lookup 或 host-side warning；
-- BF16 fallback 不能记录成 MXFP4 success。
+~~~text
+Fprop: Q8_RNE(X)    x Q4(W)   -> FP32 acc -> BF16
+DGrad: Q8_SR(dY)    x Q4(W)^T -> FP32 acc -> BF16
+WGrad: Q8_SR(dY)^T  x Q8_RNE(X) -> FP32 main_grad
+~~~
 
-建议 reason enum：
+因此 A8W4 是整体训练 recipe 标签；WGrad 本身没有 W4 operand。
 
-```text
-UNSUPPORTED_ARCH
-UNSUPPORTED_SHAPE
-UNSUPPORTED_LOCAL_EXPERTS
-MISSING_AITER_API
-MISSING_TUNED_CONFIG
-INVALID_GROUP_SIZES
-INDEX_OVERFLOW
-KERNEL_REJECTED
-KERNEL_RUNTIME_ERROR
-BIAS_UNSUPPORTED
-FORCED_SEQUENTIAL
-FORCED_BF16
-```
+这里 RNE 是 V1 对 RTN 的精确定义：round-to-nearest, ties-to-even。E4M3FN 的 finite max、encoding、special-value 和 saturation 由版本化 codec 与 golden vectors 固定；FNUZ、E5M2、按 FP8 max 重新选择 scale 或 per-row FP32 scale 都不属于该 control。
+
+Fixed-snapshot paired operator/one-step test MUST 对同一 BF16 group 只执行一次 A4 selector，并把同一份 E8M0 scale bytes 同时交给 E2M1 和 byte-exact-defined E4M3FN quantizer。Full-training arms 只共享初始 checkpoint、optimizer/scheduler/data order 和 recipe；首次 update 后允许各自权重与 routing 轨迹自然分叉。
+
+Confirmatory quality ablation 中 A4/A8 MUST 使用相同 execution structure 和 strict zero-fallback。若 A8 只有 sequential reference 而 A4 使用 grouped，它只能是 diagnostic，不得进入 confirmatory non-inferiority。
+
+A8W4 不进入运行时 fallback，不进入 A4W4 性能主表；它是必做质量消融。现有 generic FP8 路径只能复用底层组件，不能未经 contract 对齐直接作为该 control。
 
 ---
 
-## 13. AITER tuning 与 kernel representation
+## 6. Routing metadata 与生命周期
 
-### 13.1 Tuning key
+### 6.1 Ownership
 
-P1 config key 至少包含：
+- Lumen/Megatron 拥有 routing counts 的语义、permutation generation、对象生命周期和 autograd retention。
+- AITER 定义 metadata 的物理 schema 和 builder/validator。
+- buffers 由 caller 拥有；AITER MUST NOT 隐藏全局 routing object。
 
-```text
-gfx, cu_count, pass, fc_role,
-E_l, M_total_bucket, nonempty_experts_bucket, max_Me_bucket,
-N, K,
-activation_layout, weight_layout, scale_layout,
-output_dtype, accumulate
-```
+每个 routing epoch 构造一次 immutable RoutingMetadataV1，供 FC1、FC2、DGrad 和 WGrad 复用。至少包含：
 
-原因：同一个 `M_total` 在均匀和长尾路由下有不同的 occupancy/尾块行为；只用 global E=256 或总 token 数无法代表 EP4/EP8 的真实 local workload。
+~~~text
+counts
+offsets
+total_rows
+nonempty
+max_Me
+capacity_rows
+segment_alignment
+padded_counts
+padded_offsets
+total_padded
+routing_epoch
+dispatch_generation
+layout_id
+~~~
+
+不同 operand/pass 若需要不同 M-padding，MUST 按 layout_id 保存不同 padded offsets。不得假定一组 offsets 服务所有 pass。
+
+### 6.2 Empty/ragged semantics
+
+- M_e=0 产生合法 empty descriptor，不启动 0-M kernel。
+- all-empty microbatch 对 Fprop、DGrad 和 WGrad ACCUMULATE_FP32 是 no-op；ledger terminal state 为 EMPTY，selected GEMM backend 为 none。
+- WGrad OVERWRITE 是例外：每个 M_e=0 的对应 output 必须保证清零。all-empty 时可以执行已绑定的 zero-fill child operation，但不得启动 0-M GEMM；ledger 仍记录 EMPTY，并单独记录 output initialization，而不能把它伪装成 grouped GEMM success。
+- 每个 expert 独立 padding，不能跨 expert 共享 quant block、scale、H16 segment 或 RNG logical index。
+- metadata correctness identity 是被 BoundExecutionV1 和 autograd context 强引用的 immutable object；routing_fingerprint 只用于诊断，不能作为 correctness identity。
+- 对象生命周期持续到最后一个异步 consumer 的 completion event；Python backward 返回不是生命周期终点。
+
+### 6.3 Stable raw descriptor
+
+稳定 descriptor 与可演进 bucketizer 分离：
+
+~~~text
+route_descriptor_version = seghist-v1
+route_bucketizer_version = artifact-defined version
+~~~
+
+输入 counts 的口径固定为：top-k expansion、capacity/drop、EP dispatch、local expert mask 和 local sorting 之后的语义有效行；不含 kernel padding 或预分配 capacity。
+
+seghist-v1 保存：
+
+~~~text
+E
+total_rows
+nonempty
+max_rows
+padded_rows32
+tiles32
+hist16[8]
+~~~
+
+其中：
+
+~~~text
+padded_rows32 = sum(ceil(M_i / 32) * 32)
+tiles32       = sum(ceil(M_i / 32))
+~~~
+
+对 s_i = ceil(M_i / 16)，hist16 固定八个整数区间：
+
+~~~text
+s=0, s=1, s=2, s=3..4,
+s=5..8, s=9..16, s=17..32, s>=33
+~~~
+
+workload size 主轴 MUST 使用实际 padded_work_bucket。不同 pass/op variant 若 work quantum 不同，MUST 有各自 bucketizer。nonempty < 10 时不得依赖不稳定 q90；使用 histogram cumulative concentration 或 dedicated small-active class。
+
+最多 12 个 bucket 是配置数量目标，不是预先冻结的分类语义。Bucketizer MUST 由真实 artifacts 的 collision/regret audit 生成。
+
+padded work 的计算不得依赖待选择的 kernel tile。Bucketizer artifact 对每个 op_variant 固定 candidate-independent work_quantum_rows：
+
+~~~text
+Fprop/DGrad v1: work_quantum_rows = 16
+WGrad v1:       work_quantum_rows = 32
+padded_work = sum(ceil(M_i / work_quantum_rows) * work_quantum_rows)
+~~~
+
+WGrad 的 32 与语义 pad32 一致；Fprop/DGrad 的 16 与 seghist-v1 segment quantum 一致。改变 quantum、边界或映射规则必须升级 bucketizer version，旧 tuned rows 不得用新规则重解释。
+
+每个 immutable bucketizer artifact 至少包含：
+
+~~~text
+descriptor version
+bucketizer version
+op_variant_id
+work_quantum_rows
+padded-work integer boundaries and closed/open convention
+route classifier integer rules
+canonical serialization and digest
+OOD result
+~~~
+
+---
+
+## 7. AITER API 与 ABI
+
+### 7.1 Ownership boundary
+
+| Owner | Responsibilities |
+|---|---|
+| AITER | GPU kernels、public wrapper、compiled ABI、workspace/alignment contract、metadata builder、unit tests、microbenchmarks、tuning/config |
+| Lumen | module/autograd、Parameter mapping、weight cache、optimizer invalidation、dispatch/fallback、RNG allocator、ledger、checkpoint/replay、Megatron integration |
+
+Lumen MUST NOT 新增临时 GPU kernel，也 MUST NOT 调用 AITER private kernel body。AITER MUST NOT 依赖 Lumen 实现或测试其 operator。
+
+### 7.2 Python facade 与 compiled ABI
+
+Python facade MAY 使用 dataclass，例如：
+
+~~~text
+StaticPlanV1
+RoutingMetadataV1
+BoundExecutionV1
+EphemeralOperandViewV1
+~~~
+
+V1 runtime schema ID 固定为：
+
+~~~text
+lumen.grouped_expert_runtime.v1
+~~~
+
+每个成功 bind 产生唯一 binding_id，供 launch、late attachment、ledger 和 trace 关联。
+
+低层 custom-op ABI 只允许：
+
+~~~text
+Tensor
+Tensor[]
+fixed-width scalar / enum
+fixed-length flat tuple
+~~~
+
+禁止 Python opaque plan handle 跨入 compiled ABI。Facade MUST 将 plan 展开为 config_id + metadata tensors + scalars。所有 output/workspace mutation 在 schema 中显式声明。每个低层 symbol 带 _v1；compiled backend 导出真实 ABI major/minor，且与 numeric/layout versions 分离。
+
+### 7.3 Four-stage execution model
+
+~~~text
+query_static
+  -> prepare_kernel
+  -> bind_microbatch
+  -> launch_*_v1
+~~~
+
+1. query_static(spec)：纯 capability；不分配、不编译、不运行 kernel。
+2. prepare_kernel(spec)：加载并解析静态 key 对应的 registry，完成允许的 JIT，并生成该静态域内全部不可变 candidate plans。
+3. bind_microbatch(...)：基于本次 route descriptor 做内存中的 exact-map selection，并完整事务式绑定 Fprop+DGrad+WGrad bundle。
+4. launch_*_v1(...)：只执行；不得 JIT、CSV lookup、扩容、隐藏分配、异常探测或切换 backend。
+
+本文所称 bind/launch 零 lookup，是指无 filesystem、CSV/config parse、JIT 或 autotune；bind 允许对 prepare 已构造的 immutable in-memory exact map 做确定性 O(1) route-dependent selection。
+
+### 7.4 Transactional bind and commit point
+
+bind_microbatch 的内部顺序固定为：
+
+~~~text
+receive already-prepared immutable candidate plans
+  -> side-effect-free preflight of all allowed candidates
+  -> select exactly one backend/config bundle
+  -> reserve/materialize all required cache/workspace/staging
+  -> validate full bundle
+  -> construct immutable BoundExecutionV1
+  -> return = commit point
+~~~
+
+返回 BoundExecutionV1 后，backend family、Fprop/DGrad/WGrad config、routing metadata、weight/cache epoch、runtime tensor schema、main-grad destinations、workspace slices、capacity/alignment/alias contract、prepared layouts 和 SR reservation token 均不可改变。
+
+Candidate probing 只允许以下封闭 miss 枚举触发 pre-commit 下一个候选：
+
+~~~text
+STATIC_CAPABILITY_MISS
+ROUTING_BUCKET_MISS
+BACKEND_ALIGNMENT_MISS
+TUNING_POLICY_MISS
+CACHE_BUDGET_MISS
+~~~
+
+以下错误 MUST fail，不得换 backend：
+
+- public ABI 输入非法；
+- ABI/layout/version mismatch；
+- caller workspace/capacity 不足；
+- illegal alias；
+- actual OOM；
+- cache build/JIT error after candidate selection；
+- kernel launch 后错误；
+- asynchronous GPU fault。
+
+继续执行 BF16 可能掩盖 caller bug 或损坏的 GPU context，因此上述错误不属于 fallback。Telemetry MUST 同时记录 failure_phase 与 FailureDisposition={CANDIDATE_MISS,RUN_FATAL}。
+
+### 7.5 Late attachment of backward operands
+
+Forward 时不要求知道未来 dY.data_ptr()。Backward 使用：
+
+~~~text
+attach_runtime_operands_v1(bound_pass, dy, dx_out, ...)
+  -> EphemeralOperandViewV1
+~~~
+
+它只验证 dtype、shape、stride、device、storage offset、capacity、alignment、alias、routing/layout epoch 和 tensor/stream lifetime。它 MUST NOT 查 tuning table、分配、扩容、JIT、重新选择 backend/config、重建 weight、预留 RNG 或 fallback。
+
+失败统一为：
+
+~~~text
+RUNTIME_OPERAND_CONTRACT_VIOLATION
+~~~
+
+若 backend 要求上游 allocator 无法保证的特殊 alignment/layout，bind MUST 预留固定 staging buffer，并把 copy/pack 纳入 config、workspace、memory accounting 和 benchmark。否则该 backend 在 commit 前就是 BACKEND_ALIGNMENT_MISS。
+
+EphemeralOperandViewV1 只存在于 Python 生命周期层；compiled ABI 仍接收显式 tensors/scalars。
+
+### 7.6 Low-level operator families
+
+ABI 至少提供以下 _v1 families；精确参数由 ABI review 固定，但必须遵守前述类型限制：
+
+~~~text
+grouped_mxfp4_build_weight_cache_v1
+grouped_mxfp4_quantize_row_v1
+grouped_mxfp4_quantize_transpose_v1
+grouped_mxfp4_fprop_v1
+grouped_mxfp4_dgrad_v1
+grouped_mxfp4_wgrad_v1
+~~~
+
+WGrad 的逻辑 signature 包含 mandatory Tensor[] out、output_mode 和 caller-owned workspace。API MUST 显式返回或暴露不支持原因，不允许 Lumen 捕获任意异常来猜测 fallback。
+
+---
+
+## 8. Backend selection、strict 与 fallback
+
+### 8.1 CLI
+
+新增且只新增以下主开关：
+
+~~~text
+--lumen-moe-mxfp4
+--lumen-moe-mxfp4-backend {auto,grouped,sequential}
+--lumen-moe-mxfp4-strict
+--lumen-moe-mxfp4-grouped-tuning-policy \
+  {require-certified-bucket,allow-validated-heuristic}
+~~~
+
+建议默认：
+
+~~~text
+backend=auto
+strict=false
+grouped-tuning-policy=require-certified-bucket
+~~~
+
+scope 固定为 routed-expert FC1/FC2；不得使用含义过宽的 --linear-fp4，也不新增同功能环境变量。若与 LUMEN_DSV4_LINEAR_FP8 同开，启动 MUST 失败。
+
+正式 P0/P1/promotion gate MUST 显式指定 backend；不得使用 auto。exact_continue V1 也 MUST 使用显式 backend/config。
+
+### 8.2 State machine
+
+| Requested backend | Strict | Behavior |
+|---|---:|---|
+| sequential | true | only sequential MXFP4 |
+| grouped | true | only grouped MXFP4 |
+| auto | true | pre-commit select grouped or sequential MXFP4; never BF16 |
+| sequential | false | sequential MXFP4 -> BF16 |
+| grouped | false | grouped MXFP4 -> sequential MXFP4 -> BF16 |
+| auto | false | select grouped/sequential MXFP4; BF16 only if both unavailable |
+
+对 auto，grouped capability/bucket miss 后选 sequential 是 selection，不是 precision fallback。对显式 grouped，降到 sequential 是 backend fallback。MXFP4 降到 BF16 是 precision fallback。
+
+require-certified-bucket 只过滤 grouped candidate：
+
+- grouped + strict 的 row miss：pre-launch fail；
+- auto + strict 的 row miss：可选 sequential MXFP4，禁止 BF16；
+- explicit sequential：不受 grouped tuning policy 影响；
+- non-strict：所有 MXFP4 candidate 均不可用后才允许 BF16。
+
+### 8.3 Fallback timing
+
+Fallback/selection MUST 在第一个 mutation 或 kernel launch 前完成。BoundExecutionV1 commit 后不得 fallback。用户主动请求 sequential、auto selection、backend fallback 和 precision fallback 必须是不同 telemetry 状态。
+
+---
+
+## 9. Weight epoch、cache 与 memory budget
+
+### 9.1 Authoritative cache identity
+
+Cache key 至少包含：
+
+~~~text
+parameter identity
+committed_weight_epoch
+cache_generation
+numeric_recipe_id
+physical_layout_id
+prepared_layout_id
+device / gfx / CU
+shape / local-E
+~~~
+
+committed_weight_epoch 是权威数值提交版本。Parameter._version、identity 和 checksum 只作额外防御，不能替代它。
+
+推进顺序：
+
+~~~text
+FP32 optimizer update succeeds
+  -> FP32 master syncs to BF16 Parameter
+  -> readiness event completes
+  -> atomically advance committed_weight_epoch
+~~~
+
+overflow/skipped step 不推进。一个 optimizer step 内所有 microbatches 和 recompute 使用同一 weight epoch。
+
+### 9.2 Invalidation
+
+- optimizer step、checkpoint load、支持的参数原位提交、device/dtype move、reshard 均使 derived cache 失效。
+- mark_mxfp4_weights_dirty() 表示一次受支持的外部权重提交：只允许在无 accumulation window、无异步 consumer 的安全边界调用；它推进 weight epoch、推进 cache generation 并清除 derived cache。
+- checkpoint load 恢复 checkpoint 中的 weight epoch，同时推进 process-local cache_generation 并清空 derived cache。
+- 无法拦截的裸 .data 修改明确为 unsupported。
+
+### 9.3 Cache content and generations
+
+每个 expert 从同一 BF16 snapshot 构造 forward canonical layout 与 DGrad transpose view。Production path 只允许：
+
+- 一代 active cache generation；
+- 一个 selected prepared layout；
+- 不按 tuning config 重复缓存完整权重；
+- old consumer completion 后优先释放 retired generation，再构建新 generation。
+
+Parity test 需要双 backend cache 时 MUST 使用显式 test override，并单独报告内存。
+
+### 9.4 Budget
+
+定义 B_ref 为本 rank、本 device、启用 scope 内所有 local routed-expert FC1/FC2 BF16 source-weight 的 unique-storage bytes，不含 shared expert 与 optimizer state。
+
+~~~text
+default persistent cache budget = 0.75 x B_ref
+maximum persistent budget        = 1.00 x B_ref
+default peak-build budget        = 1.00 x B_ref
+absolute maximum                 = 1.00 x B_ref
+~~~
+
+预测为 0.82x 时，默认 MUST 返回 CACHE_BUDGET_MISS。只有用户显式配置且 manifest 记录 provenance，才能把 persistent budget 提高到 0.82–1.0x。
+
+两层 enforcement：
+
+1. bind 前 planner 计算 predicted_persistent_bytes 和 predicted_peak_build_bytes；
+2. cache allocator 每次 allocation 前原子 reserve 并执行硬配额。
+
+实际计费包括 payload、scales、transpose/swizzle、metadata/descriptors、offsets、alignment padding、persistent auxiliaries、preallocated workspace/staging、builder scratch 和尚未释放的 retired generation。Shared/aliased storage 只计一次。predicted_peak_build_bytes 是构建期间所有 owned derived storage 的高水位。
+
+Promotion eligibility 按本 rank 全部 local experts 的 steady-state footprint 计算，不因当前 microbatch 只命中少数 experts而缩小。当前 free HBM 只可作为额外 fail-fast，不能自动改变 manifest 中的预算或 backend selection。
+
+计划超限是 pre-bind candidate miss；allocator 超过已批准 plan 是 ALLOCATOR_PLAN_BREACH 且 run-fatal。若旧 generation 未退休导致 peak 超限，只能等待安全退休后重建或 candidate miss，不能越限。
+
+---
+
+## 10. SR RNG contract
+
+### 10.1 Ownership and domains
+
+SR 使用 Lumen-owned、checkpointed Philox counter allocator。禁止 Python random、Torch global RNG 或纯 identity hash。
+
+V1 RNG schema ID 固定为：
+
+~~~text
+lumen.philox_logical_draw.v1
+~~~
+
+每个 global_rank、rng_domain 使用独立 seed：
+
+~~~text
+domain_seed = stable_derive(
+  run_seed,
+  global_rank,
+  rng_domain_id,
+  rng_schema_version,
+)
+~~~
+
+建议至少拆分 row DGrad dY 与 transposed WGrad dY domains；domain 列表与 ID 属于版本化 schema。
+
+### 10.2 Deterministic allocation
+
+1. 在 microbatch obligation declaration 阶段收集全部 SR obligations。
+2. 按版本化 canonical logical key 排序。
+3. 对每个 domain 一次性、原子预留 ranges。
+4. Bind 只取得已经分配的 token。
+5. Candidate probing 不消耗 draw。
+6. recompute、physical retry 和相同 logical invocation 复用同一 token。
+
+Canonical key MUST 来自训练图逻辑身份，例如 optimizer step、microbatch、global layer、FC role、pass、operand role 和 logical invocation ID；MUST NOT 包含 backend、config、tile、pointer 或 physical attempt。
+
+Token 至少包含：
+
+~~~text
+rng_schema_version
+rng_domain_id
+logical_invocation_id
+philox_seed
+base_draw
+draws_reserved
+draws_used
+~~~
+
+映射固定为：
+
+~~~text
+absolute_draw  = base_draw + logical_element_index
+philox_counter = absolute_draw // 4
+philox_lane    = absolute_draw % 4
+~~~
+
+logical_element_index 由 operand layout spec 定义，不由 tile、wave、backend/config 或 launch order 定义。Row stream 按 sorted tensor row-major；transposed stream 按 expert-major、feature-major、padded-token-major 展平。
+
+### 10.3 Reservation rules
+
+- padded lanes 占 draw slot；
+- empty expert 消耗零 draw，但仍有 ledger obligation；
+- row dY 与 H16-transposed dY 使用不重叠 subrange；
+- fallback/abort 后未使用的已预留 range不回收；
+- A4/A8 fixed-snapshot test 的对应元素共享 draw；
+- reservation 前检查 base_draw + draws_reserved 的 uint64 overflow；
+- checkpoint 保存每个 domain 的 seed、next_draw 和 next logical invocation ID；
+- AITER 只消费 SR token 并回报 draws_used，不生成 seed、不推进全局 counter。
+
+---
+
+## 11. Autograd、WGrad 与 lifetime
+
+### 11.1 Saved state
+
+Forward 只保存 compact FP4 operands、immutable routing metadata、bound execution、weight/cache generation、SR tokens 和必要 events。不得额外保存完整 BF16 weight bank。
+
+Autograd context MUST 强引用上述对象直到所有异步 Fprop/DGrad/WGrad consumer 的 completion event 完成。
+
+### 11.2 Eager WGrad only
+
+V1 只支持 backward 中立即提交 WGrad，并直接写第 5.5 节定义的 FP32 main_grad。若用户启用 deferred/delay WGrad，启动 MUST 失败，不能静默改成 eager。
+
+Deferred WGrad 放入 P2；未来实现必须重新定义 typed record、bounded queue、backpressure、exactly-once、RNG/lifetime 和 checkpoint drain barrier。
+
+### 11.3 Recompute
+
+Activation recompute 为同一 logical invocation 的 physical re-execution：
+
+- 使用同一 committed weight epoch；
+- 使用同一 routing metadata identity；
+- 使用同一 RNG token；
+- ledger 新增 physical attempt_id，不新增 logical obligation；
+- 不允许 recompute 触发新 backend selection 或新 cache generation。
+
+---
+
+## 12. Ledger 与可观测性
+
+### 12.1 Obligation state
+
+每个 FC1/FC2、Fprop/DGrad/WGrad logical obligation 在 backend selection 前声明：
+
+~~~text
+DECLARED
+  -> BOUND
+  -> ENQUEUED
+  -> COMPLETED | EMPTY | FAILED_PRELAUNCH | ABORTED
+~~~
+
+COMPLETED 只能在 stream event 确认后落账。Sequential per-expert launch、split-K 或 staging copy 记录为 child kernel_sublaunches，不增加 logical obligation。
+
+守恒式：
+
+~~~text
+declared = completed + empty + failed_prelaunch + aborted + open
+~~~
+
+正式 grouped strict success 必须满足：
+
+~~~text
+open = 0
+failed_prelaunch = 0
+aborted = 0
+backend_fallback = 0
+precision_fallback = 0
+all completed obligations executed grouped MXFP4
+~~~
+
+### 12.2 Independent attributes
+
+以下是独立属性，不是 mutually-exclusive terminal states：
+
+~~~text
+requested backend
+selected backend
+selection/fallback chain
+executed precision
+precision fallback
+config source
+route descriptor/bucket
+numeric/layout IDs
+SR token/draws
+logical_invocation_id / physical attempt_id
+~~~
+
+Expected obligations MUST 从训练图/autograd context 生成，不能从 kernel 次数反推。全 rank 校验使用聚合 counts + digest，失败时保存 rank detail。Strict failure 在安全同步点全局传播，避免 collective hang。
+
+### 12.3 Compatibility and certification flags
+
+不得复用单一 certified 布尔。至少拆分：
+
+~~~text
+runtime_compatible
+correctness_validated
+tuning_config_certified
+artifact_provenance_certified
+~~~
+
+strict 只描述 precision/fallback 语义，不等价于任一 certification 状态。
+
+### 12.4 Required telemetry
+
+每次 logical invocation 至少记录：
+
+~~~text
+layer / FC role / pass
+binding ID / runtime schema
+requested and selected backend
+selection and fallback chain
+executed precision
+E_l / M / N / K
+route descriptor version and fields
+bucketizer version / padded-work bucket / route bucket
+numeric / physical / prepared layout IDs
+config ID / config source
+weight epoch / cache generation / routing epoch
+SR token and draws receipt
+failure phase / reason / disposition
+kernel sublaunch count
+~~~
+
+首次出现某个 layer/role/reason 时 warning，后续只计数。所有 ranks 汇总 counts + digest；rank 0 只负责展示，不能只观察本 rank。
+
+---
+
+## 13. Checkpoint and continuation modes
+
+### 13.1 warm_start
+
+- 只加载 BF16 model weights；
+- optimizer、scheduler/scaler、RNG、data cursor、weight epoch 重新初始化；
+- derived cache 不加载。
+
+### 13.2 exact_continue
+
+只允许同 topology、rank mapping、build manifest、kernel/config、stream schedule、optimizer、data pipeline 和 deterministic settings。V1 禁止 backend=auto、未冻结的 config mapping、validated heuristic、fallback、resume 后 autotune/heuristic/alternative-candidate selection 和未认证的 config selection。
+
+Replay certificate MUST 固定显式 backend，以及从完整 static key + exact route bucket key 到 config_id/prepared_layout_id 的 immutable versioned mapping 和 artifact digest。Fresh resume process MAY 从同一认证 artifact 确定性重建 StaticPlan/JIT code，但 MUST 验证 mapping 和 kernel digest 一致；不得新增、删除或替换 mapping row。
+
+Checkpoint load 会清空 derived cache，因此 resume 后第一个 microbatch MUST 使用该冻结 mapping 与重新构建的 cache 执行一次正常 transactional bind，生成新的 BoundExecutionV1；禁止复用 checkpoint 前的 BoundExecution，也禁止把 prepare/bind 当作重新选型机会。
+
+replay_class 分开表示：
+
+~~~text
+BITWISE_REPLAY_CERTIFIED
+STATE_COMPLETE_ONLY
+REPLAY_UNSUPPORTED
+~~~
+
+数值稳定性/质量是独立字段。只有完整 run-level replay certificate 为 BITWISE_REPLAY_CERTIFIED 时，模式才可命名 exact_continue；否则必须称 state_complete_continue。
+
+STATE_COMPLETE_ONLY 不是 exact 失败后的自动降级标签。它必须通过第 16.2 节的独立 state-completeness qualification；restore-state、cache rebuild 或 continuation-stability 任一门禁失败时，replay_class 必须为 REPLAY_UNSUPPORTED。该分类只证明 checkpoint 状态完整且可继续训练，不证明逐 step replay、数值等价或质量继承。
+
+Replay certificate 绑定：
+
+- GPU/driver/ROCm/AITER/RCCL；
+- topology/rank mapping；
+- 所有 pass config/kernel digest；
+- routing/shape envelope；
+- split-K/reduction order；
+- stream schedule；
+- optimizer/data pipeline；
+- RNG contract；
+- execution manifest digest。
+
+BITWISE_REPLAY_CERTIFIED 还要求无不确定 atomic accumulation；split-K 必须为单 partition，或使用 certificate 固定的确定 reduction order。任一参与 pass/rank 不具备该能力时，启动或 bind fail closed。
+
+Checkpoint 只能在全 rank quiescent optimizer-step boundary 保存，且 open ledger entries=0。它恢复 model、FP32 master、optimizer、scheduler/scaler、data cursor、Python/NumPy/Torch CPU/CUDA/model-parallel/data-worker RNG、FP4 counter-RNG、committed weight epoch 和 compact ledger frontier；derived cache load 后无条件清空。
+
+### 13.3 Hash-chain frontier
+
+Checkpoint 不保存完整 invocation history。V1 固定可追加 hash-chain：
+
+~~~text
+ledger_schema_version
+ledger_epoch
+next_logical_invocation_id per domain
+RNG seed / next_draw per domain
+cumulative terminal counts
+prefix_leaf_count
+hash_chain_state
+last committed optimizer step
+execution/certificate manifest digest
+~~~
+
+V1 replay schema ID 固定为：
+
+~~~text
+lumen.replay_hash_chain.v1
+~~~
+
+Hash chain 定义为：
+
+~~~text
+H0 = SHA256(replay_schema_version || frozen_run_manifest_digest)
+H(i+1) = SHA256(H(i) || canonical_event_v1)
+~~~
+
+canonical_event_v1 至少包含 logical key、stable logical-binding key、config ID、routing/weight epoch、完整 SR token、shape/dtype/layout、terminal status 和 canonical attempt digest。每次 bind 唯一的 process-local `binding_id`、地址、时间戳和 branch/process UUID 只用于 trace correlation，MUST NOT 进入 replay hash。canonical attempt digest 只包含有序的语义结果和 sublaunch descriptor，不包含 ephemeral identity。
+
+Same-manifest resume 在首个 op 前验证 frontier；缺失、重复、乱序或 manifest mismatch 均为 REPLAY_FRONTIER_MISMATCH。Checkpoint commit 时 uninterrupted branch 也必须关闭当前 segment；uninterrupted 与所有 resume branches 从同一 checkpoint frontier 创建相同 deterministic logical child segment，并记录 parent_frontier_digest。外部 artifact 可另记唯一 physical attempt/branch ID，但该 ID 不进入 canonical hash。完整 invocation 明细保存为外部 artifact。
+
+### 13.4 reshard_continue
+
+用于 EP/DP/TP/PP/world-size 改变。它保证 canonical global Parameter/optimizer mapping、scheduler、step 和 data cursor 正确并可继续训练，不承诺 bitwise replay。
+
+每个受支持 source-to-target tuple MUST 在 manifest 中显式列出并单独验收；单向测试不授权反向或任意拓扑声明。
+
+Reshard 不使用 same-manifest frontier equality。它必须定义 versioned `reshard_transition_id`，验证 source frontier/source manifest，记录 target manifest，并以如下 canonical transition 开启新的 ledger epoch：
+
+~~~text
+target_H0 = SHA256(
+    replay_schema_version
+    || source_frontier_digest
+    || source_manifest_digest
+    || target_manifest_digest
+    || reshard_transition_id
+)
+~~~
+
+RNG transition 必须按 domain 显式定义，不能比较不同 rank ownership 下的 raw per-rank state：
+
+- 与 global sample/parameter identity 绑定且可 canonical remap 的 domain，按注册映射恢复；
+- data-worker/model-parallel domain 从 global data cursor、target rank mapping 与 transition ID 确定性重建；
+- rank-local FP4 SR domain 使用 `stable_derive(run_seed, source_frontier_digest, target_manifest_digest, target_global_rank, rng_domain_id, rng_schema_version)` 生成新的 target epoch seed，`next_draw=0`、`next_logical_invocation_id=0`；二者由新的 target ledger/RNG epoch 命名空间隔离，不与 source token identity 混用；
+- source RNG state 与 target mapping/seed ledger 均保存于 artifact，禁止隐式复用可能重叠的 draw range。
+
+---
+
+## 14. Tuning、bucketization 与 certification
+
+### 14.1 Grouped tuning key
+
+通用 static key 只包含 route-independent fields：
+
+~~~text
+gfx / CU
+pass
+op_variant_id
+E_l / N / K
+numeric_recipe_id
+physical_layout_id / prepared_layout_id
+output mode / dtype
+~~~
+
+fc_role 不进入通用 key；N/K/pass 已表达差异。只有 epilogue 等真实语义差异才使用 op_variant_id。
+
+Exact row lookup 对象是：
+
+~~~text
+static key
++ descriptor version
++ bucketizer version
++ padded-work bucket
++ route bucket id
+~~~
+
+不是 raw group_sizes，也禁止 route 字段 wildcard。require-certified-bucket 禁止 nearest-bucket、跨 CU relaxation 或缺列 wildcard。
+
+### 14.2 Bucketizer evidence
+
+Bucketizer 由真实 routing artifacts 训练/审计，tuning artifacts、validation artifacts 与 final held-out certification artifacts MUST 按完整 capture run/seed/data-shard/checkpoint 分离。一旦 final set 被用于修改 bucket、候选或阈值，它就不再是 held-out。
+
+Coverage 至少包含：
+
+- bucket center 与两侧边界；
+- size 两端；
+- maximum padding waste；
+- single-hot；
+- many-empty/small-active；
+- balanced；
+- extreme skew/long tail；
+- 多个真实 layer、step 和 seed。
+
+Synthetic artifacts 只补 adversarial corner，不能单独获得 provenance certification。每个待认证 exact key/bucket 至少有三个真实 artifacts：center、boundary、extreme，并来自至少两个独立 capture runs。
+
+V1 使用 route-representatives-v1 选择代表：
+
+- center：在 bucket 内，以各 descriptor 数值字段的 robust range 归一化后，选择到其他 artifacts 的 L1 距离和最小的 medoid；
+- boundary：选择到任一 bucket integer decision boundary 的最小 normalized slack；
+- extreme：选择 hot_share、empty_share、padding_waste、max_rows 四项 empirical rank 最大值最高的 artifact；
+- 所有 tie 按 canonical artifact digest 的字节序打破。
+
+其中：
+
+~~~text
+hot_share     = max_rows / max(1,total_rows)
+empty_share   = (E-nonempty) / E
+padding_waste = (padded_rows32-total_rows) / max(1,padded_rows32)
+~~~
+
+Certification envelope 为每个字段的闭区间 min/max：
+
+~~~text
+total_rows, nonempty, max_rows, padded_rows32, tiles32,
+hist16[0] ... hist16[7]
+~~~
+
+Runtime descriptor 必须逐字段落在 envelope 内，并满足 config 的 max_rows_capacity。
+
+对真实 artifact r 和候选 config c，定义：
+
+~~~text
+L(c,r) = fresh-process paired measurements 的 median latency
+oracle(r) = min L(c,r) over all correctness-valid, runtime-compatible candidates
+regret(c,r) = (L(c,r)-oracle(r)) / oracle(r)
+weighted_mean_regret = sum(freq_r * regret(c,r)) / sum(freq_r)
+~~~
+
+freq_r 是 final held-out trace 中该 exact invocation 的出现次数，不再按 token 数二次加权。
+
+V1 预注册 regret gate：
+
+- selected config 相对 held-out candidate oracle 的 frequency-weighted mean latency regret，U95 <=3%；
+- center/boundary/extreme 任一 artifact 的 regret U95 <=5%；
+- 差异在 2% 内视为 tie，选择更通用、资源占用更稳定的 config。
+
+若最优 config 翻转或超过 gate，MUST 拆桶或使用明确的 generic config；不得事后放宽阈值。最多 12 个 bucket 只是目标，不是强制压缩。
+
+U95 使用 process-first hierarchical paired bootstrap：先按独立 capture group/process 重采样，再在 process 内按预注册 contiguous block 重采样。单个 artifact 的重复 kernel iterations 不是独立 provenance samples。
+
+### 14.3 Runtime compatibility
+
+每次 bind 动态重算：
+
+~~~text
+compiled ABI major matches and minor is in the declared compatible range
+backend build/version satisfies the published compatibility predicate
+numeric recipe / physical layout / prepared layout IDs are supported
+required capability bits are present
+descriptor/version available
+exact bucket row exists
+descriptor lies inside certification envelope
+max_rows <= config capacity
+GPU arch/CU/ROCm conditions and static key match
+workspace and alignment are valid
+~~~
+
+OOD 包括 ABI/backend compatibility miss、missing capability bit、unknown descriptor version、missing bucket、envelope miss、capacity exceeded、numeric/layout/arch/CU/ROCm mismatch 和 uncertified config。Strict grouped 失败；auto 可在 commit 前选择 sequential。不得 nearest-match。源码路径、git commit 和 artifact provenance 不参与 API 类型兼容判断；它们由独立 certification flags 管理。
+
+### 14.4 Config source and representation
+
+~~~text
+config_source=certified_bucket
+config_source=validated_heuristic
+config_source=sequential_reference
+~~~
+
+正常 execution 不得在 launch 时 autotune。AITER runtime mapping 可使用专用 config table，并以 immutable artifact-set sidecar 记录 tuning/validation/held-out provenance。
+
+每个 launchable Triton/Gluon kernel MUST 使用 AITER make_kernel_repr；其他 backend 使用其真实 naming/registration mechanism。Trace 至少区分 weight/cache build、row quant、transpose/H16 quant、FC1/FC2 Fprop/DGrad/WGrad 和 staging copy，并包含 op variant、route/bucket versions、config ID 和 layout IDs。
+
+V1 只承诺满足 frozen plan 条件的 low-level launch 可以被 capture。Capture contract 必须绑定 immutable RoutingMetadata object identity、counts/offsets、每个 layout_id 的 padded offsets、operand capacities、caller-owned workspace、所有参与 tensor 的稳定地址、numeric/physical/prepared layout IDs，以及 SR token 的 draws_reserved/draws_used。routing_fingerprint 只用于诊断，不能替代 metadata identity。
+
+若 capture 中存在 SR，compiled ABI 必须接收显式 counter/state，并由 caller 为每次 replay 提供唯一、不重叠的 reservation；kernel/backend/config 不得改变 logical-element-to-draw mapping。任何一个绑定条件或 RNG uniqueness 无法保证时，query_static MUST 返回 capture_safe=false。Dynamic-routing end-to-end replay 和 bucket-capacity graph 留给 P2。
+
+---
+
+## 15. Correctness test gates
+
+### 15.1 Validation order
+
+固定顺序：
+
+~~~text
+numeric golden vectors
+  -> AITER public-wrapper kernel tests
+  -> P0 sequential reference tests
+  -> P1 grouped-vs-P0 parity
+  -> Lumen dispatch/autograd/cache/checkpoint tests
+  -> Megatron EP integration
+  -> short training
+  -> performance
+~~~
+
+不得用 end-to-end loss 掩盖 kernel mismatch，也不得在 correctness 未通过前调优性能。
+
+### 15.2 Numeric/layout tests
+
+- selector、E2M1、E4M3FN、E8M0、special values 和 saturation 使用 byte-exact golden vectors；
+- row/transpose layouts、nibble order、scale placement、H16、padding 和 offsets 使用 byte-exact fixtures；
+- same BF16 snapshot 的 dual layout 独立量化；测试必须能检测 decode/requant；
+- identical RNG token 必须 bitwise 重放 packed gradient operands；
+- backend/config/tile 变化不得改变 logical RNG mapping；
+- A4/A8 fixed-snapshot 的 scale bytes 和 W4 bytes 必须 bitwise identical；
+- uint64 draw overflow、int32 operand indexing overflow、illegal alias、capacity/alignment/version mismatch fail closed；
+- output/workspace 周围使用 canary 检测 OOB。
+
+### 15.3 Shape/routing matrix
+
+至少覆盖：
+
+~~~text
+E_l in {32,64}
+M_e in {0,1,15,16,31,32,33,63,64,127,128,129,257}
+balanced / half-empty / many-empty / single-hot / Zipf-long-tail / all-empty
+FC1 and FC2
+Fprop / DGrad / WGrad
+OVERWRITE BF16 / OVERWRITE FP32 / ACCUMULATE_FP32
+cold/hot cache
+multiple gradient-accumulation microbatches
+full recompute
+~~~
+
+专门的 segment-isolation case：M=[31,1,33,...]，用 sentinel 验证 scale、pad、H16 和 RNG 不跨 expert。
+
+还必须覆盖 noncontiguous、storage offset、wrong device/dtype、alias、stale routing/weight epoch、workspace/capacity/alignment 错误；这些均应 prelaunch fail。
+
+### 15.4 Numerical gates
+
+使用三个层级：
+
+1. **Operand parity:** grouped quantizer 的 packed bytes、scales、offsets 和 metadata 与 trusted per-expert quantizer bitwise 相同。
+2. **Kernel parity oracle:** 固定 packed bytes/scales/metadata，反量化后逐 expert FP32 matmul；隔离 layout/index/reduction 错误。
+3. **Recipe oracle:** 从原始 BF16 X/W/dY 做独立 BF16 per-expert 数学实现；衡量 A4W4 recipe 误差。
+
+Bring-up hard floors：
+
+| Comparison | Fprop | DGrad | WGrad |
+|---|---:|---:|---:|
+| kernel parity oracle | >=30 dB | >=30 dB | >=30 dB |
+| BF16 recipe oracle | >=12 dB | >=12 dB | >=10 dB |
+
+Promotion 前必须用独立、真实 DSV4 activation/gradient pilot 预注册 production envelope。默认目标是 kernel-parity SNR >=40 dB，且 grouped 相对同 packed operands 的 P0 sequential SNR 下降 <=0.25 dB；若硬件累加顺序无法满足 40 dB，替代阈值必须由 pilot 在正式 P1 数据可见前冻结，且不得低于 bring-up floor。
+
+Recipe accuracy 在真实 DSV4 snapshots 上相对 P0 同 seed/op 的下降不得超过 0.5 dB。Kernel parity 还要求至少 99% 元素满足预注册 atol=0.5、rtol=0.02；FP32 WGrad 另外报告 norm error 与 max error。
+
+### 15.5 Lumen tests
 
 必须覆盖：
 
-- `E_l=32`：4-layer EP8；
-- `E_l=64`：43-layer EP4；
-- FC1 `(N=4096,K=4096)`；
-- FC2 `(N=4096,K=2048)`；
-- fwd、dgrad、wgrad；
-- cache cold/hot；
-- balanced、long-tail、many-empty buckets。
+- CLI scope/conflict/defaults；
+- 第 8.2 节 backend/strict 六格状态机；
+- grouped tuning policy 只过滤 grouped；
+- typed pre-commit miss 与 non-fallback errors；
+- bind commit 后禁止 selection/fallback；
+- bind/launch steady path 零 filesystem/config parse、零 JIT、零 hidden allocation；仅允许已准备 exact map 的内存查询；
+- late attachment validation；
+- selected backend/pass/config counters；
+- committed_weight_epoch、skipped update、external dirty、DCP in-place load；
+- cache budget planner 与 allocator hard quota；
+- gradient accumulation、full recompute、routing-probability gradient；
+- eager WGrad only；deferred flag 启动失败；
+- warm/exact/state-complete/reshard modes；
+- ledger conservation、events 和 all-rank digest；
+- low-level launch 的 capture-safe capability；dynamic-routing replay 明确为 unsupported。
 
-### 13.2 Config ownership
+### 15.6 AITER artifact requirements
 
-- 唯一持久化表为 AITER 的 `aiter/configs/model_configs/dsv4_a4w4_train_grouped_gfx950.csv`，只允许写入已验证的 tuned rows；不能复用 `dsv4_fp8fp4_tuned_fmoe.csv`。
-- 未命中表时由 `aiter/ops/flydsl/grouped_mxfp4_linear.py` 的版本化 `heuristic_v1` 选择默认 config，并记录 `config_source=heuristic, config_id=heuristic_v1:<resolved fields>`；heuristic 不写入 CSV，也不能表述为 tuned。
-- tuned row 的晋升流程固定为：对第 13.1 节完整 key 运行 AITER public-wrapper benchmark → 通过第 16.1 节 correctness matrix → 保存 raw result/provenance digest → code review 后写入 CSV。每行记录完整 key、config fields、benchmark artifact digest 和生成该行的 AITER commit。
-- strict production run 要求命中 CSV 中的 exact tuned row；heuristic 只允许用于非 strict bring-up/调优。
-- Lumen 不携带 kernel tuning CSV；
+每个新/修改 kernel 必须有 public wrapper、正确目录、repr、unit tests、benchmark 和 tuning config。不得复制近似 kernel；共享 activation/shuffle/reduction/helper 放 AITER utils/common。测试调用 public wrapper，不允许 literal tuning dict 绕过真实 config resolution。
 
-### 13.3 Kernel repr
-
-Profiler 中至少区分：
-
-```text
-grouped_mxfp4_weight_quant_2d
-grouped_mxfp4_activation_quant_fwd
-grouped_mxfp4_activation_quant_wgrad
-grouped_mxfp4_linear_fwd_fc1
-grouped_mxfp4_linear_fwd_fc2
-grouped_mxfp4_linear_dgrad_fc1
-grouped_mxfp4_linear_dgrad_fc2
-grouped_mxfp4_linear_wgrad_fc1
-grouped_mxfp4_linear_wgrad_fc2
-```
-
-repr 中应带 `E_l/M_bucket/N/K/tile/config`，便于从 trace 判断真实路径。
+通过本节只允许声明 tested gfx950 shapes/distributions 下的 kernel/op correctness，不授权训练质量或 full-step 性能。
 
 ---
 
-## 14. Repository ownership 与文件变更
+## 16. Resume conformance gates
 
-### 14.1 AITER
+### 16.1 exact_continue qualification
 
-| 文件 | 变更 |
-|---|---|
-| `aiter/ops/grouped_mxfp4_linear.py` | 新 public wrapper、参数验证、capability 与 metadata |
-| `aiter/ops/flydsl/grouped_mxfp4_linear.py` | gfx950 launcher/dispatch |
-| `aiter/ops/flydsl/kernels/grouped_mxfp4_quant.py` | canonical weight quant、segment-aware row/transpose quant |
-| `aiter/ops/flydsl/kernels/grouped_mxfp4_gemm.py` | grouped fwd/dgrad/wgrad kernels |
-| `aiter/__init__.py` | public API export |
-| `aiter/configs/model_configs/dsv4_a4w4_train_grouped_gfx950.csv` | local-E 32/64 的已验证 tuned rows；不存 heuristic rows |
-| `op_tests/test_grouped_mxfp4_linear.py` | kernel correctness |
-| `op_tests/op_benchmarks/flydsl/bench_grouped_mxfp4_linear.py` | kernel benchmark |
+每个 certificate cell 至少使用 2 paired seeds、至少 2 个不同 quiescent checkpoint boundaries。每个 boundary 从同一 checkpoint 启动两个独立 resume branches，并与 uninterrupted branch 共同比较 100 个 post-resume optimizer steps；两条 resume 必须分别匹配 uninterrupted，也必须彼此匹配。
 
-AITER patch 必须遵循其 kernel 提交流程，包含 standalone test、benchmark、tuning config 和可识别 repr。
+Uninterrupted 与 save/resume 分支逐 step 必须 bitwise 一致：
 
-### 14.2 Lumen
+~~~text
+sample IDs / data-order digest
+routing fingerprint and immutable metadata digest
+FP4 RNG tokens and domain frontier
+packed-weight hash
+loss / grad / BF16 model / FP32 master
+optimizer / scheduler / scaler state
+ledger leaf and hash-chain state
+~~~
 
-| 文件 | 变更 |
-|---|---|
-| `lumen/models/dsv4/megatron/quantization.py`（新） | 统一 BF16/FP8/MXFP4 选择、冲突检查、启动摘要 |
-| `lumen/models/dsv4/megatron/pretrain.py` | 模型构建后应用标准 MXFP4 配置 |
-| `lumen/patches/builders/dsv4.py` | 接入 common quant CLI 与 MoE backend/strict 参数 |
-| `lumen/patches/training/megatron_hooks.py` | DSV4 安装 grouped MXFP4 cache invalidation |
-| `lumen/modules/grouped_linear.py` | unique tensor IDs、P0 sequential、P1 grouped dispatch、cache/autograd |
-| `lumen/ops/gemm/grouped_gemm.py` | MXFP4 adapter、backend result 与 fallback chain |
-| `lumen/ops/dispatch.py` | AITER grouped MXFP4 capability probe |
-| `lumen/quantize/__init__.py` | grouped multi-weight cache/version/invalidation helper |
-| `tests/ops/test_grouped_gemm.py` | MXFP4 fwd/dgrad/wgrad 与 fallback |
-| `tests/modules/test_grouped_linear.py` | module/autograd/cache/checkpoint |
-| `tests/models/dsv4/test_mxfp4_moe_training.py` | CLI、provider、EP integration 与 training contract |
-| `benchmarks/bench_dsv4_mxfp4_moe.py`（新） | production API microbenchmark |
+Load boundary 还必须 canonical bitwise 匹配 optimizer moments、consumed samples/tokens、router/expert-bias state 及 Python/NumPy/Torch CPU/CUDA RNG。
 
-不在 Lumen 中新增 Triton/FlyDSL/HIP kernel。
+Packed cache 不进入 checkpoint；load 后 cache 必须 absent/invalid，首个 forward 从恢复后的 BF16 Parameters 重建，并与 fresh quantization bitwise 一致。
 
----
+任一不一致使当前 exact run 立即失败；不得在该 run 内继续降级执行。只有另行通过第 16.2 节后，该 execution domain 才可声明 STATE_COMPLETE_ONLY；否则为 REPLAY_UNSUPPORTED。十步 replay 只能作为 smoke，不能用于正式 certificate。
 
-## 15. 实现阶段
+### 16.2 state_complete_continue qualification
 
-### P0 — 可验证的顺序 MXFP4 correctness baseline
+STATE_COMPLETE_ONLY 必须在与目标运行相同的 topology、rank mapping 和 serialized-state schema 上独立验证。每个注册 cell 至少 2 paired seeds、2 个不同 quiescent checkpoint boundaries，并满足：
 
-目的：先证明 DSV4 grouped module 的训练语义与 dense A4W4 一致，不做性能承诺。
+- load boundary 对 canonical BF16 model、FP32 master、optimizer moments、scheduler、scaler、global step、consumed samples/tokens、data cursor、router/expert-bias state、committed weight epoch、ledger frontier 及所有已声明 RNG domain 做 bitwise 比较；
+- checkpoint 中不存在 derived packed cache；load 后 cache 必须 absent/invalid，首次 forward 从恢复后的 BF16 Parameters 重建，packed bytes、scale bytes、layout IDs 与同一 snapshot 的 fresh quantization bitwise 一致；
+- restore-state mismatch、缺失 state 或 cache rebuild mismatch 直接得到 REPLAY_UNSUPPORTED，不能标记 STATE_COMPLETE_ONLY；
+- 每个 boundary 继续执行 100 个 successful optimizer steps；要求 finite loss/grad、ledger conservation、open=0、strict zero-fallback、无 OOM/device fault，并把 `continuation_stability_pass` 作为独立字段记录；
+- 允许 post-resume 数值轨迹不 bitwise，但必须保存相对 uninterrupted branch 的逐 step loss/grad/model-state diagnostics；任何数值容差只属于 stability/quality protocol，不把 STATE_COMPLETE_ONLY 提升为 exact。
 
-交付：
+该门禁不授权质量声明。需要质量声明时仍按第 16.5 和第 17 节执行完整三臂矩阵。
 
-1. DSV4 接入标准 `--linear-fp4`，并与环境 FP8 互斥。
-2. 仅对 routed-expert grouped FC1/FC2 启用 `mxfp4`、block size 32。
-3. 每个 expert 使用唯一 tensor ID。
-4. 每个 `weightN` 使用 per-step cache 和 `_version` 校验。
-5. 顺序逐 expert fwd/dgrad/wgrad 支持 empty/ragged `M_e`。
-6. 安装 optimizer invalidation。
-7. 完成 4-layer EP8 smoke、checkpoint round trip 和 backend telemetry。
-8. 保持当前 full recompute 配置，不顺带开启 EP/shared-expert overlap。
+### 16.3 reshard qualification
 
-P0 日志必须明确显示 `backend=sequential_mxfp4`。不得用“grouped MXFP4 kernel”描述该阶段。
+对每个显式 source-to-target topology tuple：
 
-### P1 — Grouped training operator
+- load 前后 canonical gathered model、FP32 master、optimizer moments、scheduler、step 和 data cursor 必须匹配；
+- derived cache 必须失效并从目标 rank 的 BF16 Parameters 重建；
+- 2 paired seeds x 100 post-resume steps 通过 finite loss/grad、ledger conservation、open=0、strict zero-fallback、无 OOM/device fault；
+- 该结果只认证该方向 tuple，不认证 bitwise replay 或反向转换。
 
-交付：
+### 16.4 Initial topology cells
 
-1. AITER public expert-sorted grouped weight quant、forward、DGrad、WGrad API。
-2. gfx950 local-E 32/64、DSV4 FC1/FC2、真实 token buckets 的 tuning。
-3. Lumen grouped autograd 与 pointer-table weight/cache 接线。
-4. empty expert、ragged per-expert pad32、gradient accumulation、deferred WGrad。
-5. strict fallback 与 backend counters。
-6. 4-layer EP8 correctness 验收；43-layer EP4 留作 production promotion。
-7. 保持当前 full recompute 基线；overlap 不计入 P1 收益。
+实现计划至少注册并验证：
 
-P1 可以在满足 correctness-merge gate 后以 experimental 状态合入；只有继续满足第 17.6 节和第 18 节的 production promotion gate，才可默认启用或称为 production-ready。
+~~~text
+exact:   4L  world8  TP8 PP1 EP8 ETP1 -> same
+exact:   43L world16 TP4 PP4 EP4 ETP1 -> same
+reshard: world16 TP4 PP4 EP4 ETP1 -> world16 TP8 PP2 EP8 ETP1
+reshard: world16 TP8 PP2 EP8 ETP1 -> world16 TP4 PP4 EP4 ETP1
+~~~
 
-### P2 — 仅由 profile 驱动的融合
+若资源 preflight 证明某 tuple 无法运行，必须在实现前以版本化 manifest amendment 替换为另一个明确 tuple；不能省略后仍声称 generic reshard support。
 
-候选项：
+### 16.5 Quality inheritance
 
-- weighted SwiGLU + FC2 input quant；
-- dispatch/compute overlap；
-- delayed WGrad overlap；
-- counts GPU-resident fast path；
-- A8W4 实验 recipe。
+exact_continue 只有从 checkpoint 到已认证 quality endpoint 全程 bitwise identical 时，才可继承对应 uninterrupted cell 的质量结论。仅做 2x100 conformance 不自动获得质量声明。
 
-P2 的前提是保持 router/probability gradients、activation clamp、checkpoint 和 P1 数值门槛；未达到前不得并入 P1。
+state_complete_continue、warm_start 和 reshard_continue 若要获得质量声明，必须分别升级为第 17 节完整三臂矩阵。
 
 ---
 
-## 16. 测试计划
+## 17. Training quality gates
 
-所有 FP4/GPU 数值测试必须在 CUDA/ROCm device 上运行；gradient reference weight 必须是 leaf tensor。
+### 17.1 Experiment classes
 
-### 16.1 AITER kernel tests
+| Model | Start mode | Precision arms | Minimum purpose |
+|---|---|---|---|
+| 4L | cold pretrain | BF16 / A8W4 / A4W4 | stability + powered short-horizon quality |
+| 4L | warm_start | BF16 / A8W4 / A4W4 | stability + powered short-horizon quality |
+| 4L | exact/reshard | each precision internally | resume conformance; quality only if upgraded |
+| 43L | every supported mode | BF16 / A8W4 / A4W4 | 1 seed x 100-step stability |
+| 43L | each publicly claimed cell | BF16 / A8W4 / A4W4 | powered short-horizon quality |
 
-使用两级、彼此独立的 oracle，均不得调用被测 grouped wrapper：
+100-step run 只证明 stability、finite、routing、ledger 和 zero-fallback。它不是 convergence。
 
-1. **Kernel parity oracle:** 固定 packed bytes、E8M0 scales、offsets 和 Philox metadata，将同一 operands 反量化为 FP32，逐 expert 用 FP32 matmul，再 cast 到目标 output dtype。它隔离 kernel/layout/indexing 错误，不重复计算量化误差。
-2. **Recipe accuracy oracle:** 从原始 BF16 `X/W/dY` 做独立 BF16 per-expert 数学实现，用于衡量 A4W4 recipe 本身的误差和训练 SNR。
+### 17.2 Paired seeds and power
 
-矩阵：
+正式 paired seeds MUST >=5。最终 n 在正式结果可见前由预注册 power analysis 决定：
 
-- `E_l ∈ {32,64}`；
-- `M_e ∈ {0,1,15,16,31,32,33,63,64,127,128,129,257}`；
-- balanced、single-hot、Zipf/long-tail、half-empty、all-empty；
-- FC1 `(4096,4096)` 与 FC2 `(4096,2048)`；
-- fwd、dgrad、wgrad；
-- `accumulate=False/True`；
-- WGrad BF16 parameter-grad 与 FP32 `main_grad` output buffers；
-- cold/hot layout；
-- deterministic seed/offset bitwise 重放与 `next_philox_offset` 校验。
+- 使用独立历史或 pilot seeds 估计 paired-difference standard deviation；
+- one-sided alpha、margin、目标 power 和备择均值必须预注册；
+- power MUST >=80%，SHOULD >=90%；
+- 最紧的 A4-A8 margin=0.005 NLL 通常决定样本数；
+- seed list、n、endpoint token horizon 和 exclusions 在正式 run 前冻结。
 
-专门的 segment isolation case：
+若按 true mean delta=0 规划，近似：
 
-```text
-M_0=31, M_1=1, M_2=33
-```
+~~~text
+n = ceil(((z_0.95 + z_power) * sigma / margin)^2)
+~~~
 
-用 sentinel 值验证 expert 0 的 pad 区、expert 1 的唯一 token 和 expert 2 的首 block 互不共享 scale/RHT segment。
+这只是 planning approximation；正式分析使用 paired t upper bound。若预算只能运行 5 seeds，且未证明 n=5 power 足够，结果只能命名 short_horizon_quality_regression_gate，不得称 confirmatory non-inferiority。
 
-断言：
+Pilot data 不并入 formal results。
 
-- shape/dtype；
-- finite；
-- empty expert dW 为零；
-- `sum(group_sizes)==M`；
-- backend/config name；
-- 无越界或跨 expert 污染；
-- `X/dY` 的 `group_offsets`、`padded_offsets` 与 `rht_id` 完全一致；
-- 对 kernel parity oracle，fwd/dgrad/wgrad SNR 均 ≥ 30 dB，且至少 99% 元素满足 `atol=0.5, rtol=0.02`；
-- 对 BF16 recipe oracle，fwd SNR ≥ 12 dB、dX SNR ≥ 12 dB、dW SNR ≥ 10 dB；
-- 在相同 quantized operands/seed 下，grouped 相对 sequential MXFP4 的 SNR 下降不超过 0.5 dB。
+### 17.3 Pairing contract
 
-上述绝对 floor 来自当前 dense MXFP4 的保守测试门槛；release 前还必须在真实 DSV4 activation/gradient 分布上确认，不得因 synthetic test 通过就宣称收敛等价。
+同一 seed 的三臂共享：
 
-### 16.2 Lumen op dispatch tests
+- pre-quant initial checkpoint；
+- optimizer/scheduler/batch geometry；
+- fixed cumulative non-padding token horizon；
+- data order、tokenizer、preprocessing 和 validation corpus；
+- dropout/router 等公共 RNG streams。
 
-- capability probe 成功/失败；
-- runtime AITER import path/commit allowlist 与 strict/release fail-closed；
-- 强制 grouped、sequential、BF16；
-- AITER import 缺失；
-- kernel 同步错误；
-- unsupported arch/shape/local-E；
-- int32 overflow；
-- strict 模式拒绝 fallback；
-- auto 模式 fallback 顺序与 reason counter；
-- multi-rank counter reduce/provenance gather，且任一 rank fallback 使 strict run 全局失败；
-- backend warmup 后 steady-state 无同步，graph capture 内不发生 probing/JIT/fallback；
-- selected backend 断言，防止 BF16 假成功。
+DataLoader 使用独立 rank-local generator。训练数据顺序、validation token/label/mask 和 preprocessing MUST 记录 digest。量化 RNG 使用独立命名 domain，不能扰动公共 RNG。
 
-### 16.3 Lumen module/autograd tests
+只有明确 infra-invalid attempt 可用同 seed 重跑；所有 attempts 均保留。NaN、发散、质量差、fallback 或 ledger violation 是实验失败，不能 clean rerun 到通过。
 
-- 先修复遗留的 `m.weights/m.biases` 断言，使 construction test 对齐 `weight0..weightN`/`bias0..biasN`；
-- `weight0..weightN` 参数与 state_dict key 不变；
-- BF16 model grad 与 FP32 `main_grad` 两种 WGrad destination dtype；
-- MXFP4 不改变 main-param/main-grad/moment dtype 或 optimizer checkpoint schema；
-- FC1/FC2 forward、dX、每 expert dW；
-- routing probability gradient；
-- empty experts；
-- ragged `M_e`；
-- unique tensor ID；
-- cache cold miss、同 step hit、weight `_version` 变化 miss；
-- optimizer successful step invalidation；
-- skipped/overflow step 不产生错误 generation；
-- activation recompute；
-- gradient accumulation fusion；
-- deferred WGrad；
-- WGrad policy/config 必须改变实际 selected kernel 或明确拒绝，不只改变 Namespace 值；
-- bias 非空时的 strict/error 与 auto fallback；
-- checkpoint save/load 后首个 forward 重建 cache。
+### 17.4 Primary metric and endpoint
 
-### 16.4 Megatron integration tests
+Primary metric 是固定 held-out corpus 上、至少约 1M valid target tokens 的 token-weighted validation NLL：
 
-1. 单卡 EP1 小 shape，验证 API 和 autograd。
-2. 8 GPU、4-layer、TP8/EP8/ETP1。
-3. 16 GPU、43-layer、TP4/PP4/EP4/ETP1。
-4. 对每层验证 `tokens_per_expert` 与 output segment 保持一致。
-5. 验证 dispatch/combine、router 和 shared expert 仍为原路径。
-6. 验证 strict 模式所有 routed expert passes 的 fallback counter 为 0。
-7. 验证日志中的 Lumen/Megatron/runtime AITER commit、gitlink、import path、GPU arch 与实际进程一致。
+~~~text
+NLL = sum(cross_entropy over valid targets) / number of valid targets
+~~~
 
-### 16.5 训练测试
+Pilot 应把 validation sampling 95% half-width 控制到 <=0.001 NLL；最终 token 数在 formal run 前冻结。
 
-固定：
+Endpoint 是固定累计 non-padding training-token horizon 对应的 checkpoint；推荐至少 500 matched updates，并以实际 token 数对齐。禁止选择 best checkpoint。更多 validation tokens 只降低 evaluation noise，不能替代独立 training seeds。
 
-- 同一初始 checkpoint；
-- 同一数据顺序与 seed；
-- 同一 LR、warmup、optimizer、clip、loss scale；
-- 同一 main-param、main-grad、exp-avg 和 exp-avg-sq dtype；
-- 同一 TP/PP/EP/ETP；
-- 不允许为获得 green run 修改已经与 BF16 对齐的训练参数。
+Primary evaluation 使用各 arm 当前 BF16 Parameter 的共同 deterministic BF16 path，以隔离学到的 checkpoint 质量。Native A4/A8 deterministic evaluation 是 required secondary。若未来声明 native inference quality，则 primary 与 native gate 均须通过。
 
-阶段：
+### 17.5 Statistical gate
 
-- 4-layer smoke：至少 20 optimizer steps，无 NaN/Inf、deadlock、非法访存。
-- 4-layer paired run：至少 100 optimizer steps，BF16 与 MXFP4 同配置。
-- 43-layer distributed smoke：至少 20 optimizer steps。
-- production convergence run：4-layer 至少 500 steps；43-layer 至少 100 steps。
+对 paired seed s：
 
-收敛门槛：
+~~~text
+d_s = endpoint NLL(arm_1, s) - endpoint NLL(arm_0, s)
+U95 = mean(d_s) + t_(0.95,n-1) * sd(d_s) / sqrt(n)
+~~~
 
-- 所有 optimizer step 的 loss 和 grad norm 有限；
-- MXFP4 最终 validation loss 与 BF16 的差值不超过 `max(2 × BF16 seed-to-seed 标准差, BF16 loss 的 2%)`；
-- overflow/skip rate 相对 BF16 增加不超过 1 个百分点；
-- 不允许使用 BF16 fallback counter 非零的 run 作为“full MXFP4”收敛结果。
+三个结果分开记录：
+
+~~~text
+a4_vs_bf16_noninferior:
+  U95[NLL(A4)-NLL(BF16)] <= +0.010
+
+a8_control_vs_bf16_valid:
+  U95[NLL(A8)-NLL(BF16)] <= +0.010
+
+a4_vs_a8_activation_penalty_within_margin:
+  U95[NLL(A4)-NLL(A8)] <= +0.005
+
+quality_bundle_pass = AND(all three)
+~~~
+
+0.010 NLL 约对应 exp(0.010)-1，即约 1.0% perplexity ratio；margin 必须在正式结果前冻结。
+
+Per-seed safety caps：
+
+~~~text
+A4-BF16 <= +0.030
+A4-A8   <= +0.015
+A8-BF16 <= +0.030
+~~~
+
+Cap 是 guardrail，不替代 power/CI。若只声明 conjunction，可按 intersection-union test 对每个 one-sided alpha=0.05；若分别宣传三项独立结论，必须预注册 multiplicity correction。
+
+### 17.6 Claim boundaries
+
+- 4L 不外推 43L；
+- cold 不外推 warm/exact/reshard；
+- 一个 topology 不外推另一个；
+- pretraining 与 continued-training 不互相授权；
+- exact_continue 只有 checkpoint 到 endpoint bitwise identical 才可继承 uninterrupted 质量结论；
+- 其他 resume cell 若需要质量声明，必须升级为完整 BF16/A8/A4 powered matrix。
 
 ---
 
-## 17. Benchmark 计划
+## 18. Benchmark and performance gates
 
-### 17.1 原则
+### 18.1 General protocol
 
-1. AITER kernel microbenchmark 调用 AITER public wrapper；Lumen integration/full-step benchmark 调用真实 Lumen production module/API。两类都必须断言 selected backend，不用纯 PyTorch 循环冒充 production kernel。
-2. Lumen GPU 计时统一使用 `benchmarks.bench_utils.cuda_timer(..., trim_pct=10)`；包含 collective 的 case 固定 `dist_barrier=True`。
-3. 多卡进程组固定使用 `backend="cpu:gloo,cuda:nccl"` 和当前 rank 的 CUDA `device_id`，避免 host collective 与 GPU collective backend 歧义。
-4. kernel/local-block case 至少 20 次 warmup、100 次测量；从两端各裁剪 10% 样本后报告 trimmed mean、median、p95、standard deviation 和 CV。完整训练 step 使用第 17.4 节的 wall-clock 协议。
-5. 比较顺序采用 A/B/A 或 ABBA，减少温度、频率和 cache 漂移。
-6. 固定 Lumen/Megatron/runtime AITER commit、dirty patch digest、容器、GPU arch/CU、seed、batch、sequence length、optimizer 和并行拓扑。
-7. 每个结果附 `aiter.__file__`、Lumen AITER gitlink、selected backend、kernel repr/config key 和 fallback counters。
-8. 若 overlap 实验需要关闭 full recompute，必须作为独立配置报告显存和吞吐；不得把 recompute 策略变化带来的收益归因于 grouped MXFP4 kernel。
+- AITER microbenchmark 调 public wrapper；Lumen benchmark 调真实 production API。
+- 必须断言实际 selected backend/config/precision，strict results 的 fallback counters 为零。
+- GPU timing 使用 CUDA events；distributed full-step 使用 max-rank wall clock。
+- correctness、quality 和 performance artifacts 使用同一 clean/pinned manifest。
+- tuning/timed path 禁止首次 JIT、lookup、autotune、扩容和 fallback probing。
+- cold cache build、hot cache hit、quant、Fprop、DGrad、WGrad、full local expert block 和 full step 分开报告。
 
-### 17.2 Workload
+### 18.2 Workloads
 
-从 BF16 DSV4 run 捕获真实 `tokens_per_expert`，生成：
+从真实 BF16 与冻结后的 P1 strict DSV4 runs 捕获 routing artifacts，覆盖 4L EP8/local-E32 与 43L EP4/local-E64 的多 layer/step/seed。Benchmark 必须包含 bucket center/boundary、p10/p50/p90/p99 padded work、balanced、many-empty、single-hot 和 long-tail。
 
-- p10/p50/p90/p99 total-token buckets；
-- balanced；
-- long-tail；
-- many-empty；
-- single-hot worst case。
+真实 route-weighted local-block latency 使用 final held-out trace 中每种 invocation 的出现频率加权；不得对已按 invocation 计数的结果再次按 token 数加权。
 
-不能只用均匀 synthetic counts。
+对 route artifact r，令 w_r 为归一化 invocation frequency，L(v,r) 为 variant v 的 fresh-process median latency。主 local-block speedup 唯一定义为：
 
-### 17.3 分项计时
+~~~text
+weighted_latency(v) = sum(w_r * L(v,r))
+speedup(P1 over P0) = weighted_latency(P0) / weighted_latency(P1)
+~~~
 
-分别报告：
+Tail 指标唯一定义为：按 w_r 展开/加权的 route-latency empirical distribution 上分别计算 Q0.9，再取：
 
-- weight cache cold build；
-- weight cache hot hit；
-- activation quant；
-- FC1 forward；
-- FC2 forward；
-- FC1/FC2 DGrad；
-- FC1/FC2 WGrad；
-- full local expert block；
-- dispatch/combine；
-- full training step。
+~~~text
+p90_latency_ratio = Q0.9(L(P1)) / Q0.9(L(P0))
+~~~
 
-`full local expert block` 的计时边界固定为 hot-cache lookup → FC1 activation quant/GEMM → 原 BF16 clamp/SwiGLU/probability multiply → FC2 activation quant/GEMM；包含 hot-cache lookup 和两次 activation quant，不包含 router、dispatch/combine、optimizer step 或 cold weight-cache build。P0/P1/current-FP8 必须使用同一边界。
+Formal local-block interval 使用同一组 process-first paired bootstrap draws 同时重算 route weights、每个 route 的 paired latency statistic、weighted_latency/speedup 和 weighted-route p90 ratio。每次 draw 先重采样独立 capture group/process pair，再在 process 内按冻结的 contiguous block length 重采样；rank、route 或单次 kernel iteration不得被当作独立 provenance unit。LCB/UCB 分别取 paired bootstrap distribution 的 5th/95th percentile。
 
-若评估 overlap，必须同时报告：
+### 18.3 Microbenchmark statistics
 
-- compute-only；
-- comm-only；
-- sequential compute+comm；
-- overlap；
-- hidden time (`hidden_ms`)；
-- speedup；
-- overlap ratio/efficiency。
+每个正式 bucket/config 至少：
 
-### 17.4 Full-step throughput 协议
+- 3 个独立 fresh process pairs，默认 5；最终 `n_micro` 由独立 pilot 的 paired log-throughput variance 与目标 power 决定；
+- 每 process 20 warmups 和 >=200 timed samples per candidate；
+- AB/BA balance，或交错使用 ABBA/BAAB/ABBA；
+- 报告 raw samples、mean、median、p95、p99、CV；
+- process-first hierarchical paired bootstrap，再在 process 内 contiguous block resample；
+- block length 由 pilot autocorrelation 冻结，默认 5，并报告 5/10 sensitivity；
+- 记录 GPU/ROCm/PyTorch/AITER、kernel repr/config、artifact digest、memory、roofline/arithmetic-intensity evidence。
 
-CUDA event microbenchmark 不能作为完整训练 step 的硬门槛，因为 full step 还包含 host 调度、collective 和 CPU optimizer offload。4-layer 与 43-layer 的主吞吐指标固定采用 steady-state wall-clock window：
+Micro 与 full-step 分别估计独立单位上的 paired log-speedup 标准差，不共享一个 n_perf。对 `j in {micro,full}`：
 
-1. 先完成 backend/JIT/cache 预热和 20 个不计时 optimizer steps；计时窗口内禁止首次编译、fallback probing、checkpoint、evaluation 或额外 profiling。
-2. 每个 profile 测量至少 100 个连续、未 overflow/skip 的 optimizer steps；若发生 skip，该窗口作废并单独报告原因，不能从样本中静默删除。
-3. window 起点在 batch 已就绪之后；终点在最后一个 optimizer update、CPU offload 工作和相关 CUDA work 全部完成之后。窗口起止各执行一次 device synchronize 和 world barrier，窗口内部不注入额外 barrier/synchronize。
-4. 每个 rank 使用 `time.perf_counter_ns()` 记录相同 train-step 边界的原始逐 step delta；窗口结束后一次性 all-gather。主 wall time 取各 rank 整个窗口 elapsed 的最大值，诊断用逐 step latency 取相同 step index 上各 rank delta 的最大值。
-5. 主吞吐 `tokens/s = measured non-padding global tokens / max-rank window seconds`；同时报告 `samples/s = successful_steps × global_batch_size / max-rank window seconds`。第 17.6 节 full-step gate 使用 `tokens/s`。
-6. 保留所有 rank 的 raw per-step samples 和 window totals；95% interval 使用保持时间顺序的 block bootstrap（block length 5 steps），不能把相关 step 当成独立同分布样本。
-7. BF16、当前 FP8、P0、P1 使用相同数据、GBS/MBS、sequence length、recompute、optimizer/offload、日志频率和测量窗口；任一配置差异都使该对比无效。
+~~~text
+delta_log_j = expected_mean_log_speedup_j - log(promotion_threshold_j)
+n_j = max(3, ceil(((z_0.95 + z_power) * sigma_log_j / delta_log_j)^2))
+~~~
 
-### 17.5 Baselines
+要求 `delta_log_j > 0`，one-sided alpha=0.05、power >=80%（推荐 90%）。`n_micro` 的独立单位是 fresh process pair；`n_full` 的独立单位是 fresh distributed paired replicate block。默认 5 只有在上述 power 计算通过时才足够。Pilot 的 variance、alternative mean、power、n 与 seed rule 必须在 formal data 前冻结；pilot samples 不进入 formal interval。
 
-同一 API/shape 下比较：
+### 18.4 Full-step protocol
 
-1. BF16 grouped GEMM；
-2. 当前 DSV4 sequential blockwise FP8，保留其真实 BF16 fallback 行为并报告各 pass counter；
-3. P0 sequential per-expert MXFP4；
-4. P1 grouped MXFP4；
-5. 可选 A8W4 inference 数据只能列为旁证，不进入 training speedup 主表。
+4L 与 43L 每个正式 comparison 使用 `n_full` 个独立 fresh distributed paired replicate blocks，至少 3、默认 5 仅在第 18.3 节 power 计算允许时成立。每个 block 强制使用三个独立 fresh distributed launches，顺序固定为 `C_before -> V_candidate -> C_after`。三者从 byte-identical initial training checkpoint 开始，包括 BF16 model、FP32 master、optimizer、scheduler/scaler、所有 RNG state 和 data cursor；使用同一 seed/data slice、相同且预先固定的 warmup step count/warmup data prefix、相同且预先固定的 timed optimizer-step count 与其他 matched run settings。Derived caches 不在 checkpoint 中，各 variant 按自身固定 contract 重建。每个 launch：
 
-### 17.6 性能门槛
+1. backend/JIT/cache 预热；
+2. 至少 20 个不计时 optimizer steps；
+3. 至少 100 个连续、未 skip 的 timed optimizer steps；
+4. 计时窗口不含 checkpoint/eval/profile；
+5. 起止各一次 device synchronize + world barrier，窗口内无额外同步；
+6. 保留每 rank raw step samples 和 max-rank window elapsed；
+7. 主指标为 non-padding global tokens/s；
+8. CI 只使用下述预注册 hierarchical paired block bootstrap，不允许在看到数据后改用 t interval 或另一种 estimator。
 
-P1 correctness merge 不以未经测量的理论 speedup 为前提。标记 production-ready 前必须满足：
+任一 formal candidate/control 的任何 runtime fallback、OOM、NaN/Inf、kernel failure 或 skipped update 使整个 formal replicate block 失败。任何未声明的 backend/precision/config 变化同样使 block 失败。不得删除单个 step 或 clean rerun 到通过。完整 runs 必须使用相同 data、GBS/MBS、sequence length、recompute、optimizer/offload、logging、stream policy 和与各 variant contract 相符的固定 tuning policy。
 
-- 在真实 token histogram 加权后的 local expert block 上，P1 相对 P0 至少 1.20×；
-- 4-layer full-step throughput 相对 P0 至少 1.10×；
-- 43-layer full-step throughput 相对 BF16 至少 1.05×；
-- 4-layer 与 43-layer full-step throughput 相对当前 blockwise FP8 均不得回退（speedup ratio ≥ 1.00×）；
-- routing-distribution p90 workload 的 median local-block latency 不得比 P0 慢超过 5%；
-- 对所有 speedup 下限，95% bootstrap confidence interval 的 lower bound 必须达到阈值；对 p90 workload 的 latency ratio `P1/P0`，95% interval 的 upper bound 必须 ≤ 1.05；
-- cold cache cost 单独报告，不得混入 hot-path 数字后平均隐藏。
+Control replicate drift 默认必须 <=2%。Peak allocated/reserved、cold build、p95 step latency 和 physical HBM headroom 单列；formal run SHOULD 保留至少 10% HBM headroom。
 
-若未达门槛，功能可保留为 experimental，但不得默认启用或宣传为 production speedup。
+对上述强制 `C_before -> V_candidate -> C_after` schedule，control drift 定义为：
 
----
+~~~text
+control_drift = abs(C_after-C_before) / ((C_after+C_before)/2)
+~~~
 
-## 18. 验收清单
+C 为同一 primary metric 的 control window estimate。任一 paired block 超过 2% 即无效并保留为环境失败 artifact，不能删除后继续统计。
 
-### P0 exit criteria
+本 spec 不再允许“等价 schedule”或事后选择 estimator。对 throughput/rate 指标，唯一 control estimate 与 paired effect 为：
 
-- [ ] DSV4 parser 接受 `--linear-fp4`，并拒绝与 FP8 同开。
-- [ ] 启动摘要明确 `recipe=a4w4, scope=routed_experts, backend=sequential_mxfp4`。
-- [ ] 每个 expert 使用唯一 tensor ID。
-- [ ] 同 optimizer step 内 weight cache 命中，更新后失效。
-- [ ] FC1/FC2 exact shape 的 ragged fwd/dgrad/wgrad 通过。
-- [ ] 4-layer EP8 20-step smoke 通过。
-- [ ] checkpoint round trip 参数 key 无变化。
-- [ ] 所有 fallback 可计数；结果不得标为 grouped performance。
+~~~text
+C_hat_i = sqrt(C_before_i * C_after_i)
+d_i = log(V_candidate_i) - log(C_hat_i)
+speedup_i = exp(d_i)
+~~~
 
-### P1 correctness-merge criteria
+Formal CI 使用固定 10,000 次、seed 预注册的 two-level paired moving-block bootstrap：先以 paired replicate block 为单位有放回重采样；再对每个被选 block 生成一组 contiguous circular step-block indices，并把同一组 indices 同时用于 C_before、V_candidate、C_after 及其全部 ranks。Rank 始终作为一个 distributed launch 的联合观测，绝不独立重采样。每次 draw 重新计算各 launch 的 `max_rank_window_elapsed`、non-padding tokens/s、`C_hat_i` 和 mean paired log-speedup。lower/upper 95% bound 分别取 bootstrap distribution 的 5th/95th percentile，最终在 log 域聚合后 exponentiate。Pilot 冻结 block length、bootstrap seed-generation rule 与 `n_full`；formal data 不得改变它们。
 
-- [ ] AITER grouped weight quant、fwd、dgrad、wgrad API 和 tests 合入。
-- [ ] local-E 32/64、FC1/FC2、empty/long-tail/ragged matrix 全通过。
-- [ ] Lumen module/autograd/cache/optimizer/deferred WGrad tests 全通过。
-- [ ] 4-layer EP8 strict smoke 中 fallback counter 为 0。
-- [ ] kernel parity、recipe SNR 与 4-layer paired 100-step training 门槛通过。
-- [ ] A4W4 与 A8W4 的日志、config 和报告名称无混用。
+### 18.5 Baselines
 
-### Production promotion criteria
+~~~text
+BF16 grouped
+current DSV4 blockwise FP8 diagnostic with truthful pass-level fallback counters
+P0 sequential A4W4
+P1 grouped A4W4
+~~~
 
-- [ ] 43-layer EP4 strict smoke 中 fallback counter 为 0。
-- [ ] 4-layer 500-step 与 43-layer 100-step convergence 门槛通过。
-- [ ] benchmark 使用真实 API、真实路由 bucket，并通过性能门槛。
-- [ ] profiler 能区分每个 MXFP4 pass 和 config。
-- [ ] benchmark artifact 包含完整 runtime provenance、dirty patch digest、raw samples 和 bootstrap interval。
+每个 variant 使用自己的显式执行契约，不能用一条 grouped/strict 规则覆盖所有 baseline：
 
-### Spec approval criteria
+- **P1 grouped A4W4:** `backend=grouped`、`strict=true`、`require-certified-bucket`；backend fallback=0、precision fallback=0，所有 completed obligations 均为 grouped MXFP4。
+- **P0 sequential A4W4:** `backend=sequential`、`strict=true`；backend fallback=0、precision fallback=0，所有 completed obligations 均为 sequential MXFP4。它不受 grouped tuning policy 过滤。
+- **BF16 grouped:** 固定并记录 BF16 grouped backend/config；不得发生未声明的 backend substitution。MXFP4 strict/fallback 字段不适用，executed precision 必须始终 BF16。
+- **current DSV4 blockwise FP8 diagnostic:** 固定审计时的 current execution policy，逐 FC1/FC2 和 Fprop/DGrad/WGrad 记录 selected backend、executed precision 与真实 fallback reasons。已知的 ragged-WGrad BF16 路径必须如实计数，不能伪装成 FP8 success；只要出现任何 fallback，该 comparison 仅为 deployment diagnostic，不进入 formal promotion evidence。
+- **current DSV4 blockwise FP8 formal control:** 只有在全部参与 pass 能以显式 strict policy、backend fallback=0、precision fallback=0 执行相同 frozen workload 时才成立；其 backend/config/precision signature 必须预注册。否则该 formal control 为 unavailable，而不是放宽零 fallback 要求。
+- **matched A8W4 diagnostic:** 若进入性能比较，必须使用与 P1 相同的 grouped execution structure、显式 config 和 strict zero-fallback；否则只能单列 diagnostic。
 
-- [ ] Lumen 与 AITER owner 同意 API/ownership 边界。
-- [ ] 训练 owner 同意精度 recipe、scope 和 convergence gate。
-- [ ] benchmark owner 同意 workload、计时和性能 gate。
-- [ ] 无未决占位符，且 shape/layout 均已定义。
-- [ ] 用户审核后才把状态从 Draft 改为 Approved。
+A8W4 quality control 不进入 A4 性能主表；可单列诊断。Micro/kernel speedup 不等于 full-step speedup，full-step speedup不等于 time-to-quality。
+
+### 18.6 Promotion thresholds
+
+Experimental promotion-qualified 前必须同时满足：
+
+- real-route weighted local expert block：P1/P0 throughput lower 95% bound >=1.20x；
+- 4L full-step：P1/P0 tokens/s lower 95% bound >=1.10x；
+- 43L full-step grouped-value：P1/P0 lower 95% bound >=1.10x；
+- 43L full-step：P1/BF16 lower 95% bound >=1.05x；
+- 若对应的 current blockwise FP8 formal control 可用，4L 与 43L 分别要求 lower 95% bound >=1.00x；若只有含 fallback 的 deployed control，则该 ratio 降为 diagnostic，不作为 promotion gate 或正式性能结论；
+- A4W4 相对 matched A8W4 若对外比较：lower 95% bound >=1.00x；
+- held-out p90_latency_ratio 的 upper 95% bound <=1.05；
+- memory 同时满足第 9.4 节 budget 与 headroom；
+- 每个 formal ratio 的 P1 candidate 侧都来自 explicit `backend=grouped`、`strict=true`、`require-certified-bucket`、zero-fallback；control 侧也必须 zero-fallback，并严格遵循第 18.5 节对应 baseline contract。含 fallback 的 current-FP8 结果只能进入单列 diagnostic artifact。
+
+这些阈值在获得实测证据前均为 unverified gates，不是性能承诺。未达门槛时功能 MAY 保留 experimental/reference-only，但不得默认启用或宣传 speedup。V1 不预承诺 1.6x。
 
 ---
 
-## 19. 风险与缓解
+## 19. Repository ownership and planned changes
 
-| 风险 | 影响 | 缓解 |
+### 19.1 AITER
+
+预期交付：
+
+- versioned public facade/compiled ABI 与 typed capability reasons；
+- numeric selector、packing/layout、dual-layout quantization；
+- grouped Fprop/DGrad/WGrad；
+- matched-scale A8 non-weight operand support needed by the quality control；
+- metadata builder/validator；
+- caller-owned workspace contract；
+- gfx950 tuning/bucketizer/config；
+- public-wrapper unit tests、benchmarks、repr 和 artifacts。
+
+所有新 GPU kernels 位于 AITER 正确目录。任何可复用 activation/shuffle/reduction/helper 放 utils 或 common，不复制近似实现。AITER 提交遵守 DCO；每个 kernel change 带 wrapper、test、benchmark 和必要 config。
+
+### 19.2 Lumen
+
+预期交付：
+
+- DSV4 专用 CLI 与 conflict checks；
+- P0 sequential 与 P1 grouped dispatch；
+- RoutingMetadataV1 / BoundExecutionV1 / late attachment；
+- autograd 与 direct FP32 main-grad WGrad；
+- committed weight epoch、cache allocator/budgets；
+- Philox domain allocator；
+- obligation ledger 与 all-rank telemetry；
+- warm/exact/state-complete/reshard checkpoint integration；
+- module/op/model tests、training harness 和 full-step benchmark。
+
+Lumen 不新增 GPU kernel，也不持久化 AITER tuning tables。
+
+### 19.3 Megatron
+
+V1 SHOULD 通过现有 Lumen provider/hook 接入，不修改 Megatron core。若 routing metadata 生命周期无法在现有 hook 表达，任何最小 Megatron patch 都必须先单独审查，且不能把 MoE 基础设施复制进 Lumen。
+
+---
+
+## 20. Milestones and exit criteria
+
+### M0 — clean prerequisites
+
+- [ ] Lumen/AITER dirty diff inventory 完整。
+- [ ] 每个 prerequisite 是独立、可测试 commit。
+- [ ] runtime AITER、gitlink 和 extension build-id 单一事实源。
+- [ ] clean/pinned manifest，dirty=false。
+- [ ] mxfp4-moe implementation lineage 包含这些 commits；现有 docs commit 不被当作 code baseline。
+
+### P0 — sequential reference
+
+- [ ] --lumen-moe-mxfp4 --lumen-moe-mxfp4-backend=sequential --lumen-moe-mxfp4-strict。
+- [ ] 与 P1 相同 quantizer/layout/RNG/output semantics。
+- [ ] Fprop/DGrad/WGrad、empty/ragged、EP8/local-E32 和 EP4/local-E64 op gates。
+- [ ] committed weight epoch/cache budget/checkpoint invalidation gates。
+- [ ] 4L EP8 100-step strict stability，zero fallback。
+- [ ] 日志明确 selected_backend=sequential_mxfp4。
+
+### P1 — grouped correctness merge
+
+- [ ] AITER public ABI、kernel tests、benchmark 和 config 完整。
+- [ ] P1 grouped-vs-P0 parity 通过。
+- [ ] bind transaction、late attachment、typed errors 和 no-post-commit-fallback 通过。
+- [ ] direct FP32 main-grad、eager WGrad、full recompute 通过。
+- [ ] 使用显式 validated config 完成 4L EP8 strict 100-step stability，逐 pass zero fallback。
+
+### M2 — forward-ported release candidate
+
+- [ ] ABI freeze 后 forward-port 到一个明确 pinned 的 latest-AITER commit，并更新 Lumen gitlink/adapter。
+- [ ] 新 manifest 记录 source/tree、extension SHA256/build-id、ABI/layout/toolchain，且 dirty=false。
+- [ ] 重新通过 numeric/ABI conformance、AITER Fprop/DGrad/WGrad correctness、P0/P1 parity 和 4L EP8 grouped strict 100-step gate。
+- [ ] 在 M2 lineage 上完成 route descriptor/bucketizer held-out certification。
+- [ ] 在 M2 lineage 上完成 4L EP8 与 43L EP4 strict stability，以及 warm/exact/state-complete/reshard 对应 conformance。
+- [ ] M2 之前的 tuning、quality 和 performance artifacts 不进入 promotion evidence。
+
+### Experimental promotion-qualified
+
+- [ ] 所声明 quality cells 通过第 17 节 powered matrix。
+- [ ] exact_continue cells 获得 run-level bitwise replay certificate。
+- [ ] full-step/microbenchmark 通过第 18 节门槛。
+- [ ] persistent/peak memory 在预算内。
+- [ ] runtime compatibility、correctness、tuning 和 provenance 四类状态均为 true。
+- [ ] 所有 artifact、raw samples、route data、seed/attempt ledger 和 manifests 可审计。
+
+---
+
+## 21. Failure semantics
+
+以下类别必须结构化记录：
+
+~~~text
+candidate_miss
+public_contract_error
+runtime_operand_contract_violation
+resource_error
+kernel_error
+asynchronous_device_error
+distributed_abort
+~~~
+
+只有第 7.4 节列出的 candidate miss 可在 commit 前尝试下一个候选。OOM、workspace shortage、illegal alias、version mismatch、launch 后错误和 async fault 都不得 fallback。
+
+建议细分 run-fatal reason：
+
+~~~text
+RUNTIME_SCHEMA_MISMATCH
+ROUTING_EPOCH_MISMATCH
+WEIGHT_EPOCH_MISMATCH
+MAIN_GRAD_MISMATCH
+WORKSPACE_SLICE_MISMATCH
+SR_TOKEN_MISMATCH
+ALLOCATOR_PLAN_BREACH
+REPLAY_FRONTIER_MISMATCH
+BOUND_KERNEL_FAILURE
+~~~
+
+任一 rank 的 strict failure 在下一个安全 collective boundary 传播 global abort。发生设备异步错误后不得继续提交 BF16 工作。
+
+---
+
+## 22. Risks and mitigations
+
+| Risk | Consequence | Required mitigation |
 |---|---|---|
-| 小且不均匀的 `M_e` 使 grouped kernel 利用率低 | P1 不比 sequential 快 | 以真实 histogram 调优；key 包含 nonempty/max-M buckets |
-| 32×32 canonical weight scale 与现有 inference 1×32 layout 不同 | 直接复用 kernel 会读错或改变数值 | AITER 从 canonical grid 派生 layout，禁止重新量化 |
-| expert segment padding 混合 | WGrad 数值污染，难以从 loss 定位 | 独立 offsets/helper + sentinel isolation test |
-| `dY^T/X^T` 使用不同 H16 transform | WGrad 不再等价于共同正交变换后的乘积 | 固定相同 `rht_id`/segment origin，launch 前校验 metadata |
-| `weight0..N` 分散存储导致 staging 开销 | 额外 BF16 显存和 copy | P1 使用 pointer-table quant；stack 只准 P0/bring-up 并计数 |
-| cache 未失效 | 长期使用 step-0 weight，loss 悄然停滞 | `_version` correctness key + optimizer eager invalidation |
-| fallback 隐藏 kernel 缺陷 | 看似成功但实际 BF16 | strict mode、backend assertion、结束汇总 |
-| 只汇总 rank 0 或单 rank 先抛错 | 漏报 fallback，或其他 rank 卡在 collective | all-rank reduce/gather；在安全边界一致失败 |
-| steady-state 每次同步探测错误 | 性能失真并破坏 graph capture | 只在 warmup/debug 同步；缓存 backend，capture 前预热 |
-| deferred WGrad 改变 SR 随机序列 | 可复现性和收敛漂移 | 显式 Philox ranges；backward 时完成 quant，closure 只保留 GEMM |
-| WGrad 把 optimizer destination 错误固定为 BF16 | FP32 `main_grad` 写入错误或额外 cast/copy | mandatory typed `out` buffers；按 BF16 baseline 保持 optimizer dtype |
-| host list → GPU counts | 小 shape 下吞吐损失 | 复用 buffer并单独计时；P2 再做 GPU-resident 接口 |
-| AITER tuned key 使用 global E | EP4/EP8 未命中 | config 固定 local-E 32/64 |
-| 完整 fused inference API 改变模型数学语义 | router/prob gradient 错误 | v1 只接 expert-sorted grouped linear |
+| dirty prerequisites 未拆分 | 数值/性能变化不可归因 | M0 独立 commits + clean manifest |
+| S1024 被误称 DSV4 S32 | 错误等价性声明 | 独立 recipe IDs/spec |
+| row operand decode/requant | shape-dependent double quantization | same-BF16 snapshot golden tests |
+| DCP 原位 load 不变 _version | stale packed weight | committed epoch + cache generation |
+| late dY alignment 不满足 | commit 后被迫 fallback | bind-time staging reservation or candidate miss |
+| route bucket collision | config ranking 翻转 | raw descriptor + held-out regret audit |
+| hidden BF16 fallback | 假成功 | strict ledger and pass-level counters |
+| SR 与 backend/attempt 绑定 | retry/recompute 不可复现 | canonical logical allocation + non-reclaimed ranges |
+| deferred WGrad 扩大生命周期 | exactly-once/checkpoint 风险 | V1 fail at startup |
+| 43L cache resident cost | OOM/吞吐不稳 | 0.75x default, 1.0x hard max, allocator quota |
+| low-powered quality run | 伪 non-inferiority | pre-registered power, n>=5, claim downgrade |
+| path/commit 与 loaded binary 不同 | provenance 失真 | extension digest/build-id in manifest |
 
 ---
 
-## 20. 后续但不阻塞 P1 的问题
+## 23. Decision register
 
-以下均采用“默认不做”的冻结策略，不阻塞当前实现：
+本版本已整合全部需求确认：
 
-- 是否将 weighted SwiGLU 与 FC2 activation quant 融合：默认不融合，只有 profile 证明收益且梯度测试通过后进入 P2。
-- 是否增加 A8W4 training recipe：默认不增加；需要独立 spec、CLI 名称和收敛验收。
-- 是否把 counts 全程保留在 GPU：v1 允许从已存在的 host list 拷回预分配 CUDA buffer；P2 再评估 Megatron 接口扩展。
-- 是否支持 ETP>1：v1 fail closed；后续需重新定义 local weight shard、scale grid 和 collective。
-- 是否扩展到 shared expert：v1 保持 BF16；后续走 dense MXFP4 的独立验收。
+~~~text
+Q1  minimal clean prerequisites before implementation
+Q2  gfx950, ETP1, EP8/local-E32 and EP4/local-E64, two DSV4 shapes
+Q3  Lumen A4W4; explicitly not DSV4-report equivalent
+Q4  expert-sorted tensor boundary
+Q5  P0 -> P1 -> promotion with strict zero-fallback gates
+Q6  AITER kernels/API; Lumen lifecycle/integration
+Q7  --lumen-moe-mxfp4 naming
+Q8  experimental pretraining/continued-training positioning
+Q9  BF16 model Parameter quant source
+Q10 dual layouts independently quantized from same BF16 snapshot
+Q11 WGrad OVERWRITE / ACCUMULATE_FP32
+Q12 one clean source/build lineage
+Q13 Python facade vs versioned compiled ABI
+Q14 query -> prepare -> bind -> launch
+Q15 routing semantics/lifetime vs physical schema ownership
+Q16 auto+strict is legal; selection separated from precision fallback
+Q17 no V1 dynamic-routing graph replay guarantee
+Q18 compatibility separated from certification
+Q19 numeric recipe / physical layout / prepared layout IDs
+Q20 successful transactional bind is commit point
+Q21 committed weight epoch is authoritative
+Q22 0.75x persistent target, 1.0x hard ceiling
+Q23 eager WGrad only
+Q24 warm_start / exact_continue / reshard_continue
+Q25 matched fixed-snapshot and full-training A8W4 controls
+Q26 grouped-only tuning policy and multi-axis certification state
+Q27 obligation conservation ledger
+Q28 late runtime operand attachment only
+Q29 planner + allocator memory enforcement
+Q30 deterministic rank/domain Philox allocation
+Q31 run-level replay certificate and hash-chain frontier
+Q32 matched-scale A8W4 format lift
+Q33 stable seghist descriptor; data-derived bucketizer
+Q34 power-determined paired quality matrix and scoped claims
+~~~
+
+没有遗留的设计问题阻塞 M0/P0。实现过程中若发现需要改变上述 contract，MUST 先修改本 spec 并重新审查受影响的 decision subtree，不能以代码现实静默改写规范。
 
 ---
 
-## 21. Out of Scope
+## 24. Key source index
 
-- Router/top-k kernel 重写。
-- MoE auxiliary loss 或 load-balancing loss 的数值变更。
-- EP dispatch/combine 的量化通信。
-- shared expert、attention、embedding、lm-head MXFP4。
-- FP4 参数持久化或 FP4 optimizer state。
-- inference checkpoint 导出。
-- gfx942/gfx1250 production support。
-- ETP>1。
-- 无验证的 1.6× 或其他端到端性能承诺。
-
----
-
-## 22. 关键源码索引
-
-| 主题 | 位置 |
+| Topic | Source snapshot location |
 |---|---|
-| DSV4 模型/专家配置 | `examples/dsv4/dsv4_megatron_args.sh:44-105` |
-| 4-layer parallel | `examples/dsv4/dsv4_megatron_args.sh:11-24` |
-| 43-layer parallel | `examples/dsv4/dsv4_flash_mi300x_parallel.sh:2-14` |
-| Grouped MLP provider | `lumen/models/dsv4/megatron/spec_provider.py:26-35` |
-| Megatron grouped FC1/act/FC2 | `megatron/core/transformer/moe/experts.py:746-963` |
-| Token dispatch/sort/combine | `megatron/core/transformer/moe/token_dispatcher.py:552-803` |
-| DSV4 FP8 post-build enable | `lumen/models/dsv4/megatron/fp8.py:10-80` |
-| DSV4 provider enable point | `lumen/models/dsv4/megatron/pretrain.py:141-160` |
-| DSV4 full recompute default | `examples/dsv4/run_dsv4_flash_pretrain_inner.sh:63-69` |
-| Full recompute/EP overlap exclusion | `megatron/core/transformer/transformer_config.py:1448-1477` |
-| Megatron FP32 main-param default | `megatron/training/arguments.py:3781-3784`; `megatron/core/optimizer/optimizer_config.py:72` |
-| DSV4 FP32 grad/BF16 moment profile | `examples/dsv4/run_dsv4_flash_pretrain_inner.sh:22-23,113,121-122`; `examples/dsv4/run_dsv4_4layer_pretrain_inner.sh:82` |
-| Sequential grouped module | `lumen/modules/grouped_linear.py:126-167` |
-| Grouped test parameter API drift | `tests/modules/test_grouped_linear.py:45-69`; `lumen/modules/grouped_linear.py:99-124` |
-| Existing grouped GEMM modes | `lumen/ops/gemm/grouped_gemm.py:166-440` |
-| Current FP8 blockwise backward | `lumen/ops/quantize/linear.py:3091-3235` |
-| Dense MXFP4 forward/backward | `lumen/ops/quantize/linear.py:2179-2560` |
-| Dense MXFP4 cache | `lumen/quantize/__init__.py:543-653,1176-1245` |
-| 32×32 weight scale contract | `lumen/ops/quantize/ops.py:619-645` |
-| Standard `--linear-fp4` CLI | `lumen/patches/builders/megatron_args.py:261-327` |
-| Backend warmup/sync cache behavior | `lumen/ops/dispatch.py:540-620` |
-| AITER gfx950 A4W4 forward test | `aiter/ops/flydsl/test_flydsl_moe_a4w4.py:4-18,41-43` |
-| AITER A4W4 stage1/stage2 | `aiter/ops/flydsl/moe_kernels.py:1099-1152,1453-1505` |
-| AITER DSV4 A8W4 tuned rows | `aiter/configs/model_configs/dsv4_fp8fp4_tuned_fmoe.csv:122-137` |
-| AITER gfx950 A4W4 EP limitation | `aiter/fused_moe.py:702-713` |
-| AITER config key includes local E | `aiter/fused_moe.py:569-570,1770-1783` |
-| AITER non-MXFP4 MoE WGrad | `aiter/ops/triton/moe/moe_wgrad.py:47-211` |
-| Lumen benchmark timer/statistics | `benchmarks/bench_utils.py:91-174` |
-| Lumen overlap reporting | `benchmarks/bench_utils.py:276-318` |
+| DSV4 model/expert args | examples/dsv4/dsv4_megatron_args.sh |
+| DSV4 grouped provider | lumen/models/dsv4/megatron/spec_provider.py |
+| Megatron grouped expert flow | megatron/core/transformer/moe/experts.py |
+| Token dispatch/sort/combine | megatron/core/transformer/moe/token_dispatcher.py |
+| Current DSV4 FP8 enable | lumen/models/dsv4/megatron/fp8.py |
+| Current sequential grouped module | lumen/modules/grouped_linear.py |
+| Existing grouped GEMM dispatch | lumen/ops/gemm/grouped_gemm.py |
+| Dense MXFP4 Fprop/backward | lumen/ops/quantize/linear.py |
+| Dense MXFP4 quantization/SR | lumen/ops/quantize/ops.py |
+| Dense MXFP4 cache/invalidation | lumen/quantize/__init__.py |
+| Lumen backend dispatch | lumen/ops/dispatch.py |
+| AITER DSV4 A8W4 tuned rows | aiter/configs/model_configs/dsv4_fp8fp4_tuned_fmoe.csv |
+| AITER current MoE WGrad | aiter/ops/triton/moe/moe_wgrad.py |
+| Lumen benchmark utilities | benchmarks/bench_utils.py |
