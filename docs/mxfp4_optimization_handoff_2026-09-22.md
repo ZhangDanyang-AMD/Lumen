@@ -38,19 +38,118 @@
 
 ## 1. 最重要的迁移警告
 
-### 1.1 远端分支不能完整复原当前实验代码
+### 1.1 已建立的远端 recovery snapshots
 
-当前 Lumen checkout：
+2026-09-22 已对两个 dirty worktree 做了只读审计，并建立或核验了以下恢复点：
+
+| 仓库 | 远端分支 | 精确 commit | 用途 |
+|---|---|---|---|
+| `DaiXindi-AMD/Lumen` | `backup/2026-09-22/mxfp4-optimization-wip` | `74771d140c334cabc4c1d0023a525a1328b9a2b4` | 当前 Lumen 相关 dirty 源码、测试、benchmark、诊断脚本和 fresh 实验总账 |
+| `DaiXindi-AMD/aiter` | `backup/2026-09-22/fused-swiglu-dual-layout-wip` | `35e796da188e2131d004e5b17391b7b8e836d852` | 当前 AITER 的 split-SwiGLU、two-way MXFP4 quant 和 fused dual-layout WIP |
+
+两条远端 ref 均已用 live `git ls-remote` 核验。它们是 **recovery snapshot，
+不是 PR-ready 分支**，不得整分支直接合并到产品分支。
+
+Lumen recovery commit 基于本交接文档 commit
+`8d7a8a8e0410ab87409bb97d0849e26b4d4becb8`，保存 34 个文件，包含：
+
+- 当前链路所需的 Qwen3 CLI/FSDP2、packed QKV、split SwiGLU、MXFP4
+  forward/backward、ASM registry、autotune/cache、weight-cache invalidation、
+  tuned CSV、测试和 benchmark；
+- default-off 或未完成的 projection guard、root FSDP retention、FlyDSL；
+- 已作为速度方案否决但可用于历史复现的 packed gate/up；
+- Hadamard 诊断脚本，但不含 PNG/HTML/JSON 生成物；
+- fresh-reset 后的完整实验总账，移动到
+  `docs/mxfp4_fresh_experiment_log_2026-09-22.md`，内容 SHA256 仍为
+  `7c6e0f3da5944047df69056e705bc321cd2e7083347fbff88d3103802cb5887d`；
+- 分支内的分类清单 `docs/mxfp4_wip_snapshot_manifest_2026-09-22.md`。
+
+Lumen snapshot 明确排除了 `.agents/`、`AGENTS.md`、`.gitignore` 的 agent
+scratch hunk、Hadamard 生成图、GPU trace/compiler cache/result 目录，以及未改变
+gitlink 的 dirty `third_party/aiter`。后者唯一差异是无关 A8W8 CSV 的 CRLF/LF
+换行转换。
+
+AITER 当前 checkout 是：
 
 ```text
-repository: /home/xdai/Lumen
-branch:     dev/mxfp4
-HEAD:       9d85c8adb5159cc5765680bbc4c2230bb00e74e4
-upstream:   origin/dev/mxfp4
-state:      ahead 3 before this handoff commit, plus a large dirty worktree
+path:       /home/xdai/aiter
+branch:     bench/ecfff3f-lumen
+HEAD:       e35bb17f4f815903bf73598facedbb321e15af28
+Lumen pin:  ecfff3fa80f906c5c421a35a7f5e52842f000559
+relation:   HEAD is one commit ahead of the Lumen pin
 ```
 
-原来的 3 个本地提交是：
+AITER 远端 recovery commit 中的 17 个相关路径已逐一比较 Git blob hash，
+与当前 dirty worktree **17/17 字节一致**。其中当前 Lumen 实际依赖 11 个：
+
+```text
+aiter/ops/triton/_triton_kernels/activation.py
+aiter/ops/triton/activation.py
+aiter/ops/triton/utils/_triton/activation.py
+op_tests/triton_tests/fusions/test_fused_silu_mul.py
+op_tests/op_benchmarks/triton/bench_swiglu.py
+aiter/ops/triton/_triton_kernels/quant/quant.py
+aiter/ops/triton/quant/quant.py
+aiter/ops/triton/quant/__init__.py
+aiter/ops/triton/utils/_triton/shuffle.py
+op_tests/triton_tests/quant/test_quant_mxfp4_2way.py
+op_tests/op_benchmarks/triton/bench_quant_mxfp4_2way.py
+```
+
+另外 6 个是当前 Lumen 尚未调用的 fused SwiGLU dual-layout WIP：
+
+```text
+aiter/ops/triton/_triton_kernels/quant/fused_swiglu_dual_layout_mxfp4.py
+aiter/ops/triton/quant/fused_swiglu_dual_layout_mxfp4.py
+aiter/ops/triton/configs/quant/gfx950-FUSED-SWIGLU-DUAL-LAYOUT-MXFP4.json
+aiter/ops/triton/utils/quant_config_utils.py
+op_tests/triton_tests/quant/test_fused_swiglu_dual_layout_mxfp4.py
+op_tests/op_benchmarks/triton/bench_fused_swiglu_dual_layout_mxfp4.py
+```
+
+该 WIP 已有 repr、public wrapper、gfx950 config、unit test 和 benchmark，目标是
+一次产生 BF16 SwiGLU、row-major MXFP4 和 H16-transposed MXFP4；但尚未接入
+Lumen，也没有在本次备份审计中重跑 GPU correctness/performance。
+
+新机器恢复 Lumen snapshot：
+
+```bash
+git clone https://github.com/DaiXindi-AMD/Lumen.git
+cd Lumen
+git fetch origin backup/2026-09-22/mxfp4-optimization-wip
+git switch -c recovery/mxfp4 FETCH_HEAD
+test "$(git rev-parse HEAD)" = 74771d140c334cabc4c1d0023a525a1328b9a2b4
+```
+
+新机器获取 AITER snapshot：
+
+```bash
+git clone https://github.com/ROCm/aiter.git
+cd aiter
+git fetch https://github.com/DaiXindi-AMD/aiter.git \
+  refs/heads/backup/2026-09-22/fused-swiglu-dual-layout-wip
+test "$(git rev-parse FETCH_HEAD)" = 35e796da188e2131d004e5b17391b7b8e836d852
+```
+
+AITER backup commit 的父提交是 Dai fork 的较新 `main`，不是当前
+`e35bb17` 的线性后继；两者 merge-base 为 `5f930ea50a36`，左右提交数为
+`9/595`。若必须复原旧运行树，应先 checkout 目标 AITER base，再从
+`FETCH_HEAD` **按上面 17 个路径执行 `git restore --source=FETCH_HEAD
+--worktree -- <paths>`**。不要直接 cherry-pick 整个 backup commit。
+
+### 1.2 为什么没有把混合 dirty tree 直接提交到 `dev/mxfp4`
+
+实验时的 Lumen source HEAD 是：
+
+```text
+repository:       /home/xdai/Lumen
+branch:           dev/mxfp4
+experiment HEAD:  9d85c8adb5159cc5765680bbc4c2230bb00e74e4
+handoff commit:   8d7a8a8e0410ab87409bb97d0849e26b4d4becb8
+upstream:         origin/dev/mxfp4
+```
+
+原来的 3 个功能提交是：
 
 ```text
 9d85c8a feat(fsdp): fuse the pretraining cross-entropy to free logit-sized buffers
@@ -58,22 +157,16 @@ db0f330 feat(fsdp): dial activation recompute with --grad-checkpoint-layers
 d8bb173 feat(fsdp): retain accumulated parameters across the FSDP2 window
 ```
 
-本文件会作为额外提交推送，但以下关键 MXFP4 工作仍主要位于未提交改动中。
-新机器只执行 `git checkout dev/mxfp4`，不会自动得到全部实验实现：
+当前 dirty 文件内同时混有已接受路径、已拒绝/default-off 实验、尚未完成的
+projection guard，以及按仓库边界最终应移到 AITER 的 FlyDSL kernel。直接把
+整棵工作树提交到共享 `dev/mxfp4` 会把这些状态错误地包装成同一个可合并实现。
+因此采用独立 backup branch 保存完整字节，再由下一位 agent 按 hunk 拆成可审查
+提交。`dev/mxfp4` 只保存交接文档和此前已经独立提交的改动。
 
-- MXFP4 ASM/autotune、weight cache 与 cache invalidation 改动；
-- packed QKV；
-- split SwiGLU；
-- Qwen3 MXFP4 集成与训练 CLI；
-- last-layer projection guard；
-- 对应测试和 benchmark；
-- 外部 `/home/xdai/aiter` checkout 中的 fused SwiGLU dual-layout kernel。
+**旧机器上的 dirty tree 仍未被切分、清理、stash 或覆盖。** 不要对它执行
+`git reset --hard`、`git clean`，也不要把 recovery branch 直接当作最终方案。
 
-**不要在旧机器执行 `git reset --hard`、`git clean` 或覆盖这些文件。** 若要在
-新机器继续，必须单独迁移 dirty worktree，或先人工拆分、审核并提交这些改动。
-本交接提交只包含本文档，不会擅自把工作树里的其他用户改动一起提交。
-
-### 1.2 当前 source snapshot 指纹
+### 1.3 当前 source snapshot 指纹
 
 最后一次 projection-guard smoke 冻结到的运行源码状态：
 
