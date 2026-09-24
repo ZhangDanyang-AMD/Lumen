@@ -84,6 +84,7 @@ pip install -e ".[dev]"
 | **Qwen3-8B MXFP4 Pretrain** | Pretraining Qwen3-8B with MXFP4 quantized training on MI308X | [`examples/qwen3/`](examples/qwen3/) |
 | **Qwen3-30B-A3B MoE** | Qwen3-30B-A3B (128 experts) MoE training with FSDP2 + 2D parallelism (DP×EP) on multi-node MI308X | [`examples/qwen3-30b-a3b/`](examples/qwen3-30b-a3b/) |
 | **DeepSeek-V4** | DeepSeek-V4 full finetune / pretrain with native torchrun + Lumen + GRPO policy loss on MI308X | [`examples/dsv4/`](examples/dsv4/) |
+| **VeOmni Qwen-Image / Wan2.1 performance** | Training on 8× MI350X, stock example → configuration tuning → Lumen (aiter FlyDSL VAE conv, SDPA backend and Triton forward, RMSNorm fusion, local-shard AdamW): Qwen-Image 1.855 → 0.971 → 0.680 s/step (2.73×), Wan2.1 3.569 → 2.654 → 1.160 s/step (3.08×), Wan2.1 video embedding 5.96× | [中文](examples/perf-veomni/README.md) / [English](examples/perf-veomni/README_EN.md) |
 
 ## LumenRL Integration
 
