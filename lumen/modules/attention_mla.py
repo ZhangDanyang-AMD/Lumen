@@ -179,7 +179,7 @@ class LumenDotProductAttentionMLA(MegatronModule):
                 scale_manager=self.scale_manager,
             )
         else:
-            if self.backend == "aiter_csrc" and not is_aiter_available():
+            if self.backend in ("aiter_csrc", "aiter_opus") and not is_aiter_available():
                 raise RuntimeError("AITER not installed. Use --lumen-attn-backend aiter_triton.")
             out = attention(
                 q,

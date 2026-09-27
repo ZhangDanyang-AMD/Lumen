@@ -621,11 +621,74 @@ class AttentionCsrcFP8BwdFunction(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None, None, None, None, None
 
 
+class AttentionOpusFunction(torch.autograd.Function):
+    """OPUS gfx950 BF16 forward paired with AITER CK/ASM backward."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        q,
+        k,
+        v,
+        softmax_scale,
+        causal,
+        deterministic,
+        grad_quant_type,
+        seq_major_out,
+    ):
+        from lumen.kernels.attention.attention_impl import attention_opus_forward_impl
+
+        out, softmax_lse = attention_opus_forward_impl(
+            q, k, v, softmax_scale, causal, seq_major_out
+        )
+        rng_state = torch.zeros((2,), dtype=torch.int64, device=q.device)
+        ctx.save_for_backward(q, k, v, out, softmax_lse, rng_state)
+        ctx.softmax_scale = softmax_scale
+        ctx.causal = causal
+        ctx.deterministic = deterministic
+        ctx.grad_quant_type = grad_quant_type
+        return out
+
+    @staticmethod
+    def backward(ctx, dout, *args):
+        from aiter.ops.mha import _flash_attn_backward
+
+        q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
+        dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
+        _flash_attn_backward(
+            dout,
+            q,
+            k,
+            v,
+            out,
+            softmax_lse,
+            dq,
+            dk,
+            dv,
+            None,
+            0.0,
+            ctx.softmax_scale,
+            ctx.causal,
+            -1,
+            -1,
+            None,
+            None,
+            ctx.deterministic,
+            rng_state,
+        )
+        gqt = ctx.grad_quant_type
+        dq = quantize_grad_tensor(dq, gqt)
+        dk = quantize_grad_tensor(dk, gqt)
+        dv = quantize_grad_tensor(dv, gqt)
+        return dq, dk, dv, None, None, None, None, None
+
+
 _mark_allow_in_graph(
     AttentionTritonFunction,
     AttentionTritonMXFP8Function,
     AttentionTritonBlockwise2DFunction,
     AttentionCsrcFP8BwdFunction,
+    AttentionOpusFunction,
 )
 
 
@@ -650,6 +713,7 @@ def attention(
     backend_type: str = "auto",
     cp_param_bundle=None,
     grad_quant_type: Optional[str] = None,
+    seq_major_out: bool = False,
 ):
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
@@ -668,6 +732,48 @@ def attention(
     # Resolve "auto": prefer CK csrc when available, fall back to Triton.
     if backend_type == "auto":
         backend_type = "aiter_csrc" if _is_aiter_available() else "aiter_triton"
+
+    if backend_type == "aiter_opus":
+        if not _is_aiter_available():
+            raise RuntimeError(
+                "AITER is not installed. The aiter_opus attention backend requires "
+                "'aiter' — install it or use backend_type='aiter_triton'."
+            )
+        from lumen.kernels.attention.attention_impl import opus_available
+
+        opus_ok = (
+            cp_param_bundle is None
+            and not return_lse
+            and not return_attn_probs
+            and opus_available(
+                q,
+                k,
+                v,
+                dropout_p=dropout_p,
+                window_size_left=int(window_size[0]),
+                window_size_right=int(window_size[1]),
+                bias=bias,
+                alibi_slopes=alibi_slopes,
+            )
+        )
+        if opus_ok:
+            return AttentionOpusFunction.apply(
+                q,
+                k,
+                v,
+                softmax_scale,
+                causal,
+                deterministic,
+                grad_quant_type,
+                seq_major_out,
+            )
+        logger.info(
+            "attention: opus backend not eligible (q=%s, k=%s, dtype=%s); using csrc",
+            tuple(q.shape),
+            tuple(k.shape),
+            q.dtype,
+        )
+        backend_type = "aiter_csrc"
 
     # Context-parallelism path
     if cp_param_bundle is not None:

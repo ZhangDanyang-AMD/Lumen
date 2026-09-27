@@ -63,9 +63,9 @@ class LumenAttention(torch.nn.Module):
         self._is_fp8 = backend_type in _FP8_BACKENDS or quant_type is not None
 
         if not self._is_fp8:
-            if backend_type == "aiter_csrc" and not is_aiter_available():
+            if backend_type in ("aiter_csrc", "aiter_opus") and not is_aiter_available():
                 raise RuntimeError(
-                    "AITER is not installed. The aiter_csrc backend requires "
+                    f"AITER is not installed. The {backend_type} backend requires "
                     "'aiter' — install it or use backend_type='aiter_triton'."
                 )
 
@@ -84,7 +84,7 @@ class LumenAttention(torch.nn.Module):
             # its default ("aiter_csrc"), _is_fp8 becomes True but the backend
             # is still the non-FP8 variant.  Map to the corresponding FP8
             # backend so the dispatch succeeds transparently.
-            if _backend == "aiter_csrc":
+            if _backend in ("aiter_csrc", "aiter_opus"):
                 _backend = "aiter_triton"
             elif _backend == "aiter_asm":
                 _backend = "aiter_asm_fp8"

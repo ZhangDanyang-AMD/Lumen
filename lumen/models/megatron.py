@@ -333,6 +333,7 @@ _BACKEND_MAP = {
     "triton": ("aiter_triton", "aiter_triton_fp8"),
     "csrc": ("aiter_csrc", "aiter_csrc_fp8"),
     "asm": ("aiter_csrc", "aiter_asm_fp8"),
+    "opus": ("aiter_opus", "aiter_triton_fp8"),
 }
 
 
@@ -2166,9 +2167,11 @@ def add_common_megatron_args(parser):
         "--lumen-attn-backend",
         type=str,
         default="auto",
-        choices=["auto", "triton", "csrc", "asm"],
+        choices=["auto", "triton", "csrc", "asm", "opus"],
         help="Lumen attention kernel backend. 'auto' prefers csrc with triton fallback. "
-        "'asm' uses ASM kernels with fallback chain: asm -> csrc -> triton.",
+        "'asm' uses ASM kernels with fallback chain: asm -> csrc -> triton. "
+        "'opus' uses the gfx950 BF16 OPUS forward with the csrc backward, "
+        "falling back to csrc for unsupported shapes.",
     )
     safe_add_argument(
         lumen,

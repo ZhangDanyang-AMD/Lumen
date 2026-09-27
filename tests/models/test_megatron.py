@@ -886,7 +886,7 @@ class TestAddCommonMegatronArgs:
         assert args.lumen_attn_backend == "auto"
 
     def test_lumen_attn_backend_choices(self):
-        for backend in ["auto", "triton", "csrc", "asm"]:
+        for backend in ["auto", "triton", "csrc", "asm", "opus"]:
             args = self._parse(["--lumen-attn-backend", backend])
             assert args.lumen_attn_backend == backend
 
