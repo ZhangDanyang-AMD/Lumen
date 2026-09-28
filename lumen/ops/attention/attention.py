@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 from lumen.core.grad_quant import quantize_grad_tensor
 
+_ATTN_BWD_ATOMIC_FP32 = _os.environ.get("LUMEN_ATTN_BWD_ATOMIC_FP32", "1") == "1"
+
 
 def _is_aiter_available() -> bool:
     try:
@@ -675,6 +677,7 @@ class AttentionOpusFunction(torch.autograd.Function):
             None,
             ctx.deterministic,
             rng_state,
+            is_v3_atomic_fp32=_ATTN_BWD_ATOMIC_FP32,
         )
         gqt = ctx.grad_quant_type
         dq = quantize_grad_tensor(dq, gqt)
