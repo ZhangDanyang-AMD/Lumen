@@ -406,14 +406,9 @@ class SonicMoEExperts(nn.Module):
 
             return _profiled_experts(permuted_local_hidden_states, _run), None
 
-        # Keep Megatron's dispatcher-produced host counts on the CPU. The
-        # pre-routed entry point creates the GPU offsets needed by Triton while
-        # the multi-stream hipBLASLt backend reuses host offsets, matching
-        # TEGroupedMLP's one-D2H-per-layer metadata boundary.
-        counts = torch.as_tensor(
-            cpu_counts if cpu_counts is not None else gpu_counts,
-            dtype=torch.int32,
-        )
+        # Prefer device-side counts. AITER builds cu_seqlens on GPU; do not
+        # .cpu() a GPU tensor here — that D2H is the per-layer host wait.
+        counts = torch.as_tensor(counts_source, dtype=torch.int32)
 
         from aiter.ops.triton.sonicmoe import (
             SonicMoEActivationType,
