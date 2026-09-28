@@ -1345,6 +1345,73 @@ def install_moe_device_alltoall():
     mappings._AllToAll._lumen_device_a2a = True
 
 
+
+# ── Router backward GEMM in bf16 ────────────────────────────────────────────
+
+_ROUTER_BWD_BF16 = os.environ.get("LUMEN_ROUTER_BWD_BF16", "0") == "1"
+_ROUTER_BWD_BF16_LOGGED = False
+
+
+def install_router_bwd_bf16():
+    """Run the fp32 router's backward GEMMs on bf16 inputs.
+
+    Forward logits stay fp32. Megatron otherwise casts the full activation to
+    fp32 before the input and weight gradients. The returned gradients are
+    cast back to the parameter dtype either way.
+
+    Gated by ``LUMEN_ROUTER_BWD_BF16=1``.
+    """
+    if not _ROUTER_BWD_BF16:
+        return
+
+    from megatron.core.transformer.moe import moe_utils
+
+    cls = moe_utils.RouterGatingLinearFunction
+    if getattr(cls, "_lumen_bwd_bf16", False):
+        return
+    te_general_gemm = moe_utils.te_general_gemm
+    if te_general_gemm is None:
+        print("Lumen router bwd bf16: te_general_gemm missing, skipped", flush=True)
+        return
+    orig_backward = cls.backward
+
+    def backward(ctx, grad_output):
+        if ctx.router_dtype != torch.float32:
+            return orig_backward(ctx, grad_output)
+        inp, weight, bias = ctx.saved_tensors
+        inp_shape = inp.shape
+        grad_shape = grad_output.shape
+        inp = inp.view(-1, inp_shape[-1])
+        grad_output = grad_output.view(-1, grad_shape[-1])
+        grad_bf16 = (
+            grad_output
+            if grad_output.dtype == torch.bfloat16
+            else grad_output.to(torch.bfloat16)
+        )
+        weight_bf16 = weight if weight.dtype == torch.bfloat16 else weight.to(torch.bfloat16)
+        inp_bf16 = inp if inp.dtype == torch.bfloat16 else inp.to(torch.bfloat16)
+        grad_input = te_general_gemm(
+            weight_bf16, grad_bf16, torch.float32, layout="NN", grad=True
+        )[0]
+        grad_weight = te_general_gemm(
+            inp_bf16, grad_bf16, torch.float32, layout="NT", grad=True
+        )[0]
+        grad_bias = grad_output.sum(dim=0).to(ctx.weight_dtype) if bias is not None else None
+        return (
+            grad_input.to(ctx.input_dtype).view(inp_shape),
+            grad_weight.to(ctx.weight_dtype),
+            grad_bias,
+            None,
+        )
+
+    cls.backward = staticmethod(backward)
+    cls._lumen_bwd_bf16 = True
+    global _ROUTER_BWD_BF16_LOGGED
+    if not _ROUTER_BWD_BF16_LOGGED:
+        _ROUTER_BWD_BF16_LOGGED = True
+        print("Lumen router backward GEMM: bf16 inputs, fp32 accumulate", flush=True)
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 def install_all():
@@ -1368,6 +1435,7 @@ def install_all():
     install_optimizer_patches()
     install_moe_async_split_metadata()
     install_moe_device_alltoall()
+    install_router_bwd_bf16()
     # install_split_along_dim()  # disabled — adds forward overhead
 
     # SDMA DP gradient all-reduce (replaces NCCL when --use-sdma is set)
