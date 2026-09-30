@@ -57,6 +57,7 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/modules/attention_megatron.py:/workspace/Lumen/lumen/modules/attention_megatron.py" \
     --volume "${REPO_ROOT}/lumen/modules/attention_mla.py:/workspace/Lumen/lumen/modules/attention_mla.py" \
     --volume "${REPO_ROOT}/lumen/ops/attention/attention.py:/workspace/Lumen/lumen/ops/attention/attention.py" \
+    --volume "${REPO_ROOT}/lumen/ops/attention/hf_patch.py:/workspace/Lumen/lumen/ops/attention/hf_patch.py" \
     --volume "${REPO_ROOT}/lumen/modules/parallel_linear.py:/workspace/Lumen/lumen/modules/parallel_linear.py" \
     --volume "${REPO_ROOT}/lumen/modules/layernorm_linear.py:/workspace/Lumen/lumen/modules/layernorm_linear.py" \
     --volume "${REPO_ROOT}/lumen/ops/fused_residual_norm.py:/workspace/Lumen/lumen/ops/fused_residual_norm.py" \
