@@ -762,11 +762,13 @@ class EPShardedMoeBlock(nn.Module):
             recv_splits,
             differentiable=True,
         )
+        # fused=True uses TE moe_sort_chunks_by_index and skips .tolist(),
+        # which would sync the compute stream before the expert GEMM.
         grouped_hidden = transpose_variable_chunks(
             recv_hidden,
             recv_counts_by_sender,
             source_layout="sender_major",
-            fused=False,
+            fused=True,
         )
         grouped_output = self.local_experts(
             grouped_hidden,
@@ -776,7 +778,7 @@ class EPShardedMoeBlock(nn.Module):
             grouped_output,
             recv_counts_by_sender,
             source_layout="expert_major",
-            fused=False,
+            fused=True,
         )
         returned = self._exchange_tensor(
             local_output,
