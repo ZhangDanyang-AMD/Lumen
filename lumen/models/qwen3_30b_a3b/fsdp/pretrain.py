@@ -729,19 +729,13 @@ class EPShardedMoeBlock(nn.Module):
     ) -> torch.Tensor:
         """Dispatch expert-major tokens and avoid receiver-side token sorting."""
         from lumen.ops.moe.dispatch_layout import (
+            gather_tokens,
             transpose_variable_chunks,
             weighted_token_reduce,
         )
 
-        token_ids = (
-            torch.arange(hidden_flat.shape[0], device=hidden_flat.device)
-            .unsqueeze(1)
-            .expand_as(selected_experts)
-            .reshape(-1)
-        )
         flat_experts = selected_experts.reshape(-1)
         order = torch.argsort(flat_experts, stable=True)
-        send_token_ids = token_ids[order]
 
         local_counts = torch.bincount(flat_experts, minlength=self.num_experts)
         global_counts = self._gather_expert_counts(local_counts)
@@ -757,8 +751,13 @@ class EPShardedMoeBlock(nn.Module):
         )
         recv_splits = recv_counts_by_sender.sum(dim=1).tolist()
 
+        send_hidden, route_rows = gather_tokens(
+            hidden_flat,
+            order,
+            selected_experts.shape[1],
+        )
         recv_hidden = self._exchange_tensor(
-            hidden_flat[send_token_ids],
+            send_hidden,
             send_splits,
             recv_splits,
             differentiable=True,
@@ -789,7 +788,7 @@ class EPShardedMoeBlock(nn.Module):
         )
         # index_add_ scatters duplicate token ids. Gathering each token's
         # top-k rows and reducing them avoids those atomics.
-        return weighted_token_reduce(returned, order, routing_weights)
+        return weighted_token_reduce(returned, route_rows, routing_weights)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Route tokens to local experts and restore their original ordering."""

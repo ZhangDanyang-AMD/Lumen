@@ -212,20 +212,162 @@ def _token_reduce_kernels():
     return _fwd, _bwd_src, _bwd_weight
 
 
+@functools.cache
+def _token_gather_kernels():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def _fwd(
+        hidden_states,
+        order,
+        gathered,
+        stride_h,
+        stride_g,
+        hidden,
+        topk: tl.constexpr,
+        block: tl.constexpr,
+    ):
+        row = tl.program_id(0)
+        tile = tl.program_id(1)
+        route = tl.load(order + row)
+        token = route // topk
+        offs = tile * block + tl.arange(0, block)
+        mask = offs < hidden
+        value = tl.load(
+            hidden_states + token * stride_h + offs,
+            mask=mask,
+            other=0.0,
+        )
+        tl.store(gathered + row * stride_g + offs, value, mask=mask)
+
+    @triton.jit
+    def _bwd(
+        grad_gathered,
+        rows,
+        grad_hidden,
+        stride_g,
+        stride_h,
+        hidden,
+        topk: tl.constexpr,
+        block: tl.constexpr,
+    ):
+        token = tl.program_id(0)
+        tile = tl.program_id(1)
+        offs = tile * block + tl.arange(0, block)
+        mask = offs < hidden
+        acc = tl.zeros((block,), dtype=tl.float32)
+        for slot in tl.static_range(topk):
+            row = tl.load(rows + token * topk + slot)
+            value = tl.load(
+                grad_gathered + row * stride_g + offs,
+                mask=mask,
+                other=0.0,
+            ).to(tl.float32)
+            acc += value
+        tl.store(
+            grad_hidden + token * stride_h + offs,
+            acc.to(tl.bfloat16),
+            mask=mask,
+        )
+
+    return _fwd, _bwd
+
+
+class _TokenGather(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, hidden_states: torch.Tensor, order: torch.Tensor, topk: int):
+        import triton
+
+        tokens, hidden = hidden_states.shape
+        slots = order.numel()
+        rows = torch.empty(slots, dtype=torch.int32, device=hidden_states.device)
+        order_i64 = order.to(dtype=torch.int64)
+        rows.scatter_(
+            0,
+            order_i64,
+            torch.arange(slots, device=hidden_states.device, dtype=torch.int32),
+        )
+        gathered = torch.empty(
+            slots,
+            hidden,
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+        fwd, _ = _token_gather_kernels()
+        fwd[(slots, triton.cdiv(hidden, _BLOCK))](
+            hidden_states,
+            order_i64,
+            gathered,
+            hidden_states.stride(0),
+            gathered.stride(0),
+            hidden,
+            topk,
+            _BLOCK,
+        )
+        ctx.save_for_backward(rows)
+        ctx.hidden_shape = hidden_states.shape
+        ctx.topk = topk
+        ctx.mark_non_differentiable(rows)
+        return gathered, rows
+
+    @staticmethod
+    def backward(ctx, grad_gathered: torch.Tensor, _grad_rows):
+        import triton
+
+        (rows,) = ctx.saved_tensors
+        tokens, hidden = ctx.hidden_shape
+        if grad_gathered.stride(-1) != 1:
+            grad_gathered = grad_gathered.contiguous()
+        grad_hidden = torch.empty(
+            tokens,
+            hidden,
+            dtype=grad_gathered.dtype,
+            device=grad_gathered.device,
+        )
+        _, bwd = _token_gather_kernels()
+        bwd[(tokens, triton.cdiv(hidden, _BLOCK))](
+            grad_gathered,
+            rows,
+            grad_hidden,
+            grad_gathered.stride(0),
+            grad_hidden.stride(0),
+            hidden,
+            ctx.topk,
+            _BLOCK,
+        )
+        return grad_hidden, None, None
+
+
+def gather_tokens(
+    hidden_states: torch.Tensor,
+    order: torch.Tensor,
+    topk: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather token rows into expert order and return the inverse route map."""
+    if hidden_states.dtype != torch.bfloat16:
+        raise TypeError("gather_tokens expects bfloat16 hidden states")
+    if not hidden_states.is_cuda:
+        token_ids = (
+            torch.arange(hidden_states.shape[0], device=hidden_states.device)
+            .unsqueeze(1)
+            .expand(-1, topk)
+            .reshape(-1)
+        )
+        rows = torch.empty_like(order)
+        rows.scatter_(0, order, torch.arange(order.numel(), device=order.device))
+        return hidden_states[token_ids[order]], rows
+    return _TokenGather.apply(hidden_states.contiguous(), order, topk)
+
+
 class _WeightedTokenReduce(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, returned: torch.Tensor, order: torch.Tensor, weights: torch.Tensor):
+    def forward(ctx, returned: torch.Tensor, rows: torch.Tensor, weights: torch.Tensor):
         import triton
 
         tokens, topk = weights.shape
         hidden = returned.shape[-1]
         slots = returned.shape[0]
-        rows = torch.empty(slots, dtype=torch.int32, device=returned.device)
-        rows.scatter_(
-            0,
-            order.to(dtype=torch.int64),
-            torch.arange(slots, device=returned.device, dtype=torch.int32),
-        )
         out = torch.empty(tokens, hidden, dtype=returned.dtype, device=returned.device)
         fwd, _, _ = _token_reduce_kernels()
         fwd[(tokens, triton.cdiv(hidden, _BLOCK))](
@@ -287,20 +429,19 @@ class _WeightedTokenReduce(torch.autograd.Function):
 
 def weighted_token_reduce(
     returned: torch.Tensor,
-    order: torch.Tensor,
+    rows: torch.Tensor,
     weights: torch.Tensor,
 ) -> torch.Tensor:
     """Sum top-k expert outputs back onto their tokens.
 
-    ``returned`` is expert-sorted and ``order`` maps each sorted row to its
-    original ``[token, slot]`` index. ``weights`` keeps that original token
-    order. The reduction gathers each token's rows instead of atomically
+    ``returned`` is expert-sorted and ``rows`` maps each original
+    ``[token, slot]`` route to its sorted row. ``weights`` keeps that original
+    token order. The reduction gathers each token's rows instead of atomically
     scattering them.
     """
     if returned.dtype != torch.bfloat16:
         raise TypeError("weighted_token_reduce expects bfloat16 expert outputs")
     if not returned.is_cuda:
-        unsorted = torch.empty_like(returned)
-        unsorted[order] = returned
+        unsorted = returned[rows]
         return (unsorted.view(*weights.shape, returned.shape[-1]) * weights.unsqueeze(-1)).sum(dim=1)
-    return _WeightedTokenReduce.apply(returned.contiguous(), order, weights.contiguous())
+    return _WeightedTokenReduce.apply(returned.contiguous(), rows, weights.contiguous())
