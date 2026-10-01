@@ -357,10 +357,28 @@ class _TEGroupedLocalExperts(nn.Module):
 class _SonicLocalExperts(nn.Module):
     """Local HF expert slice backed by AITER SonicMoE."""
 
-    def __init__(self, experts: nn.Module, start: int, end: int):
+    def __init__(
+        self,
+        experts: nn.Module,
+        start: int,
+        end: int,
+        indices: Optional[list[int]] = None,
+    ):
         super().__init__()
         self.num_experts = end - start
-        if hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
+        if indices is not None:
+            if len(indices) != self.num_experts:
+                raise ValueError(
+                    f"expected {self.num_experts} expert indices, got {len(indices)}"
+                )
+            index = torch.tensor(
+                indices,
+                dtype=torch.long,
+                device=experts.gate_up_proj.device,
+            )
+            packed_gate_up = experts.gate_up_proj.index_select(0, index).detach()
+            packed_down = experts.down_proj.index_select(0, index).detach()
+        elif hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
             packed_gate_up = experts.gate_up_proj[start:end].detach()
             packed_down = experts.down_proj[start:end].detach()
         elif isinstance(experts, (nn.ModuleList, list)):
@@ -561,6 +579,7 @@ class EPShardedMoeBlock(nn.Module):
         ep_size: int,
         ep_group: Optional[dist.ProcessGroup],
         expert_backend: str = "sequential",
+        layer_idx: Optional[int] = None,
     ):
         super().__init__()
         self.gate = original_block.gate
@@ -572,6 +591,7 @@ class EPShardedMoeBlock(nn.Module):
         self._lumen_moe_global_expert_layout = False
         self._sonic_first_forward = expert_backend == "sonic"
         self._offload_moe_activations = False
+        self._expert_slot: Optional[torch.Tensor] = None
 
         experts = original_block.experts
         num_experts = getattr(experts, "num_experts", None)
@@ -587,6 +607,7 @@ class EPShardedMoeBlock(nn.Module):
         self.experts_per_rank = self.num_experts // ep_size
         self.local_expert_start = ep_rank * self.experts_per_rank
         end = self.local_expert_start + self.experts_per_rank
+        local_indices = self._expert_indices(layer_idx, expert_backend)
         if hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
             if expert_backend == "te_grouped":
                 self.local_experts = _TEGroupedLocalExperts(
@@ -599,6 +620,7 @@ class EPShardedMoeBlock(nn.Module):
                     experts,
                     self.local_expert_start,
                     end,
+                    indices=local_indices,
                 )
             else:
                 self.local_experts = _FusedLocalExperts(experts, self.local_expert_start, end)
@@ -662,13 +684,53 @@ class EPShardedMoeBlock(nn.Module):
             routing_weights, selected_experts = torch.topk(
                 routing_probs, self.top_k, dim=-1
             )
-            return routing_weights.to(hidden_states.dtype), selected_experts
+            routing_weights = routing_weights.to(hidden_states.dtype)
+        else:
+            routing_scores = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+            routing_weights, selected_experts = torch.topk(
+                routing_scores, self.top_k, dim=-1
+            )
+            if getattr(self.gate, "norm_topk_prob", getattr(self, "norm_topk_prob", False)):
+                routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+            routing_weights = routing_weights.to(hidden_states.dtype)
+        if self._expert_slot is not None:
+            selected_experts = self._expert_slot[selected_experts.long()]
+        return routing_weights, selected_experts
 
-        routing_scores = F.softmax(router_logits, dim=-1, dtype=torch.float32)
-        routing_weights, selected_experts = torch.topk(routing_scores, self.top_k, dim=-1)
-        if getattr(self.gate, "norm_topk_prob", getattr(self, "norm_topk_prob", False)):
-            routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
-        return routing_weights.to(hidden_states.dtype), selected_experts
+    def _expert_indices(
+        self,
+        layer_idx: Optional[int],
+        expert_backend: str,
+    ) -> Optional[list[int]]:
+        """Permute expert ids so each rank's measured load is even.
+
+        The table maps an original expert id onto a contiguous slot. Rank r
+        still owns slots [16*r, 16*r+16); only which physical experts sit
+        there changes. Routing weights stay on the original experts.
+        """
+        if os.environ.get("LUMEN_EXPERT_REMAP", "0") != "1":
+            return None
+        if expert_backend != "sonic":
+            raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires expert_backend=sonic")
+        if layer_idx is None:
+            raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires a decoder layer index")
+        from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import expert_slot
+
+        slot = expert_slot(layer_idx)
+        if len(slot) != self.num_experts or sorted(slot) != list(range(self.num_experts)):
+            raise RuntimeError(
+                f"expert placement for layer {layer_idx} is not a permutation "
+                f"of {self.num_experts} experts"
+            )
+        inverse = [0] * self.num_experts
+        for original, new_slot in enumerate(slot):
+            inverse[new_slot] = original
+        self._expert_slot = torch.tensor(
+            slot,
+            dtype=torch.long,
+            device=self.gate.weight.device,
+        )
+        return inverse[self.local_expert_start : self.local_expert_start + self.experts_per_rank]
 
     def _exchange_counts(self, send_counts: torch.Tensor) -> torch.Tensor:
         if self.ep_size == 1:
@@ -905,7 +967,7 @@ def shard_moe_experts(
 ) -> nn.Module:
     """Replace all HuggingFace Qwen3 MoE blocks with EP-sharded blocks."""
     replaced = 0
-    for layer in model.model.layers:
+    for layer_idx, layer in enumerate(model.model.layers):
         mlp = getattr(layer, "mlp", None)
         if mlp is not None and hasattr(mlp, "experts") and hasattr(mlp, "gate"):
             layer.mlp = EPShardedMoeBlock(
@@ -914,6 +976,7 @@ def shard_moe_experts(
                 ep_size=groups.ep_size,
                 ep_group=groups.ep_group,
                 expert_backend=expert_backend,
+                layer_idx=layer_idx,
             )
             replaced += 1
     _rank0_log(
@@ -921,6 +984,11 @@ def shard_moe_experts(
         replaced,
         QWEN3_30B_A3B_CONFIG["num_experts"] // groups.ep_size,
     )
+    if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
+        _rank0_log(
+            "static per-layer expert placement enabled "
+            "(permutation only; each token still hits the same expert)"
+        )
     return model
 
 
