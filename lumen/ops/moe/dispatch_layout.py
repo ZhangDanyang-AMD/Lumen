@@ -209,7 +209,41 @@ def _token_reduce_kernels():
             acc += grad * value
         tl.store(grad_weight + index, tl.sum(acc))
 
-    return _fwd, _bwd_src, _bwd_weight
+    @triton.jit
+    def _bwd_fused(
+        grad_out,
+        src,
+        rows,
+        weights,
+        grad_src,
+        grad_weight,
+        stride_g,
+        stride_s,
+        hidden,
+        topk: tl.constexpr,
+        block: tl.constexpr,
+    ):
+        index = tl.program_id(0)
+        token = index // topk
+        row = tl.load(rows + index)
+        weight = tl.load(weights + index).to(tl.float32)
+        acc = tl.zeros((block,), dtype=tl.float32)
+        for hidden_offset in range(0, hidden, block):
+            offs = hidden_offset + tl.arange(0, block)
+            mask = offs < hidden
+            grad = tl.load(
+                grad_out + token * stride_g + offs, mask=mask, other=0.0
+            ).to(tl.float32)
+            value = tl.load(src + row * stride_s + offs, mask=mask, other=0.0).to(tl.float32)
+            tl.store(
+                grad_src + row * stride_s + offs,
+                (grad * weight).to(tl.bfloat16),
+                mask=mask,
+            )
+            acc += grad * value
+        tl.store(grad_weight + index, tl.sum(acc))
+
+    return _fwd, _bwd_src, _bwd_weight, _bwd_fused
 
 
 @functools.cache
@@ -369,7 +403,7 @@ class _WeightedTokenReduce(torch.autograd.Function):
         hidden = returned.shape[-1]
         slots = returned.shape[0]
         out = torch.empty(tokens, hidden, dtype=returned.dtype, device=returned.device)
-        fwd, _, _ = _token_reduce_kernels()
+        fwd, _, _, _ = _token_reduce_kernels()
         fwd[(tokens, triton.cdiv(hidden, _BLOCK))](
             returned,
             rows,
@@ -395,35 +429,55 @@ class _WeightedTokenReduce(torch.autograd.Function):
         topk = ctx.topk
         hidden = returned.shape[-1]
         slots = returned.shape[0]
-        _, bwd_src, bwd_weight = _token_reduce_kernels()
+        _, bwd_src, bwd_weight, bwd_fused = _token_reduce_kernels()
         grad_returned = grad_weights = None
-        if ctx.needs_input_grad[0]:
+        both = ctx.needs_input_grad[0] and ctx.needs_input_grad[2]
+        if both:
             grad_returned = torch.empty_like(returned)
-            bwd_src[(slots, triton.cdiv(hidden, _BLOCK))](
+            grad_weight_flat = torch.empty(slots, dtype=torch.float32, device=returned.device)
+            bwd_fused[(slots,)](
                 grad_out,
+                returned,
                 rows,
                 weights,
                 grad_returned,
+                grad_weight_flat,
                 grad_out.stride(0),
                 grad_returned.stride(0),
                 hidden,
                 topk,
                 _BLOCK,
-            )
-        if ctx.needs_input_grad[2]:
-            grad_weight_flat = torch.empty(slots, dtype=torch.float32, device=returned.device)
-            bwd_weight[(slots,)](
-                grad_out,
-                returned,
-                rows,
-                grad_weight_flat,
-                grad_out.stride(0),
-                returned.stride(0),
-                hidden,
-                topk,
-                _BLOCK,
+                num_warps=4,
             )
             grad_weights = grad_weight_flat.view_as(weights).to(dtype=weights.dtype)
+        else:
+            if ctx.needs_input_grad[0]:
+                grad_returned = torch.empty_like(returned)
+                bwd_src[(slots, triton.cdiv(hidden, _BLOCK))](
+                    grad_out,
+                    rows,
+                    weights,
+                    grad_returned,
+                    grad_out.stride(0),
+                    grad_returned.stride(0),
+                    hidden,
+                    topk,
+                    _BLOCK,
+                )
+            if ctx.needs_input_grad[2]:
+                grad_weight_flat = torch.empty(slots, dtype=torch.float32, device=returned.device)
+                bwd_weight[(slots,)](
+                    grad_out,
+                    returned,
+                    rows,
+                    grad_weight_flat,
+                    grad_out.stride(0),
+                    returned.stride(0),
+                    hidden,
+                    topk,
+                    _BLOCK,
+                )
+                grad_weights = grad_weight_flat.view_as(weights).to(dtype=weights.dtype)
         return grad_returned, None, grad_weights
 
 

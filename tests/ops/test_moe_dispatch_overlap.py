@@ -7,7 +7,12 @@ import torch
 import torch.nn as nn
 
 from lumen.config import LumenConfig
-from lumen.ops.moe.dispatch_layout import transpose_variable_chunks
+from lumen.ops.moe.dispatch_layout import (
+    _BLOCK,
+    _token_reduce_kernels,
+    transpose_variable_chunks,
+    weighted_token_reduce,
+)
 from lumen.ops.moe.dispatch_overlap import begin_count_exchange
 
 
@@ -134,3 +139,62 @@ def test_lumen_config_maps_and_patches_global_expert_layout():
     config.enable(model)
     assert config.moe_global_expert_layout is True
     assert model[0].enabled is True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
+def test_weighted_token_reduce_backward_matches_split_kernels():
+    torch.manual_seed(3)
+    tokens, topk, hidden = 32, 8, 2048
+    slots = tokens * topk
+    returned = torch.randn(slots, hidden, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    rows = torch.randperm(slots, device="cuda", dtype=torch.int32).view(tokens, topk)
+    weights = torch.rand(tokens, topk, device="cuda", dtype=torch.float32, requires_grad=True)
+    grad_out = torch.randn(tokens, hidden, device="cuda", dtype=torch.bfloat16)
+
+    out = weighted_token_reduce(returned, rows, weights)
+    out.backward(grad_out)
+
+    token = torch.arange(slots, device="cuda") // topk
+    grad = grad_out[token]
+    expected_src = torch.empty_like(returned)
+    expected_src[rows.view(-1)] = (grad.float() * weights.detach().view(-1)[:, None]).bfloat16()
+    import triton
+
+    _, bwd_src, bwd_weight, _ = _token_reduce_kernels()
+    split_src = torch.empty_like(returned)
+    split_weight = torch.empty(slots, device="cuda", dtype=torch.float32)
+    bwd_src[(slots, triton.cdiv(hidden, _BLOCK))](
+        grad_out,
+        rows,
+        weights.detach(),
+        split_src,
+        grad_out.stride(0),
+        split_src.stride(0),
+        hidden,
+        topk,
+        _BLOCK,
+    )
+    bwd_weight[(slots,)](
+        grad_out,
+        returned.detach(),
+        rows,
+        split_weight,
+        grad_out.stride(0),
+        returned.stride(0),
+        hidden,
+        topk,
+        _BLOCK,
+    )
+
+    torch.testing.assert_close(out, _reference_reduce(returned.detach(), rows, weights.detach()))
+    torch.testing.assert_close(returned.grad, expected_src, rtol=0, atol=0)
+    torch.testing.assert_close(returned.grad, split_src, rtol=0, atol=0)
+    torch.testing.assert_close(weights.grad, split_weight.view_as(weights), rtol=0, atol=0)
+
+
+def _reference_reduce(returned, rows, weights):
+    unsorted = returned[rows.view(-1)].view(*weights.shape, returned.shape[-1])
+    acc = torch.zeros(weights.shape[0], returned.shape[-1], dtype=torch.float32, device=returned.device)
+    for slot in range(weights.shape[1]):
+        acc += unsorted[:, slot].float() * weights[:, slot].float().unsqueeze(-1)
+    return acc.bfloat16()
