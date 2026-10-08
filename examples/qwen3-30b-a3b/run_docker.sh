@@ -53,6 +53,10 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
     --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
     --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention.py:/workspace/Lumen/lumen/modules/attention.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention_megatron.py:/workspace/Lumen/lumen/modules/attention_megatron.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention_mla.py:/workspace/Lumen/lumen/modules/attention_mla.py" \
+    --volume "${REPO_ROOT}/lumen/ops/attention/attention.py:/workspace/Lumen/lumen/ops/attention/attention.py" \
     --volume "${REPO_ROOT}/lumen/modules/parallel_linear.py:/workspace/Lumen/lumen/modules/parallel_linear.py" \
     --volume "${REPO_ROOT}/lumen/modules/layernorm_linear.py:/workspace/Lumen/lumen/modules/layernorm_linear.py" \
     --volume "${REPO_ROOT}/lumen/ops/fused_residual_norm.py:/workspace/Lumen/lumen/ops/fused_residual_norm.py" \
