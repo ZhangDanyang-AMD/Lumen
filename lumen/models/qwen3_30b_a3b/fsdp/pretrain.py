@@ -666,7 +666,10 @@ class EPShardedMoeBlock(nn.Module):
     def _route(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         gate_output = self.gate(hidden_states)
         if isinstance(gate_output, tuple) and len(gate_output) >= 3:
-            return gate_output[1], gate_output[2]
+            routing_weights, selected_experts = gate_output[1], gate_output[2]
+            if self._expert_slot is not None:
+                selected_experts = self._expert_slot[selected_experts.long()]
+            return routing_weights, selected_experts
 
         router_logits = gate_output
         if self._lumen_fused_router:
