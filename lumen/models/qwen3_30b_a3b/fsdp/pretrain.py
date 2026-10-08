@@ -799,29 +799,61 @@ class EPShardedMoeBlock(nn.Module):
             transpose_variable_chunks,
             weighted_token_reduce,
         )
+        from lumen.ops.moe.dispatch_overlap import device_a2a_enabled, host_split_pair
 
         flat_experts = selected_experts.reshape(-1)
         order = torch.argsort(flat_experts, stable=True)
 
         local_counts = torch.bincount(flat_experts, minlength=self.num_experts)
-        global_counts = self._gather_expert_counts(local_counts)
+        # Count all-gather is a few KB. Run it beside the token gather, and
+        # materialize split lists on a side stream so RCCL does not drain the
+        # gather before launch. Payload bytes are unchanged.
+        use_device_splits = (
+            device_a2a_enabled()
+            and self.ep_size > 1
+            and local_counts.is_cuda
+        )
+        if use_device_splits:
+            gathered = torch.empty(
+                self.ep_size * self.num_experts,
+                dtype=local_counts.dtype,
+                device=local_counts.device,
+            )
+            count_work = dist.all_gather_into_tensor(
+                gathered,
+                local_counts.contiguous(),
+                group=self.ep_group,
+                async_op=True,
+            )
+            send_hidden, route_rows = gather_tokens(
+                hidden_flat,
+                order,
+                selected_experts.shape[1],
+            )
+            if count_work is not None:
+                count_work.wait()
+            global_counts = gathered.view(self.ep_size, self.num_experts)
+        else:
+            global_counts = self._gather_expert_counts(local_counts)
+            send_hidden, route_rows = gather_tokens(
+                hidden_flat,
+                order,
+                selected_experts.shape[1],
+            )
+        # Keep this slice a view. contiguous() would queue a copy on the
+        # default stream, behind the token gather, and the side-stream read
+        # would copy uninitialized memory.
         recv_counts_by_sender = global_counts[
             :,
             self.local_expert_start : self.local_expert_start
             + self.experts_per_rank,
-        ].contiguous()
-        send_splits = (
-            local_counts.view(self.ep_size, self.experts_per_rank)
-            .sum(dim=1)
-            .tolist()
+        ]
+        send_splits, recv_splits = host_split_pair(
+            local_counts.view(self.ep_size, self.experts_per_rank),
+            recv_counts_by_sender,
         )
-        recv_splits = recv_counts_by_sender.sum(dim=1).tolist()
+        recv_counts_by_sender = recv_counts_by_sender.contiguous()
 
-        send_hidden, route_rows = gather_tokens(
-            hidden_flat,
-            order,
-            selected_experts.shape[1],
-        )
         recv_hidden = self._exchange_tensor(
             send_hidden,
             send_splits,
