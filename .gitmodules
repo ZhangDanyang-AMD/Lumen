@@ -1,6 +1,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
-	url = https://github.com/ZhangDanyang-AMD/aiter.git
+	url = https://github.com/WuLei-AMD/aiter.git
 	branch = lumen/moe
 [submodule "third_party/mori"]
 	path = third_party/mori
