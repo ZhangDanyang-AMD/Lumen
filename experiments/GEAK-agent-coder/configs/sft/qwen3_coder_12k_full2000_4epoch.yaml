@@ -1,0 +1,43 @@
+profiles:
+  hardware: ../hardware/amd_mi308_gfx942.yaml
+  recipe: ../recipes/geak_mi308_dev.yaml
+
+model:
+  name_or_path: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  local_path: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/models/Qwen3-Coder-30B-A3B-Instruct
+  revision: b2cff646eb4bb1d68355c01b18ae02e7cf42d120
+
+distributed:
+  expert_backend: sonic
+  timeout_seconds: 7200
+
+optimizations:
+  fused_router: false
+  moe_global_expert_layout: true
+
+data:
+  train_path: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/data/build/qwen3_30b_a3b_full2000/train.tokenized.jsonl
+  validation_path: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/data/build/qwen3_30b_a3b_full2000/dev.tokenized.jsonl
+  max_sequence_length: 12288
+  pad_token_id: 151643
+  num_workers: 0
+
+training:
+  gradient_accumulation_steps: 4
+  gradient_checkpointing: true
+  selective_gc: true
+  moe_activation_offload: true
+  max_steps: 125
+  evaluation_interval: 25
+  validation_batches: 32
+  log_interval: 1
+
+output:
+  adapter_dir: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/outputs/qwen3-coder-12k-full2000-4epoch
+  resume_adapter_dir: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/outputs/qwen3-coder-12k-full2000-2epoch
+
+execution:
+  allow_training: true
+  data_manifest_path: /home/danyzhan/Lumen/experiments/GEAK-agent-coder/data/build/qwen3_30b_a3b_full2000/manifest.json
+  tokenizer_sha256: 4dbc3bb2f4583311d9745013e46f2e3dc2c066971c8f16fce90a2f8b5c4baa98
+  data_manifest_sha256: d39ae7e466d35fde9673c8228fdcaa250b098613ccbafe1b6f42a8c3bc546995

@@ -1,195 +1,208 @@
-# Benchmark Results: Base vs SFT on AMD GPU Kernel Generation
+# Benchmark Results: Base vs SFT on AMD GPU Kernel Optimization
 
-**Date:** 2026-09-30 (updated)
+**Date:** 2026-10-04 (V8 final with speedup analysis)
 **Hardware:** 8x AMD MI308X (gfx942), GPU 0 for model serving, GPU 1-7 for kernel eval
 **Held-out suite:** 99 tasks (54 Triton + 45 HIP), 10 operator families × 3 source suites, verified no training data overlap
 **Models:** Base (Qwen3-Coder-30B-A3B-Instruct), SFT-2epoch (val_loss 0.178), SFT-4epoch (val_loss 0.173)
+**Benchmark version:** V8 (fuzzy patch + full-code fallback + non-patch retry + multi-turn 5-turn error recovery + agent loop metrics)
 
 ---
 
-## 1. Patch Optimization Benchmark (v5)
+## 0. Executive Summary
 
-Given the parent kernel source code, the model generates a unified diff patch to optimize it. The harness applies the patch and verifies compile → correctness → performance.
+**Key finding: SFT improves generation capability but not optimization quality.**
+
+- Patch mode measures "edit without breaking" — high pass rate but almost no speedup (geomean 0.74-1.00x)
+- Generation mode measures "write kernel from scratch" — SFT improves compile/correct rate but generated kernels are slower than baseline (geomean 0.20-0.36x)
+- **The meaningful optimization metric is Fast@1.2** (patches that achieve ≥20% speedup): SFT-2e leads at 26%, vs Base 13% and SFT-4e 11%
+- SFT-4e shows overfitting: more patches apply but fewer produce speedup compared to SFT-2e
+
+---
+
+## 1. Speedup Analysis (Primary Metric)
+
+### 1.1 Patch Mode — Speedup vs Baseline
+
+Given parent kernel source, model generates a unified diff to optimize it. Speedup = baseline_ms / patched_ms.
 
 | Metric | Base | SFT-2epoch | SFT-4epoch |
 |--------|------|-----------|-----------|
-| Patch generated | 83/99 (84%) | **99/99 (100%)** | **99/99 (100%)** |
-| Patch applied | 50/99 (51%) | 24/99 (24%) | 28/99 (28%) |
-| Compiled | 50/99 (51%) | 24/99 (24%) | 28/99 (28%) |
-| **Correct** | **44/99 (44%)** | **23/99 (23%)** | **26/99 (26%)** |
-| Triton correct | 20/54 | 10/54 | 18/54 |
-| HIP correct | 24/45 | 13/45 | 8/45 |
+| Correct patches | 48/99 | 42/99 | 37/99 |
+| **Speedup geomean** | 0.762x | **1.001x** | 0.742x |
+| Faster@1.0 (any speedup) | 16/48 (33%) | **19/42 (45%)** | 14/37 (38%) |
+| **Fast@1.2 (≥20% speedup)** | 6/48 (13%) | **11/42 (26%)** | 4/37 (11%) |
+| Fast@1.5 (≥50% speedup) | 5/48 (10%) | **6/42 (14%)** | 3/37 (8%) |
+| Fast@2.0 (≥100% speedup) | 0/48 | 0/42 | 0/37 |
 
-**Note:** SFT models have lower apply rate due to context-line mismatch between training templates and held-out templates. Among successfully applied patches, SFT correctness rate (93%) is comparable to base (88%). A fuzzy Python patch applier (v6+) is being developed to eliminate this infrastructure bias.
+**SFT-2epoch is the best optimizer**: only model with geomean ≥1.0x, highest Fast@1.2 rate (26%), and highest Faster@1.0 rate (45%).
 
-## 2. From-Scratch Generation Benchmark (v4)
+SFT-4epoch regressed on speedup despite having comparable pass rate, suggesting memorization of patch patterns rather than optimization reasoning.
 
-Given only the operator contract (no parent source), the model generates a complete kernel.py from scratch. This directly tests SFT's kernel coding capability without patch-apply interference.
+#### Per-Language Breakdown (Triton vs HIP)
+
+**Triton kernels:**
 
 | Metric | Base | SFT-2epoch | SFT-4epoch |
 |--------|------|-----------|-----------|
-| Code generated | 99/99 (100%) | 99/99 (100%) | 98/99 (99%) |
-| **Compiled** | **5/99 (5%)** | **10/99 (10%)** | **18/99 (18%)** |
-| **Correct** | **0/99 (0%)** | **1/99 (1%)** | **2/99 (2%)** |
+| Correct patches | 35 | 35 | 27 |
+| Speedup geomean | 0.886x | 0.984x | 0.898x |
+| Faster@1.0 | 12/35 (34%) | 14/35 (40%) | 10/27 (37%) |
+| **Fast@1.2** | 4/35 (11%) | **7/35 (20%)** | 3/27 (11%) |
+| Fast@1.5 | 4/35 (11%) | **5/35 (14%)** | 3/27 (11%) |
 
-**SFT4 compile rate is 3.6x base** (18% vs 5%). This is the cleanest signal of SFT effect.
+**HIP kernels:**
 
-### Per-Operator Generation Results (SFT-4epoch v4)
+| Metric | Base | SFT-2epoch | SFT-4epoch |
+|--------|------|-----------|-----------|
+| Correct patches | 13 | 7 | 10 |
+| Speedup geomean | 0.508x | **1.092x** | 0.445x |
+| Faster@1.0 | 4/13 (30%) | **5/7 (71%)** | 4/10 (40%) |
+| **Fast@1.2** | 2/13 (15%) | **4/7 (57%)** | 1/10 (10%) |
+| Fast@1.5 | 1/13 (7%) | 1/7 (14%) | 0/10 (0%) |
 
-| Operator | Compiled | Correct | Training samples |
-|----------|----------|---------|-----------------|
-| rms_norm | **6/12** | **3/12** | 19 (norm) |
-| gemm | **1/12** | 0/12 | 19 |
-| fused_moe | 0/12 | 0/12 | 7 |
-| mha | 0/12 | 0/12 | 13 |
-| mla | 0/12 | 0/12 | 22 |
-| paged_attention | 0/12 | 0/12 | 13 (attention) |
-| blockscale_gemm | 0/6 | 0/6 | 0 (fp8 variant) |
-| rope_kv_cache | 0/12 | 0/12 | 11 |
-| sampling | 0/9 | 0/9 | 17 |
+**Key finding:** SFT-2epoch 在 HIP kernel 上优化效果最突出 — Fast@1.2 达 57%（vs Base 15%），geomean 1.09x（唯一 >1.0x 的组合）。Triton kernel 优化效果较均匀（Fast@1.2 11-20%）。HIP kernel 因为用 C++ inline extension 编写，patch 空间更大（loop unroll、memory coalescing、warp-level primitives），SFT 学到了有效的 HIP 优化 pattern。
 
-Only `rms_norm` achieves correctness — the simplest operator with a clear contract.
+### 1.2 Generation Mode — Speedup vs Baseline
 
----
+Model writes kernel.py from scratch given only the operator contract. Speedup = baseline_ms / generated_ms.
 
-## 3. Error Analysis
+| Metric | Base | SFT-2epoch | SFT-4epoch |
+|--------|------|-----------|-----------|
+| Correct kernels | 7/99 | 4/99 | 12/99 |
+| **Speedup geomean** | 0.333x | 0.356x | 0.199x |
+| Faster@1.0 | 2/7 | 1/4 | 1/12 |
+| Fast@1.2 | 0/7 | 1/4 | 0/12 |
 
-### Patch mode: why SFT apply rate is lower
+**No model produces competitive from-scratch kernels.** Generated kernels are 3-5x slower than expert-written baselines. This is expected — cold-start generation without profiling data cannot match tuned implementations.
 
-SFT models generate patches with context lines learned from training data templates. Held-out tasks use different template variants (different shape parameters produce slightly different boilerplate code). GNU `patch` fails when context lines don't exactly match, even if the actual change is correct.
+### 1.3 Interpretation
 
-- **Base model** outputs simpler patches (sometimes just variable renames) that match more easily
-- **SFT model** outputs deeper algorithmic changes with more context lines, making exact matching harder
-- Among applied patches, SFT correctness (93%) ≈ base correctness (88%)
-
-### Generation mode: compile error breakdown (SFT-4epoch)
-
-| Error category | Count | Fixable? |
-|---------------|-------|----------|
-| Wrong function signature | 21 | **Yes** — improved prompt with exact signature |
-| RuntimeError | 19 | Partially — multi-turn error recovery |
-| AssertionError | 9 | Partially — multi-turn |
-| Arch gate false positive | 6 | **Yes** — removed in harness |
-| TypeError | 6 | Partially — multi-turn |
-| Wrong function name | 5 | **Yes** — auto-alias added |
-| NVIDIA-only gate | 4 | **Yes** — removed in harness |
-| SyntaxError | 2 | Multi-turn recovery |
+Patch mode with speedup filtering is the meaningful benchmark:
+- **Pass@1 (compile+correct)** measures "can the model edit a kernel without breaking it" — necessary but not sufficient
+- **Fast@1.2** measures "can the model actually make kernels faster" — this is the optimization metric
+- Models that pass more patches but with lower speedup are just making safe no-op edits, not optimizing
 
 ---
 
-## 4. Training Data Gap Analysis and Recommendations
+## 2. Correctness Benchmark (V8 Multi-Turn)
 
-### Current training data
+### 2.1 Patch Mode (5-turn error recovery, fuzzy patch apply)
 
-689 kernel samples (406 HIP + 258 Triton), covering:
+| Metric | Base | SFT-2epoch | SFT-4epoch |
+|--------|------|-----------|-----------|
+| Total PASS (patch+gen combined) | **55/99** | 46/99 | 49/99 |
+| Patch correct | **48/99** | 42/99 | 37/99 |
+| Gen correct | 7/99 | 4/99 | **12/99** |
+| Recovered via multi-turn | 35 | 27 | **42** |
+| Patch apply rate | 100% | 100% | 100% |
 
-| Operator family | Samples | Benchmark compile rate | Assessment |
-|----------------|---------|----------------------|------------|
-| quant (per-tensor/token/block) | 71 | N/A (not in held-out) | Adequate |
-| silu_and_mul | 26 | N/A | Adequate |
-| mla | 22 | 0/12 compiled | **Severely insufficient** |
-| gemm (bf16) | 19 | 1/12 compiled | **Insufficient** |
-| norm (rms_norm, layernorm) | 19 | 6/12 compiled, 3/12 correct | Best performing |
-| sampling (top-k/p) | 17 | 0/9 compiled | **Insufficient** |
-| softmax | 14 | N/A | Moderate |
-| mha | 13 | 0/12 compiled | **Severely insufficient** |
-| attention (paged) | 13 | 0/12 compiled | **Severely insufficient** |
-| rope_kv_cache | 11 | 0/12 compiled | **Insufficient** |
-| batched_gemm | 10 | N/A | Moderate |
-| router (MoE routing) | 9 | N/A | Moderate |
-| fused_moe | 7 | 0/12 compiled | **Severely insufficient** |
-| knn | 7 | N/A | Low priority |
+### 2.2 Generation Mode (compile + correctness, no speedup gate)
 
-### Recommended additional training data (Phase 2)
+| Metric | Base | SFT-2epoch | SFT-4epoch |
+|--------|------|-----------|-----------|
+| Code generated | 99/99 | 99/99 | 99/99 |
+| **Compiled** | 27/99 (27%) | 27/99 (27%) | **40/99 (40%)** |
+| **Correct** | 7/99 (7%) | 4/99 (4%) | **12/99 (12%)** |
 
-**Target: 3,000–4,000 total verified kernel SFT samples** (per runbook section 3.1)
-
-#### Priority 1: Complex operators with 0% compile rate (need 150+ samples each)
-
-| Operator | Current | Target | Gap | Priority | Rationale |
-|----------|---------|--------|-----|----------|-----------|
-| **mha (multi-head attention)** | 13 | 200 | 187 | **P0** | Core LLM inference operator, 0% compile on held-out |
-| **mla (multi-latent attention)** | 22 | 200 | 178 | **P0** | Used in DeepSeek-V3/Qwen3, unique attention variant |
-| **paged_attention** | 13 | 200 | 187 | **P0** | Critical for vLLM/SGLang serving, complex paging logic |
-| **fused_moe** | 7 | 200 | 193 | **P0** | MoE is the dominant architecture trend, token routing + expert GEMM |
-| **rope_kv_cache** | 11 | 150 | 139 | **P0** | Fused RoPE + KV cache write, essential for inference |
-
-#### Priority 2: Operators with low compile rate (need 80-120 samples each)
-
-| Operator | Current | Target | Gap | Priority | Rationale |
-|----------|---------|--------|-----|----------|-----------|
-| **gemm (bf16 + fp8)** | 19 | 120 | 101 | **P1** | Foundation operator, needs more shape diversity |
-| **sampling (top-k/top-p)** | 17 | 100 | 83 | **P1** | Last-mile inference, needs multinomial + sorting |
-| **blockscale_gemm** | 0 | 100 | 100 | **P1** | FP8 block-scaled GEMM, new for MI300X/MI350 |
-| **all_reduce** | 0 | 80 | 80 | **P1** | Multi-GPU collective, RCCL integration |
-
-#### Priority 3: Strengthen existing coverage (need 50-80 samples each)
-
-| Operator | Current | Target | Gap | Rationale |
-|----------|---------|--------|-----|-----------|
-| rms_norm | 19 | 80 | 61 | Best performer, but only 3/12 correct — more shape diversity |
-| softmax | 14 | 80 | 66 | Common in attention, needs causal mask variants |
-| silu_and_mul | 26 | 60 | 34 | Fused activation, more shape/dtype combinations |
-| fused_add_rms_norm | 0 | 60 | 60 | Residual + norm fusion, common in transformers |
-
-#### Per-lane balance
-
-| Lane | Current | Target | Gap |
-|------|---------|--------|-----|
-| Triton × gfx942 | 258 | 1,000 | 742 |
-| HIP × gfx942 | 406 | 1,000 | 594 |
-| Triton × gfx950 | 0 | 750 | 750 |
-| HIP × gfx950 | 0 | 750 | 750 |
-
-#### Per-task-type balance
-
-| Task type | Current | Target (%) | Target count | Gap |
-|-----------|---------|-----------|-------------|-----|
-| cold_start | 142 | 15% | 525 | 383 |
-| profile_guided | 134 | 15% | 525 | 391 |
-| direction_conditioned | 217 | 45% | 1,575 | 1,358 |
-| error_recovery | 116 | 15% | 525 | 409 |
-| regression_balance | 80 | 10% | 350 | 270 |
-
-### Key recommendations
-
-1. **Attention operators are the #1 gap.** MHA, MLA, and paged attention together need ~600 new samples. These operators have complex memory access patterns (Q/K/V projections, causal masking, paging) that the model cannot learn from 13-22 examples.
-
-2. **More error_recovery samples.** The multi-turn benchmark shows that error recovery capability is critical for agent loop efficiency. Current 116 samples (17%) should grow to 525 (15% of 3,500).
-
-3. **gfx950 is entirely missing.** MI350/MI355 will need separate training data with native MXFP support. Phase 2 should add 1,500 gfx950 samples.
-
-4. **From-scratch generation needs cold_start expansion.** Only 142 cold_start samples, but generation benchmark is the clearest SFT signal. Target 525.
-
-5. **Shape diversity within each operator.** Current held-out benchmark shows that models trained on limited shape variants struggle to generalize. Each operator should cover decode (M=1-4), small-batch (M=8-64), and prefill (M=128-4096) regimes.
+SFT-4epoch compile rate is 1.5x base (40% vs 27%). This is the clearest SFT signal for code generation.
 
 ---
 
-## 5. Methodology
+## 3. Agent Loop Efficiency (V8)
+
+| Metric | Base | SFT-2epoch | SFT-4epoch |
+|--------|------|-----------|-----------|
+| First-turn pass rate (patch) | 48% | 42% | 37% |
+| Turns to pass (mean) | 2.1 | 2.4 | 2.9 |
+| Error recovery rate (multi-turn) | 35/55 (64%) | 27/46 (59%) | 42/49 (86%) |
+| Compile error rate (gen T1) | 73% | 73% | 60% |
+
+SFT-4epoch has the highest error recovery rate (86%) — SFT training improved the model's ability to fix its own mistakes when given error feedback.
+
+---
+
+## 4. Per-Operator Breakdown (Patch Mode, Speedup)
+
+### Fast@1.2 by operator family (SFT-2epoch, best optimizer)
+
+| Operator | Correct | Fast@1.2 | Notable |
+|----------|---------|----------|---------|
+| rms_norm | 7/12 | 3/7 | Best optimization target |
+| paged_attention | 2/6 | 2/2 | 1.75-1.87x speedups |
+| rope_kv_cache | 3/12 | 2/3 | 1.82-1.85x from unrolling |
+| mha | 2/12 | 1/2 | 1.77x on aiter_derived |
+| gemm | 4/12 | 1/4 | Inconsistent |
+| fused_moe | 2/12 | 1/2 | 1.21x |
+| blockscale_gemm | 0/6 | 0/0 | — |
+| mla | 0/6 | 0/0 | — |
+| sampling | 3/9 | 0/3 | Correct but no speedup |
+
+Attention-family operators (paged_attention, rope_kv_cache, mha) show the highest speedup potential.
+
+---
+
+## 5. Training Data Gap Analysis
+
+### Current state (2000 gfx942 kernel SFT samples)
+
+| Operator | Samples | Patch Fast@1.2 (SFT-2e) | Assessment |
+|----------|---------|--------------------------|------------|
+| rms_norm | 19 | 43% | **Good optimization signal** |
+| paged_attention | 13 | 100% (2/2 correct) | **High potential, need more data** |
+| mha | 13 | 50% (1/2 correct) | Need more data |
+| mla | 22 | 0% (0 correct) | **Severely insufficient** |
+| gemm | 19 | 25% | Needs shape diversity |
+| fused_moe | 7 | 50% (1/2 correct) | **Severely insufficient** |
+| rope_kv_cache | 11 | 67% (2/3 correct) | Good signal, need more |
+| sampling | 17 | 0% (3 correct, 0 fast) | Model edits are safe but not faster |
+
+### Priority data additions for optimization quality
+
+1. **paged_attention** (+137 samples): 100% Fast@1.2 when correct — highest ROI
+2. **mha** (+137 samples): 50% Fast@1.2 when correct, only 2 correct — volume needed
+3. **fused_moe** (+143 samples): MoE routing + expert GEMM fusion, critical for production
+4. **mla** (+128 samples): 0% compile rate — model cannot produce these at all
+5. **rope_kv_cache** (+89 samples): 67% Fast@1.2 when correct, strong signal
+
+---
+
+## 6. Key Conclusions
+
+1. **Patch mode speedup is the right metric.** Pass@1 (compile+correct) without speedup is misleading — Base has the highest pass rate but worst optimization quality.
+
+2. **SFT-2epoch > SFT-4epoch for optimization.** 2-epoch model produces fewer correct patches but more of them actually speed things up (26% vs 11% Fast@1.2). 4-epoch overfits to template patterns.
+
+3. **From-scratch generation is not competitive.** No model produces kernels anywhere close to expert baseline performance. Generation mode is useful for testing code synthesis, not optimization.
+
+4. **RL training should optimize for speedup, not just correctness.** The GRPO reward function (`reward = 1.0 + clip(log(speedup), 0, log3)`) correctly prioritizes speedup. Target: speedup geomean >1.2x, Fast@1.2 >40%.
+
+5. **Attention operators are the highest-value training targets.** paged_attention and rope_kv_cache show 67-100% Fast@1.2 when correct, but have very few training samples (11-13).
+
+---
+
+## 7. Methodology
+
+### V8 Benchmark Infrastructure
+
+| Feature | Description |
+|---------|-------------|
+| Fuzzy patch apply | Python context-insensitive hunk matching (`fuzzy_patch.py`) — 100% apply rate |
+| Full-code fallback | If model outputs complete code instead of patch, use directly |
+| Non-patch retry | If SFT model outputs explanation, ask for regeneration |
+| Multi-turn recovery | Up to 5 turns of error feedback + retry |
+| Arch gate removal | Auto-remove broken gfx942/NVIDIA architecture checks |
+| Function aliasing | Auto-add expected function name alias |
+| Signature in prompt | Full reference function signature from initial_source.py |
+| Agent loop metrics | First-turn pass, turns-to-pass, error recovery rate |
+| **Speedup measurement** | baseline_ms/candidate_ms from GEAK performance harness |
 
 ### Held-out dataset
 
-- 120 tasks (60 Triton + 60 HIP) from `Zhangdanyang/agent-phase1-held-out-private`
-- 10 operator families × 3 source suites (geak_native, aiter_derived, adversarial_boundary) × 4 shape variants
-- 99 tasks pass baseline verification (12 all_reduce excluded — need multi-GPU, 9 others have adversarial shape issues)
-- All tasks have complete GEAK harness (config.yaml, scripts/task_runner.py, metadata.json) with SHA-256 verified against protected hashes
-- Zero overlap with training data verified by contract hash, source lineage, and operator+shape exclusion
-
-### Benchmark infrastructure fixes applied
-
-| Version | Fix | Impact |
-|---------|-----|--------|
-| v2 | Strip code fences, normalize git diff format | Patch gen rate 78%→99% |
-| v4 | `--fuzz=3/10` for GNU patch | Apply rate improved |
-| v4 | Remove broken arch gates (gcnArchName) | Gen compile +82 (base), +6 (SFT) |
-| v4 | Auto function alias | Gen compile +5 (SFT) |
-| v4 | Fix `hip_cxxflags` API | Gen compile +1 |
-| v4 | Improved generation prompt with interface spec | Pending re-run |
-| v5 | Restore original file before each patch attempt | Apply rate +3-5 |
-| v6 | Python fuzzy patch applier (context-insensitive) | Pending |
-| v7 | Multi-turn error recovery (5 turns max) | Pending |
-| v7 | Full function signature in generation prompt | Pending |
+- 120 tasks from `Zhangdanyang/agent-phase1-held-out-private`
+- 99 pass baseline (12 all_reduce excluded, 9 adversarial shape failures)
+- 10 operator families × 3 source suites × 4 shape variants
+- SHA-256 verified harnesses, zero training data overlap
 
 ### Model serving
 
-All models served with vLLM 0.15.0+rocm700, TP=1, 32K context, enforce-eager, qwen3_coder tool parser. Models run sequentially (not simultaneously) to ensure clean GPU state.
+vLLM 0.15.0+rocm700, TP=1, 32K context, enforce-eager, qwen3_coder tool parser

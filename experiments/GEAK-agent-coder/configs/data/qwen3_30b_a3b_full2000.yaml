@@ -1,0 +1,56 @@
+schema_version: geak_data_config_v2
+
+tokenizer:
+  path: ../../models/Qwen3-30B-A3B-tokenizer
+  sha256: "4dbc3bb2f4583311d9745013e46f2e3dc2c066971c8f16fce90a2f8b5c4baa98"
+
+tokenization:
+  model_family: Qwen/Qwen3-30B-A3B
+  max_length: 32768
+  include_assistant_eot_in_loss: true
+  overflow_policy: quarantine
+
+sampling:
+  steps: 2000
+  length_penalty_power: 0.5
+  seed: 42
+  replay_mix:
+    enabled: false
+
+sources:
+  - name: kernel_train
+    type: local_jsonl
+    path: /home/danyzhan/geak_sft_dataset/phase1-production-wave-2000-v1/processed/train.jsonl
+    admission:
+      type: generic
+      allowed_splits: [train]
+      require_checksum: true
+      expected_sha256: "9142b2044183498e32343307fb764738de228a8aac2b03b8b225310227e3d891"
+      required_provenance_fields: [source_hash]
+    field_mapping: &kernel_mapping
+      schema_version: {source: schema_version}
+      sample_id: {source: sample_id}
+      sample_domain: {const: kernel}
+      task_type: {source: task_type}
+      split: {source: split}
+      input: {source: input}
+      output: {source: output}
+      labels: {source: labels}
+      provenance: {source: provenance}
+
+  - name: kernel_dev
+    type: local_jsonl
+    path: /home/danyzhan/geak_sft_dataset/phase1-dev-wave-200-v1/processed/dev.jsonl
+    admission:
+      type: generic
+      allowed_splits: [dev]
+      require_checksum: true
+      expected_sha256: "bbb510467f44f9044dfd6d940ee7d20dcdb9d3052714ea16db8bf107cfa3e88b"
+      required_provenance_fields: [source_hash]
+    field_mapping: *kernel_mapping
+
+output:
+  directory: ../../data/build/qwen3_30b_a3b_full2000
+  train_file: train.tokenized.jsonl
+  dev_file: dev.tokenized.jsonl
+  manifest_file: manifest.json
