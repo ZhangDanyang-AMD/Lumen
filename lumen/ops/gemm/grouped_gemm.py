@@ -507,7 +507,10 @@ def _dummy_expert_wgrad(weight: torch.Tensor) -> torch.Tensor:
     key = (weight.device.index, tuple(weight.shape), weight.dtype)
     buf = _DUMMY_WGRAD.get(key)
     if buf is None:
-        buf = torch.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+        # Zeros, not empty storage. The DDP hook skips this tensor when the
+        # in-kernel accumulate already updated main_grad; a stale add of
+        # uninitialized values would corrupt that buffer.
+        buf = torch.zeros(weight.shape, dtype=weight.dtype, device=weight.device)
         _DUMMY_WGRAD[key] = buf
     return buf
 

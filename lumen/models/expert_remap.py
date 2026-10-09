@@ -43,7 +43,7 @@ def _inverse_index(layer: int, device: torch.device) -> torch.Tensor:
     return cached
 
 
-def _exchange_expert_placement(model) -> None:
+def _exchange_expert_placement(model) -> bool:
     from lumen.modules.sonic_moe import SonicMoEExperts
 
     modules: list[SonicMoEExperts] = []
@@ -56,7 +56,10 @@ def _exchange_expert_placement(model) -> None:
     if len(modules) != 48:
         raise RuntimeError(f"expert remap expected 48 SonicMoE layers, found {len(modules)}")
 
+    placed = False
     for layer, module in enumerate(modules):
+        if getattr(module, "_lumen_experts_remapped", False):
+            continue
         group = module.ep_group
         if group is None:
             raise RuntimeError("expert remap requires an expert-parallel group")
@@ -74,13 +77,16 @@ def _exchange_expert_placement(model) -> None:
             stacked = torch.cat(gathered, dim=0)
             param.data.copy_(stacked.index_select(0, src))
             del gathered, stacked
+        module._lumen_experts_remapped = True
+        placed = True
 
-    if dist.get_rank() == 0:
+    if placed and dist.get_rank() == 0:
         print(
             "> Lumen expert remap enabled "
             "(permutation only; each token still hits the same expert)",
             flush=True,
         )
+    return placed
 
 
 def install_megatron_expert_remap() -> None:
@@ -98,8 +104,8 @@ def install_megatron_expert_remap() -> None:
         probs, routing_map = original_routing(self, logits, padding_mask)
         index = _inverse_index(self.layer_number - 1, probs.device)
         return (
-            probs.index_select(-1, index).contiguous(),
-            routing_map.index_select(-1, index).contiguous(),
+            probs.index_select(-1, index),
+            routing_map.index_select(-1, index),
         )
 
     TopKRouter.routing = routing
@@ -109,8 +115,10 @@ def install_megatron_expert_remap() -> None:
     def train(*args, **kwargs):
         model = args[1] if len(args) > 1 else kwargs["model"]
         optimizer = args[2] if len(args) > 2 else kwargs["optimizer"]
-        _exchange_expert_placement(model)
-        optimizer.reload_model_params()
+        # A second train() call must not permute an already permuted layout,
+        # and must not reload the fp32 master from the rounded bf16 copy.
+        if _exchange_expert_placement(model):
+            optimizer.reload_model_params()
         return original_train(*args, **kwargs)
 
     training.train = train

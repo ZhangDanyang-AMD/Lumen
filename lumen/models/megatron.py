@@ -2406,7 +2406,7 @@ def add_common_megatron_args(parser):
         "--lumen-fused-rope",
         action="store_true",
         default=False,
-        help="Use AITER fused RoPE kernel for rotary positional embeddings.",
+        help="Use apex native fused RoPE. AITER RoPE is a different rounding path.",
     )
     safe_add_argument(
         lumen,

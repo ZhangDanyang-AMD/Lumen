@@ -543,23 +543,45 @@ _FUSED_ROPE_INSTALLED = False
 
 
 def install_fused_rope():
-    """Register apex fused RoPE into Megatron's rope_utils.
+    """Register apex's native fused RoPE into Megatron's rope_utils.
 
-    Enables ``apply_rope_fusion=True`` without TransformerEngine.  The apex
-    kernel delegates to AITER on ROCm (MI300X), matching TE's fused path.
+    Enables ``apply_rope_fusion=True`` without TransformerEngine. Apex selects
+    the AITER backend at import when ``USE_ROCM_AITER_ROPE_BACKEND`` is left
+    at its default. That backend uses a different rounding and is not the
+    kernel this path measured, so pin the native kernel before the import.
 
-    Megatron passes ``interleaved=`` kwarg that apex doesn't accept, so we
-    wrap to strip unsupported keywords.
+    Megatron passes ``interleaved=``, which this apex entry point does not
+    accept. The Qwen recipe keeps rotary interleaving off.
     """
     global _FUSED_ROPE_INSTALLED
     if _FUSED_ROPE_INSTALLED:
         return
+    import sys
+
+    already_imported = "apex.transformer.functional.fused_rope" in sys.modules
+    os.environ["USE_ROCM_AITER_ROPE_BACKEND"] = "0"
     try:
-        from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
+        from apex.transformer.functional import fused_rope as _fused_rope_mod
         import megatron.core.models.common.embeddings.rope_utils as rope_utils
 
-        def _compat_fused_rope(t, freqs, **kwargs):
-            return _apex_rope(t, freqs)
+        if already_imported and getattr(_fused_rope_mod, "AITER_ROPE_BACKEND", False):
+            print(
+                "Lumen fused RoPE: apex was already imported with the AITER "
+                "backend. Restart with USE_ROCM_AITER_ROPE_BACKEND=0.",
+                flush=True,
+            )
+        _apex_rope = _fused_rope_mod.fused_apply_rotary_pos_emb
+
+        def _compat_fused_rope(t, freqs, interleaved=False, **kwargs):
+            if interleaved:
+                raise RuntimeError(
+                    "native apex fused RoPE does not implement rotary_interleaved"
+                )
+            return _apex_rope(
+                t,
+                freqs,
+                transpose_output_memory=kwargs.get("transpose_output_memory", False),
+            )
 
         rope_utils.fused_apply_rotary_pos_emb = _compat_fused_rope
         _FUSED_ROPE_INSTALLED = True
