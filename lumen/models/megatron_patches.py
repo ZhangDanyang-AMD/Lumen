@@ -1436,6 +1436,9 @@ def install_all():
     install_moe_async_split_metadata()
     install_moe_device_alltoall()
     install_router_bwd_bf16()
+    from lumen.models.expert_remap import install_megatron_expert_remap
+
+    install_megatron_expert_remap()
     # install_split_along_dim()  # disabled — adds forward overhead
 
     # SDMA DP gradient all-reduce (replaces NCCL when --use-sdma is set)

@@ -51,6 +51,7 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/models/fsdp.py:/workspace/Lumen/lumen/models/fsdp.py" \
     --volume "${REPO_ROOT}/lumen/models/llama31:/workspace/Lumen/lumen/models/llama31" \
     --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
+    --volume "${REPO_ROOT}/lumen/models/expert_remap.py:/workspace/Lumen/lumen/models/expert_remap.py" \
     --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
     --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
     --volume "${REPO_ROOT}/lumen/modules/attention.py:/workspace/Lumen/lumen/modules/attention.py" \
@@ -137,6 +138,7 @@ docker run --rm --init \
     --env OVERLAP_MOE_EP_COMM="${OVERLAP_MOE_EP_COMM:-1}" \
     --env LUMEN_MOE_ASYNC_SPLITS="${LUMEN_MOE_ASYNC_SPLITS:-1}" \
     --env LUMEN_MOE_DEVICE_A2A="${LUMEN_MOE_DEVICE_A2A:-1}" \
+    --env LUMEN_EXPERT_REMAP="${LUMEN_EXPERT_REMAP:-1}" \
     --env CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-8}" \
     --env MOE_PAD_TO_CAPACITY="${MOE_PAD_TO_CAPACITY:-0}" \
     --env MOE_EXPERT_CAPACITY_FACTOR="${MOE_EXPERT_CAPACITY_FACTOR:-1.0}" \
