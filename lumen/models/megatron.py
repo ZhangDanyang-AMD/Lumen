@@ -503,8 +503,17 @@ def lumen_gpt_builder(
 
     _override_te_args_for_lumen(args)
 
+    # get_model() builds the config before the provider runs, so the flag has
+    # to be stamped onto that object. The provider-built path still reads args.
+    if getattr(args, "lumen_fused_rope", False):
+        args.apply_rope_fusion = True
+        if config is not None:
+            config.apply_rope_fusion = True
+        print_rank_0("> Lumen fused RoPE enabled")
+
     if config is None:
-        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
+        if not getattr(args, "lumen_fused_rope", False):
+            args.apply_rope_fusion = False
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -582,8 +591,17 @@ def lumen_gpt_builder_with_spec(
 
     _override_te_args_for_lumen(args)
 
+    # get_model() builds the config before the provider runs, so the flag has
+    # to be stamped onto that object. The provider-built path still reads args.
+    if getattr(args, "lumen_fused_rope", False):
+        args.apply_rope_fusion = True
+        if config is not None:
+            config.apply_rope_fusion = True
+        print_rank_0("> Lumen fused RoPE enabled")
+
     if config is None:
-        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
+        if not getattr(args, "lumen_fused_rope", False):
+            args.apply_rope_fusion = False
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False

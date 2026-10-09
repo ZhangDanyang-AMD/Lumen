@@ -73,6 +73,12 @@ LUMEN_EXTRA_ARGS=()
 if [ "${FUSED_ROUTER:-0}" = "1" ]; then
     LUMEN_EXTRA_ARGS+=(--lumen-fused-router)
 fi
+# Native apex RoPE matches the unfused kernel and is faster than the AITER
+# backend. The backend flag is read when apex is imported, before torchrun.
+if [ "${LUMEN_FUSED_ROPE:-1}" = "1" ]; then
+    LUMEN_EXTRA_ARGS+=(--lumen-fused-rope)
+    export USE_ROCM_AITER_ROPE_BACKEND=0
+fi
 # LUMEN_NORM is exported by run_docker.sh (default 1) but --lumen-norm is
 # opt-in so production A/B numbers stay comparable. Set LUMEN_NORM_CLI=1.
 if [ "${LUMEN_NORM_CLI:-0}" = "1" ]; then
