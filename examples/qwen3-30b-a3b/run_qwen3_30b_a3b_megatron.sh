@@ -69,6 +69,13 @@ if [ "${GRAD_ACC_FUSION:-0}" != "1" ]; then
     GRAD_ACC_ARGS=(--no-gradient-accumulation-fusion)
 fi
 
+# Automatic GC pauses about 0.75 s on some steps and shows up in the median.
+# Interval 0 collects once at startup and leaves the steady steps alone.
+MANUAL_GC_ARGS=()
+if [ "${MANUAL_GC:-1}" = "1" ]; then
+    MANUAL_GC_ARGS=(--manual-gc --manual-gc-interval "${MANUAL_GC_INTERVAL:-0}")
+fi
+
 LUMEN_EXTRA_ARGS=()
 if [ "${FUSED_ROUTER:-0}" = "1" ]; then
     LUMEN_EXTRA_ARGS+=(--lumen-fused-router)
@@ -241,6 +248,7 @@ torchrun \
     --eval-iters 1 \
     --save-interval 1000000 \
     --log-interval 1 \
+    "${MANUAL_GC_ARGS[@]}" \
     --log-throughput \
     "${LOAD_ARGS[@]}" \
     "${PROFILE_ARGS[@]}" \
