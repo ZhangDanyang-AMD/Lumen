@@ -31,6 +31,7 @@ Quantization modes:
 """
 
 import logging
+import os
 from typing import Optional
 
 import torch
@@ -474,6 +475,43 @@ def grouped_gemm_wgrad(
     return try_backends(backends, op_name="grouped_gemm_wgrad")
 
 
+_DUMMY_WGRAD = {}
+
+
+def _expert_wgrad_accum_target(weight: torch.Tensor):
+    """fp32 ``main_grad`` for the in-kernel expert wgrad accumulate.
+
+    DDP adds a bf16 ``param.grad`` into this buffer after backward. The
+    grouped kernel can do that add in its store when the buffer matches
+    the weight. The parameter must already carry Megatron's
+    ``grad_added_to_main_grad`` flag so the post-hook skips a second add.
+    """
+    if os.environ.get("LUMEN_EXPERT_WGRAD_ACCUM", "0") != "1":
+        return None
+    if not hasattr(weight, "grad_added_to_main_grad"):
+        return None
+    main = getattr(weight, "main_grad", None)
+    if (
+        main is None
+        or main.dtype != torch.float32
+        or tuple(main.shape) != tuple(weight.shape)
+        or main.stride(-1) != 1
+        or not main.is_cuda
+    ):
+        return None
+    return main
+
+
+def _dummy_expert_wgrad(weight: torch.Tensor) -> torch.Tensor:
+    """Unwritten bf16 tensor so the DDP post-hook still sees a grad."""
+    key = (weight.device.index, tuple(weight.shape), weight.dtype)
+    buf = _DUMMY_WGRAD.get(key)
+    if buf is None:
+        buf = torch.empty(weight.shape, dtype=weight.dtype, device=weight.device)
+        _DUMMY_WGRAD[key] = buf
+    return buf
+
+
 def _cu_seqlens_from_group_sizes(group_sizes: torch.Tensor) -> torch.Tensor:
     counts = group_sizes.to(dtype=torch.int32)
     zeros = torch.zeros(1, dtype=torch.int32, device=counts.device)
@@ -489,6 +527,7 @@ def _sonic_grouped_linear_backward(
     scaling_type="none",
     fp8_dtype=None,
     block_size=128,
+    accumulate_into=None,
 ):
     """Dgrad/wgrad via SonicMoE grouped GEMM.
 
@@ -543,11 +582,13 @@ def _sonic_grouped_linear_backward(
             inp_col,
             grad_col,
             cu_seqlens,
+            out=accumulate_into,
             A_is_transposed=True,
             A_scale=inp_col_scale,
             B_scale=grad_col_scale,
             block_size=block_size,
             out_dtype=torch.bfloat16,
+            accumulate=accumulate_into is not None,
         )
         return grad_input, grad_weight
 
@@ -826,6 +867,8 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=fp8_dtype,
         )
         ctx.save_for_backward(hidden, w1, w2, fc1, hidden_act, group_sizes)
+        ctx.w1_ref = w1
+        ctx.w2_ref = w2
         ctx.intermediate = intermediate
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
@@ -845,6 +888,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         w1 = w1.contiguous()
         w2 = w2.contiguous()
         cu_seqlens = _cu_seqlens_from_group_sizes(group_sizes)
+        w2_acc = _expert_wgrad_accum_target(ctx.w2_ref)
         grad_act, grad_w2 = _sonic_grouped_linear_backward(
             grad_output,
             hidden_act,
@@ -854,7 +898,11 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             scaling_type=ctx.scaling_type,
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
+            accumulate_into=w2_acc,
         )
+        if w2_acc is not None:
+            ctx.w2_ref.grad_added_to_main_grad = True
+            grad_w2 = _dummy_expert_wgrad(ctx.w2_ref)
         if ctx.concat_layout:
             grad_fc1 = activation_bwd(
                 fc1,
@@ -865,6 +913,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             )
         else:
             grad_fc1 = _swiglu_interleaved_bwd(fc1, grad_act, ctx.intermediate)
+        w1_acc = _expert_wgrad_accum_target(ctx.w1_ref)
         grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
             grad_fc1,
             hidden,
@@ -874,7 +923,11 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             scaling_type=ctx.scaling_type,
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
+            accumulate_into=w1_acc,
         )
+        if w1_acc is not None:
+            ctx.w1_ref.grad_added_to_main_grad = True
+            grad_w1 = _dummy_expert_wgrad(ctx.w1_ref)
         return grad_hidden, grad_w1, grad_w2, None, None, None, None, None
 
 

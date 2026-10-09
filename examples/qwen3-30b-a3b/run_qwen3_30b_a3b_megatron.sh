@@ -168,6 +168,9 @@ LOG_FILE="${RESULTS_DIR}/${RUN_NAME}.log"
 
 echo "Qwen3-30B-A3B: MOE_IMPL=${MOE_IMPL}, FP8_MODE=${FP8_MODE:-bf16}, TP=${TP}, EP=${EP}, seq=${SEQ_LEN}, pad=${MOE_PAD_TO_CAPACITY:-0}, grad_acc_fusion=${GRAD_ACC_FUSION:-0}, cuda_graph_scope=${CUDA_GRAPH_SCOPE:-}"
 
+# Expert wgrad writes the bf16-rounded tile straight into fp32 main_grad.
+export LUMEN_EXPERT_WGRAD_ACCUM="${LUMEN_EXPERT_WGRAD_ACCUM:-1}"
+
 torchrun \
     --nproc_per_node="${NGPU}" \
     --nnodes="${NNODES}" \
