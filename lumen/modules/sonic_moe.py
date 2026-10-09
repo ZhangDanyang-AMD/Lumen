@@ -14,6 +14,8 @@ from typing import Iterable, MutableMapping
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import triton
+import triton.language as tl
 
 from megatron.core.dist_checkpointing.mapping import ShardedTensor, ShardedTensorFactory
 from megatron.core.utils import get_pg_rank
@@ -487,6 +489,62 @@ def _quantized_expert_linear(
     )
 
 
+@triton.jit
+def _expert_score_bwd_kernel(
+    dy_ptr, y_ptr, s_ptr, dx_ptr, ds_ptr, stride_dy, stride_y, H, BLOCK: tl.constexpr,
+):
+    row = tl.program_id(0)
+    score = tl.load(s_ptr + row).to(tl.float32)
+    acc = tl.zeros((), dtype=tl.float32)
+    for h in range(0, H, BLOCK):
+        offs = h + tl.arange(0, BLOCK)
+        dy = tl.load(dy_ptr + row * stride_dy + offs).to(tl.float32)
+        y = tl.load(y_ptr + row * stride_y + offs).to(tl.float32)
+        tl.store(dx_ptr + row * stride_dy + offs, (dy * score).to(tl.bfloat16))
+        acc += tl.sum((dy * y).to(tl.bfloat16).to(tl.float32))
+    tl.store(ds_ptr + row, acc.to(tl.bfloat16).to(tl.float32))
+
+
+def _expert_score_bwd(grad: torch.Tensor, output: torch.Tensor, scores: torch.Tensor):
+    """One-pass backward of ``output * scores`` (scores is ``[M, 1]`` bf16)."""
+    rows, hidden = grad.shape
+    dx = torch.empty_like(grad)
+    ds = torch.empty(rows, device=grad.device, dtype=torch.float32)
+    _expert_score_bwd_kernel[(rows,)](
+        grad, output, scores.reshape(-1), dx, ds,
+        grad.stride(0), output.stride(0), hidden,
+        BLOCK=512, num_warps=4,
+    )
+    return dx, ds
+
+
+class _ExpertScoreMul(torch.autograd.Function):
+    """``output * probs`` with the cast-and-multiply forward left on aten."""
+
+    @staticmethod
+    def forward(ctx, output: torch.Tensor, probs: torch.Tensor):
+        scores = probs.reshape(-1, 1).to(dtype=output.dtype)
+        ctx.save_for_backward(output, scores)
+        ctx.probs_shape = probs.shape
+        return output * scores
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor):
+        output, scores = ctx.saved_tensors
+        if (
+            grad.shape != output.shape
+            or grad.stride(-1) != 1
+            or output.stride(-1) != 1
+            or grad.shape[-1] % 512 != 0
+            or grad.shape[0] == 0
+        ):
+            dx = grad * scores
+            dprobs = (grad * output).sum(dim=-1).to(torch.float32)
+        else:
+            dx, dprobs = _expert_score_bwd(grad, output, scores)
+        return dx, dprobs.view(ctx.probs_shape)
+
+
 def _fp8_pre_routed_forward(
     hidden_states: torch.Tensor,
     tokens_per_expert,
@@ -560,13 +618,12 @@ def _fp8_pre_routed_forward(
             torch.cat(outputs, dim=0) if outputs else hidden_states.new_empty(0, hidden)
         )
 
-    scores = permuted_probs.reshape(-1, 1).to(dtype=output.dtype)
-    if scores.numel() != output.shape[0]:
+    if permuted_probs.numel() != output.shape[0]:
         raise ValueError(
             f"Expected one router score per pre-routed token ({output.shape[0]}), "
-            f"got {scores.numel()}"
+            f"got {permuted_probs.numel()}"
         )
-    return output * scores
+    return _ExpertScoreMul.apply(output, permuted_probs)
 
 
 def replace_megatron_moe_experts(model: nn.Module) -> int:
