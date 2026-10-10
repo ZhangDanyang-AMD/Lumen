@@ -1267,6 +1267,83 @@ def _enable_fsdp_sonic_fp8(model: nn.Module, lumen_config, manager) -> None:
     )
 
 
+def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
+    """Run the three HF attention projections as one blockwise FP8 linear."""
+    from lumen.ops.quantize.linear import quantized_linear
+    from lumen.quantize import _materialize_linear_weight
+
+    qcfg = lumen_config.quant_config
+    scaling_type = (
+        qcfg.scaling.value if hasattr(qcfg.scaling, "value") else str(qcfg.scaling)
+    )
+    count = 0
+    for name, attention in model.named_modules():
+        if "Attention" not in type(attention).__name__:
+            continue
+        if not all(hasattr(attention, proj) for proj in ("q_proj", "k_proj", "v_proj")):
+            continue
+        q_proj, k_proj, v_proj = attention.q_proj, attention.k_proj, attention.v_proj
+        if not all(getattr(proj, "_quant_enabled", False) for proj in (q_proj, k_proj, v_proj)):
+            continue
+        if any(proj.bias is not None for proj in (q_proj, k_proj, v_proj)):
+            raise RuntimeError("fused QKV FP8 requires bias-free projections")
+
+        sizes = tuple(proj.out_features for proj in (q_proj, k_proj, v_proj))
+        tensor_id = f"{name}.qkv_proj.weight"
+        activation_tensor_id = f"{name}.qkv_proj.activation"
+
+        def q_forward(
+            input_tensor,
+            *,
+            _attention=attention,
+            _sizes=sizes,
+            _tensor_id=tensor_id,
+            _activation_tensor_id=activation_tensor_id,
+        ):
+            weights = [
+                _materialize_linear_weight(proj, scaling_type, qcfg.block_size)
+                for proj in (_attention.q_proj, _attention.k_proj, _attention.v_proj)
+            ]
+            packed_weight = torch.cat(weights, dim=0)
+            packed = quantized_linear(
+                input_tensor,
+                packed_weight,
+                None,
+                scaling_manager=manager,
+                scaling_type=scaling_type,
+                fp8_dtype=qcfg.torch_dtype,
+                block_size=qcfg.block_size,
+                tensor_id=_tensor_id,
+                quantize_activation=qcfg.quantize_activation,
+                fp8_wgrad=qcfg.fp8_wgrad,
+                activation_tensor_id=_activation_tensor_id,
+            )
+            q, k, v = packed.split(_sizes, dim=-1)
+            _attention._lumen_qkv_cache = (input_tensor, k, v)
+            return q
+
+        def k_forward(input_tensor, *, _attention=attention):
+            cached_input, k, _ = _attention._lumen_qkv_cache
+            if input_tensor is not cached_input:
+                raise RuntimeError("fused QKV projection input mismatch")
+            return k
+
+        def v_forward(input_tensor, *, _attention=attention):
+            cached_input, _, v = _attention._lumen_qkv_cache
+            if input_tensor is not cached_input:
+                raise RuntimeError("fused QKV projection input mismatch")
+            del _attention._lumen_qkv_cache
+            return v
+
+        q_proj.forward = q_forward
+        k_proj.forward = k_forward
+        v_proj.forward = v_forward
+        count += 1
+    if count == 0:
+        raise RuntimeError("LUMEN_FUSED_QKV found no quantized attention projections")
+    _rank0_log("Enabled fused FP8 QKV projection on %d attention layers", count)
+
+
 def _enable_lumen(
     model: nn.Module,
     args: argparse.Namespace,
@@ -1309,6 +1386,8 @@ def _enable_lumen(
         moe_global_expert_layout=args.lumen_moe_global_expert_layout,
     )
     manager, model = config.enable(model, dp_group=dp_group)
+    if args.mode == "fp8_blockwise2d" and os.environ.get("LUMEN_FUSED_QKV", "1") == "1":
+        _enable_fused_qkv_fp8(model, config, manager)
     if args.mode == "fp8_blockwise2d" and args.expert_backend == "sonic":
         _enable_fsdp_sonic_fp8(model, config, manager)
     return model
