@@ -804,10 +804,20 @@ def gemm_per_token(a_fp8, w_fp8, scale_a, scale_w):
     return try_backends(backends, op_name="gemm_per_token")
 
 
+@functools.lru_cache(maxsize=1)
+def _blockscale_gemm_backend() -> str:
+    """gfx950 Gluon blockscale is faster than Triton on the Qwen QKV/proj shapes."""
+    from aiter.ops.triton.utils._triton.arch_info import get_arch
+
+    return "gluon" if get_arch() == "gfx950" else "triton"
+
+
 def _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import gemm_a8w8_blockscale
 
-    return gemm_a8w8_blockscale(a_fp8, w_fp8, scale_a, scale_w)
+    return gemm_a8w8_blockscale(
+        a_fp8, w_fp8, scale_a, scale_w, backend=_blockscale_gemm_backend()
+    )
 
 
 @functools.lru_cache(maxsize=1)
