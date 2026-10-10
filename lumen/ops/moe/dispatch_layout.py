@@ -129,7 +129,7 @@ def transpose_variable_chunks(
     return torch.cat([chunk_by_pair[pair] for pair in output_pairs], dim=0)
 
 
-_BLOCK = 256
+_BLOCK = 2048
 
 
 @functools.cache
