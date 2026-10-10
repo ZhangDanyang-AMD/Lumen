@@ -1408,6 +1408,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 quant_fp8_blockwise_dual_axis_impl,
                 quant_fp8_blockwise_impl,
             )
+            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
             from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
 
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
@@ -1499,7 +1500,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
                         if _wt is not None:
                             w_t, w_s_t = _wt
                         else:
-                            w_t, w_s_t = weight_data.t().contiguous(), weight_scale.t().contiguous()
+                            w_t = fast_transpose_fp8(weight_data)
+                            w_s_t = weight_scale.t().contiguous()
                     grad_input = gemm_blockscale(g_row, w_t, g_row_s, w_s_t)
                 except (AssertionError, RuntimeError) as e:
                     _logger.warning("%s dgrad: kernel rejected (%s); BF16 fallback", scaling_type, e)
@@ -1523,8 +1525,8 @@ class QuantizedLinearFunction(torch.autograd.Function):
                         input_data, input_scale, fp8_dtype, block_size,
                     )
                     return _gemm_blockscale_triton(
-                        g_col.t().contiguous(),     # (N_out, M) ∇Y^T
-                        x_col.t().contiguous(),     # (K_in,  M) X^T
+                        fast_transpose_fp8(g_col),  # (N_out, M) ∇Y^T
+                        fast_transpose_fp8(x_col),  # (K_in,  M) X^T
                         g_col_s.t().contiguous(),   # (N_out, M/128)
                         x_col_s.t().contiguous(),   # (K_in,  M/128)
                     )
@@ -1905,7 +1907,8 @@ class FP8StoredLinearFunction(torch.autograd.Function):
                     if _wt is not None:
                         w_t, w_s_t = _wt
                     else:
-                        w_t = weight_fp8.t().contiguous()
+                        from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+                        w_t = fast_transpose_fp8(weight_fp8)
                         w_s_t = weight_scale.t().contiguous()
                     g_row, g_row_s = get_hip_quant(QuantType.per_1x128)(
                         grad_flat, quant_dtype=fp8_dtype,
