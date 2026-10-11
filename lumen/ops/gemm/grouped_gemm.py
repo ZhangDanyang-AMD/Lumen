@@ -506,7 +506,7 @@ def _sonic_grouped_linear_backward(
             fp8_dtype = _default_fp8_dtype()
         from lumen.ops.quantize.ops import (
             quant_fp8_blockwise_impl,
-            quant_fp8_blockwise_segment_m_impl,
+            quant_fp8_blockwise_segment_m_dual,
         )
 
         grad_row, grad_row_scale = quant_fp8_blockwise_impl(
@@ -526,34 +526,16 @@ def _sonic_grouped_linear_backward(
             out_dtype=torch.bfloat16,
         )
 
-        scale_counts = torch.div(
-            group_sizes.to(torch.int32) + block_size - 1,
-            block_size,
-            rounding_mode="trunc",
-        )
-        scale_cu_seqlens = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.int32, device=group_sizes.device),
-                torch.cumsum(scale_counts, dim=0).to(torch.int32),
-            ]
-        )
-        inp_col, inp_col_scale = quant_fp8_blockwise_segment_m_impl(
-            inp,
-            len(group_sizes),
-            group_sizes,
-            cu_seqlens,
-            scale_cu_seqlens,
-            fp8_dtype,
-            block_size,
-        )
-        grad_col, grad_col_scale = quant_fp8_blockwise_segment_m_impl(
-            grad_output,
-            len(group_sizes),
-            group_sizes,
-            cu_seqlens,
-            scale_cu_seqlens,
-            fp8_dtype,
-            block_size,
+        inp_col, inp_col_scale, grad_col, grad_col_scale = (
+            quant_fp8_blockwise_segment_m_dual(
+                inp,
+                grad_output,
+                len(group_sizes),
+                group_sizes,
+                cu_seqlens,
+                fp8_dtype,
+                block_size,
+            )
         )
         grad_weight = sonic_grouped_gemm(
             inp_col,

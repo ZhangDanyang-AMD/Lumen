@@ -17,8 +17,10 @@ from typing import Optional, Tuple
 
 import torch
 import triton
+import triton.language as tl
 from aiter.ops.quant import static_per_tensor_quant
 from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+    compute_scale_and_quant,
     quant_fp8_blockwise_for_act_grad_kernel,
     quant_fp8_blockwise_kernel,
     quant_fp8_blockwise_segment_m_kernel,
@@ -314,6 +316,122 @@ def quant_fp8_blockwise_segment_m_impl(
         torch.finfo(dtype).max,
     )
     return x_fp8, x_scales
+
+
+@triton.jit
+def _quant_fp8_blockwise_segment_m_dual_kernel(
+    x_ptr,
+    y_ptr,
+    x_fp8_ptr,
+    y_fp8_ptr,
+    x_scales_ptr,
+    y_scales_ptr,
+    XN,
+    YN,
+    batch_size,
+    seg_indptr,
+    BLOCK_SIZE: tl.constexpr,
+    FP8_MAX: tl.constexpr,
+):
+    """Quantize two identically segmented matrices in one launch."""
+    pid_m = tl.program_id(axis=0)
+    pid_n = tl.program_id(axis=1)
+    bid = 0
+    tile_start = 0
+    total_m_block = 0
+    for bs in range(batch_size):
+        seg_start = tl.load(seg_indptr + bs)
+        seg_end = tl.load(seg_indptr + bs + 1)
+        tiles = (
+            (seg_end - seg_start + BLOCK_SIZE - 1) // BLOCK_SIZE
+        ).to(tl.int32)
+        if pid_m >= total_m_block:
+            bid = bs
+            tile_start = total_m_block
+        total_m_block += tiles
+    if pid_m >= total_m_block:
+        return
+
+    seg_start = tl.load(seg_indptr + bid)
+    seg_end = tl.load(seg_indptr + bid + 1)
+    m_start = seg_start + (pid_m - tile_start) * BLOCK_SIZE
+    m_end = min(seg_end, m_start + BLOCK_SIZE)
+    if m_end - m_start == 0:
+        return
+
+    offs_m = m_start + tl.arange(0, BLOCK_SIZE)
+    offs_n = pid_n * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    if pid_n * BLOCK_SIZE < XN:
+        x_mask = (offs_m[:, None] < m_end) & (offs_n[None, :] < XN)
+        x_offsets = offs_m[:, None] * XN + offs_n[None, :]
+        x = tl.load(x_ptr + x_offsets, mask=x_mask, other=0.0).to(tl.float32)
+        x_fp8, x_scale = compute_scale_and_quant(x, tl.abs(x), 0, FP8_MAX)
+        tl.store(
+            x_fp8_ptr + x_offsets,
+            x_fp8.to(x_fp8_ptr.dtype.element_ty),
+            mask=x_mask,
+        )
+        tl.store(
+            x_scales_ptr + pid_m * XN + offs_n,
+            tl.reshape(1.0 / x_scale, BLOCK_SIZE),
+            mask=offs_n < XN,
+        )
+
+    if pid_n * BLOCK_SIZE < YN:
+        y_mask = (offs_m[:, None] < m_end) & (offs_n[None, :] < YN)
+        y_offsets = offs_m[:, None] * YN + offs_n[None, :]
+        y = tl.load(y_ptr + y_offsets, mask=y_mask, other=0.0).to(tl.float32)
+        y_fp8, y_scale = compute_scale_and_quant(y, tl.abs(y), 0, FP8_MAX)
+        tl.store(
+            y_fp8_ptr + y_offsets,
+            y_fp8.to(y_fp8_ptr.dtype.element_ty),
+            mask=y_mask,
+        )
+        tl.store(
+            y_scales_ptr + pid_m * YN + offs_n,
+            tl.reshape(1.0 / y_scale, BLOCK_SIZE),
+            mask=offs_n < YN,
+        )
+
+
+def quant_fp8_blockwise_segment_m_dual(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    batch_size: int,
+    seg_lens: torch.Tensor,
+    seg_indptr: torch.Tensor,
+    dtype: torch.dtype,
+    block_size: int = 128,
+):
+    """Quantize two matrices with shared expert segment boundaries."""
+    assert x.is_contiguous() and y.is_contiguous()
+    assert x.dim() == 2 and y.dim() == 2 and x.shape[0] == y.shape[0]
+    M, XN = x.shape
+    YN = y.shape[1]
+    x_fp8 = torch.empty((M, XN), dtype=dtype, device=x.device)
+    y_fp8 = torch.empty((M, YN), dtype=dtype, device=y.device)
+    scale_rows = triton.cdiv(M, block_size) + batch_size
+    x_scales = torch.empty((scale_rows, XN), dtype=torch.float32, device=x.device)
+    y_scales = torch.empty((scale_rows, YN), dtype=torch.float32, device=y.device)
+    grid = (
+        triton.cdiv(M, block_size) + seg_lens.shape[0],
+        triton.cdiv(max(XN, YN), block_size),
+    )
+    _quant_fp8_blockwise_segment_m_dual_kernel[grid](
+        x,
+        y,
+        x_fp8,
+        y_fp8,
+        x_scales,
+        y_scales,
+        XN,
+        YN,
+        batch_size,
+        seg_indptr,
+        block_size,
+        torch.finfo(dtype).max,
+    )
+    return x_fp8, x_scales, y_fp8, y_scales
 
 
 # ---------------------------------------------------------------------------
