@@ -1633,9 +1633,9 @@ class FSDPTrainer:
             torch.cuda.reset_peak_memory_stats(self.local_rank)
             start = time.perf_counter()
             self.optimizer.zero_grad()
-            accumulated_loss = 0.0
-            accumulated_lm_loss = 0.0
-            accumulated_aux_loss = 0.0
+            accumulated_loss = []
+            accumulated_lm_loss = []
+            accumulated_aux_loss = []
             grad_acc = self.args.gradient_accumulation_steps
             for micro_step in range(grad_acc):
                 try:
@@ -1684,9 +1684,11 @@ class FSDPTrainer:
                         * self.groups.dp_size
                     )
                 ).backward()
-                accumulated_loss += loss.item()
-                accumulated_lm_loss += lm_loss.item()
-                accumulated_aux_loss += aux_loss.item()
+                # Keep scalar metrics on device. Calling item() here drains the
+                # GPU queue three times between every pair of microbatches.
+                accumulated_loss.append(loss.detach())
+                accumulated_lm_loss.append(lm_loss.detach())
+                accumulated_aux_loss.append(aux_loss.detach())
 
             if self.args.max_grad_norm > 0:
                 grad_norm = _clip_grad_norm_mixed_mesh(
@@ -1713,14 +1715,12 @@ class FSDPTrainer:
             throughput = global_batch_size * 1000 / elapsed_ms
 
             if step % self.args.log_interval == 0:
-                loss_metrics = torch.tensor(
+                loss_metrics = torch.stack(
                     [
-                        accumulated_loss,
-                        accumulated_lm_loss,
-                        accumulated_aux_loss,
-                    ],
-                    dtype=torch.float64,
-                    device=f"cuda:{self.local_rank}",
+                        torch.stack(accumulated_loss).sum(dtype=torch.float64),
+                        torch.stack(accumulated_lm_loss).sum(dtype=torch.float64),
+                        torch.stack(accumulated_aux_loss).sum(dtype=torch.float64),
+                    ]
                 )
                 if self.groups.dp_size > 1:
                     dist.all_reduce(loss_metrics, group=self.groups.dp_group)
