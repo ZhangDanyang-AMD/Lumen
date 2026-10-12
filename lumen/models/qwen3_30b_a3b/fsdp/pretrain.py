@@ -1334,13 +1334,33 @@ def _enable_fsdp_sonic_fp8(model: nn.Module, lumen_config, manager) -> None:
 
 def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
     """Run the three HF attention projections as one blockwise FP8 linear."""
-    from lumen.ops.quantize.linear import quantized_linear
+    from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+    from lumen.ops.quantize.linear import (
+        _quant_blockwise2d_weight,
+        quantized_linear,
+    )
     from lumen.quantize import _materialize_linear_weight
 
     qcfg = lumen_config.quant_config
     scaling_type = (
         qcfg.scaling.value if hasattr(qcfg.scaling, "value") else str(qcfg.scaling)
     )
+    cache_weights = os.environ.get("LUMEN_DENSE_WEIGHT_QUANT_ONCE", "1") == "1"
+
+    def make_weight_cache(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            fp8, scale = _quant_blockwise2d_weight(
+                weight.detach().contiguous(),
+                qcfg.torch_dtype,
+                qcfg.block_size,
+            )
+            # DGrad otherwise transposes this same weight every microbatch.
+            fp8._lumen_wt = (
+                fast_transpose_fp8(fp8),
+                scale.t().contiguous(),
+            )
+        return fp8, scale
+
     count = 0
     for name, attention in model.named_modules():
         if "Attention" not in type(attention).__name__:
@@ -1370,6 +1390,10 @@ def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
                 for proj in (_attention.q_proj, _attention.k_proj, _attention.v_proj)
             ]
             packed_weight = torch.cat(weights, dim=0)
+            weight_cache = getattr(_attention, "_lumen_qkv_weight_cache", None)
+            if cache_weights and weight_cache is None:
+                weight_cache = make_weight_cache(packed_weight)
+                _attention._lumen_qkv_weight_cache = weight_cache
             packed = quantized_linear(
                 input_tensor,
                 packed_weight,
@@ -1382,6 +1406,8 @@ def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
                 quantize_activation=qcfg.quantize_activation,
                 fp8_wgrad=qcfg.fp8_wgrad,
                 activation_tensor_id=_activation_tensor_id,
+                fp8_weight_cache=weight_cache[0] if weight_cache is not None else None,
+                fp8_weight_scale=weight_cache[1] if weight_cache is not None else None,
             )
             q, k, v = packed.split(_sizes, dim=-1)
             _attention._lumen_qkv_cache = (input_tensor, k, v)
@@ -1403,10 +1429,45 @@ def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
         q_proj.forward = q_forward
         k_proj.forward = k_forward
         v_proj.forward = v_forward
+        if cache_weights:
+            original_o_forward = attention.o_proj.forward
+
+            def o_forward(
+                input_tensor,
+                *args,
+                _attention=attention,
+                _original_o_forward=original_o_forward,
+                **kwargs,
+            ):
+                o_proj = _attention.o_proj
+                if getattr(o_proj, "_fp8_weight_data", None) is None:
+                    weight = _materialize_linear_weight(
+                        o_proj, scaling_type, qcfg.block_size
+                    )
+                    fp8, scale = make_weight_cache(weight)
+                    o_proj._fp8_weight_data = fp8
+                    o_proj._fp8_weight_scale = scale
+                return _original_o_forward(input_tensor, *args, **kwargs)
+
+            attention.o_proj.forward = o_forward
         count += 1
     if count == 0:
         raise RuntimeError("LUMEN_FUSED_QKV found no quantized attention projections")
     _rank0_log("Enabled fused FP8 QKV projection on %d attention layers", count)
+
+
+def _invalidate_dense_weight_caches(model: nn.Module) -> None:
+    """Drop per-step dense FP8 weight caches after AdamW updates BF16 masters."""
+    if os.environ.get("LUMEN_DENSE_WEIGHT_QUANT_ONCE", "1") != "1":
+        return
+    for module in model.modules():
+        if "Attention" not in type(module).__name__:
+            continue
+        module._lumen_qkv_weight_cache = None
+        o_proj = getattr(module, "o_proj", None)
+        if o_proj is not None:
+            o_proj._fp8_weight_data = None
+            o_proj._fp8_weight_scale = None
 
 
 def _enable_lumen(
@@ -1769,6 +1830,7 @@ class FSDPTrainer:
             else:
                 grad_norm = torch.zeros((), device=f"cuda:{self.local_rank}")
             self.optimizer.step()
+            _invalidate_dense_weight_caches(self.model)
             self.scheduler.step()
             torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - start) * 1000
