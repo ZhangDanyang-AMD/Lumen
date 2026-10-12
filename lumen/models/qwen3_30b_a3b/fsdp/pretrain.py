@@ -805,7 +805,15 @@ class EPShardedMoeBlock(nn.Module):
         flat_experts = selected_experts.reshape(-1)
         order = torch.argsort(flat_experts, stable=True)
 
-        local_counts = torch.bincount(flat_experts, minlength=self.num_experts)
+        # torch.bincount calls max().item() and drains the compute stream
+        # before the count all-gather. histc writes the same 128 bins and
+        # leaves the following gather queued.
+        local_counts = torch.histc(
+            flat_experts.to(torch.float32),
+            bins=self.num_experts,
+            min=0,
+            max=self.num_experts - 1,
+        ).to(torch.int64)
         # Count all-gather is a few KB. Run it beside the token gather, and
         # materialize split lists on a side stream so RCCL does not drain the
         # gather before launch. Payload bytes are unchanged.
