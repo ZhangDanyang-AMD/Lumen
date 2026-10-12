@@ -1164,6 +1164,66 @@ class AlpacaDataset(Dataset):
         }
 
 
+def _install_apex_rope() -> None:
+    """Replace HuggingFace RoPE with apex's native cached kernel.
+
+    Query and key arrive as ``[batch, heads, seq, dim]``. Apex wants
+    ``[seq, batch, heads, dim]`` plus ``[seq, 1, 1, dim]`` cosine and sine.
+    ``USE_ROCM_AITER_ROPE_BACKEND`` must stay off; that backend rounds
+    differently and is not this kernel.
+    """
+    import sys
+
+    os.environ["USE_ROCM_AITER_ROPE_BACKEND"] = "0"
+    already = "apex.transformer.functional.fused_rope" in sys.modules
+    from apex.transformer.functional import fused_rope as fused_rope_mod
+    import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
+
+    if already and getattr(fused_rope_mod, "AITER_ROPE_BACKEND", False):
+        raise RuntimeError(
+            "apex RoPE was imported with the AITER backend; restart with "
+            "USE_ROCM_AITER_ROPE_BACKEND=0"
+        )
+    cached = fused_rope_mod.fused_apply_rotary_pos_emb_cached
+    checked = False
+
+    def _rotate(states, cos, sin):
+        nonlocal checked
+        if not checked:
+            if cos.shape[0] > 1 and not torch.equal(cos, cos[:1].expand_as(cos)):
+                raise RuntimeError(
+                    "apex RoPE expects the same positions on every row of the microbatch"
+                )
+            if sin.shape[0] > 1 and not torch.equal(sin, sin[:1].expand_as(sin)):
+                raise RuntimeError(
+                    "apex RoPE expects the same positions on every row of the microbatch"
+                )
+            checked = True
+        seq_batch_heads = states.permute(2, 0, 1, 3).contiguous()
+        freq_cos = cos[0].unsqueeze(1).unsqueeze(1).contiguous()
+        freq_sin = sin[0].unsqueeze(1).unsqueeze(1).contiguous()
+        # Store the result as contiguous BSHD. HF sees the equivalent BHSD
+        # view, then the patched SDPA immediately transposes it back to BSHD.
+        # This removes the full-size post-RoPE BHSD copy.
+        rotated = cached(
+            seq_batch_heads,
+            freq_cos,
+            freq_sin,
+            transpose_output_memory=True,
+        )
+        return rotated.transpose(0, 1).transpose(1, 2)
+
+    def lumen_apex_rotary(query, key, cos, sin, unsqueeze_dim=1):
+        if unsqueeze_dim != 1:
+            raise RuntimeError(
+                f"apex RoPE only covers unsqueeze_dim=1, got {unsqueeze_dim}"
+            )
+        return _rotate(query, cos, sin), _rotate(key, cos, sin)
+
+    modeling_qwen3_moe.apply_rotary_pos_emb = lumen_apex_rotary
+    _rank0_log("Enabled apex native fused rotary embedding")
+
+
 def build_model(args: argparse.Namespace) -> nn.Module:
     """Load Qwen3-30B-A3B or initialize the matching architecture."""
     from transformers import (
@@ -1219,7 +1279,11 @@ def build_model(args: argparse.Namespace) -> nn.Module:
     for module in model.modules():
         if hasattr(module, "top_k") and hasattr(module, "norm_topk_prob"):
             module.norm_topk_prob = args.norm_topk_prob
-    if args.fuse_rope:
+    if os.environ.get("LUMEN_APEX_ROPE", "1") == "1":
+        if args.fuse_rope:
+            raise RuntimeError("LUMEN_APEX_ROPE and --fuse-rope both replace RoPE")
+        _install_apex_rope()
+    elif args.fuse_rope:
         import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
         from lumen.ops.rope import apply_rotary_qk_autograd
 
