@@ -12,6 +12,7 @@ across expert-data-parallel replicas.
 """
 
 import argparse
+import gc
 import json
 import logging
 import math
@@ -1613,6 +1614,12 @@ class FSDPTrainer:
     def train(self) -> None:
         """Run the configured training loop."""
         self.model.train()
+        # Megatron's manual GC collects once, then leaves steady steps alone.
+        # Automatic collections were landing on some steps and opening a gap.
+        if os.environ.get("LUMEN_MANUAL_GC", "1") == "1":
+            gc.disable()
+            gc.collect()
+            _rank0_log("Manual GC: collected once and disabled automatic collection")
         data_iterator = iter(self.train_loader)
         profiler = None
         profile_output = os.environ.get("LUMEN_PROFILE_OUTPUT")
