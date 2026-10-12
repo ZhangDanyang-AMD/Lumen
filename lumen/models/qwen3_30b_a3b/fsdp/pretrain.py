@@ -1232,6 +1232,73 @@ def _install_apex_rope() -> None:
     _rank0_log("Enabled apex native fused rotary embedding")
 
 
+def _install_async_aux_loss_counts() -> None:
+    """Avoid the host synchronization in HF's per-layer expert histogram."""
+    import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
+
+    def load_balancing_loss_func(
+        gate_logits,
+        num_experts: Optional[int] = None,
+        top_k: int = 2,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
+        if gate_logits is None or not isinstance(gate_logits, tuple):
+            return 0
+
+        compute_device = gate_logits[0].device
+        tokens_per_expert_sum = torch.zeros(
+            num_experts, dtype=torch.float32, device=compute_device
+        )
+        router_prob_sum = torch.zeros(
+            num_experts, dtype=torch.float32, device=compute_device
+        )
+        total_rows = 0.0
+        if attention_mask is not None:
+            flat_mask = attention_mask.reshape(-1).to(
+                device=compute_device, dtype=torch.float32
+            )
+
+        for layer_gate in gate_logits:
+            routing_weights = F.softmax(layer_gate.to(compute_device), dim=-1)
+            _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+            if attention_mask is None:
+                # bincount determines its output size with max().item(), which
+                # drains all router work queued before this layer. Expert ids
+                # are exact integers below 128, so FP32 histc has identical
+                # counts without a host read.
+                layer_counts = torch.histc(
+                    selected_experts.to(torch.float32),
+                    bins=num_experts,
+                    min=0,
+                    max=num_experts - 1,
+                )
+                tokens_per_expert_sum = tokens_per_expert_sum + layer_counts
+                router_prob_sum = router_prob_sum + routing_weights.float().sum(dim=0)
+                total_rows = total_rows + routing_weights.shape[0]
+            else:
+                tokens_per_expert_sum = tokens_per_expert_sum + torch.zeros(
+                    num_experts, dtype=torch.float32, device=compute_device
+                ).scatter_add_(
+                    0,
+                    selected_experts.reshape(-1),
+                    flat_mask.repeat_interleave(top_k),
+                )
+                router_prob_sum = router_prob_sum + (
+                    routing_weights.float() * flat_mask.unsqueeze(-1)
+                ).sum(dim=0)
+                total_rows = total_rows + flat_mask.sum()
+
+        tokens_per_expert = tokens_per_expert_sum / total_rows
+        router_prob_per_expert = router_prob_sum / total_rows
+        overall_loss = torch.sum(
+            tokens_per_expert * router_prob_per_expert.unsqueeze(0)
+        )
+        return overall_loss * num_experts
+
+    modeling_qwen3_moe.load_balancing_loss_func = load_balancing_loss_func
+    _rank0_log("Auxiliary loss expert counts stay asynchronous")
+
+
 def build_model(args: argparse.Namespace) -> nn.Module:
     """Load Qwen3-30B-A3B or initialize the matching architecture."""
     from transformers import (
@@ -1239,6 +1306,9 @@ def build_model(args: argparse.Namespace) -> nn.Module:
         Qwen3MoeConfig,
         Qwen3MoeForCausalLM,
     )
+
+    if os.environ.get("LUMEN_ASYNC_AUX_COUNTS", "1") == "1":
+        _install_async_aux_loss_counts()
 
     if args.model_name_or_path:
         model = AutoModelForCausalLM.from_pretrained(
