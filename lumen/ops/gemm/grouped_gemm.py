@@ -34,6 +34,8 @@ import logging
 from typing import Optional
 
 import torch
+import triton
+import triton.language as tl
 
 from lumen.ops.dispatch import (
     Backend,
@@ -650,6 +652,136 @@ def grouped_quantized_linear(
     )
 
 
+@triton.jit
+def _swiglu_interleaved_fwd_kernel(
+    h_ptr,
+    a_ptr,
+    stride_h,
+    stride_a,
+    rows,
+    I: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_I: tl.constexpr,
+):
+    """SwiGLU on per-column gate/up pairs. Loads each pair as one vector."""
+    pid_m = tl.program_id(0)
+    pid_i = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_i = pid_i * BLOCK_I + tl.arange(0, BLOCK_I)
+    m_mask = offs_m < rows
+    i_mask = offs_i < I
+    pair = pid_i * (2 * BLOCK_I) + tl.arange(0, 2 * BLOCK_I)
+    packed = tl.load(
+        h_ptr + offs_m[:, None].to(tl.int64) * stride_h + pair[None, :],
+        mask=m_mask[:, None] & (pair[None, :] < 2 * I),
+        other=0.0,
+    )
+    gate_bf, up_bf = tl.split(tl.reshape(packed, (BLOCK_M, BLOCK_I, 2)))
+    gate = gate_bf.to(tl.float32)
+    up = up_bf.to(tl.float32)
+    out = gate * tl.sigmoid(gate) * up
+    tl.store(
+        a_ptr + offs_m[:, None].to(tl.int64) * stride_a + offs_i[None, :],
+        out.to(a_ptr.dtype.element_ty),
+        mask=m_mask[:, None] & i_mask[None, :],
+    )
+
+
+@triton.jit
+def _swiglu_interleaved_bwd_kernel(
+    h_ptr,
+    da_ptr,
+    dh_ptr,
+    stride_h,
+    stride_da,
+    stride_dh,
+    rows,
+    I: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_I: tl.constexpr,
+):
+    pid_m = tl.program_id(0)
+    pid_i = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_i = pid_i * BLOCK_I + tl.arange(0, BLOCK_I)
+    m_mask = offs_m < rows
+    i_mask = offs_i < I
+    pair = pid_i * (2 * BLOCK_I) + tl.arange(0, 2 * BLOCK_I)
+    pair_mask = pair[None, :] < 2 * I
+    packed = tl.load(
+        h_ptr + offs_m[:, None].to(tl.int64) * stride_h + pair[None, :],
+        mask=m_mask[:, None] & pair_mask,
+        other=0.0,
+    )
+    gate_bf, up_bf = tl.split(tl.reshape(packed, (BLOCK_M, BLOCK_I, 2)))
+    gate = gate_bf.to(tl.float32)
+    up = up_bf.to(tl.float32)
+    da = tl.load(
+        da_ptr + offs_m[:, None].to(tl.int64) * stride_da + offs_i[None, :],
+        mask=m_mask[:, None] & i_mask[None, :],
+        other=0.0,
+    ).to(tl.float32)
+    sig = tl.sigmoid(gate)
+    act = gate * sig
+    d_up = da * act
+    d_gate = da * up * sig * (1.0 + gate * (1.0 - sig))
+    packed_d = tl.reshape(
+        tl.join(d_gate.to(dh_ptr.dtype.element_ty), d_up.to(dh_ptr.dtype.element_ty)),
+        (BLOCK_M, 2 * BLOCK_I),
+    )
+    tl.store(
+        dh_ptr + offs_m[:, None].to(tl.int64) * stride_dh + pair[None, :],
+        packed_d,
+        mask=m_mask[:, None] & pair_mask,
+    )
+
+
+def _swiglu_interleaved_fwd(h: torch.Tensor, intermediate: int) -> torch.Tensor:
+    """Faster interleaved SwiGLU. Same rounding as the generic GLU kernel."""
+    h = h.contiguous()
+    out = torch.empty(h.shape[0], intermediate, dtype=h.dtype, device=h.device)
+    if h.shape[0] == 0:
+        return out
+    _swiglu_interleaved_fwd_kernel[(triton.cdiv(h.shape[0], 64), triton.cdiv(intermediate, 128))](
+        h,
+        out,
+        h.stride(0),
+        out.stride(0),
+        h.shape[0],
+        I=intermediate,
+        BLOCK_M=64,
+        BLOCK_I=128,
+        num_warps=2,
+        num_stages=1,
+    )
+    return out
+
+
+def _swiglu_interleaved_bwd(
+    h: torch.Tensor, grad_act: torch.Tensor, intermediate: int
+) -> torch.Tensor:
+    h = h.contiguous()
+    grad_act = grad_act.contiguous()
+    grad_h = torch.empty_like(h)
+    if h.shape[0] == 0:
+        return grad_h
+    _swiglu_interleaved_bwd_kernel[(triton.cdiv(h.shape[0], 64), triton.cdiv(intermediate, 128))](
+        h,
+        grad_act,
+        grad_h,
+        h.stride(0),
+        grad_act.stride(0),
+        grad_h.stride(0),
+        h.shape[0],
+        I=intermediate,
+        BLOCK_M=64,
+        BLOCK_I=128,
+        num_warps=2,
+        num_stages=1,
+    )
+    return grad_h
+
+
 class _GroupedFp8ExpertMlp(torch.autograd.Function):
     """SwiGLU expert MLP: FP8 grouped w1/w2 GEMMs and FP8 grouped backward."""
 
@@ -679,9 +811,12 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=fp8_dtype,
         )
         intermediate = w1.shape[-1] // 2
-        hidden_act = activation_fwd(
-            fc1, intermediate, "swiglu", concat_layout=concat_layout
-        )
+        if concat_layout:
+            hidden_act = activation_fwd(
+                fc1, intermediate, "swiglu", concat_layout=concat_layout
+            )
+        else:
+            hidden_act = _swiglu_interleaved_fwd(fc1, intermediate)
         output = grouped_gemm(
             hidden_act,
             w2,
@@ -720,9 +855,16 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
         )
-        grad_fc1 = activation_bwd(
-            fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=ctx.concat_layout
-        )
+        if ctx.concat_layout:
+            grad_fc1 = activation_bwd(
+                fc1,
+                grad_act,
+                ctx.intermediate,
+                "swiglu",
+                concat_layout=ctx.concat_layout,
+            )
+        else:
+            grad_fc1 = _swiglu_interleaved_bwd(fc1, grad_act, ctx.intermediate)
         grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
             grad_fc1,
             hidden,
