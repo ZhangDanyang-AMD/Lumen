@@ -1,16 +1,16 @@
 """Place Qwen3 experts so each EP rank sees a similar token load.
 
-Counts are taken from the router's original expert ids while the weights are
-still in their contiguous layout. After ``LUMEN_EXPERT_REMAP_AFTER_STEPS``
-optimizer steps (default 1) the permutation is packed from those counts.
-Rank ``r`` then owns slots ``[local * r, local * r + local)``. Token weights
-stay on the original experts. Megatron aux loss is attached inside
-``TopKRouter.routing`` before the column permute, so it still sees the logical
-expert ids.
+One forward over the first batch counts the router's original expert
+ids while the weights are still in their contiguous layout. The placement is
+packed from those counts and written into the expert parameters before any
+optimizer step. Rank ``r`` then owns slots ``[local * r, local * r + local)``.
+A token keeps the expert it routed to; only the rank that stores it changes.
 
-Moving a weight also moves the Adam moments that belong to it. The bf16
-parameter and Megatron's fp32 master are permuted directly, so this does not
-reload the master from the rounded bf16 copy.
+Megatron has already constructed its optimizer by the time the data iterator
+exists, but that optimizer has not stepped. After the weights move,
+``reload_model_params`` copies them into the fp32 master. Adam moments are
+still the initial zeros, so nothing trained is migrated. FSDP creates Adam
+only after this placement.
 """
 
 from __future__ import annotations
@@ -23,24 +23,10 @@ import torch.distributed as dist
 _INVERSE: dict[tuple[int, str], torch.Tensor] = {}
 _INSTALLED = False
 _PLACED = False
-_OPTIMIZER_STEPS = 0
 
 
 def _enabled() -> bool:
     return os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1"
-
-
-def _after_steps() -> int:
-    raw = os.environ.get("LUMEN_EXPERT_REMAP_AFTER_STEPS", "1")
-    try:
-        steps = int(raw)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"LUMEN_EXPERT_REMAP_AFTER_STEPS must be an integer, got {raw!r}"
-        ) from exc
-    if steps < 1:
-        raise RuntimeError("LUMEN_EXPERT_REMAP_AFTER_STEPS must be at least 1")
-    return steps
 
 
 def _inverse_index(layer: int, device: torch.device) -> torch.Tensor:
@@ -52,85 +38,6 @@ def _inverse_index(layer: int, device: torch.device) -> torch.Tensor:
         cached = torch.tensor(inverse_ids(layer), dtype=torch.long, device=device)
         _INVERSE[key] = cached
     return cached
-
-
-def _walk_optimizers(optimizer):
-    seen: set[int] = set()
-    stack = [optimizer]
-    found = []
-    while stack:
-        current = stack.pop()
-        if current is None or id(current) in seen:
-            continue
-        seen.add(id(current))
-        found.append(current)
-        for name in ("optimizer", "_inner", "inner_optimizer"):
-            child = getattr(current, name, None)
-            if child is not None and child is not current:
-                stack.append(child)
-        for name in ("chained_optimizers", "optimizers"):
-            children = getattr(current, name, None)
-            if children:
-                stack.extend(children)
-    return found
-
-
-def _paired_shards(optimizer, param) -> list[torch.Tensor]:
-    """Megatron keeps a 1-D fp32 master beside the bf16 expert parameter."""
-    shards = []
-    group_pairs = (
-        ("model_float16_groups", "shard_fp32_from_float16_groups"),
-        ("model_float16_groups", "shard_float16_groups"),
-        ("model_fp32_groups", "shard_fp32_groups"),
-        ("float16_groups", "fp32_from_float16_groups"),
-    )
-    for model_name, shard_name in group_pairs:
-        model_groups = getattr(optimizer, model_name, None)
-        shard_groups = getattr(optimizer, shard_name, None)
-        if not model_groups or not shard_groups:
-            continue
-        for model_group, shard_group in zip(model_groups, shard_groups):
-            for model_param, shard_param in zip(model_group, shard_group):
-                if model_param is param and torch.is_tensor(shard_param):
-                    shards.append(shard_param)
-    return shards
-
-
-def _state_tensors(optimizer, owner) -> list[torch.Tensor]:
-    state = getattr(optimizer, "state", None)
-    if state is None:
-        return []
-    bucket = state.get(owner)
-    if not bucket:
-        return []
-    tensors = []
-    for key in ("exp_avg", "exp_avg_sq"):
-        value = bucket.get(key)
-        if torch.is_tensor(value):
-            tensors.append(value)
-    return tensors
-
-
-def _storages(param: torch.nn.Parameter, optimizer) -> list[tuple[torch.Tensor, bool]]:
-    """Return ``(tensor, is_adam_moment)`` in a rank-independent order."""
-    ordered: list[tuple[torch.Tensor, bool]] = [(param.data, False)]
-    for opt in _walk_optimizers(optimizer):
-        for moment in _state_tensors(opt, param):
-            ordered.append((moment, True))
-        for shard in _paired_shards(opt, param):
-            ordered.append((shard, False))
-            for owner in _walk_optimizers(opt):
-                for moment in _state_tensors(owner, shard):
-                    ordered.append((moment, True))
-    unique: list[tuple[torch.Tensor, bool]] = []
-    seen: set[int] = set()
-    for tensor, is_moment in ordered:
-        pointer = tensor.data_ptr()
-        if pointer in seen:
-            continue
-        seen.add(pointer)
-        unique.append((tensor, is_moment))
-    return unique
 
 
 def _local_storage(tensor: torch.Tensor) -> torch.Tensor:
@@ -150,40 +57,19 @@ def _exchange_matrix(
     ep_group,
     num_local: int,
 ) -> None:
-    """Move expert rows across the EP group.
-
-    A parameter keeps its leading expert dimension. Megatron's fp32 master and
-    Adam moments are flat, but still expert-major, so they are viewed as rows.
-    """
+    """Move expert rows across the EP group."""
     tensor = _local_storage(tensor)
     ep_size = dist.get_world_size(ep_group)
-    if tensor.ndim >= 1 and tensor.shape[0] == num_local:
-        matrix = tensor
-    elif tensor.ndim == 1 and tensor.is_contiguous() and tensor.numel() % num_local == 0:
-        matrix = tensor.view(num_local, -1)
-    else:
-        raise RuntimeError("expert storage is not a contiguous expert-major layout")
-    gathered = [torch.empty_like(matrix) for _ in range(ep_size)]
-    dist.all_gather(gathered, matrix.contiguous(), group=ep_group)
-    stacked = torch.cat(gathered, dim=0)
-    matrix.copy_(stacked.index_select(0, src))
-    del gathered, stacked
-
-
-def _permute_param(param, src: torch.Tensor, ep_group, num_local: int, optimizer) -> None:
-    storages = _storages(param, optimizer)
-    if not any(is_moment for _, is_moment in storages):
+    if tensor.ndim < 1 or tensor.shape[0] != num_local:
         raise RuntimeError(
-            "expert remap could not find Adam moments for an expert weight; "
-            "refusing to move the weight without its optimizer state"
+            "expert weight is not laid out with the local experts on dimension 0, "
+            f"got shape {tuple(tensor.shape)} and {num_local} local experts"
         )
-    for tensor, _ in storages:
-        if tensor.numel() != param.numel():
-            raise RuntimeError(
-                "runtime expert remap does not support an expert optimizer shard "
-                f"of {tensor.numel()} elements for a parameter of {param.numel()}"
-            )
-        _exchange_matrix(tensor, src, ep_group, num_local)
+    gathered = [torch.empty_like(tensor) for _ in range(ep_size)]
+    dist.all_gather(gathered, tensor.contiguous(), group=ep_group)
+    stacked = torch.cat(gathered, dim=0)
+    tensor.copy_(stacked.index_select(0, src))
+    del gathered, stacked
 
 
 def _targets(model):
@@ -207,8 +93,82 @@ def _targets(model):
     return blocks, experts
 
 
-def _place(model, optimizer) -> None:
+def _invert(slot: list[int]) -> list[int]:
+    inverse = [0] * len(slot)
+    for original, new_slot in enumerate(slot):
+        inverse[new_slot] = original
+    return inverse
+
+
+def _finish_inflight_param_gathers(model) -> None:
+    """Wait until probe communication has landed in the persistent parameters.
+
+    A flag check is not enough. Megatron can leave a parameter all-gather
+    queued after ``param_gather_dispatched`` is already false, and that gather
+    writes the pre-placement weights back over the exchange.
+    """
+    chunks = model if isinstance(model, (list, tuple)) else [model]
+    for chunk in chunks:
+        groups = []
+        for name in ("bucket_groups", "expert_parallel_bucket_groups"):
+            found = getattr(chunk, name, None)
+            if found:
+                groups.extend(found)
+        for group in groups:
+            config = getattr(group, "ddp_config", None)
+            if not getattr(config, "overlap_param_gather", False):
+                continue
+            if getattr(group, "param_gather_dispatched", False):
+                group.finish_param_sync(skip_next_bucket_dispatch=True)
+    torch.cuda.synchronize()
+
+
+def _drop_probe_weight_caches() -> None:
+    """Drop expert GEMM weight snapshots taken while the layout was still identity.
+
+    The probe is the first forward. FlyDSL keeps a Sonic operator built from
+    those weights, and the FP8 expert path keeps a quantized copy keyed by
+    parameter id and ``_version``. Writing ``param.data`` does not change
+    ``_version``, so either snapshot would still be the original layout.
+    """
+    from lumen.ops.moe import flydsl_grouped
+
+    for name in ("_PRESHUFFLE_CACHE", "_WEIGHT_KN_CACHE", "_NATIVE_ROUTES_CACHE"):
+        cache = getattr(flydsl_grouped, name, None)
+        if isinstance(cache, dict):
+            cache.clear()
+    from lumen.ops.gemm.grouped_gemm import _weight_fp8_cache
+
+    _weight_fp8_cache.clear()
+
+
+def _reshard_fsdp_parameters(model) -> None:
+    """Put FSDP parameters back on the shard the optimizer updates.
+
+    ``shard_grad_op`` keeps the probe's parameters in the all-gather buffer.
+    Writing that buffer is discarded on the next reshard, so step 1 can look
+    healthy and step 2 reads the original expert order again.
+    """
+    from torch.distributed.fsdp import FSDPModule
+
+    chunks = model if isinstance(model, (list, tuple)) else [model]
+    modules = []
+    for chunk in chunks:
+        root = getattr(chunk, "module", chunk)
+        for submodule in root.modules():
+            if isinstance(submodule, FSDPModule):
+                modules.append(submodule)
+    for module in reversed(modules):
+        module.reshard()
+
+
+def apply_counted_placement(model) -> None:
+    """Permute expert weights from counts already recorded, then publish the table."""
     global _PLACED
+    if _PLACED:
+        return
+    _finish_inflight_param_gathers(model)
+    _reshard_fsdp_parameters(model)
     from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import build_slots, commit_slots
 
     blocks, experts = _targets(model)
@@ -248,28 +208,22 @@ def _place(model, optimizer) -> None:
             "does not match"
         )
 
-    def invert(slot: list[int]) -> list[int]:
-        inverse = [0] * len(slot)
-        for original, new_slot in enumerate(slot):
-            inverse[new_slot] = original
-        return inverse
-
     with torch.no_grad():
         if blocks:
             for block in blocks:
                 local = int(block.experts_per_rank)
-                inverse = invert(table[block._remap_layer])
+                inverse = _invert(table[block._remap_layer])
                 src = torch.tensor(
                     inverse[block.local_expert_start : block.local_expert_start + local],
                     dtype=torch.long,
                     device=block.local_experts.w1.device,
                 )
                 for param in (block.local_experts.w1, block.local_experts.w2):
-                    _permute_param(param, src, block.ep_group, local, optimizer)
+                    _exchange_matrix(param.data, src, block.ep_group, local)
         else:
             for layer, module in enumerate(experts):
                 local = int(module.num_local_experts)
-                inverse = invert(table[layer])
+                inverse = _invert(table[layer])
                 start = dist.get_rank(module.ep_group) * local
                 src = torch.tensor(
                     inverse[start : start + local],
@@ -277,9 +231,17 @@ def _place(model, optimizer) -> None:
                     device=module.w1.device,
                 )
                 for param in (module.w1, module.w2):
-                    _permute_param(param, src, module.ep_group, local, optimizer)
+                    _exchange_matrix(param.data, src, module.ep_group, local)
+    torch.cuda.synchronize()
+    _drop_probe_weight_caches()
     # Publish after the exchange. The next forward is what first reads the table.
     commit_slots(table)
+    moved = 0
+    for layer in layers:
+        moved = max(
+            moved,
+            sum(expert != dest for expert, dest in enumerate(table[layer])),
+        )
     if blocks:
         for block in blocks:
             block._expert_slot = torch.tensor(
@@ -292,22 +254,121 @@ def _place(model, optimizer) -> None:
     _PLACED = True
     if dist.get_rank() == 0:
         print(
-            "> Lumen expert remap: packed a placement from token counts after "
-            f"{_OPTIMIZER_STEPS} optimizer step(s); heaviest rank is {worst:.2f}x "
-            "the mean load. Each token still hits the same expert.",
+            "> Lumen expert remap: packed a placement from the first batch "
+            "before optimizer state was created; heaviest rank is "
+            f"{worst:.2f}x the mean load; {moved} experts changed seats. "
+            "Each token still hits the same expert.",
             flush=True,
         )
 
 
-def note_optimizer_step(model, optimizer) -> None:
-    """Pack and apply the placement once the warmup steps have been optimized."""
-    global _OPTIMIZER_STEPS
-    if not _enabled() or _PLACED:
-        return
-    _OPTIMIZER_STEPS += 1
-    if _OPTIMIZER_STEPS < _after_steps():
-        return
-    _place(model, optimizer)
+def _as_list(value):
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _probe_megatron(forward_step, model, iterators) -> None:
+    from megatron.core.num_microbatches_calculator import get_num_microbatches
+
+    chunks = _as_list(model)
+    wrapped = iterators if isinstance(iterators, list) else [iterators]
+    if len(wrapped) != len(chunks):
+        raise RuntimeError(
+            f"expert remap probe has {len(chunks)} model chunks and {len(wrapped)} iterators"
+        )
+    microbatches = get_num_microbatches()
+    if microbatches < 1:
+        raise RuntimeError("expert remap probe requires at least one microbatch")
+    for chunk in chunks:
+        chunk.train()
+    # Gradients stay enabled so activation checkpointing can run. The graph is
+    # dropped with the output; this pass never backpropagates or steps.
+    for _ in range(microbatches):
+        for chunk, iterator in zip(chunks, wrapped):
+            output = forward_step(iterator, chunk)
+            del output
+    return microbatches
+
+
+class _CapturedBatches:
+    """Remember batches read during the probe without replacing the outer iterator."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.saved = []
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        item = next(self.inner)
+        self.saved.append(_clone_batch(item))
+        return item
+
+
+def _clone_batch(value):
+    """Copy batch tensors so a later iterator write cannot change the replay."""
+    if torch.is_tensor(value):
+        return value.detach().clone()
+    if isinstance(value, dict):
+        return {key: _clone_batch(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_clone_batch(item) for item in value)
+    if isinstance(value, list):
+        return [_clone_batch(item) for item in value]
+    return value
+
+
+def _capture_probe(iterator) -> list[_CapturedBatches]:
+    from megatron.core.rerun_state_machine import RerunDataIterator
+
+    iterators = iterator if isinstance(iterator, list) else [iterator]
+    captured = []
+    for current in iterators:
+        if not isinstance(current, RerunDataIterator):
+            raise RuntimeError(
+                "expert remap probe requires Megatron's RerunDataIterator, "
+                f"got {type(current).__name__}"
+            )
+        wrapper = _CapturedBatches(current.iterable)
+        current.iterable = wrapper
+        captured.append(wrapper)
+    return captured
+
+
+def _rewind_probe(iterator, captured: list[_CapturedBatches], microbatches: int) -> None:
+    """Replay the probe's batches so the first training step sees the same data."""
+    iterators = iterator if isinstance(iterator, list) else [iterator]
+    if len(iterators) != len(captured):
+        raise RuntimeError("expert remap lost a probe iterator")
+    for current, wrapper in zip(iterators, captured):
+        if len(wrapper.saved) != microbatches:
+            raise RuntimeError(
+                "expert remap probe recorded "
+                f"{len(wrapper.saved)} batches, expected {microbatches}"
+            )
+        current.iterable = wrapper.inner
+        current.saved_microbatches = wrapper.saved
+        current.replaying = True
+        current.replay_pos = 0
+
+
+def _clear_probe_aux_tracker() -> None:
+    """Drop aux-loss totals recorded by the probe so step 1 logs only itself."""
+    from megatron.core.transformer.moe.moe_utils import clear_aux_losses_tracker
+
+    clear_aux_losses_tracker()
+
+
+def _refresh_megatron_master(optimizer) -> None:
+    reload = getattr(optimizer, "reload_model_params", None)
+    if not callable(reload):
+        raise RuntimeError(
+            "expert remap moved the weights but cannot copy them into the Megatron "
+            "fp32 master"
+        )
+    reload()
 
 
 def install_megatron_expert_remap() -> None:
@@ -316,18 +377,22 @@ def install_megatron_expert_remap() -> None:
     if not _enabled() or _INSTALLED:
         return
 
-    from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import (
-        accumulate_layer_counts,
-        slots_ready,
-    )
+    # Importing the qwen3 package here pulls Megatron back in while
+    # ``lumen.models.megatron`` is still initializing.
     from megatron.core.transformer.moe.router import TopKRouter
     import megatron.training.training as training
 
     original_routing = TopKRouter.routing
 
     def routing(self, logits, padding_mask=None):
+        from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import (
+            accumulate_layer_counts,
+        )
+
         probs, routing_map = original_routing(self, logits, padding_mask)
-        if not slots_ready():
+        # ``_PLACED`` lives in this module. Gating on the balance module's
+        # flag can miss the table when that module was imported twice.
+        if not _PLACED:
             if routing_map is not None:
                 counts = routing_map.detach().to(dtype=torch.float64)
                 counts = counts.sum(dim=tuple(range(counts.ndim - 1)))
@@ -344,20 +409,23 @@ def install_megatron_expert_remap() -> None:
     original_train = training.train
 
     def train(*args, **kwargs):
+        if not _enabled() or _PLACED:
+            return original_train(*args, **kwargs)
+        forward_step = args[0] if args else kwargs["forward_step_func"]
         model = args[1] if len(args) > 1 else kwargs["model"]
         optimizer = args[2] if len(args) > 2 else kwargs["optimizer"]
-        original_step = optimizer.step
-
-        def step(*step_args, **step_kwargs):
-            result = original_step(*step_args, **step_kwargs)
-            note_optimizer_step(model, optimizer)
-            return result
-
-        optimizer.step = step
-        try:
-            return original_train(*args, **kwargs)
-        finally:
-            optimizer.step = original_step
+        args_list = list(args)
+        if len(args_list) > 4:
+            incoming = args_list[4]
+        else:
+            incoming = kwargs["train_data_iterator"]
+        captured = _capture_probe(incoming)
+        microbatches = _probe_megatron(forward_step, model, incoming)
+        apply_counted_placement(model)
+        _refresh_megatron_master(optimizer)
+        _rewind_probe(incoming, captured, microbatches)
+        _clear_probe_aux_tracker()
+        return original_train(*args, **kwargs)
 
     training.train = train
     _INSTALLED = True

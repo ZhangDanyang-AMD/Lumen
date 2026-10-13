@@ -9,14 +9,14 @@ Expert implementations:
 
 ## Current best 20-step results
 
-Measured 2026-10-12 on `dev/qwen3-30b-a3b-opt-fsdp-fp8`, 8×MI350X, seq=4096, MBS=2, GBS=256. The step time is the median of steps 11–20. Commands, tokenizer pinning, and the step-1 check are in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md) ([中文](docs/qwen3-30b-a3b-reproduce.md)).
+Measured 2026-10-13 on `dev/qwen3-30b-a3b-opt-fsdp-fp8`, 8×MI350X, seq=4096, MBS=2, GBS=256. The step time is the median of steps 11–20. Expert seats are packed from the first batch before optimizer state exists. Commands, tokenizer pinning, and the step-1 check are in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md) ([中文](docs/qwen3-30b-a3b-reproduce.md)).
 
 | Path | Median step | samples/s |
 |---|---:|---:|
-| Megatron BF16 | 8.519 s | 30.05 |
-| Megatron FP8 blockwise2d | 8.435 s | 30.35 |
-| FSDP BF16 | 10.209 s | 25.08 |
-| FSDP FP8 blockwise2d | 9.545 s | 26.82 |
+| Megatron BF16 | 8.562 s | 29.90 |
+| Megatron FP8 blockwise2d | 8.292 s | 30.87 |
+| FSDP BF16 | 10.251 s | 24.97 |
+| FSDP FP8 blockwise2d | 9.561 s | 26.77 |
 
 ## Megatron SonicMoE script defaults
 

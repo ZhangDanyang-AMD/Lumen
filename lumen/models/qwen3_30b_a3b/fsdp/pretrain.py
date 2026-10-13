@@ -1033,9 +1033,8 @@ def shard_moe_experts(
     )
     if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
         _rank0_log(
-            "expert remap will pack placement from token counts after %s "
-            "optimizer step(s)",
-            os.environ.get("LUMEN_EXPERT_REMAP_AFTER_STEPS", "1"),
+            "expert remap will pack placement from the first batch before "
+            "the optimizer is created"
         )
     return model
 
@@ -1660,6 +1659,13 @@ class FSDPTrainer:
             )
         self.model = _enable_lumen(self.model, args, self.groups.dp_group)
         self.model = apply_fsdp2(self.model, self.groups, args.sharding)
+        self.tokenizer, self.train_loader, self.val_loader = self._build_data()
+        if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
+            self._probe_expert_counts()
+            from lumen.models.expert_remap import apply_counted_placement
+
+            apply_counted_placement(self.model)
+            self.model.zero_grad(set_to_none=True)
 
         decay_parameters = []
         no_decay_parameters = []
@@ -1687,7 +1693,6 @@ class FSDPTrainer:
             self.optimizer,
             self._lr_multiplier,
         )
-        self.tokenizer, self.train_loader, self.val_loader = self._build_data()
 
     def _lr_multiplier(self, step: int) -> float:
         if step < self.args.lr_warmup_steps:
@@ -1753,6 +1758,15 @@ class FSDPTrainer:
             else None
         )
         return tokenizer, train_loader, val_loader
+
+    def _probe_expert_counts(self) -> None:
+        """Count original expert ids on the first global batch, without stepping."""
+        self.model.train()
+        probe = iter(self.train_loader)
+        for _ in range(self.args.gradient_accumulation_steps):
+            loss, _, _ = self._loss_components(next(probe))
+            del loss
+        del probe
 
     def _loss_components(
         self,
@@ -1912,10 +1926,6 @@ class FSDPTrainer:
                 grad_norm = torch.zeros((), device=f"cuda:{self.local_rank}")
             self.optimizer.step()
             _invalidate_dense_weight_caches(self.model)
-            if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
-                from lumen.models.expert_remap import note_optimizer_step
-
-                note_optimizer_step(self.model, self.optimizer)
             self.scheduler.step()
             torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - start) * 1000

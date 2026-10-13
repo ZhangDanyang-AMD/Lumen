@@ -1,8 +1,5 @@
 """Packing rules for the runtime expert placement."""
 
-import torch
-
-from lumen.models.expert_remap import _storages
 from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import pack_slots
 
 
@@ -31,14 +28,3 @@ def test_pack_slots_breaks_load_ties_by_expert_id():
     # seating it leaves every rank tied, so the lowest rank fills first.
     assert pack_slots([5, 5, 5, 5], experts_per_rank=2) == [0, 2, 1, 3]
     assert pack_slots([0, 0, 0, 0], experts_per_rank=2) == [0, 1, 2, 3]
-
-
-def test_optimizer_moments_follow_the_expert_parameter():
-    weight = torch.nn.Parameter(torch.arange(8, dtype=torch.float32).view(2, 4))
-    optimizer = torch.optim.AdamW([weight], lr=0.1)
-    weight.sum().backward()
-    optimizer.step()
-    storages = _storages(weight, optimizer)
-    pointers = {tensor.data_ptr() for tensor, _ in storages}
-    assert weight.data.data_ptr() in pointers
-    assert sum(is_moment for _, is_moment in storages) == 2
