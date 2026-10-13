@@ -93,11 +93,9 @@ bash examples/qwen3-30b-a3b/run_docker.sh
 ```
 
 Host paths under `HOST_ASSET_ROOT` are mounted at `/nobackup` in the
-container. The four optimization write-ups are
-[`Megatron BF16`](docs/qwen3-30b-a3b-bf16-megatron-optimization.md),
-[`FSDP BF16`](docs/qwen3-30b-a3b-bf16-fsdp-optimization.md),
-[`Megatron FP8`](docs/qwen3-30b-a3b-fp8-megatron-optimization.md), and
-[`FSDP FP8`](docs/qwen3-30b-a3b-fp8-fsdp-optimization.md).
+container. The reproduction runbook is
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md)
+([中文](docs/qwen3-30b-a3b-reproduce.md)).
 
 ### Smoke (mock data, default MBS=1 GBS=8)
 

@@ -2,13 +2,6 @@
 
 中文：[qwen3-30b-a3b-reproduce.md](qwen3-30b-a3b-reproduce.md)
 
-Optimization write-ups:
-
-- [Megatron BF16](qwen3-30b-a3b-bf16-megatron-optimization.md)
-- [FSDP BF16](qwen3-30b-a3b-bf16-fsdp-optimization.md)
-- [Megatron FP8](qwen3-30b-a3b-fp8-megatron-optimization.md)
-- [FSDP FP8](qwen3-30b-a3b-fp8-fsdp-optimization.md)
-
 These are the four 20-step runs remeasured on 2026-10-13 on `dev/qwen3-30b-a3b-opt-fsdp-fp8`. Expert seats are not stored in source. Before training, one pass over the first batch counts the original expert ids, packs a placement, and writes it into the expert weights before any optimizer state exists. Each token still reaches the expert it routed to; only the rank that stores that expert changes. Every run is 8×MI350X, TP=PP=CP=1, EP=8, seq=4096, MBS=2, GBS=256. The median is the average of the 5th and 6th values after sorting steps 11–20. samples/s = 256 / median seconds. The first three steps include load and autotune and are left out. Step-time noise is about 50–100 ms.
 
 | Path | Median step | samples/s | step 1 lm / grad | step 20 lm / grad | Log |

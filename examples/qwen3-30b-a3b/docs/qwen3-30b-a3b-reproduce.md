@@ -2,13 +2,6 @@
 
 English: [qwen3-30b-a3b-reproduce.en.md](qwen3-30b-a3b-reproduce.en.md)
 
-优化过程分别见：
-
-- [Megatron BF16](qwen3-30b-a3b-bf16-megatron-optimization.md)
-- [FSDP BF16](qwen3-30b-a3b-bf16-fsdp-optimization.md)
-- [Megatron FP8](qwen3-30b-a3b-fp8-megatron-optimization.md)
-- [FSDP FP8](qwen3-30b-a3b-fp8-fsdp-optimization.md)
-
 下面是 2026-10-13 在 `dev/qwen3-30b-a3b-opt-fsdp-fp8` 上复测的四组 20 步。专家座位不写进源码：开训前用第一批 token 的原始专家 id 现算一张表，在优化器状态出现之前写入专家权重。每个 token 仍进原来的专家，变的只是它落在哪个 rank。形状都是 8×MI350X、TP=PP=CP=1、EP=8、seq=4096、MBS=2、GBS=256。中位数取 steps 11–20 排序后第 5、第 6 个的平均，samples/s = 256 / 中位秒。前 3 步含加载和 autotune，不进统计。步时噪声大约 50–100 ms。
 
 | 路径 | 中位 step | samples/s | step 1 lm / grad | step 20 lm / grad | 日志 |
