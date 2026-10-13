@@ -7,10 +7,22 @@ Expert implementations:
 - `te_grouped`: Transformer Engine `TEGroupedMLP`
 - `sonic`: AITER SonicMoE (replaces `MoELayer.experts` only)
 
-## Fastest Megatron SonicMoE recipe (default)
+## Current best 20-step results
 
-These knobs are the script defaults. Set `MOE_IMPL=sonic` and, for the
-reported numbers, `MBS=2 GBS=256` with a real checkpoint and FineWeb.
+Measured 2026-10-12 on `dev/qwen3-30b-a3b-opt-fsdp-fp8`, 8×MI350X, seq=4096, MBS=2, GBS=256. The step time is the median of steps 11–20. Commands, tokenizer pinning, and the step-1 check are in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md) ([中文](docs/qwen3-30b-a3b-reproduce.md)).
+
+| Path | Median step | samples/s |
+|---|---:|---:|
+| Megatron BF16 | 8.519 s | 30.05 |
+| Megatron FP8 blockwise2d | 8.435 s | 30.35 |
+| FSDP BF16 | 10.209 s | 25.08 |
+| FSDP FP8 blockwise2d | 9.545 s | 26.82 |
+
+## Megatron SonicMoE script defaults
+
+These knobs are the script defaults. They are not the current best recipe;
+that recipe overrides attention, RoPE, and the expert backend as documented
+in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
 
 | Knob | Default | What it does |
 |---|---|---|
@@ -50,9 +62,12 @@ TRAIN_STEPS=2 GBS=16 \
 ./run_docker.sh
 ```
 
-### Production e2e (real weights + FineWeb)
+### Early Megatron e2e snapshot (real weights + FineWeb)
 
 Image: `zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream`.
+This table is the early CK + CUDA-graph stack, not the current best.
+Current four-path commands are in
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
 BF16, seq=4096, 20 steps, median of steps 11–20. Loss matches the
 pre-graph recipe (step 20 lm loss 2.3846 vs 2.3847).
 
@@ -60,7 +75,7 @@ pre-graph recipe (step 20 lm loss 2.3846 vs 2.3847).
 |---|---|---|---|---|
 | Triton attn + multistream GEMM (no overlap extras) | 24.71 s | 10.36 samples/s | 122.0 | 0.609 |
 | 4 opts (CK + Triton GEMM + EP overlap + CONN=8) | 17.47 s | 14.66 samples/s | 172.7 | 0.710 |
-| **4 opts + attn CUDA Graph (current default)** | **12.72 s** | **20.13 samples/s** | **237.2** | 0.692 |
+| 4 opts + attn CUDA Graph | 12.72 s | 20.13 samples/s | 237.2 | 0.692 |
 
 ```bash
 cd /home/leiwu/Lumen   # or your clone
@@ -78,8 +93,11 @@ bash examples/qwen3-30b-a3b/run_docker.sh
 ```
 
 Host paths under `HOST_ASSET_ROOT` are mounted at `/nobackup` in the
-container. Attribution, profiles, and A/B notes:
-`docs/qwen3-30b-a3b-perf-optimization.md`.
+container. The four optimization write-ups are
+[`Megatron BF16`](docs/qwen3-30b-a3b-bf16-megatron-optimization.md),
+[`FSDP BF16`](docs/qwen3-30b-a3b-bf16-fsdp-optimization.md),
+[`Megatron FP8`](docs/qwen3-30b-a3b-fp8-megatron-optimization.md), and
+[`FSDP FP8`](docs/qwen3-30b-a3b-fp8-fsdp-optimization.md).
 
 ### Smoke (mock data, default MBS=1 GBS=8)
 
@@ -292,7 +310,9 @@ Performance is the median of steps 11–20.
 
 ![Qwen3-30B-A3B MoE benchmark](results/qwen3-30b-a3b-real-optimized20-speed.png)
 
-Best validated configurations:
+The current four best runs are in
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
+The six rows below are an earlier backend matrix:
 
 - **FSDP Sequential:** 32.413 s/step, 7.898 samples/s, 161.2 GiB peak memory.
 - **FSDP SonicMoE:** 22.356 s/step, 11.451 samples/s, 128.0 GiB peak memory.
