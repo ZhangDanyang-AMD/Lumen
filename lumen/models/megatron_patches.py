@@ -549,6 +549,7 @@ def install_fused_rope():
     the AITER backend at import when ``USE_ROCM_AITER_ROPE_BACKEND`` is left
     at its default. That backend uses a different rounding and is not the
     kernel this path measured, so pin the native kernel before the import.
+    If apex was already imported with the AITER backend, refuse to install it.
 
     Megatron passes ``interleaved=``, which this apex entry point does not
     accept. The Qwen recipe keeps rotary interleaving off.
@@ -565,10 +566,9 @@ def install_fused_rope():
         import megatron.core.models.common.embeddings.rope_utils as rope_utils
 
         if already_imported and getattr(_fused_rope_mod, "AITER_ROPE_BACKEND", False):
-            print(
-                "Lumen fused RoPE: apex was already imported with the AITER "
-                "backend. Restart with USE_ROCM_AITER_ROPE_BACKEND=0.",
-                flush=True,
+            raise RuntimeError(
+                "apex RoPE was imported with the AITER backend; restart with "
+                "USE_ROCM_AITER_ROPE_BACKEND=0"
             )
         _apex_rope = _fused_rope_mod.fused_apply_rotary_pos_emb
 

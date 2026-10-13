@@ -502,7 +502,9 @@ def _expert_score_bwd_kernel(
         y = tl.load(y_ptr + row * stride_y + offs).to(tl.float32)
         tl.store(dx_ptr + row * stride_dy + offs, (dy * score).to(tl.bfloat16))
         acc += tl.sum((dy * y).to(tl.bfloat16).to(tl.float32))
-    tl.store(ds_ptr + row, acc.to(tl.bfloat16).to(tl.float32))
+    # Keep the reduced score gradient in fp32. The eager path sums the bf16
+    # products in fp32 and does not quantize that scalar.
+    tl.store(ds_ptr + row, acc)
 
 
 def _expert_score_bwd(grad: torch.Tensor, output: torch.Tensor, scores: torch.Tensor):
