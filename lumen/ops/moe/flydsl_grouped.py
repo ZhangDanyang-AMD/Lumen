@@ -10,9 +10,8 @@ When ``SONIC_MOE_GEMM_BACKEND=flydsl``, the BF16 pre-routed expert path uses
 the native FlyDSL training lifecycle on Qwen3 E16 (``forward_routes_training``
 plus retained-state ``sonic_moe_backward_routes``).  Other shapes fall back
 to gemm1/gemm2 forward and FlyDSL NN/TN grouped GEMMs for dgrad/wgrad.
-Qwen3-local defaults come from
-``tests/kernels/bench_sonic_moe_aiter_vs_flydsl.py --sweep-tiles`` on T=8192
-with real uneven expert counts.
+Qwen3-local defaults come from a gfx950 tile sweep at T=8192 with real
+uneven expert counts.
 """
 
 from __future__ import annotations
