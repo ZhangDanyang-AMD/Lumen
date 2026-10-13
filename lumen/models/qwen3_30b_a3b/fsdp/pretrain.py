@@ -594,6 +594,8 @@ class EPShardedMoeBlock(nn.Module):
         self._sonic_first_forward = expert_backend == "sonic"
         self._offload_moe_activations = False
         self._expert_slot: Optional[torch.Tensor] = None
+        self._remap_collect = False
+        self._remap_layer: Optional[int] = None
 
         experts = original_block.experts
         num_experts = getattr(experts, "num_experts", None)
@@ -668,9 +670,7 @@ class EPShardedMoeBlock(nn.Module):
         gate_output = self.gate(hidden_states)
         if isinstance(gate_output, tuple) and len(gate_output) >= 3:
             routing_weights, selected_experts = gate_output[1], gate_output[2]
-            if self._expert_slot is not None:
-                selected_experts = self._expert_slot[selected_experts.long()]
-            return routing_weights, selected_experts
+            return routing_weights, self._place_selected_experts(selected_experts)
 
         router_logits = gate_output
         if self._lumen_fused_router:
@@ -698,20 +698,36 @@ class EPShardedMoeBlock(nn.Module):
             if getattr(self.gate, "norm_topk_prob", getattr(self, "norm_topk_prob", False)):
                 routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
             routing_weights = routing_weights.to(hidden_states.dtype)
+        return routing_weights, self._place_selected_experts(selected_experts)
+
+    def _place_selected_experts(self, selected_experts: torch.Tensor) -> torch.Tensor:
+        """Count original ids, then rewrite them once a runtime placement exists."""
+        if self._remap_collect:
+            from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import (
+                accumulate_layer_counts,
+            )
+
+            counts = torch.histc(
+                selected_experts.detach().reshape(-1).to(torch.float32),
+                bins=self.num_experts,
+                min=0,
+                max=self.num_experts - 1,
+            )
+            accumulate_layer_counts(self._remap_layer, counts)
         if self._expert_slot is not None:
             selected_experts = self._expert_slot[selected_experts.long()]
-        return routing_weights, selected_experts
+        return selected_experts
 
     def _expert_indices(
         self,
         layer_idx: Optional[int],
         expert_backend: str,
     ) -> Optional[list[int]]:
-        """Permute expert ids so each rank's measured load is even.
+        """Keep the contiguous weight slice until runtime counts are packed.
 
-        The table maps an original expert id onto a contiguous slot. Rank r
-        still owns slots [16*r, 16*r+16); only which physical experts sit
-        there changes. Routing weights stay on the original experts.
+        Rank r still starts with experts ``[local*r, local*r+local)``. After
+        the warmup steps, those weights move and ``_expert_slot`` rewrites the
+        selected ids. Routing weights stay on the original experts.
         """
         if os.environ.get("LUMEN_EXPERT_REMAP", "0") != "1":
             return None
@@ -719,23 +735,9 @@ class EPShardedMoeBlock(nn.Module):
             raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires expert_backend=sonic")
         if layer_idx is None:
             raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires a decoder layer index")
-        from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import expert_slot
-
-        slot = expert_slot(layer_idx)
-        if len(slot) != self.num_experts or sorted(slot) != list(range(self.num_experts)):
-            raise RuntimeError(
-                f"expert placement for layer {layer_idx} is not a permutation "
-                f"of {self.num_experts} experts"
-            )
-        inverse = [0] * self.num_experts
-        for original, new_slot in enumerate(slot):
-            inverse[new_slot] = original
-        self._expert_slot = torch.tensor(
-            slot,
-            dtype=torch.long,
-            device=self.gate.weight.device,
-        )
-        return inverse[self.local_expert_start : self.local_expert_start + self.experts_per_rank]
+        self._remap_layer = layer_idx
+        self._remap_collect = True
+        return None
 
     def _exchange_counts(self, send_counts: torch.Tensor) -> torch.Tensor:
         if self.ep_size == 1:
@@ -1031,8 +1033,9 @@ def shard_moe_experts(
     )
     if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
         _rank0_log(
-            "static per-layer expert placement enabled "
-            "(permutation only; each token still hits the same expert)"
+            "expert remap will pack placement from token counts after %s "
+            "optimizer step(s)",
+            os.environ.get("LUMEN_EXPERT_REMAP_AFTER_STEPS", "1"),
         )
     return model
 
@@ -1909,6 +1912,10 @@ class FSDPTrainer:
                 grad_norm = torch.zeros((), device=f"cuda:{self.local_rank}")
             self.optimizer.step()
             _invalidate_dense_weight_caches(self.model)
+            if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
+                from lumen.models.expert_remap import note_optimizer_step
+
+                note_optimizer_step(self.model, self.optimizer)
             self.scheduler.step()
             torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - start) * 1000
