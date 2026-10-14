@@ -150,71 +150,78 @@ dominates. On production shapes (B=32+, S=2048+), the overhead would be
 amortized and AITER's optimized kernel would likely win. The 9.62x reflects
 a small-batch advantage, not a fundamental algorithmic improvement.
 
-### Comparison: SFT-2F vs SFT-2E
+---
 
-| Metric | SFT-2E (69/100) | SFT-2F (76/76 core, profiler) |
-|--------|-----------------|-------------------------------|
-| Training data | 2000 patch only | **3164** (+ 1164 impl) |
-| Core FAST rate | 2/69 (2.9%) | **25/76 (33%)** |
-| gemm FAST | 0 | **16/25 (64%)** |
-| rms_norm FAST | 2 | **8/19 (42%)** |
-| mla FAST | 0 | **1** (small shape) |
-| Best gemm | 1.66x (unverified) | **1.88x (profiler)** |
-| Best rms_norm | 1.83x | **6.63x (profiler)** |
-| First-shot (t1-t2) | Rare (t3-t5) | **Common (t1-t2)** |
+## Base Model — Qwen3-Coder-30B-A3B-Instruct (no SFT)
 
-Key improvement: complete_implementation training data enabled gemm from-scratch
-writing (16% -> 81% snapshot rate).
+- Model: `Qwen/Qwen3-Coder-30B-A3B-Instruct`
+- No kernel SFT training data. Pure base model coding capability.
 
-### Turn Budget Analysis
+### Base Summary (76/76 core tasks completed)
 
-| Turns | Tasks | With Snapshots | Insight |
-|-------|-------|---------------|---------|
-| <=10 | ~15 | ~12 (80%) | Early exit, but model wrote good kernel first |
-| 11-100 | ~15 | ~10 (67%) | Exception exits, snapshots captured |
-| 101-200 | ~43 | ~13 (30%) | Full runs, complex ops mostly fail |
+| Operator | Tasks | FAST (>=0.9x) | OK (<0.9x) | FAIL | Best Speedup |
+|----------|-------|---------------|------------|------|-------------|
+| gemm | 25 | **4** | 1 | 20 | 1.25x |
+| rms_norm | 19 | **12** | 3 | 4 | 5.68x |
+| mla | 6 | 0 | 0 | 6 | — |
+| mha | 14 | 0 | 0 | 14 | — |
+| paged_attention | 12 | 0 | 0 | 12 | — |
+| **Total** | **76** | **16 (21%)** | **4 (5%)** | **56 (74%)** | |
 
-Best kernels appear at t1-t2 (first successful evaluate). 200-turn iteration
-often degrades results by overwriting good kernels with broken ones.
+### Base Profiler Results (19 snapshots, device-only time)
+
+| # | Task | Op | AITER (ms) | SFT (ms) | Speedup | Status |
+|---|------|----|-----------|---------|---------|--------|
+| 1 | adversarial_boundary-rms_norm | rms_norm | 0.042 | 0.007 | **5.68x** | FAST |
+| 2 | adversarial_boundary-rms_norm | rms_norm | 0.037 | 0.007 | **5.50x** | FAST |
+| 3 | geak_native-rms_norm-04 | rms_norm | 0.038 | 0.007 | **5.30x** | FAST |
+| 4 | aiter-prod-rms_norm-12 | rms_norm | 0.037 | 0.007 | **5.21x** | FAST |
+| 5 | geak_native-rms_norm-02 | rms_norm | 0.043 | 0.010 | **4.36x** | FAST |
+| 6 | aiter-prod-rms_norm-07 | rms_norm | 0.038 | 0.009 | **4.31x** | FAST |
+| 7 | aiter-prod-rms_norm-10 | rms_norm | 0.040 | 0.012 | **3.32x** | FAST |
+| 8 | aiter-prod-rms_norm-01 | rms_norm | 0.042 | 0.019 | **2.20x** | FAST |
+| 9 | aiter_derived-rms_norm-04 | rms_norm | 0.041 | 0.024 | **1.74x** | FAST |
+| 10 | aiter-prod-gemm-13 | gemm | 0.112 | 0.089 | **1.25x** | FAST |
+| 11 | aiter-prod-gemm-01 | gemm | 0.050 | 0.040 | **1.24x** | FAST |
+| 12 | aiter-prod-gemm-02 | gemm | 0.054 | 0.046 | **1.16x** | FAST |
+| 13 | aiter-prod-gemm-04 | gemm | 0.130 | 0.124 | **1.05x** | FAST |
+| 14 | aiter-prod-rms_norm-09 | rms_norm | 0.007 | 0.007 | **1.02x** | FAST |
+| 15 | aiter-prod-rms_norm-13 | rms_norm | 0.007 | 0.007 | **0.99x** | FAST |
+| 16 | aiter-prod-rms_norm-02 | rms_norm | 0.006 | 0.007 | **0.94x** | FAST |
+| 17 | aiter-prod-gemm-03 | gemm | 0.320 | 0.545 | 0.59x | OK |
+| 18 | aiter-prod-rms_norm-03 | rms_norm | 0.007 | 0.011 | 0.58x | OK |
+| 19 | aiter-prod-rms_norm-08 | rms_norm | 0.065 | 0.128 | 0.51x | OK |
 
 ---
 
-## Profiler Re-benchmark (device-only time)
+## SFT-2F vs Base Comparison
 
-All 37 snapshots re-benchmarked with `torch.profiler` device-only timing
-(excludes host/launch overhead). Previous measurements used `triton.testing.do_bench`
-with `cuda.Event` timing which includes kernel launch overhead.
+| Metric | Base | SFT-2F | Improvement |
+|--------|------|--------|-------------|
+| **FAST rate** | 16/76 (21%) | **25/76 (33%)** | +12 pp |
+| **gemm FAST** | 4/25 (16%) | **16/25 (64%)** | **+48 pp (4x)** |
+| **rms_norm FAST** | 12/19 (63%) | 8/19 (42%) | -21 pp |
+| **mla FAST** | 0 | 1 | +1 |
+| Best gemm | 1.25x | **1.88x** | +50% |
+| Best rms_norm | **5.68x** | 6.63x | +17% |
+| Snapshots | 19 | **33+** | +74% |
 
-| Metric | do_bench (old) | profiler (new) |
-|--------|---------------|----------------|
-| FAST (>=0.9x) | ~15 | **29** |
-| OK (>0, <0.9x) | ~7 | **8** |
-| FAIL | ~15 | **0** |
-| Total snapshots | 37 | 37 |
+### Key Takeaways
 
-### Top profiler results
+1. **gemm is the SFT win**: Base gets 4/25 gemm FAST (16%), SFT-2F gets 16/25 (64%) —
+   a 4x improvement. The complete_implementation training data directly teaches
+   tiled GEMM from scratch.
 
-| Task | Op | Speedup | AITER (ms) | SFT (ms) |
-|------|----|---------|-----------|---------|
-| aiter-prod-rope_kv_cache-03 | rope_kv_cache | 1478.76x* | 114.94 | 0.078 |
-| aiter-prod-rope_kv_cache-02 | rope_kv_cache | 133.83x* | 0.868 | 0.006 |
-| aiter_derived-rope_kv_cache-02 | rope_kv_cache | 79.88x* | 0.507 | 0.006 |
-| adversarial_boundary-rope_kv_cache | rope_kv_cache | 10.76x* | 0.262 | 0.024 |
-| aiter_derived-sampling-02 | sampling | 9.92x* | 0.130 | 0.013 |
-| aiter-prod-rms_norm-01 | rms_norm | 6.63x | 0.042 | 0.006 |
-| geak_native-rms_norm-02 | rms_norm | 6.25x | 0.043 | 0.007 |
-| aiter_derived-rms_norm-04 | rms_norm | 6.15x | 0.041 | 0.007 |
-| geak_native-rms_norm-04 | rms_norm | 5.77x | 0.038 | 0.007 |
-| adversarial_boundary-rms_norm-02 | rms_norm | 4.62x | 0.037 | 0.008 |
-| aiter-prod-gemm-05 | gemm | 1.88x | 0.134 | 0.071 |
-| aiter_derived-gemm-03 | gemm | 1.88x | 0.148 | 0.078 |
-| adversarial_boundary-gemm-04 | gemm | 1.81x | 0.070 | 0.039 |
-| aiter_derived-gemm-01 | gemm | 1.58x | 0.076 | 0.048 |
-| aiter-prod-gemm-04 | gemm | 1.53x | 0.130 | 0.085 |
+2. **rms_norm: Base is already strong**: Base gets 12/19 FAST (63%) vs SFT-2F's 8/19 (42%).
+   Base model's general coding ability is sufficient for simple 1D reduction kernels.
+   SFT may have slightly narrowed rms_norm capability while improving gemm.
 
-*rope_kv_cache and sampling baselines use Python fallback, not AITER C++ kernels.
+3. **Complex ops: both fail**: Neither Base nor SFT-2F can write MHA, MLA (except 1),
+   or paged_attention from scratch. These require multi-kernel architecture knowledge
+   not present in either model's training.
 
-Full results saved to `receipts/profiler_rebenchmark.json`.
+4. **Overall: SFT training provides net positive**: +12 percentage points FAST rate
+   (21% → 33%), driven entirely by gemm improvement (+48 pp).
 
 ---
 
