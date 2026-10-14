@@ -2,11 +2,11 @@
 
 **Date:** 2026-09-21
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-10-09（本轮一手源码 reconciliation R19；保留 R1–R18 历史）
 
-**Status:** Design frozen for implementation planning
+**Status（分层）:** M0 frozen；P0a operator contract frozen；P0b fixed-random-init 4L training-closure/regression smoke decided; concrete run manifest pending；P1 architecture reviewed；P1 compiled ABI draft；validation protocol correctness frozen、quality/performance pending preregistration；execution authorization not granted；implementation not started
 
-**Lifecycle:** Spec developing; Q1–Q34 review decisions incorporated
+**Lifecycle:** Spec developing; Q1–Q34 review decisions incorporated; 2026-10-09 amendments R1–R6 and GPT-review amendments R7–R18 recorded
 
 **Scope:** gfx950 上 DeepSeek-V4 routed-expert FC1/FC2 的 Lumen-native MXFP4 A4W4 experimental training path
 
@@ -20,7 +20,7 @@
 
 ## 1. 结论
 
-当前 DeepSeek-V4（下文简称 DSV4）的 FP8 MoE 训练链路是：
+固定 Lumen revision c6d2e121a81b73ef0acdfe323c11c0254d8ac7bb 的 DeepSeek-V4（下文简称 DSV4）FP8 MoE 链路是（不得外推所有版本，证据见 §3.5）：
 
 ~~~text
 Megatron router / permutation / EP all-to-all / local expert sorting
@@ -36,12 +36,12 @@ Megatron router / permutation / EP all-to-all / local expert sorting
 
 > **Lumen-native FP4 A4W4 training for DeepSeek-V4 routed-expert shapes — experimental pretraining/continued-training.**
 
-该名称只表示模型结构、shape 和集成位置，不表示复现或数值等价于 DeepSeek-V4 报告中的 QAT recipe。目标链路保留 Megatron 的 router、dispatch/combine、SwiGLU/clamp、routing probability gradient、checkpoint/recompute 语义，只在 expert-sorted tensor 边界替换 routed-expert FC1/FC2 的 GEMM。
+该名称只表示模型结构、shape 和集成位置，不表示复现或数值等价于 DeepSeek-V4 报告中的 QAT recipe。目标链路保留 Megatron 的 router、dispatch/combine、SwiGLU/clamp、routing probability gradient、checkpoint/recompute 语义，只在 expert-sorted tensor 边界替换 routed-expert FC1/FC2 的 GEMM。Router 保持原精度/BF16 且可训练；gate Parameter gradient 与 e-score bias 的非梯度状态更新分别保留，不冻结整个 router。
 
 交付按三个阶段推进：
 
 1. **M0 / prerequisites:** 从 Lumen、AITER dirty workspace 中抽取最小必要前置提交，逐项测试并建立唯一 clean lineage。
-2. **P0 / sequential:** 使用与 P1 完全相同的数值 recipe、layout、RNG、cache 和输出 dtype，逐 expert 建立 correctness reference。
+2. **P0 / sequential:** 使用与 P1 完全相同的数值 recipe、layout、RNG、cache 和输出 dtype，逐 expert 建立 correctness reference。P0 拆分为：**P0a operator reference**（sequential A4W4 算子契约与数值/生命周期门禁，本 spec 已冻结）与 **P0b training closure/regression smoke**（4L 分布式训练 fixture 与数据/配置冻结，设计选择已关闭，具体运行 manifest 待冻结）。
 3. **P1 / grouped:** AITER 提供 grouped Fprop/DGrad/WGrad，Lumen 提供 autograd、事务式绑定、cache、optimizer/checkpoint 生命周期、dispatch、ledger 和 Megatron 集成。
 
 最终 promotion 不是“能训练”或“loss 有限”。它要求 strict zero-fallback、全拓扑/恢复门禁、预注册质量统计、真实 routing bucket certification 和端到端性能门槛同时通过。即使全部通过，V1 仍是 opt-in experimental、仅对已测试配置有效，不称通用 production/convergence parity。
@@ -102,6 +102,8 @@ V1 MUST NOT 扩展到：
 - FP4 checkpoint 主表示、FP4 optimizer state 或 rollout/export；
 - 把 A8W4 或 BF16 当作 strict A4W4 的静默 fallback。
 
+OQ-G-01 已关闭：V1 明确排除 FSDP，仅覆盖 Megatron-Core expert training path；reshard_continue 仅指 Megatron/DCP topology reshard，不含 FSDP flat-parameter lifecycle。公共 module 保持 Parameter/state_dict 语义；TE FSDP 生命周期仅为未来接口参考，不进入 V1 exit criteria。
+
 ### 2.3 DSV4 报告与本设计的差异
 
 DSV4 报告的 MoE 数值链路是：
@@ -127,6 +129,8 @@ BF16 model Parameter as quantization source
 ~~~
 
 两者的 activation precision、weight scale granularity、训练 kernel、gradient quantization 和 rollout/export contract 均不同。DSV4 的 S32/A8W4 路径若实现，MUST 使用独立 recipe/spec，不能作为本设计的别名或运行时选项。
+
+官方报告（[arXiv:2606.19348v1](https://arxiv.org/abs/2606.19348v1)）明确其 FP4 QAT 在 **post-training stage** 引入（其 [§5.2.1](https://arxiv.org/html/2606.19348v1#S5.SS2.SSS1) 与 [§1 Introduction](https://arxiv.org/html/2606.19348v1#S1) 有直接原文），作用于 teacher/reference 模型；其整体预训练按标准 from-scratch 语义描述，但未明示随机初始化（未证实，不得写成已证实）。本设计是独立的 A4W4 experimental pretraining/continued-training：既不声称复现官方 QAT，也不援引官方报告作为 MXFP4 从头预训练可行性的证据。
 
 ---
 
@@ -154,7 +158,7 @@ runtime AITER 与 Lumen gitlink 不一致，且 Lumen/AITER workspace 均含未�
 3. 每个前置提交独立审查、独立测试，记录它解决的具体 prerequisite。
 4. 固定 Lumen、AITER、Megatron、ROCm、compiler、PyTorch 和容器版本。
 5. 使 Lumen gitlink、实际 import 的 AITER source 和实际加载 extension build-id 指向同一 lineage。
-6. 在 clean baseline 上完成 P0/P1；ABI 冻结后再 forward-port 到最新 AITER，并重复 conformance、kernel correctness 和最小训练门禁。
+6. 2026-10-09 用户批准的 upstream-first 修订（§23 R2）：AITER clean baseline 直接建立在当前 upstream main 的明确 commit 上（拟建独立 worktree `/scratch/users/xdai/aiter-mxfp4-moe`，本记录时不创建），旧恢复 dirty 仅作逐项语义来源并保留；取代旧"先在旧 M1 完成 P0/P1、ABI 冻结后再 forward-port"的顺序。ABI 冻结后若 upstream 前移，forward-port 到新的明确 pinned commit 仍作为独立 gate，并重复 conformance、kernel correctness 和最小训练门禁。
 
 正式 manifest 至少包含：
 
@@ -165,7 +169,7 @@ source tree/content digest
 dirty=false
 aiter.__file__ / lumen.__file__
 loaded .so or wheel digest and build-id
-ABI version / numeric recipe ID / layout IDs
+ABI version / training/operand-quant/operand-transform recipe IDs / layout IDs
 ROCm / driver / compiler / PyTorch / RCCL
 GPU arch / CU count / topology / rank mapping
 build flags / tuning database digest
@@ -175,15 +179,15 @@ build flags / tuning database digest
 
 ### 3.3 当前链路的关键事实
 
-源码审计确认：
+历史 snapshot 审计结论如下；其中 FP8 sequential/backward 以本轮 §3.5 固定 revision 重新核对，AITER 能力以 §3.6 矩阵限定，不将历史 snapshot 泛称所有当前版本：
 
 - Megatron 已正确拥有 router、token permutation/local sorting、EP all-to-all、SwiGLU/clamp、combine、router gradient 和 recompute。
-- LumenGroupedLinear 当前按 expert Python loop 调 quantized_linear，不是 grouped kernel。
+- 固定 Lumen c6d2e121 的 LumenGroupedLinear 按 expert Python loop 调 quantized_linear，不是 grouped GPU 调度。
 - 默认 DSV4 blockwise FP8 的 Fprop/DGrad 可低精度执行，但 WGrad 对 M_e % 128 的限制会触发 BF16。
 - DSV4 的 post-build FP8 enable 没有使 Megatron config.fp8 为真，因此不能假定 Megatron FP8 padding 已启用。
 - dense MXFP4 已有可复用的 A4W4、dual-layout、H16、SR 和 weight-cache 能力，但不能直接证明 grouped MoE correctness/performance。
 - AITER 现有 DSV4 tuned rows 是 A8W4 inference rows，且 local-E/训练 backward contract 不匹配。
-- AITER 当前没有本 spec 所需的完整 grouped MXFP4 training backward。
+- 本轮固定 AITER 663f69b2 的已核对公共路径不提供本 spec 完整的 grouped MXFP4 F/D/W 训练合同；已有能力和具体缺口见 §3.6，不能概括成“没有 grouped GEMM”。
 - 当前 Python random 生成 SR seed/offset 的路径不满足 exact replay，MUST 移除出本链路。
 - distributed checkpoint 可原位恢复 Parameter bytes，而 Parameter identity 与 _version 不变；因此 _version 不能作为 cache correctness authority。
 
@@ -199,6 +203,74 @@ build flags / tuning database digest
 | Dense MXFP4 has reusable F/D/W and cache pieces | lumen/ops/quantize/linear.py, lumen/ops/quantize/ops.py, lumen/quantize/__init__.py | reuse only after numeric/lifecycle conformance |
 | Existing AITER DSV4 table is FP8-activation/FP4-weight inference | aiter/configs/model_configs/dsv4_fp8fp4_tuned_fmoe.csv | it is not an A4W4 training tuning source |
 | Existing AITER MoE WGrad is not the required MXFP4 operand contract | aiter/ops/triton/moe/moe_wgrad.py | new or extended public training API is required |
+
+---
+
+### 3.5 Fixed Lumen evidence — sequential is not grouped GPU execution
+
+本轮读取的 Lumen 固定 SHA 为 `c6d2e121a81b73ef0acdfe323c11c0254d8ac7bb`，与承载本设计文档的 `7c98d87` 分支基点分开记录：
+
+- [grouped_linear.py L126–167](https://github.com/ZhangDanyang-AMD/Lumen/blob/c6d2e121a81b73ef0acdfe323c11c0254d8ac7bb/lumen/modules/grouped_linear.py#L126-L167)：`m_splits[i]` → expert slice → dense `quantized_linear` → `torch.cat`；empty expert 跳过，all-empty 返回空 tensor。`m_splits_gpu` 仅在签名出现，未用于 grouped GPU 调度。
+- [dense backward L2351–2533](https://github.com/ZhangDanyang-AMD/Lumen/blob/c6d2e121a81b73ef0acdfe323c11c0254d8ac7bb/lumen/ops/quantize/linear.py#L2351-L2533)：dense autograd 已有 DGrad/WGrad。blockwise DGrad 对 N/K 对齐，M 不受此限制；WGrad `_aligned_wgrad=(M % block_size == 0)`，非对齐 M_e 使 `g_col=None` 后执行 `_bf16_wgrad()`；kernel rejection 也可触发 BF16。不能把“有 backward”误写成“全 grouped/全低精度 backward”。当前 WGrad FP8 分支实际调用 `requant_fp8_row_to_col`，不是注释描述的必然 BF16 中间张量路径。
+- [fp8.py L10–80](https://github.com/ZhangDanyang-AMD/Lumen/blob/c6d2e121a81b73ef0acdfe323c11c0254d8ac7bb/lumen/models/dsv4/megatron/fp8.py#L10-L80)：DSV4 默认 blockwise/block128，通过 model 构建后的 enable hook 配置；此 hook 不设置 Megatron `config.fp8`，不可据此假设 framework FP8 padding。
+
+这些事实只针对该 revision。P0a 使用逐 expert **dense MXFP4** F/D/W parity，修补/验证其 frozen recipe、empty/tiny/nonaligned/skew 和生命周期，不把旧 FP8 fallback 当作通过；P0b 是显式 sequential correctness backend 的固定随机 4L smoke；P1 才针对已有能力逐项复用/扩展，交付真正满足冻结合同的 AITER grouped MXFP4 F/D/W 与 Lumen autograd/cache/dispatch，而非从零复制所有 grouped GEMM。
+
+### 3.6 AITER capability-gap matrix — current source outranks historical issues
+
+本轮通过 `git ls-remote` 固定 upstream main 为 `663f69b223cdc231c7b2c20d1104aa6626b899b9`；这是证据 pin，不是已安装/测试或获准实现的 baseline。[Issue 3038](https://github.com/ROCm/aiter/issues/3038) 正文提出 training TN/NN/NT、routing-free splits、caller out/accumulate、scale/empty 合同；[roadmap 3443](https://github.com/ROCm/aiter/issues/3443) 把它列为 training planned direction。两者是需求/历史状态，不能独自证明本次源码缺失。
+
+| 已读取固定源码 | 已有能力 | 对本 V1 的具体缺口/处理 |
+|---|---|---|
+| [MoE a8w8](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/moe/moe_op_gemm_a8w8.py) | FP8/MX scale forward、RoutingData/gather/scatter、SwiGLU/reduction；自行分配输出 | 不提供同一 training F/D/W、caller main_grad accumulate 合同；scale transpose/recipe 必须独立验证 |
+| [gmm / ptgmm](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/gemm/grouped/gmm.py) + [dtype validation](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/utils/gmm_common.py) | BF16/FP16 grouped F/D、reduction-axis WGrad；device group_sizes；existing_out；ptgmm accumulate | 不是 FP8/MXFP8/MXFP4 packed-scale 合同；不能说 AITER 完全没有 grouped training 或 caller out |
+| [SonicMoE wrapper](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/moe/sonicmoe.py#L66-L316) + [kernel](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/_triton_kernels/moe/sonicmoe/grouped_gemm.py) | **已有** `grouped_gemm(A,B,cu_seqlens,out,...)`、transpose flags、blockwise FP8 F/D 与 `_grouped_gemm_dw`；可不传 gather/scatter，caller out 可用；kernel 直接 store | 部分超越 3038 的历史“仅 forward”说法。scale 固定 128（activation1x128/weight128x128；WGrad token-axis scales），没有 MXFP4/E8M0/H16-SR 合同；无 accumulate 参数，[WGrad kernel L243–319](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/_triton_kernels/moe/sonicmoe/grouped_gemm.py#L243-L319) store 覆盖而非 main_grad +=；[wrapper L243–276](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/moe/sonicmoe.py#L243-L276) scale validation 使用 `.sum().item()`，不符合 P1 新增 D2H 禁令。应优先复用/扩展而非重复 kernel；不因接口存在宣称完整稳定通过 |
+| [moe_wgrad](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/moe/moe_wgrad.py) | 已有 sorted-token WGrad、empty sorted input 返回 zero dW | 依赖 sorted ids/top_k，内部 zeros allocation、没有 packed scales/caller accumulation；不等于所需 MXFP4 WGrad |
+| [dense FP4 GEMM](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/triton/gemm/basic/gemm_afp4wfp4.py) | packed E2M1 + E8M0 dense GEMM，caller y、split-K、prepared layouts | dense 非 grouped；caller y 不等于 FP32 main_grad accumulate；其每行1x32 scale 接口不得无审计当作 Lumen weight32x32 recipe |
+| [FlyDSL MoE](https://github.com/ROCm/aiter/blob/663f69b223cdc231c7b2c20d1104aa6626b899b9/aiter/ops/flydsl/moe_kernels.py) | FP8/MXFP8/FP4 前向 stage1/2、sort/top-k/EP reduction | stage1 FC1–SwiGLU 与 stage2 FC2–reduction 是两个 **forward** 阶段，不是 forward/backward；不能替代训练 D/W |
+
+另一个可核实的历史冲突：3038 写 a8w8 仅 scalar static scales；本次固定 wrapper 已有 `x_token_scale` 和 `w_expt_scale`，不得继续宣称该项完全缺失。SonicMoE 以上结论来自公开 Python wrapper 与其内部 kernel 分支，并非全组合 GPU 测试证明：未审计/运行的 dtype-layout 组合与 empty/ragged 稳定性不得标为 supported。当前缺口是**满足冻结 MXFP4 recipe 的完整稳定训练 bundle**，不是所有低精度 grouped 算子不存在。A0 必须逐 pass 对 TN Fprop / NN DGrad / NT WGrad、routing-free splits、caller output/main_grad overwrite/accumulate、empty/all-empty/ragged 与 determinism 给出 capability 和测试，已有局部支持不得冒充全 bundle；本轮未运行任何 GPU 测试。
+
+### 3.6.1 Dense MXFP4 candidate reuse — pass-by-pass audit prerequisite
+
+用户已提交的 dense 算子是候选复用来源，不代表完整 MoE 契约已支持。M0/P0a MUST 记录真实 Lumen/AITER commit、public API/symbol、实际调用链与测试证据；§3.1/§3.5 历史 pins 不能自动替代实际候选 pin。
+
+| Pass / item | 复用前必须证明的合同 | 未通过时处理 |
+|---|---|---|
+| Fprop | X4 @ W4^T 方向；E2M1 packed payload/E8M0 scales；activation1x32 与 weight32x32/S1024 的 axes/layout/selector；FP32 accumulation 到 BF16 | 记录具体 dense capability gap，优先补 dense 公共合同 |
+| DGrad | dY4 @ W4-transpose-view 方向；同 forward 权重 snapshot/scale bytes 的确定性 repack；dY SR token；禁止更新后重量化或启用 DGrad Hadamard | 不宣称仅有 dense backward 就已满足冻结 recipe |
+| WGrad | dY^T @ X；两 operand 先逻辑零 pad 再 normalized H16；RTN/SR、dual layouts 与 logical RNG；OVERWRITE/ACCUMULATE_FP32，直接 FP32 main_grad 且 exactly-once | caller output 不等于 FP32 accumulate，禁止 BF16 中间落地冒充通过 |
+| 所有 pass / lifecycle | FC1/FC2 empty/all-empty/tiny/nonaligned/ragged/skew、cache-disabled parity、recompute/optimizer/cache epochs、kernel_family allowlist 与 noCK（含内部 dispatch） | 未审计/未测试组合保留 unsupported/待验证；strict typed fail，不能静默 BF16 |
+
+P0 缺口优先修补 dense 契约与 Lumen adapter，不为建立 sequential correctness backend 新造 grouped kernel；P1 后续按 §3.6 grouped capability-gap 逐项扩展。
+
+### 3.7 DeepGEMM: API/scheduler and test-design reference only
+
+本轮 main 固定为 `057ca5964aae0879ff2e0eb71ee05a3cb0ba3df7`，读取 [gemm.hpp](https://github.com/deepseek-ai/DeepGEMM/blob/057ca5964aae0879ff2e0eb71ee05a3cb0ba3df7/csrc/apis/gemm.hpp)、[test_fp8_fp4.py](https://github.com/deepseek-ai/DeepGEMM/blob/057ca5964aae0879ff2e0eb71ee05a3cb0ba3df7/tests/test_fp8_fp4.py) 和 [generators.py](https://github.com/deepseek-ai/DeepGEMM/blob/057ca5964aae0879ff2e0eb71ee05a3cb0ba3df7/tests/generators.py)。测试已重构，不沿用用户所列旧行号，以下以实际 symbol 定位。
+
+| API | 实际数学/输入与输出边界 | 本设计参考点 |
+|---|---|---|
+| `m_grouped_fp8_fp4_gemm_nt_contiguous(a,b,d,grouped_layout,...)` | `[M,K] @ [G,N,K].mT`，caller BF16 d、int32 PSUM 或 per-row group layout，M=0 early return | Fprop M-grouped ragged descriptor/scheduling；注意其 NT 名称与 TE 调用 weights-first TN 不同，不机械按字母对齐 |
+| `m_grouped_fp8_fp4_gemm_nn_contiguous(...)` | 包装器转置 B payload/scale 再调 NT | DGrad API/layout 参考；测试生成器对 FP4×FP4 的 MN-major B 组合跳过，不能凭 NN symbol 存在宣称 native A4W4 DGrad 全支持 |
+| `k_grouped_fp4_gemm_nt_contiguous(a,b,d,ks_cpu,grouped_layout,c,... )` | 逻辑 A `[m,sum_k]`、B `[n,sum_k]`（packed 最后一维减半、K-major），D `[G,m,n]`，可选 C；recipe `(1,1,32)`，k_alignment 为256倍数，SM100 路径 | WGrad `dY^T[N,M_e] @ X[M_e,K]`，映射 m=N、n=K、每组 reduction k=M_e；必须参考 **K-grouped** reduction 调度，不能机械套 Fprop 的 M-grouped |
+
+K-grouped C/D 可别名做累加；总 K=0 的 early-return 对 C==D 保持、不别名复制 C、无 C 清零 D。测试包含 partial-empty/首组empty/single-hot、PSUM/host-K variants、BF16/FP32 overwrite、C/D accumulate、重复 deterministic 检查；未见显式 all-empty generator case，API early return 不等于已执行 all-empty GPU 测试。Lumen 必须补其 own empty OVERWRITE 清零 / ACCUMULATE 不变测试。
+
+只借 API、ragged、reduction、C/D accumulation 与 empty 测试设计：不是实现依赖，不可在 AMD/gfx950 直接调用，不是 Lumen 数值 oracle，也不证明 DSV4 历史内部使用了 current main。其 FP4 1x32 scale/layout 与冻结 activation1x32、**weight32x32**、H16-RHT/SR 并不默认等价，禁止移植其量化 recipe 替代 §5。
+
+### 3.8 Forward fusion, PDL and TransformerEngine boundaries
+
+[DeepGEMM PR304](https://github.com/deepseek-ai/DeepGEMM/pull/304) 正文明确 MegaMoE 融合 dispatch/linear1/SwiGLU/linear2/combine，**Only FP8 × FP4**，且声明该 release 与 internal model release 无关；对应 [固定 release README](https://github.com/deepseek-ai/DeepGEMM/blob/7f2a703ed51ac1f7af07f5e1453b2d3267d37d50/README.md) 也给出 `fp8_fp4_mega_moe` forward。它属于 A8W4 fused forward/rollout/inference 方向，不提供 DGrad/WGrad 证据；与 §3.7 独立 grouped weight-backward API 区分。
+
+[NVIDIA CUDA PDL 文档](https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-host-programming.html#programmatic-dependent-kernel-launch)（本轮读取 v13.4.2）将 PDL 定义为 **Programmatic Dependent Launch**：primary trigger、secondary grid dependency synchronize 和 launch attribute 允许同 stream dependent kernels 部分重叠。它不是 expert wave 调度概念，不是 gfx950 V1 capability 或依赖。
+
+TE main 本轮固定 `39a8b879dfbfea0d23bc3862dc83ec1d6f970b49`，读取 [grouped_linear.py](https://github.com/NVIDIA/TransformerEngine/blob/39a8b879dfbfea0d23bc3862dc83ec1d6f970b49/transformer_engine/pytorch/module/grouped_linear.py)。仅用作 Lumen §9/§11 封装与生命周期参考：
+
+- saved operands / offsets 经 prepare_for_saving 保存，row/column usage 按 F/D/W consumer 准备；weight workspace/cache 受 first-microbatch 与 update 控制。
+- forward TN、DGrad NN、WGrad NT 调用与 caller output、main_grad accumulate/overwrite 分开；weakrefs 指向原 Parameter 而非临时 gathered copy。
+- FSDP lazy main_grad accessor、distributed weight backward re-materialization、finalize grads，提示未来 sharding 生命周期；TP 通信由 MoE dispatch/combine 处理而非模块内部复制。**不将 FSDP 加回 V1 scope。**
+- 防重复梯度包含 `grad_added_to_main_grad` bookkeeping 与 None/dummy-grad 约定；Lumen 应审查自己的 Megatron reducer 合同，不能机械照抄 TE dummy grads 或产生第二份真实梯度。
+- TE NVFP4 并非 OCP MXFP4；不复制其 block16、E4M3/global scale 或 RHT recipe。仅凭 wrapper 的 NVFP4 开关不能改写 Lumen §5 的冻结格式、32x32 weights 和 H16-SR。
 
 ---
 
@@ -242,23 +314,27 @@ BF16 hidden states
   -> local permutation
   -> EP all-to-all
   -> local expert sorting
-  -> grouped MXFP4 FC1
+  -> selected sequential/grouped MXFP4 FC1
   -> existing BF16 clamp + SwiGLU
   -> existing routing-probability multiply
-  -> grouped MXFP4 FC2
+  -> selected sequential/grouped MXFP4 FC2
   -> local unsort
   -> TP/EP combine
 ~~~
 
 MXFP4 implementation MUST NOT 接收或重新解释 global router logits、top-k ids、top-k weights 或 expert mask。Probability gradient、dispatch/combine 和 checkpoint keys 继续由 Megatron/Lumen integration layer 拥有。
 
+P0b 数据合同：固定随机初始化 4L，BF16/MXFP4 必须共用相同 model/optimizer/seed/data 顺序、attention masks、positions 和 loss target token 集合。Packing MUST 强制跨文档 attention 隔离；用显式文档边界、有效长度与 target mask 区分 padding/真实 EOS，EOS=pad 时 MUST NOT 仅凭 token ID 屏蔽真实 EOS。验收保存两臂 valid-target 与 mask/position digest，并加入两篇文档 sentinel、真实 EOS 与尾部 padding 同 ID 的负向测试。具体 seed/超参数值未给出，不据此发明已批准值。
+
 ### 4.3 Fprop/DGrad/WGrad
 
 ~~~text
 Fprop: X4 [M_e,K] x W4 [N,K]^T -> BF16 Y [M_e,N]
 DGrad: dY4 [M_e,N] x W4-transpose-view -> BF16 dX [M_e,K]
-WGrad: dY4^T [N,P_e] x X4^T [P_e,K] -> FP32 accumulation [N,K]
+WGrad: Q(H16·pad(dY_e))^T [N,P_e] x Q(H16·pad(X_e)) [P_e,K] -> FP32 accumulation dW_e [N,K]
 ~~~
+
+WGrad 的两个 operand 使用同一 H16 transform（同一 operand_transform_id、同一 normalized 约定、同一 diagonal sign vector）；语义细则见第 5.4 节。
 
 P0 sequential 与 P1 grouped MUST 使用完全相同的 quantizer、scale bytes、physical layouts、RTN/SR、padding、accumulator 和 output dtype。P0 是 executable numerical reference，不是另一套 recipe。
 
@@ -268,43 +344,66 @@ P0 sequential 与 P1 grouped MUST 使用完全相同的 quantizer、scale bytes�
 
 ### 5.1 权威 ID 分层
 
-不得使用 canonical MXFP4 作为含混格式名。V1 将数值语义与物理布局分开：
+不得使用 canonical MXFP4 作为含混格式名。V1 将训练 recipe、operand 量化数值、operand 数值变换与物理布局分成独立演进的层：
 
 ~~~text
-numeric_recipe_id
+training_recipe_id
+operand_quant_recipe_id
+operand_transform_id
 physical_layout_id
 prepared_layout_id
 ~~~
 
-主 weight numeric recipe：
+training_recipe_id 标识整体训练 recipe 标签：
 
 ~~~text
-lumen_fp4_e2m1_e8m0_tile32x32_s1024_v1
-lumen_fp4_e2m1_e8m0_row1x32_v1
+lumen_a4w4_direct_training_v1
+lumen_w4_s1024_a8_nonweight_operands_v1
 ~~~
 
-它 MUST 完整规定：
+前者是本 spec 主线 A4W4 直接训练；后者是第 5.6 节 matched-scale A8W4 质量控制（既有 ID 保留）。
+
+operand_quant_recipe_id 标识单 operand 的量化数值 recipe。V1 固定两个，命名按 scale block 粒度而非物理 tile，避免与 physical_layout_id 混淆：
+
+~~~text
+lumen_fp4_e2m1_e8m0_scale_block_32x32_s1024_v1
+lumen_fp4_e2m1_e8m0_scale_block_1x32_v1
+~~~
+
+角色（2026-10-09 修订经 dense MXFP4 源码核对后澄清）：
+
+- scale_block_32x32_s1024：weight operand 的 2D tile scale recipe（每 32x32 tile 共享一个 E8M0 scale，1024 value/tile），对应 dense `convert_to_mxfp4_2d` 语义；
+- scale_block_1x32：非 weight operand（X、dY row 与 WGrad transposed operand）的 per-row 1x32 scale recipe，对应 dense `convert_to_mxfp4` / `hadamard_quant_mxfp4` 的 scale 粒度。旧文把两个 ID 并列于"主 weight numeric recipe"不准确：scale_block_1x32 不是第二个 weight recipe，也不是 DSV4 S32 weight recipe 的别名；DSV4 S32 路径仍按第 2.3 节要求使用独立 recipe/spec。
+
+每个 operand_quant_recipe_id MUST 完整规定：
 
 - E2M1 payload 与 E8M0 scale；
-- 32x32 / 1024-value scale granularity 和 axes；
+- scale block 粒度（32x32/S1024 或 1x32）和 axes；
 - fp4_e2m1_e8m0_selector_v1 的 amax、exponent floor/ceil、tie、encode/clamp；
-- RTN；
+- RTN 或 SR（按 operand role，第 5.3/5.4 节）；
 - zero、signed zero、NaN、Inf、subnormal、overflow 和 saturation；
 - byte-exact golden vectors。
 
-physical_layout_id MUST 规定 nibble order、byte encoding/endianness、tile traversal、strides、padding、scale placement、offset/pointer width、H16 matrix/sign/order 和最低 alignment。
+operand_transform_id 标识量化前的数值变换，不是 physical layout：
+
+~~~text
+hadamard16_all_plus_v1
+~~~
+
+H16 从旧 physical layout 列表改列到本层（2026-10-09 修订）：它改变 operand 的数值分布，不改变 packed byte 的物理排布；语义细则见第 5.4 节。
+
+physical_layout_id MUST 规定 nibble order、byte encoding/endianness、tile traversal、strides、padding、scale placement、offset/pointer width 和最低 alignment；不再承担 H16 数值变换语义。
 
 V1 公共 physical layout IDs 固定为：
 
 ~~~text
 mxfp4_weight_tile32x32_v1
 mxfp4_segmented_row_and_t_v1
-hadamard16_all_plus_v1
 ~~~
 
 prepared_layout_id 只标识 kernel-private swizzle/preshuffle。它不是公共 interchange format，也不允许改变数值值域或重新量化 BF16 source。
 
-ABI version、numeric recipe version、physical layout version 和 prepared layout version MUST 独立演进。破坏性 ABI 改动发布 _v2。
+ABI version、training/operand-quant/operand-transform recipe version、physical layout version 和 prepared layout version MUST 独立演进。破坏性 ABI 改动发布 _v2。
 
 ### 5.2 Weight source 与双布局
 
@@ -344,7 +443,7 @@ X_e_bf16
   +- H16 / transpose / logical-zero pad -> RTN -> FP4 for WGrad
 ~~~
 
-禁止从已量化 row operand decode 后再量化 transposed operand。Aligned/ragged shape MUST 具有同一 reference 数学定义；padding 不参与 amax，padded lane 固定 +0。
+禁止从已量化 row operand decode 后再量化 transposed operand。Aligned/ragged shape MUST 具有同一 reference 数学定义；pre-transform 逻辑零 padding 不参与 amax，padded lane 固定 +0；H16 之后的 post-transform lanes 是普通变换值，与真实行同权参与 amax、量化与 GEMM。
 
 ### 5.4 Gradient quantization
 
@@ -355,6 +454,13 @@ X_e_bf16
 - 两者使用不重叠 RNG subrange；
 - LUMEN_MXFP4_DGRAD_HADAMARD=1 在本模式 MUST 被拒绝；
 - recompute/physical retry MUST 复用逻辑 invocation 的同一 RNG token。
+
+H16（hadamard16_all_plus_v1）语义固定为：
+
+- X 与 dY 的 WGrad transposed operand 使用同一 H16：同一 16x16 Hadamard 矩阵、同一 normalized 约定、同一 diagonal sign vector；
+- all_plus 指 diagonal sign vector 全正（+1），即 transform 是纯 Hadamard 旋转、无随机符号翻转；
+- normalized 约定必须显式：V1 采用 normalized H16（H/√16，entries ±1/4，与 dense 实现一致），此时 H^T·H = I，WGrad 无需额外幅值补偿；任何 kernel 内部若改用 unnormalized ±1 整数矩阵，MUST 在数值 contract 中显式记录 1/16 compensation 的施加位置（unnormalized 时 H^T·H = 16·I）；
+- padding 顺序固定：先在 BF16 域补逻辑零（pre-transform padding lanes 固定 +0、不参与 amax），再施加 H16；post-transform lanes 是普通变换值，与真实行同权参与 amax、量化与 GEMM；该顺序 MUST NOT 颠倒，禁止先变换后补零。
 
 ### 5.5 WGrad output mode
 
@@ -509,6 +615,16 @@ canonical serialization and digest
 OOD result
 ~~~
 
+### 6.4 动态 M_e 运行时合同
+
+- M_e 的唯一权威来源是 EP dispatch 与 local sort 之后的 local tokens_per_expert；MUST NOT 从 pre-dispatch router map、top-k ids 或 expert mask 重新计算或二次解释（第 4.2 节边界）。
+- counts/offsets 的 dtype、shape 与 device residency MUST 显式定义并进入 ABI：V1 固定 int32、device-resident；int32 operand indexing overflow 预检 fail-closed（第 15.2 节）。
+- local expert id ↔ weight slot（Parameter 顺序、kernel weight bank index）的映射 MUST 显式、稳定、与 state_dict 顺序一致；MUST NOT 从 kernel 执行顺序反推 expert id。
+- MAY 使用 active_expert_ids（nonempty 压缩列表）作稀疏执行优化；active 压缩不得改变 M_e 语义、ledger obligation 或 empty-expert 合同。
+- P1 hot path MUST NOT 逐 expert 调用 .item()，MUST NOT 为 counts/offsets 新增 D2H 同步；任何必需的 host 侧读取只能发生在 routing epoch 构建期。
+- max_M_e、ΣM_e、offset 宽度与 capacity 上限 MUST 预注册；超限是 typed failure（capacity/width violation），不得静默截断或回退 BF16。
+- extreme token count 由 batch/top-k/capacity 推导：令 T 为本 microbatch 进入本 rank local sort 的 token 数（T = MBS × seq_len），k 为 router top-k，则 ΣM_e = T·k（无 drop 时），single-expert extreme M_e ≤ min(T·k, capacity_e)（capacity_e 为 dispatch capacity 生效时的 per-expert 上限；无 capacity 时取 T·k）。实现 MUST 按该上界预注册 max_M_e envelope。
+
 ---
 
 ## 7. AITER API 与 ABI
@@ -551,6 +667,8 @@ fixed-length flat tuple
 ~~~
 
 禁止 Python opaque plan handle 跨入 compiled ABI。Facade MUST 将 plan 展开为 config_id + metadata tensors + scalars。所有 output/workspace mutation 在 schema 中显式声明。每个低层 symbol 带 _v1；compiled backend 导出真实 ABI major/minor，且与 numeric/layout versions 分离。
+
+本节与第 7.6 节的 compiled ABI 为 **draft**：A0 ABI review 签署（plan §7 A0 exit）前不冻结；头部状态 "P1 compiled ABI draft" 即指此。
 
 ### 7.3 Four-stage execution model
 
@@ -643,13 +761,45 @@ grouped_mxfp4_wgrad_v1
 
 WGrad 的逻辑 signature 包含 mandatory Tensor[] out、output_mode 和 caller-owned workspace。API MUST 显式返回或暴露不支持原因，不允许 Lumen 捕获任意异常来猜测 fallback。
 
+Compiled ABI（draft，A0 签署前不冻结）必须对以下字段给出精确、可测试的定义；任一缺失即 ABI 不完整，A0 不得签署：
+
+- packed payload 与 scale 的 shape/dtype/stride/device；
+- expert weights 的 bank / Tensor[] / pointer table 表达；
+- counts/offsets 的 dtype、shape 与 GPU/CPU residency；
+- Fprop caller-owned y_out；
+- DGrad caller-owned dx_out；
+- WGrad Tensor[] out / main_grad 目的地；
+- workspace query / size / alignment；
+- output dtype enum；
+- alias/mutation rules；
+- stream/lifetime；
+- all-empty 返回语义；
+- typed capability/status/error。
+
+### 7.7 Backend family、execution mode 与 no-CK 契约
+
+**Sequential (P0a/P0b)** 是正规 correctness backend：Lumen 用 Megatron post-dispatch/local-sort 的 x_sorted + tokens_per_expert 切片、稳定映射原 per-expert Parameters，复用 dense MXFP4 Fprop/DGrad/WGrad；不以 grouped MoE backward 先交付为前提。Megatron 负责 routing/dispatch/combine/permutation；Lumen 仍必须完成 §11.4 autograd/context、FC1–SwiGLU/clamp–probability–FC2 衔接及 router probability gradient、FP32 main_grad exactly-once、empty/ragged/recompute/cache/optimizer 生命周期，不能把 permutation 已正确当作完整训练闭环。
+
+**Grouped (P1)** 是逐项复用/扩展已有 AITER 能力的 MXFP4 F/D/W 训练 bundle。Fprop/DGrad 是 M-grouped，WGrad 是 K/reduction-grouped；消费与 sequential 相同 recipe、BF16 snapshots、canonical payload/scales、H16 与 RNG logical mapping（prepared repack 必须值保持）。统一调度可使用少量 launches，但不承诺只有一个 kernel 或所有 routing 下总更快。同一 wrapper SHOULD 使切换模式不改变 router/model/state_dict、数据和 mask 语义。Forward bind 固定整个 F/D/W bundle 与 execution_mode；backward 只能 late-attach runtime operands，不能重新挑选模式/backend。
+
+execution_mode 与 kernel backend family 是两个独立维度，命名不得混用：
+
+~~~text
+execution_mode ∈ {grouped, sequential}   expert 维度的执行结构
+kernel_family  ∈ {FLYDSL, TRITON, ASM}   底层 kernel 实现族
+~~~
+
+本 feature 的 quantization、cache preparation、Fprop、DGrad 和 WGrad MUST NOT 选择 CK（Composable Kernel），包括任何内部 auto-dispatch 路径。kernel_family 的 V1 allowlist 为 {FLYDSL, TRITON, ASM}；Gluon 不在 allowlist（用户本轮计划明确只允许上述三类）。任一 candidate plan 的 kernel_family MUST 在 capability 与 BoundExecution 中显式记录；manifest、ledger 与每个 kernel repr 同步记录 kernel_family。
+
+Strict gate 每 rank 断言 ck_invocations=0；任何 CK 命中均使 strict run 失败。P0 复用的现有 Dense MXFP4 调用链同样受本契约审计，不得因走 dense 既有路径而豁免。
+
 ---
 
 ## 8. Backend selection、strict 与 fallback
 
 ### 8.1 CLI
 
-新增且只新增以下主开关：
+以下为待实现 CLI 契约，不表示当前代码已可用。保留既有唯一选择开关 `--lumen-moe-mxfp4-backend`：其 backend 值表达 MoE execution_mode（sequential/grouped），不是 kernel_family；不得再造同功能 execution-mode 开关。auto 是既有候选选择策略，不是第三种执行结构。新增且只新增以下主开关：
 
 ~~~text
 --lumen-moe-mxfp4
@@ -659,7 +809,7 @@ WGrad 的逻辑 signature 包含 mandatory Tensor[] out、output_mode 和 caller
   {require-certified-bucket,allow-validated-heuristic}
 ~~~
 
-建议默认：
+沿用既有建议默认（仍是待实现设计默认，未核实为运行时默认；本轮不改变默认值或引入新 auto 策略）：
 
 ~~~text
 backend=auto
@@ -682,7 +832,7 @@ scope 固定为 routed-expert FC1/FC2；不得使用含义过宽的 --linear-fp4
 | grouped | false | grouped MXFP4 -> sequential MXFP4 -> BF16 |
 | auto | false | select grouped/sequential MXFP4; BF16 only if both unavailable |
 
-对 auto，grouped capability/bucket miss 后选 sequential 是 selection，不是 precision fallback。对显式 grouped，降到 sequential 是 backend fallback。MXFP4 降到 BF16 是 precision fallback。
+对 auto，grouped capability/bucket miss 后选 sequential 是 selection，不是 precision fallback。对显式 grouped，降到 sequential 是 execution-mode fallback（既有 backend_fallback counter 记录此事件）；底层 kernel_family 与 execution_mode 分开。任一路径 MXFP4 降到 BF16 是 precision fallback。requested_backend=sequential 的主动 correctness 路径不是 fallback。Production promotion 的 P1 candidate 在任何 rank、FC/pass 都禁止 grouped→sequential 或→BF16；此必要条件不会把 V1 的 experimental 声明上限升级为 production-ready。
 
 require-certified-bucket 只过滤 grouped candidate：
 
@@ -690,6 +840,22 @@ require-certified-bucket 只过滤 grouped candidate：
 - auto + strict 的 row miss：可选 sequential MXFP4，禁止 BF16；
 - explicit sequential：不受 grouped tuning policy 影响；
 - non-strict：所有 MXFP4 candidate 均不可用后才允许 BF16。
+
+计数真值（每 FC/pass/rank）：保留累计 pre-commit selector 决策事件口径，而非已运行 backend 的转换次数。`backend_fallback` 是显式 grouped 请求在允许 miss 后降到 sequential 候选的 execution-mode 降级事件，不表示曾执行 sequential；`precision_fallback` 是允许 miss 后进入 BF16 候选的精度降级事件，也不表示先执行过 MXFP4。普通 candidate attempt/miss 本身不递增这两个计数，只有按既定链发生的降级决策递增。
+
+| Pre-commit decision chain | Final executed（成功非 EMPTY） | selector mode-degradation events (`backend_fallback`) | selector precision-degradation events (`precision_fallback`) |
+|---|---|---:|---:|
+| explicit sequential → sequential MXFP4 bundle | sequential MXFP4 | 0 | 0 |
+| explicit grouped → grouped MXFP4 bundle | grouped MXFP4 | 0 | 0 |
+| explicit grouped → sequential MXFP4 candidate（仅 non-strict、允许 miss） | sequential MXFP4 | 1 | 0 |
+| explicit sequential → BF16 candidate（仅 non-strict、sequential miss） | BF16 | 0 | 1 |
+| explicit grouped → sequential MXFP4 candidate → BF16 candidate（仅 non-strict、两者 miss） | BF16；未执行 sequential/MXFP4 | 1 | 1 |
+| auto → grouped/sequential MXFP4 candidate | selected grouped/sequential MXFP4 | 0（selection 单列） | 0 |
+| auto → BF16 candidate（两个 MXFP4 candidates 均不可用、non-strict） | BF16；未执行 MXFP4 | 0（selection 单列） | 1 |
+
+Explicit grouped 的 BF16 结果必须沿既定 grouped→sequential→BF16 候选链：不新增跳过 sequential 的 grouped→BF16 路径。事件记录 MUST 含 from/to mode 与 precision、reason、failure_phase、commit_state=PRECOMMIT，并与 candidate_attempt/miss 记录单列；即使最终 BF16，前面的 selector mode 降级事件仍保留。Execution 字段只记录最终真实执行的 bundle/mode/kernel_family/precision，绝不把候选访问写成 kernel execution。EMPTY 按 §6.2 记录无 GEMM（必要 zero-fill 单列），失败/未 launch 记录相应 terminal state，不捏造 Final executed 成功。
+
+Requested/selected/executed execution_mode、kernel_family、executed_precision 与两个计数 MUST 分开记录；既有 requested_backend 字段是 CLI selector alias，不是 kernel family。Strict sequential 禁止 BF16；strict grouped 禁止 sequential 和 BF16。所有箭头仅表示 §7.4 封闭 candidate miss 下的 pre-commit 候选决策，不允许运行后尝试降级；selected 最终 bundle 与 executed 必须一致，否则 run-fatal。非 strict 也不允许 public ABI/version/alias/capacity/OOM/launch/async 等 fatal errors 触发 fallback。
 
 ### 8.3 Fallback timing
 
@@ -707,7 +873,9 @@ Cache key 至少包含：
 parameter identity
 committed_weight_epoch
 cache_generation
-numeric_recipe_id
+training_recipe_id
+operand_quant_recipe_id
+operand_transform_id
 physical_layout_id
 prepared_layout_id
 device / gfx / CU
@@ -755,6 +923,20 @@ maximum persistent budget        = 1.00 x B_ref
 default peak-build budget        = 1.00 x B_ref
 absolute maximum                 = 1.00 x B_ref
 ~~~
+
+以下五类 MUST 分别计量、分别对照限制报告，不得合并为单一内存数字：
+
+~~~text
+persistent_cache_bytes         常驻 derived cache（payload/scales/transpose/metadata）
+peak_cache_build_bytes         构建期 owned derived storage 高水位
+reusable_workspace_bytes       预分配、跨 launch 复用的 workspace/staging
+transient_launch_bytes         单次 launch 的瞬时 staging/copy
+device_total_preflight_bytes   preflight 时本 rank 本 device 的总需求
+~~~
+
+persistent_cache_bytes 对照 0.75x 默认 / 1.0x 硬上限；peak_cache_build_bytes 对照 1.0x B_ref；reusable_workspace_bytes 与 transient_launch_bytes 必须列入 planner 预测与 manifest；device_total_preflight_bytes 另对照实测 free HBM 做 fail-fast。
+
+Test-only cache-disabled P0 oracle：P0 必须提供一条不经 weight cache、每次调用从当前 BF16 Parameter 现算量化的 test-only 路径；cache-enabled 与 cache-disabled 的 packed bytes、scale bytes、layout IDs 与 GEMM 输出 MUST bitwise 一致（cache parity gate）。
 
 预测为 0.82x 时，默认 MUST 返回 CACHE_BUDGET_MISS。只有用户显式配置且 manifest 记录 provenance，才能把 persistent budget 提高到 0.82–1.0x。
 
@@ -866,6 +1048,19 @@ Activation recompute 为同一 logical invocation 的 physical re-execution：
 - ledger 新增 physical attempt_id，不新增 logical obligation；
 - 不允许 recompute 触发新 backend selection 或新 cache generation。
 
+### 11.4 Lumen framework adapter contract
+
+V1 的框架侧实现 MUST 固定以下契约，并作为独立 review 对象：
+
+1. **Module 接口：** 与 Megatron GroupedMLP 兼容的 forward 签名；输入为 expert-sorted x_sorted 与 post-dispatch、post-local-sort 的 tokens_per_expert；per-expert weight 保持 Parameter 语义与 weight0..weightN state_dict keys；每个 expert 的 recipe/cache 独立。
+2. **Custom autograd：** forward 只保存 compact packed operands、immutable routing context 与 bound execution（第 11.1 节）；backward 调 DGrad + WGrad。
+3. **WGrad exactly-once：** WGrad 对本 invocation 恰好一次直接累加 FP32 main_grad（ACCUMULATE_FP32）。当 WGrad 已直接写 main_grad 时，weight 输入的 backward 返回值 MUST 为 None；MUST NOT 经 autograd 再生成一份 Parameter.grad 造成二次累加。
+4. **main_grad 分配时机：** 二选一并冻结——(a) forward bind 前保证已分配，或 (b) 受限的 backward late-attachment 路径在 attach 时验证并绑定；任一 backend MUST NOT 在 kernel launch 后才发现 main_grad 不存在。
+5. **Megatron gradient bookkeeping：** main_grad 的设置/清除归属 MUST 显式：V1 固定为 Lumen adapter 在 optimizer zero-boundary 侧登记，Megatron 既有 gradient bookkeeping 语义不变更；MXFP4 路径不得绕过 Megatron 的 grad buffer 归属。
+6. **Accumulation window 归属：** window 的 open/close 由 optimizer step 语义拥有；WGrad 只在已声明的 open window 内 accumulate，window 外 attach MUST fail。
+7. **Reducer/all-reduce hook 完成信号：** dW 完成的判定来源固定为 WGrad stream completion event + ledger obligation COMPLETED；reducer hook 只在二者闭合后消费 main_grad。
+8. **Parameter 顺序与 local expert id 映射：** Parameter[i] ↔ local expert id 的映射 MUST 显式单向且与 state_dict keys 一致；MUST NOT 从 kernel 执行顺序反推 expert id。
+
 ---
 
 ## 12. Ledger 与可观测性
@@ -897,6 +1092,7 @@ failed_prelaunch = 0
 aborted = 0
 backend_fallback = 0
 precision_fallback = 0
+ck_invocations = 0
 all completed obligations executed grouped MXFP4
 ~~~
 
@@ -912,25 +1108,33 @@ executed precision
 precision fallback
 config source
 route descriptor/bucket
-numeric/layout IDs
+recipe/layout IDs
+kernel_family
 SR token/draws
 logical_invocation_id / physical attempt_id
 ~~~
 
 Expected obligations MUST 从训练图/autograd context 生成，不能从 kernel 次数反推。全 rank 校验使用聚合 counts + digest，失败时保存 rank detail。Strict failure 在安全同步点全局传播，避免 collective hang。
 
-### 12.3 Compatibility and certification flags
+### 12.3 Compatibility、strict 与 certification 分轴
 
-不得复用单一 certified 布尔。至少拆分：
+三个独立轴，不得合并为单一布尔：
 
 ~~~text
-runtime_compatible
+runtime_compatible   ABI/layout/capability/workspace 可运行（第 14.3 节 predicate）
+strict               是否允许 backend/precision fallback（第 8 节状态机）
+tuning_policy        certified bucket 或 validated heuristic（第 8.1、14 节）
+~~~
+
+certification 是更进一步的独立属性，至少拆分：
+
+~~~text
 correctness_validated
 tuning_config_certified
 artifact_provenance_certified
 ~~~
 
-strict 只描述 precision/fallback 语义，不等价于任一 certification 状态。
+promotion 与 exact_continue 在 runtime_compatible 之上额外要求 certified。uncertified 不自动等于 runtime incompatible：runtime_compatible 只回答"能否运行"，certification 回答"证据是否被认证"；二者分离使 allow-validated-heuristic 可用。strict 只描述 precision/fallback 语义，不等价于任一 certification 状态。
 
 ### 12.4 Required telemetry
 
@@ -939,13 +1143,15 @@ strict 只描述 precision/fallback 语义，不等价于任一 certification �
 ~~~text
 layer / FC role / pass
 binding ID / runtime schema
-requested and selected backend
-selection and fallback chain
-executed precision
+requested_backend / selected execution_mode
+actual execution_mode / kernel_family / executed precision
+selection and execution-mode fallback chain / precision fallback
 E_l / M / N / K
 route descriptor version and fields
 bucketizer version / padded-work bucket / route bucket
-numeric / physical / prepared layout IDs
+training/operand-quant/operand-transform recipe IDs
+physical / prepared layout IDs
+kernel_family
 config ID / config source
 weight epoch / cache generation / routing epoch
 SR token and draws receipt
@@ -1036,7 +1242,7 @@ Same-manifest resume 在首个 op 前验证 frontier；缺失、重复、乱序�
 
 ### 13.4 reshard_continue
 
-用于 EP/DP/TP/PP/world-size 改变。它保证 canonical global Parameter/optimizer mapping、scheduler、step 和 data cursor 正确并可继续训练，不承诺 bitwise replay。
+仅用于 Megatron/DCP 的 EP/DP/TP/PP/world-size 改变；V1 不含 FSDP。它保证 canonical global Parameter/optimizer mapping、scheduler、step 和 data cursor 正确并可继续训练，不承诺 bitwise replay。
 
 每个受支持 source-to-target tuple MUST 在 manifest 中显式列出并单独验收；单向测试不授权反向或任意拓扑声明。
 
@@ -1072,7 +1278,9 @@ gfx / CU
 pass
 op_variant_id
 E_l / N / K
-numeric_recipe_id
+training_recipe_id
+operand_quant_recipe_id
+operand_transform_id
 physical_layout_id / prepared_layout_id
 output mode / dtype
 ~~~
@@ -1160,7 +1368,7 @@ U95 使用 process-first hierarchical paired bootstrap：先按独立 capture gr
 ~~~text
 compiled ABI major matches and minor is in the declared compatible range
 backend build/version satisfies the published compatibility predicate
-numeric recipe / physical layout / prepared layout IDs are supported
+numeric recipe / transform / physical layout / prepared layout IDs are supported
 required capability bits are present
 descriptor/version available
 exact bucket row exists
@@ -1170,7 +1378,7 @@ GPU arch/CU/ROCm conditions and static key match
 workspace and alignment are valid
 ~~~
 
-OOD 包括 ABI/backend compatibility miss、missing capability bit、unknown descriptor version、missing bucket、envelope miss、capacity exceeded、numeric/layout/arch/CU/ROCm mismatch 和 uncertified config。Strict grouped 失败；auto 可在 commit 前选择 sequential。不得 nearest-match。源码路径、git commit 和 artifact provenance 不参与 API 类型兼容判断；它们由独立 certification flags 管理。
+OOD 包括 ABI/backend compatibility miss、missing capability bit、unknown descriptor version、missing bucket、envelope miss、capacity exceeded 和 numeric/layout/arch/CU/ROCm mismatch。Strict grouped 失败；auto 可在 commit 前选择 sequential。不得 nearest-match。uncertified config 不是 OOD/runtime incompatibility：它由 tuning_policy 轴处理（require-certified-bucket 时 pre-launch miss，allow-validated-heuristic 时可用）。源码路径、git commit 和 artifact provenance 不参与 API 类型兼容判断；它们由独立 certification flags 管理。
 
 ### 14.4 Config source and representation
 
@@ -1264,7 +1472,7 @@ Recipe accuracy 在真实 DSV4 snapshots 上相对 P0 同 seed/op 的下降不�
 必须覆盖：
 
 - CLI scope/conflict/defaults；
-- 第 8.2 节 backend/strict 六格状态机；
+- 第 8.2 节 backend/strict 六格状态机及计数真值：显式 sequential 选择零 fallback；grouped 不可用 strict typed fail；non-strict 仅允许 §7.4 封闭 pre-commit miss 降级并真实计数；fatal 与 post-commit 错误不得降级；
 - grouped tuning policy 只过滤 grouped；
 - typed pre-commit miss 与 non-fallback errors；
 - bind commit 后禁止 selection/fallback；
@@ -1277,7 +1485,9 @@ Recipe accuracy 在真实 DSV4 snapshots 上相对 P0 同 seed/op 的下降不�
 - eager WGrad only；deferred flag 启动失败；
 - warm/exact/state-complete/reshard modes；
 - ledger conservation、events 和 all-rank digest；
-- low-level launch 的 capture-safe capability；dynamic-routing replay 明确为 unsupported。
+- low-level launch 的 capture-safe capability；dynamic-routing replay 明确为 unsupported；
+- kernel_family 记录与每 rank ck_invocations=0 断言（含 P0 dense 调用链）；
+- cache-disabled test-only 路径与 cache-enabled 的 bitwise parity。
 
 ### 15.6 AITER artifact requirements
 
@@ -1367,25 +1577,13 @@ state_complete_continue、warm_start 和 reshard_continue 若要获得质量声�
 
 100-step run 只证明 stability、finite、routing、ledger 和 zero-fallback。它不是 convergence。
 
-### 17.2 Paired seeds and power
+### 17.2 Pilot first, then preregistration
 
-正式 paired seeds MUST >=5。最终 n 在正式结果可见前由预注册 power analysis 决定：
+5 seeds × 500 updates 仅为 pilot 起点，不是正式 seed/step 数或最终质量门槛。首先运行 BF16 多 seed pilot 估计自然方差（initialization/routing/data 轨迹变化），再用独立 paired pilot 估计 A4-BF16、A8-BF16 与 A4-A8 差异方差及 evaluation noise。
 
-- 使用独立历史或 pilot seeds 估计 paired-difference standard deviation；
-- one-sided alpha、margin、目标 power 和备择均值必须预注册；
-- power MUST >=80%，SHOULD >=90%；
-- 最紧的 A4-A8 margin=0.005 NLL 通常决定样本数；
-- seed list、n、endpoint token horizon 和 exclusions 在正式 run 前冻结。
+在正式结果可见前预注册最终 seed list/n、step 与累计 valid-token horizon、NLL margins、per-seed caps、alpha/multiplicity、power target、exclusions 和 validation token 数。不得把旧版 n>=5、500 updates、0.010/0.005 NLL、0.030/0.015 caps 直接沿用为已批准硬门槛；它们仅是被 R19 supersede 的规划示例。Pilot 与 formal data 分离，pilot 不并入正式统计。
 
-若按 true mean delta=0 规划，近似：
-
-~~~text
-n = ceil(((z_0.95 + z_power) * sigma / margin)^2)
-~~~
-
-这只是 planning approximation；正式分析使用 paired t upper bound。若预算只能运行 5 seeds，且未证明 n=5 power 足够，结果只能命名 short_horizon_quality_regression_gate，不得称 confirmatory non-inferiority。
-
-Pilot data 不并入 formal results。
+功效分析可用 `n ≈ ceil(((z_alpha + z_power) * sigma / margin)^2)` 作规划，再预注册与样本假设相符的 paired analysis。预算不足或无充分功效只报 smoke/short-horizon regression，不报 confirmatory non-inferiority、convergence 或最终质量。
 
 ### 17.3 Pairing contract
 
@@ -1403,15 +1601,15 @@ DataLoader 使用独立 rank-local generator。训练数据顺序、validation t
 
 ### 17.4 Primary metric and endpoint
 
-Primary metric 是固定 held-out corpus 上、至少约 1M valid target tokens 的 token-weighted validation NLL：
+Primary metric 是固定 held-out corpus 上、预注册数量的 valid target tokens 的 token-weighted validation NLL：
 
 ~~~text
 NLL = sum(cross_entropy over valid targets) / number of valid targets
 ~~~
 
-Pilot 应把 validation sampling 95% half-width 控制到 <=0.001 NLL；最终 token 数在 formal run 前冻结。
+Pilot 估计 validation sampling noise；目标 half-width 与最终 token 数在 formal run 前冻结，旧 0.001 / 1M 仅作规划示例。
 
-Endpoint 是固定累计 non-padding training-token horizon 对应的 checkpoint；推荐至少 500 matched updates，并以实际 token 数对齐。禁止选择 best checkpoint。更多 validation tokens 只降低 evaluation noise，不能替代独立 training seeds。
+Endpoint 是固定累计 non-padding training-token horizon 对应的 checkpoint；最终 updates 数由 pilot 后预注册，并以实际 valid token 数对齐；500 updates 仅 pilot 起点。禁止选择 best checkpoint。更多 validation tokens 只降低 evaluation noise，不能替代独立 training seeds。
 
 Primary evaluation 使用各 arm 当前 BF16 Parameter 的共同 deterministic BF16 path，以隔离学到的 checkpoint 质量。Native A4/A8 deterministic evaluation 是 required secondary。若未来声明 native inference quality，则 primary 与 native gate 均须通过。
 
@@ -1424,32 +1622,16 @@ d_s = endpoint NLL(arm_1, s) - endpoint NLL(arm_0, s)
 U95 = mean(d_s) + t_(0.95,n-1) * sd(d_s) / sqrt(n)
 ~~~
 
-三个结果分开记录：
+三个结果分开记录，使用 pilot 后正式预注册的 margin，而非旧固定数字：
 
 ~~~text
-a4_vs_bf16_noninferior:
-  U95[NLL(A4)-NLL(BF16)] <= +0.010
-
-a8_control_vs_bf16_valid:
-  U95[NLL(A8)-NLL(BF16)] <= +0.010
-
-a4_vs_a8_activation_penalty_within_margin:
-  U95[NLL(A4)-NLL(A8)] <= +0.005
-
-quality_bundle_pass = AND(all three)
+a4_vs_bf16_noninferior: U95(A4-BF16) <= margin_a4_bf16
+a8_control_vs_bf16_valid: U95(A8-BF16) <= margin_a8_bf16
+a4_vs_a8_activation_penalty_within_margin: U95(A4-A8) <= margin_a4_a8
+quality_bundle_pass = AND(all three) plus preregistered safety caps
 ~~~
 
-0.010 NLL 约对应 exp(0.010)-1，即约 1.0% perplexity ratio；margin 必须在正式结果前冻结。
-
-Per-seed safety caps：
-
-~~~text
-A4-BF16 <= +0.030
-A4-A8   <= +0.015
-A8-BF16 <= +0.030
-~~~
-
-Cap 是 guardrail，不替代 power/CI。若只声明 conjunction，可按 intersection-union test 对每个 one-sided alpha=0.05；若分别宣传三项独立结论，必须预注册 multiplicity correction。
+Per-seed safety caps 同样由 pilot 后预注册，不替代 power/CI。Conjunction 的 intersection-union 与独立宣传结论的 multiplicity 处理须预先选择，不在看到 formal data 后改变。
 
 ### 17.6 Claim boundaries
 
@@ -1635,16 +1817,21 @@ V1 SHOULD 通过现有 Lumen provider/hook 接入，不修改 Megatron core。�
 - [ ] 每个 prerequisite 是独立、可测试 commit。
 - [ ] runtime AITER、gitlink 和 extension build-id 单一事实源。
 - [ ] clean/pinned manifest，dirty=false。
+- [ ] AITER clean baseline 建立在当前 upstream main 明确 commit（§23 R2 upstream-first 修订）；旧恢复成果保留，仅作逐项语义来源。
 - [ ] mxfp4-moe implementation lineage 包含这些 commits；现有 docs commit 不被当作 code baseline。
 
-### P0 — sequential reference
+### P0a — sequential operator reference
 
 - [ ] --lumen-moe-mxfp4 --lumen-moe-mxfp4-backend=sequential --lumen-moe-mxfp4-strict。
 - [ ] 与 P1 相同 quantizer/layout/RNG/output semantics。
 - [ ] Fprop/DGrad/WGrad、empty/ragged、EP8/local-E32 和 EP4/local-E64 op gates。
 - [ ] committed weight epoch/cache budget/checkpoint invalidation gates。
-- [ ] 4L EP8 100-step strict stability，zero fallback。
-- [ ] 日志明确 selected_backend=sequential_mxfp4。
+- [ ] 两个 FC shape 的 empty/tiny/nonaligned/skew 均做 dense MXFP4 F/D/W parity；日志分别记录 requested_backend=sequential、actual execution_mode=sequential、kernel_family、precision。
+
+### P0b — fixed-random-init 4L training closure/regression smoke
+
+- [ ] 固定随机初始化 4L，paired BF16 对照，完成 forward/backward/optimizer、router probability gradient、recompute/accumulation 与 closed ledger 的 training closure/regression smoke；显式 sequential MXFP4、zero precision fallback。
+- [ ] seed/model/optimizer/data 顺序及 masking/positions/loss token 集合冻结；100-step 为既有 smoke 候选长度而非用户批准具体 run 值，不宣称 convergence 或最终质量。
 
 ### P1 — grouped correctness merge
 
@@ -1722,7 +1909,7 @@ BOUND_KERNEL_FAILURE
 | SR 与 backend/attempt 绑定 | retry/recompute 不可复现 | canonical logical allocation + non-reclaimed ranges |
 | deferred WGrad 扩大生命周期 | exactly-once/checkpoint 风险 | V1 fail at startup |
 | 43L cache resident cost | OOM/吞吐不稳 | 0.75x default, 1.0x hard max, allocator quota |
-| low-powered quality run | 伪 non-inferiority | pre-registered power, n>=5, claim downgrade |
+| low-powered quality run | 伪 non-inferiority | BF16 variance pilot, preregistered n/horizon/margins, claim downgrade |
 | path/commit 与 loaded binary 不同 | provenance 失真 | extension digest/build-id in manifest |
 
 ---
@@ -1750,7 +1937,7 @@ Q15 routing semantics/lifetime vs physical schema ownership
 Q16 auto+strict is legal; selection separated from precision fallback
 Q17 no V1 dynamic-routing graph replay guarantee
 Q18 compatibility separated from certification
-Q19 numeric recipe / physical layout / prepared layout IDs
+Q19 training/operand-quant/operand-transform recipe 与 physical/prepared layout IDs 分层
 Q20 successful transactional bind is commit point
 Q21 committed weight epoch is authoritative
 Q22 0.75x persistent target, 1.0x hard ceiling
@@ -1768,7 +1955,119 @@ Q33 stable seghist descriptor; data-derived bucketizer
 Q34 power-determined paired quality matrix and scoped claims
 ~~~
 
-没有遗留的设计问题阻塞 M0/P0。实现过程中若发现需要改变上述 contract，MUST 先修改本 spec 并重新审查受影响的 decision subtree，不能以代码现实静默改写规范。
+2026-10-09 用户批准修订（执行顺序与本轮范围；不改变上述数值/ABI/lifecycle contract）：
+
+~~~text
+R1  本轮执行范围 M0 + P0：M0 clean-lineage 与 P0 sequential A4W4 executable
+    numerical reference；P1 及以后阶段（grouped、T0/C0、QG、B1、promotion）
+    不在本轮实施，其完整契约（§5–§19）不删减、不提前开发
+R2  upstream-first：AITER clean baseline 直接建于当前 upstream main 明确 commit
+   （本轮核查锚点 aa2bdc6273adb900ffcbdedfc192d5d6a65bf261，不假定持续最新），
+    拟建独立 worktree /scratch/users/xdai/aiter-mxfp4-moe（本记录时不创建），
+    面向最终规范上游 PR；旧恢复成果（e35bb17 基线 + 21 条恢复文件）保留，
+    仅作逐项语义来源，不作整包 PR 基线；取代旧"先在旧 M1 完成、后 M2
+    forward-port"顺序。修订原因：直接在可上游 PR 的 clean lineage 上实现，
+    避免在不可审查的混合 dirty 基线上实现后整体前移
+R3  HC_MULT=4 为本轮训练 fixture 确认值（与官方 DeepSeek-V4-Flash config
+    hc_mult 一致）；旧脚本默认 2/4 的差异以此为准
+R4  固定 digest 基础镜像允许适配
+   （docker.io/zhangdanyangamd/lumen@sha256:d398f63465ac9cb5219f52f9a42993e109b9efc37115047d4d08536eddb4b436）；
+    允许独立 pinned Megatron 副本处理版本冲突，不改镜像原件；源码独立挂载
+    保证唯一导入/编译来源；实际 pin/patch 经环境核实后 freeze
+R5  C4 采样（allenai/c4 en 前 614475 train / 前 21792 validation、train 原序
+    repeat4）与无历史文件事实已确认；tokenizer 拟采用官方
+    deepseek-ai/DeepSeek-V4-Flash pinned revision（本轮核查
+    60d8d70770c6776ff598c94bb586a859a38244f1，实施前重新核实），
+    vocab 129280 与既有配置一致；实际加载验证未完成，不作为已验证事实
+R6  验收按获批资源分档；每次资源申请单独批准
+~~~
+
+本轮 R19 已关闭随机初始化选择、packing 隔离、router trainability 与 FSDP disposition；具体 4L 超参/LR/optimizer/GBS/MBS/seq/checkpoint 频率仍待运行 manifest 冻结，镜像拉取、tokenizer/C4 实际下载、资源申请与 commit/push/PR 均未授权。本次同步仅为文档记录，不构成实施、下载、资源或提交批准。
+
+2026-10-09 GPT 评审修订（R7–R18，已裁定接受；仅文档修订，不改变未冻结项的待决状态）：
+
+~~~text
+R7  头部状态改分层：M0 frozen；P0a operator contract frozen；P0b training
+    fixture decisions now closed by R19; run manifest pending；P1 architecture reviewed；P1 compiled
+    ABI draft；validation protocol correctness frozen、quality/performance
+    pending preregistration；execution authorization not granted；
+    implementation not started
+R8  P0 拆分为 P0a（operator reference，契约已冻结）与 P0b（training
+    closure/regression smoke，选择由 R19 关闭）；修正旧"没有问题阻塞 M0/P0"
+    表述；新增 Open Decisions 表
+R9  no-CK 契约：本 feature 的 quantization/cache preparation/Fprop/DGrad/
+    WGrad MUST NOT 选择 CK（Composable Kernel），包括内部 auto-dispatch；
+    kernel_family ∈ {FLYDSL, TRITON, ASM}（Gluon 不在 allowlist）；
+    execution_mode {grouped,sequential} 与 kernel backend 命名分离；
+    capability/BoundExecution/manifest/ledger/kernel repr 记录
+    kernel_family；strict gate 每 rank 断言 ck_invocations=0；P0 现有
+    Dense MXFP4 调用链同样审计
+R10 新增 Lumen framework adapter contract（第 11.4 节）：GroupedMLP 兼容
+    forward 签名、per-expert Parameter/state_dict/recipe/cache、custom
+    autograd、WGrad exactly-once 直接累加 FP32 main_grad、main_grad 分配
+    时机、Megatron bookkeeping 归属、accumulation window 归属、reducer
+    完成信号、Parameter 顺序与 local expert id 映射
+R11 历史建议已被本轮 R19 supersede：FSDP V1 out of scope
+R12 P1 compiled ABI 标注 draft；新增精确 ABI 字段要求（第 7.6 节）
+R13 recipe ID 分层修正：numeric ID 改 scale_block_32x32 /
+    scale_block_1x32，避免与物理 tile 混淆；H16 从 physical layout 改列
+    为 operand transform（数值变换）；引入 training_recipe_id /
+    operand_quant_recipe_id / operand_transform_id 分层；row1x32 经
+    dense 源码核对为非 weight operand 的 1x32 scale recipe，保留为
+    operand recipe 并澄清角色；全部交叉引用同步更新
+R14 H16/WGrad 数学修正：逻辑公式改 Q(H16·pad(dY_e))^T [N,P_e] ×
+    Q(H16·pad(X_e)) [P_e,K] → dW_e [N,K]；明确 X/dY 同一 H16、
+    normalized 约定与 1/16 compensation 条件、先补逻辑零再 H16、
+    pre-transform padding lanes=+0 而 post-transform lanes 参与
+    量化/GEMM、all-plus 指 diagonal sign vector 全正
+R15 strict 与 certification 分轴：runtime_compatible / strict /
+    tuning_policy 三轴独立；promotion/exact_continue 额外要求
+    certified；uncertified 不等于 runtime incompatible，
+    allow-validated-heuristic 可用
+R16 动态 M_e 运行时合同（第 6.4 节）：唯一权威来源为 EP dispatch/local
+    sort 后 local tokens_per_expert；counts/offsets dtype/device；
+    expert id ↔ weight slot 映射；可选 active_expert_ids 压缩；P1 hot
+    path 禁止逐 expert .item() 与新增 D2H 同步；max_M_e/ΣM_e/offset
+    宽度/capacity 上限与超限 typed failure；extreme token count 公式
+R17 cache 预算拆分 persistent_cache_bytes / peak_cache_build_bytes /
+    reusable_workspace_bytes / transient_launch_bytes /
+    device_total_preflight_bytes 分别报告限制；新增 test-only
+    cache-disabled P0 oracle 与 cache-enabled parity
+R18 配套 plan 同步修订：分层状态、P0a/P0b、Open Decisions、no-CK 规则、
+    ABI draft 标注
+~~~
+
+明确不做：文件拆分、全量 Requirement ID 追溯（后续单独处理）；质量数字（如 5 seeds / 500 updates）保持候选；FSDP V1 out of scope（本轮 R19 supersedes R11）。
+
+### Closed decisions and remaining run-manifest fields
+
+| ID | 本轮已拍板（closed） | 仍需记录但不得擅自填成已批准 |
+|---|---|---|
+| OQ-P0-01 | 接受固定随机初始化 4L，仅 training closure/regression smoke；固定 seed/model/optimizer/data 顺序，paired BF16 对照 | seed 具体值、optimizer/LR/schedule/GBS/MBS/seq、checkpoint/recompute 具体配置和 smoke 长度进入运行 manifest；不另设随机/预训练初始化选择题 |
+| OQ-P0-02 | 强制跨文档 attention 隔离；BF16/MXFP4 完全相同 data、attention mask、positions 与 loss token 集合 | EOS 插入/position reset 的具体实现固定并测试；通过文档边界和显式有效长度/target mask 区分 padding 与真实 EOS，EOS=pad 时禁止仅按 token ID 屏蔽真实 EOS；两臂 valid-token digest 必须一致 |
+| OQ-P0-03 | router 保持原精度/BF16、可训练，保留 routing probability gradient；仅 routed FC1/FC2 GEMM 量化 | gate Parameter 梯度与 e-score bias 的非梯度 load-balancing 状态更新分别记录、测试和 checkpoint；不得把 bias 状态误称可训练梯度或冻结整个 router |
+| OQ-G-01 | V1 明确排除 FSDP；reshard 仅 Megatron/DCP；未来接口引用保留但不进 exit criteria | 任何未来 FSDP 支持另案设计/验收 |
+
+设计选择已关闭不等于允许运行：具体 manifest、数据准备与环境核实和实施/训练/下载/资源/提交授权仍未完成。不得重问上述已决选择，也不得替用户发明具体值。
+
+---
+
+
+### R20 — Execution selector / dense reuse contract clarification
+
+本轮保留唯一待实现 CLI 名称与原建议默认；新增 §3.6.1 dense pass-by-pass reuse prerequisite、§7.7 sequential/grouped 分层职责与同 recipe/snapshot 语义、§8.2 fallback 计数真值、§15.5 测试要求；Plan §7–§10 同步。P0a/P0b 不依赖先交付 grouped backward，仍要求 Lumen 完整 autograd/main_grad/router-gradient/lifecycle 闭环；P1 继续为后续 grouped 扩展。R19 源码事实、SonicMoE 反证及 QAT 非兼容目标/非官方复现/experimental 上限全部保留；本轮不授权代码、提交、下载、GPU 或资源操作。
+
+### R19 — 本轮一手源码 reconciliation（supersedes 与章节映射）
+
+本轮只改 Spec/Plan 并同步副本；不启动开发，不提交/推送、不改分支/worktree、不下载模型/C4/tokenizer、不安装拉镜像、不编译/运行 GPU、不申请/变更资源。
+
+| 变更类别 | Supersedes | Spec 落点 | Plan 落点 |
+|---|---|---|---|
+| 事实修正 | 泛称 current FP8 为 grouped、以 issue 证明所有低精度 backward 缺失、把 forward fusion/PDL 当训练能力 | §1、§3.5–3.8 fixed-source map/capability matrix；§4.3/§5 数学保持冻结 | §7 A0 reuse audit、§9 A4 K-grouped reference、§10 wrapper boundary |
+| 阶段变化 | R7/R8 中 P0b 初始化/packing/router 未决的历史描述；R11 FSDP 建议未决 | §1、§2.2、§20、§23 closed decisions | Status、§1、§8 P0a/P0b、§10、§22 closed decisions |
+| 验收标准变化 | 旧 5×500 与固定 NLL/cap 数字作为最终门槛；混用 sequential 主动路径与 fallback | §8/§12 telemetry、§17 BF16-first pilot/preregistration、§20 | §8、§15 QG、§16 B1；每 rank/pass zero-fallback 必要但不充分 |
+
+固定 main evidence pins 只反映本次阅读，并不证明远端 import/build 已对齐或测试通过。旧 R1–R18 保留历史来源；与本轮 closed decisions、pilot-only 数字和 source matrix 冲突的表述以 R19 及已同步正文为准。
 
 ---
 

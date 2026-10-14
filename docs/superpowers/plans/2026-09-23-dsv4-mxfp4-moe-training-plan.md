@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-23
 
-**Status:** Ready to execute after M0 clean-lineage approval
+**Last updated:** 2026-10-09（本轮一手源码 reconciliation R19；保留 R1–R18 历史，见 §22）
+
+**Status（分层）:** M0 frozen；P0a operator contract frozen；P0b fixed-random-init 4L training-closure/regression smoke decided; concrete run manifest pending；P1 architecture reviewed；P1 compiled ABI draft；validation protocol correctness frozen、quality/performance pending preregistration；execution authorization not granted；implementation not started。本轮范围 M0+P0 已获用户确认；尚待最终实施批准与 §22 具体运行 manifest 冻结；本文件不构成开发/训练/下载/资源/提交授权
 
 **Design source:** docs/superpowers/specs/2026-09-21-dsv4-mxfp4-moe-training-design.md
 
@@ -26,6 +28,8 @@ Fprop + DGrad + eager WGrad
 ~~~
 
 The implementation must preserve Megatron routing, dispatch/combine, SwiGLU/clamp, probability gradient, recompute and checkpoint semantics. New GPU kernels belong to AITER; Lumen owns integration and training lifecycle.
+
+本轮执行范围（2026-10-09 用户确认，§22 R1）：M0 + P0，即 upstream-first clean lineage 与 sequential A4W4 executable numerical reference。P0 拆分为 **P0a operator reference**（契约已冻结）与 **P0b training closure/regression smoke**（随机初始化/packing/router 选择已关闭，具体运行 manifest 冻结及执行授权前不得启动训练）。P1 及以后阶段（grouped、T0、C0、I0 formal、QG、B1、promotion）不在本轮实施，仅保留依赖设计；其完整契约（§9–§16）不删减、不提前开发。本轮确认不构成实施批准，实施仍待最终明确批准。
 
 The plan is complete when:
 
@@ -56,6 +60,8 @@ The plan is complete when:
 13. Do not promote a quality result without a pre-registered power analysis.
 14. Do not publish a formal candidate/control result with fallback, skip, OOM, NaN/Inf or an unverified selected backend. A current-FP8 run with truthful fallback counters is diagnostic-only.
 15. Do not modify Megatron core unless the existing provider/hook boundary is proven insufficient and the minimal change is separately reviewed.
+16. Do not treat the 2026-10-09 round-scope confirmation (§22) as implementation, commit, push, download, image-pull or resource-request approval; each of those requires its own explicit approval.
+17. Do not select CK/Composable Kernel for this feature's quantization, cache preparation, Fprop, DGrad or WGrad, including any internal auto-dispatch; kernel_family is restricted to {FLYDSL, TRITON, ASM} (Gluon is not on the V1 allowlist); strict runs assert ck_invocations=0 per rank, and the P0 dense-MXFP4 call chain is audited under the same rule.
 
 ---
 
@@ -169,18 +175,21 @@ dirty=false
 
 Update the Lumen gitlink only to the exact tested AITER commit.
 
-### M0.5 Integrate prerequisites into mxfp4-moe
+### M0.5 Integrate prerequisites into mxfp4-moe and the upstream-first AITER line
 
-The existing mxfp4-moe branch is currently the design-document carrier, not the implementation baseline. After M0:
+The existing mxfp4-moe branch is currently the design-document carrier, not the implementation baseline. Under the 2026-10-09 user-approved upstream-first amendment (§22 R2):
 
-1. merge or cherry-pick the reviewed prerequisite commits in dependency order;
-2. preserve their individual commit boundaries;
-3. avoid a force rewrite unless a separate branch-maintenance decision explicitly authorizes it;
-4. regenerate the manifest and rerun prerequisite tests on the final branch head.
+1. build the AITER clean line directly on the current upstream main explicit commit in the planned independent worktree `/scratch/users/xdai/aiter-mxfp4-moe` (recorded here as planned only; do not create it until separately approved);
+2. migrate only item-approved semantics from the preserved old recovery results; `e35bb17` and its 21 restored files are kept as item-level semantic sources, not as the PR baseline;
+3. merge or cherry-pick the reviewed prerequisite commits in dependency order;
+4. preserve their individual commit boundaries;
+5. avoid a force rewrite unless a separate branch-maintenance decision explicitly authorizes it;
+6. regenerate the manifest and rerun prerequisite tests on the final branch heads.
 
 M0 exit:
 
 - Lumen, AITER and Megatron are pinned and clean;
+- the AITER clean baseline sits on the pinned upstream-main commit; old recovery results preserved as item-level sources only;
 - runtime source/build identity is singular;
 - all prerequisite commits and test evidence are reviewable independently.
 
@@ -197,15 +206,16 @@ M1 is the immutable clean implementation baseline produced by M0: exact Lumen/AI
 Implement versioned definitions and golden vectors for:
 
 ~~~text
-lumen_fp4_e2m1_e8m0_tile32x32_s1024_v1
-lumen_fp4_e2m1_e8m0_row1x32_v1
+lumen_a4w4_direct_training_v1                  (training_recipe_id)
+lumen_fp4_e2m1_e8m0_scale_block_32x32_s1024_v1 (weight operand quant recipe)
+lumen_fp4_e2m1_e8m0_scale_block_1x32_v1        (non-weight operand quant recipe)
 fp4_e2m1_e8m0_selector_v1
 E2M1 payload codec
 E4M3FN payload codec
 E8M0 scale codec
-mxfp4_weight_tile32x32_v1
-mxfp4_segmented_row_and_t_v1
-hadamard16_all_plus_v1
+hadamard16_all_plus_v1                         (operand_transform_id)
+mxfp4_weight_tile32x32_v1                      (physical layout)
+mxfp4_segmented_row_and_t_v1                   (physical layout)
 ~~~
 
 The definitions must cover amax, exponent rounding/ties, zero/signed zero, NaN, Inf, subnormal, clamp/saturation, nibble order, endianness, scale placement and alignment.
@@ -323,6 +333,10 @@ R0 exit:
 
 Search public wrappers, private kernel bodies, quantizers, shuffle helpers, split-K reductions, tests, benchmarks and config loaders. Record the concrete semantic or hardware gap before adding a new kernel.
 
+本轮固定源码 reconciliation 见设计 spec §3.5–§3.8；A0 reuse audit 必须从矩阵已有能力出发，不能以历史 issue 代替当前源码。特别是 AITER SonicMoE 已有 blockwise FP8 grouped F/D/W、cu_seqlens/caller out；P1 是补全冻结 MXFP4、main_grad accumulate、无 D2H 与生命周期合同，不是宣称“所有 grouped backward 从零开始”。
+
+Dense reuse audit MUST first produce the pass-level ledger in spec §3.6.1: real candidate commit/public API and Fprop/DGrad/WGrad directions, packed scales/layout/H16/SR, DGrad same forward weight snapshot, WGrad FP32 output/accumulate, tiny/nonaligned/empty and noCK. Missing evidence is not supported capability. Prefer minimal dense-contract fixes for P0 rather than inventing grouped kernels; P0 does not wait for A1–A4 grouped backward. A0 grouped compiled ABI sign-off gates P1, not delivery of audited dense P0.
+
 ### A0.2 ABI symbols
 
 Define _v1 symbols for:
@@ -337,6 +351,8 @@ grouped WGrad
 ~~~
 
 Low-level types are restricted to Tensor, Tensor[], fixed-width scalars/enums and fixed flat tuples. Mutation, workspace, alignment, capacity and alias contracts are explicit.
+
+The compiled ABI is a **draft** until the A0 ABI review sign-off (the spec header status "P1 compiled ABI draft" refers to this section and design-spec §7.2/§7.6). The ABI definition must precisely fix: packed payload/scale shape, dtype, stride and device; expert-weight bank/Tensor[]/pointer-table representation; counts/offsets dtype, shape and GPU/CPU residency; caller-owned Fprop y_out and DGrad dx_out; WGrad Tensor[] out/main_grad destinations; workspace query/size/alignment; output dtype enum; alias/mutation rules; stream/lifetime; all-empty return semantics; typed capability/status/error. A missing item makes the ABI incomplete and blocks A0 sign-off.
 
 ### A0.3 Capability/error schema
 
@@ -380,9 +396,13 @@ A0 exit:
 
 ## 8. P0 — Sequential MXFP4 reference
 
-### P0.1 CLI and scope
+P0 splits into **P0a operator reference** (contract frozen) and **P0b training closure/regression smoke** (fixed random initialization, packing isolation and router decisions closed; concrete run manifest and execution authorization still required).
 
-Add:
+### P0a.1 CLI and scope
+
+Implement the single planned execution-mode selector from spec §8.1: `--lumen-moe-mxfp4-backend {auto,grouped,sequential}`. Preserve the existing proposed defaults (auto/strict=false/require-certified-bucket), not verified runtime availability; do not add a duplicate selector. Explicit sequential/grouped override auto candidate selection; kernel_family and precision remain separate. P0 gates explicitly request sequential:
+
+Add (planned CLI, not already available):
 
 ~~~text
 --lumen-moe-mxfp4
@@ -392,11 +412,13 @@ Add:
 
 Reject LUMEN_DSV4_LINEAR_FP8, LUMEN_MXFP4_DGRAD_HADAMARD=1, deferred WGrad, unsupported arch/shape/local-E/ETP and bias. Log scope=routed_experts.
 
-### P0.2 Module and autograd
+### P0a.2 Module and autograd
 
-Use the existing expert-sorted interface and call the dense MXFP4 semantics per expert. Preserve weight0..weightN Parameter/state_dict keys.
+Use the same wrapper interface for both modes. Lumen slices post-dispatch/post-local-sort x_sorted by tokens_per_expert and maps local expert IDs to original per-expert Parameters before dense MXFP4 Fprop/DGrad/WGrad calls. Preserve weight0..weightN Parameter/state_dict keys, router/model construction and data/mask semantics. Sequential is the regular P0a/P0b correctness backend, not an emergency fallback, and does not depend on delivery of grouped MoE backward.
 
-P0 must implement:
+Megatron owns routing/dispatch/combine/permutation; this does not reduce Lumen work to permutation alone. Lumen owns autograd/context, FC1–BF16 SwiGLU/clamp–probability–FC2 linkage and probability gradients, exactly-once FP32 main_grad/reducer bookkeeping, empty/ragged handling and recompute/cache/optimizer lifetimes (spec §11.4).
+
+P0a must implement:
 
 - exact routing segment handling;
 - same quantizers/layout IDs/RNG tokens as P1;
@@ -405,26 +427,37 @@ P0 must implement:
 - all empty/ragged semantics;
 - full recompute token/cache reuse.
 
-### P0.3 Tests
+Router stays trainable at its original/BF16 precision with probability gradients preserved; distinguish gate gradients from e-score bias non-gradient state. P0b packing MUST isolate attention across documents. BF16/MXFP4 use identical data/masks/positions/loss-token sets; validate explicit boundaries/valid lengths and real EOS versus padding when EOS=pad, never mask real EOS solely by token ID. Include two-document sentinel and EOS=pad negative tests and matching valid-target digests.
+
+### P0a.3 Tests
 
 Run the full design-spec section 15.3 shape/routing matrix on both local-E values. Add Megatron provider, CLI, state_dict, router-gradient, activation order and checkpoint tests.
 
-### P0.4 Distributed stability
+### P0b.1 Fixed-random-init 4L training closure/regression smoke
 
-Run:
+Run only after the concrete manifest freezes and execution is separately authorized (the OQ design choices are closed):
 
-- 4L TP8/EP8/ETP1 strict sequential, 100 optimizer steps;
-- 43L TP4/PP4/EP4/ETP1 strict sequential, 100 optimizer steps when resource-ready.
+- fixed-random-init 4L TP8/EP8/ETP1, explicitly requested strict sequential MXFP4, paired BF16 with identical seed/model/optimizer/data/masks/positions/loss-token set;
+- close forward/backward/optimizer, probability gradient, accumulation/recompute and ledger; empty/tiny/nonaligned/skew operator parity must already pass for both FC shapes;
+- 100 steps remains a smoke planning value, not a newly approved run value; 43L is a later separately authorized I0 stability gate, not a P0b exit requirement; no convergence or final-quality claim.
 
-P0 exit:
+P0a exit:
 
 - every Fprop/DGrad/WGrad obligation completes sequential MXFP4 or EMPTY;
 - fallback and open ledger counts are zero;
-- P0 artifacts become the executable reference for P1.
+- P0a artifacts become the executable reference for P1.
+
+P0b exit (after run-manifest freeze and execution authorization):
+
+- fixed-random-init 4L training closure/regression smoke, explicit sequential MXFP4 with zero precision fallback and closed ledger;
+- requested_backend=sequential is intentional, not grouped-to-sequential fallback; actual execution_mode/kernel_family/precision are separate logged fields;
+- training fixture, data and config digests recorded in the manifest.
 
 ---
 
 ## 9. A1–A5 — AITER grouped implementation
+
+P1 grouped consumes the same snapshots, recipe, canonical payload/scales, H16 and logical RNG semantics as P0; F/D use M-grouped while WGrad uses K/reduction-grouped scheduling. Few unified launches do not mean a single kernel or guaranteed speedup. Reuse/extend audited existing kernels and wrappers first, then add only missing frozen-MXFP4 capabilities. Public-wrapper presence, internal branches and tested dtype/layout combinations are separate evidence levels; neither Issue 3038 nor SonicMoE symbol names certify the full V1 contract.
 
 ### A1 — Weight/activation builders
 
@@ -462,7 +495,7 @@ Acceptance:
 
 ### A4 — Grouped eager WGrad
 
-Implement OVERWRITE and ACCUMULATE_FP32.
+Implement OVERWRITE and ACCUMULATE_FP32. WGrad is `dY^T[N,M_e] @ X[M_e,K]`; M_e is each group’s reduction dimension. Review DeepGEMM K-grouped scheduling (§3.7 of spec), never mechanically reuse the Fprop M-grouped scheduler. DeepGEMM is design-only, not a build/runtime dependency or numeric oracle.
 
 Acceptance:
 
@@ -494,6 +527,8 @@ Each AITER kernel commit includes its public wrapper, relevant tests, benchmark 
 
 ## 10. P1 — Transactional grouped Lumen integration
 
+V1 excludes FSDP. TE grouped-linear is a saved-operand/cache/main_grad/reducer lifecycle reference only; NVFP4 is not OCP MXFP4. Preserve original/BF16 trainable router and probability gradients; only routed FC1/FC2 are quantized. e-score bias is separately managed non-gradient state. FlyDSL stage1/2 and MegaMoE are forward fusion, not D/W; NVIDIA PDL is not an expert-wave or gfx950 capability.
+
 ### P1.1 Static preparation
 
 Add guarded AITER probes and cacheable static plans. The runtime_compatible predicate checks ABI major/minor policy, backend build/version range, numeric/physical/prepared layout IDs, required capability bits, GPU arch/CU/ROCm conditions, descriptor/bucket/envelope/capacity and workspace/alignment. Source path, commit and artifact provenance remain separate certification fields. Static preparation may JIT/lookup outside the timed path.
@@ -515,7 +550,7 @@ For every microbatch:
 7. validate all F/D/W destinations and schemas;
 8. return immutable BoundExecutionV1 as commit point.
 
-After step 8, no backend/config change or fallback is allowed.
+Forward step 8 fixes execution_mode, kernel_family and the entire Fprop/DGrad/WGrad bundle for this invocation. After step 8, no mode/backend/config change or fallback is allowed; backward may only late-attach runtime operands, never reselect its backend.
 
 ### P1.4 Backward attachment
 
@@ -523,7 +558,7 @@ Use attach_runtime_operands_v1 only for live tensor validation. Any mismatch is 
 
 ### P1.5 State machine tests
 
-Exercise all six backend/strict combinations and both tuning policies. Distinguish:
+Exercise all six selector/strict combinations and both tuning policies, with spec §8.2 count truth table. Explicit sequential must execute sequential with zero fallback; unavailable grouped + strict returns typed prelaunch failure. Non-strict grouped may select sequential/BF16 only for the sealed pre-commit candidate misses in spec §7.4. Preserve cumulative selector-degradation event counts, not executed-backend transitions: grouped→sequential candidate→BF16 candidate yields backend_fallback=1/precision_fallback=1 but Final executed=BF16, with no sequential execution. Do not skip sequential in that existing chain. Candidate attempts/misses are separate from degradation events; events record from/to mode and precision, reason, failure_phase and PRECOMMIT state. EMPTY/no-launch must not fabricate GEMM success. Inject fatal errors and post-commit failures to prove no fallback; backward attachment cannot reselect. Record requested/selected/executed execution_mode, kernel_family and precision independently. Distinguish:
 
 ~~~text
 requested backend
@@ -737,6 +772,8 @@ checkpoint semantics as declared
 
 After the grouped ABI/layout contract is frozen and P0/P1 pass on the M1 clean baseline, pin one explicit latest-AITER target commit. Forward-port the AITER implementation to that commit, update the Lumen gitlink/adapter to the exact tested revision, and create a new clean manifest. Do not track a moving branch name or absorb unrelated AITER changes.
 
+Amended semantics (2026-10-09, user-approved, §22 R2): because the M1 AITER baseline is built upstream-first, the old sequence "complete P0/P1 on an old-recovery-derived M1, then forward-port wholesale" is replaced. The M2 gate now applies only when upstream main has advanced beyond the M1 pin or a required upstream change arrives; it re-pins one explicit commit, forward-ports the reviewed implementation, and re-runs the gates below. If upstream has not moved materially, M2 records that no port was needed and the M1 pin remains the release-candidate lineage. This gate remains mandatory before any T0/C0/I0-formal/QG/B1 evidence is promoted; it is outside this round's scope.
+
 Repeat on the forward-ported lineage:
 
 1. ABI/schema/layout compatibility and byte-exact numeric golden vectors;
@@ -756,7 +793,7 @@ M2 exit freezes the exact release candidate used by final T0, C0, I0, QG and B1 
 
 ### QG.1 Pilot
 
-Use independent historical/pilot seeds to estimate:
+5 seeds × 500 updates is a pilot starting point only. First run BF16 multi-seed pilot to estimate natural training variance, then independent paired pilots to estimate:
 
 - paired NLL-difference variance;
 - validation sampling noise;
@@ -768,7 +805,7 @@ Freeze before formal data:
 ~~~text
 claim cells
 seed-generation rule and list
-n >= 5
+final n and step count selected after pilot
 power >= 80%, target 90%
 fixed cumulative non-padding-token endpoint
 validation corpus/tokenizer/preprocess/order digests
@@ -788,7 +825,7 @@ Run BF16/A8W4/A4W4 paired arms for:
 2. 4L warm-start continued training;
 3. every 43L cell for which a public quality claim is desired.
 
-Recommended minimum horizon is 500 matched optimizer updates, aligned by actual non-padding tokens. Endpoint selection is fixed; no best-checkpoint choice.
+Final horizon is preregistered after the BF16 variance and paired pilots, aligned by actual valid tokens; 500 updates is only a pilot starting point. Endpoint selection is fixed; no best-checkpoint choice.
 
 ### QG.3 Evaluation
 
@@ -797,8 +834,8 @@ Primary:
 ~~~text
 token-weighted validation NLL
 common deterministic BF16 evaluation
-approximately >=1M valid target tokens
-pilot-sized to <=0.001 NLL sampling half-width
+validation token count and sampling half-width preregistered after pilot
+old 1M / 0.001 values are planning examples, not final hard gates
 ~~~
 
 Secondary:
@@ -819,20 +856,20 @@ U95 = mean(d_s) + t_(0.95,n-1) * sd(d_s) / sqrt(n)
 All must pass:
 
 ~~~text
-U95(A4-BF16) <= 0.010
-U95(A8-BF16) <= 0.010
-U95(A4-A8)   <= 0.005
+U95(A4-BF16) <= preregistered margin_a4_bf16
+U95(A8-BF16) <= preregistered margin_a8_bf16
+U95(A4-A8)   <= preregistered margin_a4_a8
 ~~~
 
 Per-seed caps:
 
 ~~~text
-A4-BF16 <= 0.030
-A8-BF16 <= 0.030
-A4-A8   <= 0.015
+A4-BF16 <= preregistered cap_a4_bf16
+A8-BF16 <= preregistered cap_a8_bf16
+A4-A8   <= preregistered cap_a4_a8
 ~~~
 
-Without demonstrated power, a five-seed pass is only short_horizon_quality_regression_gate. Exact resume inherits quality only when checkpoint-to-endpoint replay is bitwise; all other continuation modes require their own full cell.
+The former 0.010/0.005 margins and 0.030/0.015 caps are superseded as hard final gates; no automatic reuse. Without demonstrated power, a pilot pass is only short-horizon regression evidence. Exact resume inherits quality only when checkpoint-to-endpoint replay is bitwise; all other continuation modes require their own full cell.
 
 ---
 
@@ -929,7 +966,7 @@ physical HBM headroom           >= 10%
 
 Variant contracts are explicit:
 
-- P1 candidate: grouped, strict, require-certified-bucket, backend fallback=0 and precision fallback=0;
+- P1 candidate: grouped, strict, require-certified-bucket, execution-mode/backend fallback=0 and precision fallback=0 on every rank/pass; any grouped→sequential or →BF16 fails promotion. This necessary condition does not raise the experimental claim ceiling to production-ready;
 - P0 control: sequential, strict, zero fallback; grouped tuning policy is not applicable;
 - BF16 control: fixed BF16 grouped backend/config with no undeclared backend substitution;
 - current blockwise-FP8 formal control: available only when the frozen workload runs under an explicit strict policy with backend fallback=0 and precision fallback=0;
@@ -1063,7 +1100,7 @@ Stop the current stage immediately when:
 - a post-commit path attempts fallback;
 - a strict run has any fallback or open ledger entry;
 - NaN/Inf, OOM, illegal memory access or async GPU fault occurs;
-- quality crosses a per-seed cap;
+- quality crosses a preregistered per-seed cap;
 - performance control drift exceeds 2%;
 - runtime source/build identity differs from the manifest.
 
@@ -1094,6 +1131,7 @@ Before declaring implementation complete:
 - [ ] Direct FP32 main-grad WGrad is verified.
 - [ ] Deferred WGrad is rejected.
 - [ ] Backend/strict/tuning state machine is fully tested.
+- [ ] kernel_family stays within {FLYDSL, TRITON, ASM} in capability/BoundExecution/manifest/ledger; strict runs assert ck_invocations=0 per rank, including the P0 dense call chain.
 - [ ] Cache budgets and allocator quotas are enforced.
 - [ ] Route buckets are held-out certified without nearest matching.
 - [ ] exact/state-complete/reshard naming matches evidence.
@@ -1104,3 +1142,74 @@ Before declaring implementation complete:
 - [ ] mxfp4-moe contains the reviewed Lumen series and pins the required AITER revision.
 
 No PR is created by this plan. Publishing or merging later remains a separate action.
+
+---
+
+## 22. 2026-10-09 修订条目（用户确认同步 R1–R6 + GPT 评审修订 R7–R18；与 spec §23 交叉引用）
+
+R1 本轮执行范围 M0 + P0 已确认：M0 clean-lineage（§4）与 P0 sequential reference（§8）。P1 及以后阶段（§9–§16）不删减、不提前实施，仅保留依赖设计。
+
+R2 upstream-first 修订已批准：AITER clean line 直接建于当前 upstream main 明确 commit（本轮核查锚点 `aa2bdc6273adb900ffcbdedfc192d5d6a65bf261`，不假定持续最新），拟建独立 worktree `/scratch/users/xdai/aiter-mxfp4-moe`（本记录时不创建），面向最终规范上游 PR；旧恢复成果（`e35bb17` 基线 + 21 条恢复文件）保留，仅作逐项语义来源，不作整包 PR 基线；取代旧"先在旧 M1 完成、后 M2 forward-port"顺序（§4 M0.5、§14 已同步修订）。修订原因：直接在可上游 PR 的 clean lineage 上实现，避免在不可审查的混合 dirty 基线上实现后整体前移。
+
+R3 HC_MULT=4 为本轮训练 fixture 确认值（与官方 DeepSeek-V4-Flash config `hc_mult` 一致）；旧脚本默认 2/4 的差异以此为准。
+
+R4 固定 digest 基础镜像允许适配（`docker.io/zhangdanyangamd/lumen@sha256:d398f63465ac9cb5219f52f9a42993e109b9efc37115047d4d08536eddb4b436`）；允许独立 pinned Megatron 副本处理版本冲突，不改镜像原件；源码独立挂载保证唯一导入/编译来源；实际 pin/patch 经环境核实后 freeze。
+
+R5 C4 采样（allenai/c4 en 前 614475 train / 前 21792 validation、train 原序 repeat4）与无历史文件事实已确认；tokenizer 拟采用官方 `deepseek-ai/DeepSeek-V4-Flash` pinned revision（本轮核查 `60d8d70770c6776ff598c94bb586a859a38244f1`，实施前重新核实），vocab 129280 与既有配置一致；实际加载验证未完成，不作为已验证事实。
+
+R6 验收按获批资源分档；每次资源申请单独批准。
+
+授权/运行 manifest 待办与已决事项（R19 supersedes 旧 Open Decisions）：
+
+- 固定随机初始化 4L 已接受（OQ-P0-01 closed）；warm_start 不是 P0b 替代选择；
+- 4L 具体超参/LR/optimizer/GBS/MBS/seq/checkpoint 频率待 manifest freeze；router trainability 已关闭；
+- packing/masking：跨文档 attention 隔离强制开启（OQ-P0-02 closed）；旧含糊草案已 supersede；EOS=pad 依显式有效长度与边界 mask，不依 token ID 排除真实 EOS；
+- 镜像拉取、tokenizer/C4 实际下载执行；
+- 资源申请（档位、时长、预算、是否使用现有 job）；
+- commit/push/PR 与 DCO 身份。
+
+2026-10-09 GPT 评审修订（R7–R18，已裁定接受；仅文档修订，与 spec §23 R7–R18 交叉引用）：
+
+- R7 头部状态改分层（见本文件 Status 行）。
+- R8 P0 拆 P0a/P0b（§8），修正 spec §23 旧"没有问题阻塞 M0/P0"表述，新增 Open Decisions 表。
+- R9 no-CK 契约（§2 规则 17）：quantization/cache preparation/Fprop/DGrad/WGrad MUST NOT 选择 CK/Composable Kernel（含内部 auto-dispatch）；kernel_family ∈ {FLYDSL, TRITON, ASM}，Gluon 不在 allowlist；execution_mode 与 kernel backend 命名分离；capability/BoundExecution/manifest/ledger/kernel repr 记录 kernel_family；strict gate 每 rank 断言 ck_invocations=0；P0 dense 调用链同样审计。
+- R10 spec 新增 Lumen framework adapter contract（spec §11.4）。
+- R11 FSDP disposition 已由 R19 关闭：V1 out of scope，未来接口参考不进入 exit criteria。
+- R12 P1 compiled ABI 标注 draft（§7 A0.2），新增精确 ABI 字段要求。
+- R13 recipe ID 分层修正（§5 N0.1）：scale_block_32x32 / scale_block_1x32 命名；H16 改列 operand transform；training/operand-quant/operand-transform 分层。
+- R14 H16/WGrad 数学修正（spec §4.3、§5.4）。
+- R15 strict 与 certification 分轴（spec §12.3、§14.3）。
+- R16 动态 M_e 运行时合同（spec §6.4）。
+- R17 cache 预算拆分与 test-only cache-disabled P0 oracle（spec §9.4）。
+- R18 本 plan 同步修订。
+
+明确不做：文件拆分、全量 Requirement ID 追溯（后续单独处理）；质量数字（如 5 seeds / 500 updates）保持候选；FSDP V1 out of scope（本轮 R19 supersedes R11）。
+
+### Closed decisions and remaining run-manifest fields
+
+| ID | 本轮已拍板（closed） | 仍需记录但不得擅自填成已批准 |
+|---|---|---|
+| OQ-P0-01 | 接受固定随机初始化 4L，仅 training closure/regression smoke；固定 seed/model/optimizer/data 顺序，paired BF16 对照 | seed 具体值、optimizer/LR/schedule/GBS/MBS/seq、checkpoint/recompute 具体配置和 smoke 长度进入运行 manifest；不另设随机/预训练初始化选择题 |
+| OQ-P0-02 | 强制跨文档 attention 隔离；BF16/MXFP4 完全相同 data、attention mask、positions 与 loss token 集合 | EOS 插入/position reset 的具体实现固定并测试；通过文档边界和显式有效长度/target mask 区分 padding 与真实 EOS，EOS=pad 时禁止仅按 token ID 屏蔽真实 EOS；两臂 valid-token digest 必须一致 |
+| OQ-P0-03 | router 保持原精度/BF16、可训练，保留 routing probability gradient；仅 routed FC1/FC2 GEMM 量化 | gate Parameter 梯度与 e-score bias 的非梯度 load-balancing 状态更新分别记录、测试和 checkpoint；不得把 bias 状态误称可训练梯度或冻结整个 router |
+| OQ-G-01 | V1 明确排除 FSDP；reshard 仅 Megatron/DCP；未来接口引用保留但不进 exit criteria | 任何未来 FSDP 支持另案设计/验收 |
+
+设计选择已关闭不等于允许运行：具体 manifest、数据准备与环境核实和实施/训练/下载/资源/提交授权仍未完成。不得重问上述已决选择，也不得替用户发明具体值。
+
+本次仅文档 reconciliation，不构成实施、下载、资源或提交批准。
+
+### R20 — Execution selector / dense reuse contract clarification
+
+本轮仅修订 Spec/Plan：保留唯一待实现 `--lumen-moe-mxfp4-backend {auto,grouped,sequential}` 与原建议默认，不称已可用；明确 P0a/P0b sequential 正规 backend、dense F/D/W 审计前提与 Lumen adapter 完整闭环，P1 仍后续。落点：Spec §3.6.1、§4.2、§7.7、§8、§15.5；Plan §7 A0、§8 P0、§9 grouped、§10 state machine。同 recipe/snapshot/payload/scales/RNG 与 forward 全 bundle 固定；显式 sequential/auto selection、execution-mode fallback、precision fallback 分账，strict grouped 不得降 sequential/BF16，全部降级仅限封闭 pre-commit miss。R19 五类一手源码证据及已决 smoke/mask/router/FSDP/pilot 语义保留，不新增实现/提交/下载/资源授权。
+
+### R19 — 本轮一手源码 reconciliation（supersedes 与章节映射）
+
+本轮只改 Spec/Plan 并同步副本；不启动开发，不提交/推送、不改分支/worktree、不下载模型/C4/tokenizer、不安装拉镜像、不编译/运行 GPU、不申请/变更资源。
+
+| 变更类别 | Supersedes | Spec 落点 | Plan 落点 |
+|---|---|---|---|
+| 事实修正 | 泛称 current FP8 为 grouped、以 issue 证明所有低精度 backward 缺失、把 forward fusion/PDL 当训练能力 | §1、§3.5–3.8 fixed-source map/capability matrix；§4.3/§5 数学保持冻结 | §7 A0 reuse audit、§9 A4 K-grouped reference、§10 wrapper boundary |
+| 阶段变化 | R7/R8 中 P0b 初始化/packing/router 未决的历史描述；R11 FSDP 建议未决 | §1、§2.2、§20、§23 closed decisions | Status、§1、§8 P0a/P0b、§10、§22 closed decisions |
+| 验收标准变化 | 旧 5×500 与固定 NLL/cap 数字作为最终门槛；混用 sequential 主动路径与 fallback | §8/§12 telemetry、§17 BF16-first pilot/preregistration、§20 | §8、§15 QG、§16 B1；每 rank/pass zero-fallback 必要但不充分 |
+
+固定 main evidence pins 只反映本次阅读，并不证明远端 import/build 已对齐或测试通过。旧 R1–R18 保留历史来源；与本轮 closed decisions、pilot-only 数字和 source matrix 冲突的表述以 R19 及已同步正文为准。
