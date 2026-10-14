@@ -194,34 +194,53 @@ a small-batch advantage, not a fundamental algorithmic improvement.
 
 ---
 
-## SFT-2F vs Base Comparison
+## SFT-4F — Qwen3-Coder-30B-A3B-SFT-TH-4epoch
 
-| Metric | Base | SFT-2F | Improvement |
-|--------|------|--------|-------------|
-| **FAST rate** | 16/76 (21%) | **25/76 (33%)** | +12 pp |
-| **gemm FAST** | 4/25 (16%) | **16/25 (64%)** | **+48 pp (4x)** |
-| **rms_norm FAST** | 12/19 (63%) | 8/19 (42%) | -21 pp |
-| **mla FAST** | 0 | 1 | +1 |
-| Best gemm | 1.25x | **1.88x** | +50% |
-| Best rms_norm | **5.68x** | 6.63x | +17% |
-| Snapshots | 19 | **33+** | +74% |
+- Model: `Zhangdanyang/Qwen3-Coder-30B-A3B-SFT-TH-4epoch`
+- 4 epochs on same 3164-sample dataset
+
+### SFT-4F Summary (76/76 core tasks, profiler device-only time)
+
+| Operator | Tasks | FAST (>=0.9x) | OK (<0.9x) | FAIL | Best Speedup |
+|----------|-------|---------------|------------|------|-------------|
+| gemm | 25 | **16** | 0 | 9 | 1.94x |
+| rms_norm | 19 | **10** | 2 | 7 | 6.28x |
+| mha | 14 | **3** | 0 | 11 | 5.46x |
+| mla | 6 | **1** | 0 | 5 | 8.04x |
+| paged_attention | 12 | 0 | 0 | 12 | — |
+| **Total** | **76** | **30 (39%)** | **2 (3%)** | **44 (58%)** | |
+
+---
+
+## Three-Model Comparison (profiler device-only time)
+
+| Metric | Base | SFT-2F | SFT-4F |
+|--------|------|--------|--------|
+| **FAST rate** | 16/76 (21%) | 25/76 (33%) | **30/76 (39%)** |
+| **gemm FAST** | 4/25 (16%) | **16/25 (64%)** | **16/25 (64%)** |
+| **rms_norm FAST** | **12/19 (63%)** | 8/19 (42%) | 10/19 (53%) |
+| **mha FAST** | 0 | 0 | **3/14 (21%)** |
+| **mla FAST** | 0 | 1 | 1 |
+| Best gemm | 1.25x | 1.88x | **1.94x** |
+| Best rms_norm | 5.68x | **6.63x** | 6.28x |
+| Best mha | — | — | **5.46x** |
 
 ### Key Takeaways
 
-1. **gemm is the SFT win**: Base gets 4/25 gemm FAST (16%), SFT-2F gets 16/25 (64%) —
-   a 4x improvement. The complete_implementation training data directly teaches
-   tiled GEMM from scratch.
+1. **SFT-4F is the best model**: 39% FAST vs SFT-2F 33% vs Base 21%.
 
-2. **rms_norm: Base is already strong**: Base gets 12/19 FAST (63%) vs SFT-2F's 8/19 (42%).
-   Base model's general coding ability is sufficient for simple 1D reduction kernels.
-   SFT may have slightly narrowed rms_norm capability while improving gemm.
+2. **MHA breakthrough at 4 epochs**: SFT-4F achieves 3/14 MHA FAST (21%),
+   writing simple dot-product attention that outperforms AITER's flash attention
+   on small shapes. Neither Base nor SFT-2F can write MHA.
 
-3. **Complex ops: both fail**: Neither Base nor SFT-2F can write MHA, MLA (except 1),
-   or paged_attention from scratch. These require multi-kernel architecture knowledge
-   not present in either model's training.
+3. **gemm saturated at 2 epochs**: Both SFT-2F and SFT-4F get 16/25 gemm FAST
+   (64%). The capability is fully learned in 2 epochs.
 
-4. **Overall: SFT training provides net positive**: +12 percentage points FAST rate
-   (21% → 33%), driven entirely by gemm improvement (+48 pp).
+4. **rms_norm recovers at 4 epochs**: SFT-4F (53%) improves over SFT-2F (42%),
+   partially recovering toward Base (63%).
+
+5. **paged_attention: still 0%**: None of the three models can write paged
+   attention from scratch.
 
 ---
 
