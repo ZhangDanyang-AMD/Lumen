@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME=${IMAGE_NAME:-zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream}
 COMMAND=${COMMAND:-"bash run_qwen3_30b_a3b_megatron.sh"}
 HOST_ASSET_ROOT=${HOST_ASSET_ROOT:-/dev/shm/qwen3-30b-a3b}
+FLYDSL_ROOT=${FLYDSL_ROOT:-/home/leiwu/FlyDSL}
 
 NCCL_ENV_ARGS=()
 for _v in \
@@ -20,8 +21,21 @@ do
     fi
 done
 
+FLYDSL_ARGS=()
+if [[ "${SONIC_MOE_GEMM_BACKEND:-triton}" == flydsl* ]]; then
+    if [ ! -f "${FLYDSL_ROOT}/kernels/moe/sonic.py" ]; then
+        echo "ERROR: FlyDSL SonicMoE not found under ${FLYDSL_ROOT}" >&2
+        exit 2
+    fi
+    FLYDSL_ARGS+=(
+        --volume "${FLYDSL_ROOT}:/workspace/FlyDSL"
+        --volume lumen-qwen3-flydsl-cache:/root/.flydsl
+    )
+fi
+
 docker run --rm --init \
     "${NCCL_ENV_ARGS[@]}" \
+    "${FLYDSL_ARGS[@]}" \
     --device=/dev/kfd \
     --device=/dev/dri \
     --group-add video \
@@ -37,8 +51,14 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/models/fsdp.py:/workspace/Lumen/lumen/models/fsdp.py" \
     --volume "${REPO_ROOT}/lumen/models/llama31:/workspace/Lumen/lumen/models/llama31" \
     --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
+    --volume "${REPO_ROOT}/lumen/models/expert_remap.py:/workspace/Lumen/lumen/models/expert_remap.py" \
     --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
     --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention.py:/workspace/Lumen/lumen/modules/attention.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention_megatron.py:/workspace/Lumen/lumen/modules/attention_megatron.py" \
+    --volume "${REPO_ROOT}/lumen/modules/attention_mla.py:/workspace/Lumen/lumen/modules/attention_mla.py" \
+    --volume "${REPO_ROOT}/lumen/ops/attention/attention.py:/workspace/Lumen/lumen/ops/attention/attention.py" \
+    --volume "${REPO_ROOT}/lumen/ops/attention/hf_patch.py:/workspace/Lumen/lumen/ops/attention/hf_patch.py" \
     --volume "${REPO_ROOT}/lumen/modules/parallel_linear.py:/workspace/Lumen/lumen/modules/parallel_linear.py" \
     --volume "${REPO_ROOT}/lumen/modules/layernorm_linear.py:/workspace/Lumen/lumen/modules/layernorm_linear.py" \
     --volume "${REPO_ROOT}/lumen/ops/fused_residual_norm.py:/workspace/Lumen/lumen/ops/fused_residual_norm.py" \
@@ -48,6 +68,7 @@ docker run --rm --init \
     --volume "${REPO_ROOT}/lumen/ops/gemm/grouped_gemm.py:/workspace/Lumen/lumen/ops/gemm/grouped_gemm.py" \
     --volume "${REPO_ROOT}/lumen/ops/gemm/__init__.py:/workspace/Lumen/lumen/ops/gemm/__init__.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/__init__.py:/workspace/Lumen/lumen/ops/moe/__init__.py" \
+    --volume "${REPO_ROOT}/lumen/ops/moe/flydsl_grouped.py:/workspace/Lumen/lumen/ops/moe/flydsl_grouped.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_layout.py:/workspace/Lumen/lumen/ops/moe/dispatch_layout.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_overlap.py:/workspace/Lumen/lumen/ops/moe/dispatch_overlap.py" \
     --volume "${REPO_ROOT}/lumen/ops/moe/fused_router.py:/workspace/Lumen/lumen/ops/moe/fused_router.py" \
@@ -58,7 +79,7 @@ docker run --rm --init \
     --volume "${HOST_ASSET_ROOT}:/nobackup" \
     --volume lumen-qwen3-triton-cache:/root/.triton \
     --workdir /workspace/Lumen/examples/qwen3-30b-a3b \
-    --env PYTHONPATH=/workspace/Lumen:/workspace/Lumen/third_party/aiter:/workspace/Megatron-LM \
+    --env PYTHONPATH=/workspace/Lumen:/workspace/Lumen/third_party/aiter:/workspace/FlyDSL:/workspace/Megatron-LM \
     --env MOE_IMPL="${MOE_IMPL:-sequential}" \
     --env TRAIN_STEPS="${TRAIN_STEPS:-20}" \
     --env SEQ_LEN="${SEQ_LEN:-4096}" \
@@ -81,8 +102,10 @@ docker run --rm --init \
     --env MOE_GLOBAL_EXPERT_LAYOUT="${MOE_GLOBAL_EXPERT_LAYOUT:-0}" \
     --env PYTORCH_TUNABLEOP_ENABLED="${PYTORCH_TUNABLEOP_ENABLED:-0}" \
     --env SONIC_MOE_GEMM_BACKEND="${SONIC_MOE_GEMM_BACKEND:-triton}" \
+    --env SONIC_MOE_FLYDSL_NATIVE="${SONIC_MOE_FLYDSL_NATIVE:-1}" \
     --env SONIC_MOE_GROUPED_GEMM_BACKEND="${SONIC_MOE_GROUPED_GEMM_BACKEND:-triton}" \
     --env SONIC_MOE_USE_QWEN3_TUNED_GEMM="${SONIC_MOE_USE_QWEN3_TUNED_GEMM:-1}" \
+    --env LUMEN_EXPERT_FUSED_SWIGLU="${LUMEN_EXPERT_FUSED_SWIGLU:-1}" \
     --env SONIC_MOE_MULTISTREAM_PRIORITY="${SONIC_MOE_MULTISTREAM_PRIORITY:-0}" \
     --env SONIC_MOE_LOG_BACKEND="${SONIC_MOE_LOG_BACKEND:-0}" \
     --env SONIC_MOE_TRACE_GEMM="${SONIC_MOE_TRACE_GEMM:-0}" \
@@ -97,6 +120,8 @@ docker run --rm --init \
     --env LUMEN_FUSED_NORM_QUANT="${LUMEN_FUSED_NORM_QUANT:-0}" \
     --env LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-0}" \
     --env LUMEN_NORM_CLI="${LUMEN_NORM_CLI:-0}" \
+    --env LUMEN_QK_RMSNORM="${LUMEN_QK_RMSNORM:-0}" \
+    --env LUMEN_ROUTER_BWD_BF16="${LUMEN_ROUTER_BWD_BF16:-0}" \
     --env LUMEN_LINEAR_CLI="${LUMEN_LINEAR_CLI:-0}" \
     --env LUMEN_FP8_EXPERTS_ONLY="${LUMEN_FP8_EXPERTS_ONLY:-0}" \
     --env NVTE_USE_CUTLASS_GROUPED_GEMM="${NVTE_USE_CUTLASS_GROUPED_GEMM:-0}" \
@@ -106,10 +131,14 @@ docker run --rm --init \
     --env NVTE_USE_HIPKITTENS_GROUPED_GEMM="${NVTE_USE_HIPKITTENS_GROUPED_GEMM:-}" \
     --env LUMEN_USE_MEGATRON_ATTENTION="${LUMEN_USE_MEGATRON_ATTENTION:-0}" \
     --env LUMEN_ATTN_BACKEND="${LUMEN_ATTN_BACKEND:-csrc}" \
+    --env LUMEN_ATTN_BWD_ATOMIC_FP32="${LUMEN_ATTN_BWD_ATOMIC_FP32:-1}" \
     --env FP8_MODE="${FP8_MODE:-bf16}" \
     --env USE_ROCM_AITER_ROPE_BACKEND="${USE_ROCM_AITER_ROPE_BACKEND:-1}" \
     --env MEGATRON_OVERLAP="${MEGATRON_OVERLAP:-1}" \
     --env OVERLAP_MOE_EP_COMM="${OVERLAP_MOE_EP_COMM:-1}" \
+    --env LUMEN_MOE_ASYNC_SPLITS="${LUMEN_MOE_ASYNC_SPLITS:-1}" \
+    --env LUMEN_MOE_DEVICE_A2A="${LUMEN_MOE_DEVICE_A2A:-1}" \
+    --env LUMEN_EXPERT_REMAP="${LUMEN_EXPERT_REMAP:-1}" \
     --env CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-8}" \
     --env MOE_PAD_TO_CAPACITY="${MOE_PAD_TO_CAPACITY:-0}" \
     --env MOE_EXPERT_CAPACITY_FACTOR="${MOE_EXPERT_CAPACITY_FACTOR:-1.0}" \

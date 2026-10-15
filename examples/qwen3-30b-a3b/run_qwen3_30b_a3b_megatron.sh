@@ -69,9 +69,22 @@ if [ "${GRAD_ACC_FUSION:-0}" != "1" ]; then
     GRAD_ACC_ARGS=(--no-gradient-accumulation-fusion)
 fi
 
+# Automatic GC pauses about 0.75 s on some steps and shows up in the median.
+# Interval 0 collects once at startup and leaves the steady steps alone.
+MANUAL_GC_ARGS=()
+if [ "${MANUAL_GC:-1}" = "1" ]; then
+    MANUAL_GC_ARGS=(--manual-gc --manual-gc-interval "${MANUAL_GC_INTERVAL:-0}")
+fi
+
 LUMEN_EXTRA_ARGS=()
 if [ "${FUSED_ROUTER:-0}" = "1" ]; then
     LUMEN_EXTRA_ARGS+=(--lumen-fused-router)
+fi
+# Native apex RoPE matches the unfused kernel and is faster than the AITER
+# backend. The backend flag is read when apex is imported, before torchrun.
+if [ "${LUMEN_FUSED_ROPE:-1}" = "1" ]; then
+    LUMEN_EXTRA_ARGS+=(--lumen-fused-rope)
+    export USE_ROCM_AITER_ROPE_BACKEND=0
 fi
 # LUMEN_NORM is exported by run_docker.sh (default 1) but --lumen-norm is
 # opt-in so production A/B numbers stay comparable. Set LUMEN_NORM_CLI=1.
@@ -155,6 +168,9 @@ LOG_FILE="${RESULTS_DIR}/${RUN_NAME}.log"
 
 echo "Qwen3-30B-A3B: MOE_IMPL=${MOE_IMPL}, FP8_MODE=${FP8_MODE:-bf16}, TP=${TP}, EP=${EP}, seq=${SEQ_LEN}, pad=${MOE_PAD_TO_CAPACITY:-0}, grad_acc_fusion=${GRAD_ACC_FUSION:-0}, cuda_graph_scope=${CUDA_GRAPH_SCOPE:-}"
 
+# Expert wgrad writes the bf16-rounded tile straight into fp32 main_grad.
+export LUMEN_EXPERT_WGRAD_ACCUM="${LUMEN_EXPERT_WGRAD_ACCUM:-1}"
+
 torchrun \
     --nproc_per_node="${NGPU}" \
     --nnodes="${NNODES}" \
@@ -235,6 +251,7 @@ torchrun \
     --eval-iters 1 \
     --save-interval 1000000 \
     --log-interval 1 \
+    "${MANUAL_GC_ARGS[@]}" \
     --log-throughput \
     "${LOAD_ARGS[@]}" \
     "${PROFILE_ARGS[@]}" \

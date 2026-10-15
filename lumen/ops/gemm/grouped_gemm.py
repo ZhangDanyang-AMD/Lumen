@@ -31,9 +31,12 @@ Quantization modes:
 """
 
 import logging
+import os
 from typing import Optional
 
 import torch
+import triton
+import triton.language as tl
 
 from lumen.ops.dispatch import (
     Backend,
@@ -472,6 +475,46 @@ def grouped_gemm_wgrad(
     return try_backends(backends, op_name="grouped_gemm_wgrad")
 
 
+_DUMMY_WGRAD = {}
+
+
+def _expert_wgrad_accum_target(weight: torch.Tensor):
+    """fp32 ``main_grad`` for the in-kernel expert wgrad accumulate.
+
+    DDP adds a bf16 ``param.grad`` into this buffer after backward. The
+    grouped kernel can do that add in its store when the buffer matches
+    the weight. The parameter must already carry Megatron's
+    ``grad_added_to_main_grad`` flag so the post-hook skips a second add.
+    """
+    if os.environ.get("LUMEN_EXPERT_WGRAD_ACCUM", "0") != "1":
+        return None
+    if not hasattr(weight, "grad_added_to_main_grad"):
+        return None
+    main = getattr(weight, "main_grad", None)
+    if (
+        main is None
+        or main.dtype != torch.float32
+        or tuple(main.shape) != tuple(weight.shape)
+        or main.stride(-1) != 1
+        or not main.is_cuda
+    ):
+        return None
+    return main
+
+
+def _dummy_expert_wgrad(weight: torch.Tensor) -> torch.Tensor:
+    """Unwritten bf16 tensor so the DDP post-hook still sees a grad."""
+    key = (weight.device.index, tuple(weight.shape), weight.dtype)
+    buf = _DUMMY_WGRAD.get(key)
+    if buf is None:
+        # Zeros, not empty storage. The DDP hook skips this tensor when the
+        # in-kernel accumulate already updated main_grad; a stale add of
+        # uninitialized values would corrupt that buffer.
+        buf = torch.zeros(weight.shape, dtype=weight.dtype, device=weight.device)
+        _DUMMY_WGRAD[key] = buf
+    return buf
+
+
 def _cu_seqlens_from_group_sizes(group_sizes: torch.Tensor) -> torch.Tensor:
     counts = group_sizes.to(dtype=torch.int32)
     zeros = torch.zeros(1, dtype=torch.int32, device=counts.device)
@@ -487,6 +530,7 @@ def _sonic_grouped_linear_backward(
     scaling_type="none",
     fp8_dtype=None,
     block_size=128,
+    accumulate_into=None,
 ):
     """Dgrad/wgrad via SonicMoE grouped GEMM.
 
@@ -506,7 +550,7 @@ def _sonic_grouped_linear_backward(
             fp8_dtype = _default_fp8_dtype()
         from lumen.ops.quantize.ops import (
             quant_fp8_blockwise_impl,
-            quant_fp8_blockwise_segment_m_impl,
+            quant_fp8_blockwise_segment_m_dual,
         )
 
         grad_row, grad_row_scale = quant_fp8_blockwise_impl(
@@ -526,44 +570,28 @@ def _sonic_grouped_linear_backward(
             out_dtype=torch.bfloat16,
         )
 
-        scale_counts = torch.div(
-            group_sizes.to(torch.int32) + block_size - 1,
-            block_size,
-            rounding_mode="trunc",
-        )
-        scale_cu_seqlens = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.int32, device=group_sizes.device),
-                torch.cumsum(scale_counts, dim=0).to(torch.int32),
-            ]
-        )
-        inp_col, inp_col_scale = quant_fp8_blockwise_segment_m_impl(
-            inp,
-            len(group_sizes),
-            group_sizes,
-            cu_seqlens,
-            scale_cu_seqlens,
-            fp8_dtype,
-            block_size,
-        )
-        grad_col, grad_col_scale = quant_fp8_blockwise_segment_m_impl(
-            grad_output,
-            len(group_sizes),
-            group_sizes,
-            cu_seqlens,
-            scale_cu_seqlens,
-            fp8_dtype,
-            block_size,
+        inp_col, inp_col_scale, grad_col, grad_col_scale = (
+            quant_fp8_blockwise_segment_m_dual(
+                inp,
+                grad_output,
+                len(group_sizes),
+                group_sizes,
+                cu_seqlens,
+                fp8_dtype,
+                block_size,
+            )
         )
         grad_weight = sonic_grouped_gemm(
             inp_col,
             grad_col,
             cu_seqlens,
+            out=accumulate_into,
             A_is_transposed=True,
             A_scale=inp_col_scale,
             B_scale=grad_col_scale,
             block_size=block_size,
             out_dtype=torch.bfloat16,
+            accumulate=accumulate_into is not None,
         )
         return grad_input, grad_weight
 
@@ -668,6 +696,136 @@ def grouped_quantized_linear(
     )
 
 
+@triton.jit
+def _swiglu_interleaved_fwd_kernel(
+    h_ptr,
+    a_ptr,
+    stride_h,
+    stride_a,
+    rows,
+    I: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_I: tl.constexpr,
+):
+    """SwiGLU on per-column gate/up pairs. Loads each pair as one vector."""
+    pid_m = tl.program_id(0)
+    pid_i = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_i = pid_i * BLOCK_I + tl.arange(0, BLOCK_I)
+    m_mask = offs_m < rows
+    i_mask = offs_i < I
+    pair = pid_i * (2 * BLOCK_I) + tl.arange(0, 2 * BLOCK_I)
+    packed = tl.load(
+        h_ptr + offs_m[:, None].to(tl.int64) * stride_h + pair[None, :],
+        mask=m_mask[:, None] & (pair[None, :] < 2 * I),
+        other=0.0,
+    )
+    gate_bf, up_bf = tl.split(tl.reshape(packed, (BLOCK_M, BLOCK_I, 2)))
+    gate = gate_bf.to(tl.float32)
+    up = up_bf.to(tl.float32)
+    out = gate * tl.sigmoid(gate) * up
+    tl.store(
+        a_ptr + offs_m[:, None].to(tl.int64) * stride_a + offs_i[None, :],
+        out.to(a_ptr.dtype.element_ty),
+        mask=m_mask[:, None] & i_mask[None, :],
+    )
+
+
+@triton.jit
+def _swiglu_interleaved_bwd_kernel(
+    h_ptr,
+    da_ptr,
+    dh_ptr,
+    stride_h,
+    stride_da,
+    stride_dh,
+    rows,
+    I: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_I: tl.constexpr,
+):
+    pid_m = tl.program_id(0)
+    pid_i = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_i = pid_i * BLOCK_I + tl.arange(0, BLOCK_I)
+    m_mask = offs_m < rows
+    i_mask = offs_i < I
+    pair = pid_i * (2 * BLOCK_I) + tl.arange(0, 2 * BLOCK_I)
+    pair_mask = pair[None, :] < 2 * I
+    packed = tl.load(
+        h_ptr + offs_m[:, None].to(tl.int64) * stride_h + pair[None, :],
+        mask=m_mask[:, None] & pair_mask,
+        other=0.0,
+    )
+    gate_bf, up_bf = tl.split(tl.reshape(packed, (BLOCK_M, BLOCK_I, 2)))
+    gate = gate_bf.to(tl.float32)
+    up = up_bf.to(tl.float32)
+    da = tl.load(
+        da_ptr + offs_m[:, None].to(tl.int64) * stride_da + offs_i[None, :],
+        mask=m_mask[:, None] & i_mask[None, :],
+        other=0.0,
+    ).to(tl.float32)
+    sig = tl.sigmoid(gate)
+    act = gate * sig
+    d_up = da * act
+    d_gate = da * up * sig * (1.0 + gate * (1.0 - sig))
+    packed_d = tl.reshape(
+        tl.join(d_gate.to(dh_ptr.dtype.element_ty), d_up.to(dh_ptr.dtype.element_ty)),
+        (BLOCK_M, 2 * BLOCK_I),
+    )
+    tl.store(
+        dh_ptr + offs_m[:, None].to(tl.int64) * stride_dh + pair[None, :],
+        packed_d,
+        mask=m_mask[:, None] & pair_mask,
+    )
+
+
+def _swiglu_interleaved_fwd(h: torch.Tensor, intermediate: int) -> torch.Tensor:
+    """Faster interleaved SwiGLU. Same rounding as the generic GLU kernel."""
+    h = h.contiguous()
+    out = torch.empty(h.shape[0], intermediate, dtype=h.dtype, device=h.device)
+    if h.shape[0] == 0:
+        return out
+    _swiglu_interleaved_fwd_kernel[(triton.cdiv(h.shape[0], 64), triton.cdiv(intermediate, 128))](
+        h,
+        out,
+        h.stride(0),
+        out.stride(0),
+        h.shape[0],
+        I=intermediate,
+        BLOCK_M=64,
+        BLOCK_I=128,
+        num_warps=2,
+        num_stages=1,
+    )
+    return out
+
+
+def _swiglu_interleaved_bwd(
+    h: torch.Tensor, grad_act: torch.Tensor, intermediate: int
+) -> torch.Tensor:
+    h = h.contiguous()
+    grad_act = grad_act.contiguous()
+    grad_h = torch.empty_like(h)
+    if h.shape[0] == 0:
+        return grad_h
+    _swiglu_interleaved_bwd_kernel[(triton.cdiv(h.shape[0], 64), triton.cdiv(intermediate, 128))](
+        h,
+        grad_act,
+        grad_h,
+        h.stride(0),
+        grad_act.stride(0),
+        grad_h.stride(0),
+        h.shape[0],
+        I=intermediate,
+        BLOCK_M=64,
+        BLOCK_I=128,
+        num_warps=2,
+        num_stages=1,
+    )
+    return grad_h
+
+
 class _GroupedFp8ExpertMlp(torch.autograd.Function):
     """SwiGLU expert MLP: FP8 grouped w1/w2 GEMMs and FP8 grouped backward."""
 
@@ -697,9 +855,12 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=fp8_dtype,
         )
         intermediate = w1.shape[-1] // 2
-        hidden_act = activation_fwd(
-            fc1, intermediate, "swiglu", concat_layout=concat_layout
-        )
+        if concat_layout:
+            hidden_act = activation_fwd(
+                fc1, intermediate, "swiglu", concat_layout=concat_layout
+            )
+        else:
+            hidden_act = _swiglu_interleaved_fwd(fc1, intermediate)
         output = grouped_gemm(
             hidden_act,
             w2,
@@ -709,6 +870,8 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             fp8_dtype=fp8_dtype,
         )
         ctx.save_for_backward(hidden, w1, w2, fc1, hidden_act, group_sizes)
+        ctx.w1_ref = w1
+        ctx.w2_ref = w2
         ctx.intermediate = intermediate
         ctx.scaling_type = scaling_type
         ctx.fp8_dtype = fp8_dtype
@@ -728,6 +891,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         w1 = w1.contiguous()
         w2 = w2.contiguous()
         cu_seqlens = _cu_seqlens_from_group_sizes(group_sizes)
+        w2_acc = _expert_wgrad_accum_target(ctx.w2_ref)
         grad_act, grad_w2 = _sonic_grouped_linear_backward(
             grad_output,
             hidden_act,
@@ -737,10 +901,22 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             scaling_type=ctx.scaling_type,
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
+            accumulate_into=w2_acc,
         )
-        grad_fc1 = activation_bwd(
-            fc1, grad_act, ctx.intermediate, "swiglu", concat_layout=ctx.concat_layout
-        )
+        if w2_acc is not None:
+            ctx.w2_ref.grad_added_to_main_grad = True
+            grad_w2 = _dummy_expert_wgrad(ctx.w2_ref)
+        if ctx.concat_layout:
+            grad_fc1 = activation_bwd(
+                fc1,
+                grad_act,
+                ctx.intermediate,
+                "swiglu",
+                concat_layout=ctx.concat_layout,
+            )
+        else:
+            grad_fc1 = _swiglu_interleaved_bwd(fc1, grad_act, ctx.intermediate)
+        w1_acc = _expert_wgrad_accum_target(ctx.w1_ref)
         grad_hidden, grad_w1 = _sonic_grouped_linear_backward(
             grad_fc1,
             hidden,
@@ -750,7 +926,11 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
             scaling_type=ctx.scaling_type,
             fp8_dtype=ctx.fp8_dtype,
             block_size=ctx.block_size,
+            accumulate_into=w1_acc,
         )
+        if w1_acc is not None:
+            ctx.w1_ref.grad_added_to_main_grad = True
+            grad_w1 = _dummy_expert_wgrad(ctx.w1_ref)
         return grad_hidden, grad_w1, grad_w2, None, None, None, None, None
 
 

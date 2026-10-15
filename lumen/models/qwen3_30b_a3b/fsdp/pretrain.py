@@ -12,6 +12,7 @@ across expert-data-parallel replicas.
 """
 
 import argparse
+import gc
 import json
 import logging
 import math
@@ -357,10 +358,28 @@ class _TEGroupedLocalExperts(nn.Module):
 class _SonicLocalExperts(nn.Module):
     """Local HF expert slice backed by AITER SonicMoE."""
 
-    def __init__(self, experts: nn.Module, start: int, end: int):
+    def __init__(
+        self,
+        experts: nn.Module,
+        start: int,
+        end: int,
+        indices: Optional[list[int]] = None,
+    ):
         super().__init__()
         self.num_experts = end - start
-        if hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
+        if indices is not None:
+            if len(indices) != self.num_experts:
+                raise ValueError(
+                    f"expected {self.num_experts} expert indices, got {len(indices)}"
+                )
+            index = torch.tensor(
+                indices,
+                dtype=torch.long,
+                device=experts.gate_up_proj.device,
+            )
+            packed_gate_up = experts.gate_up_proj.index_select(0, index).detach()
+            packed_down = experts.down_proj.index_select(0, index).detach()
+        elif hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
             packed_gate_up = experts.gate_up_proj[start:end].detach()
             packed_down = experts.down_proj[start:end].detach()
         elif isinstance(experts, (nn.ModuleList, list)):
@@ -481,6 +500,7 @@ class _SonicLocalExperts(nn.Module):
             sonicmoe.SonicMoEActivationType.SWIGLU,
             False,
             False,
+            scores_are_one=True,
         )
         return output
 
@@ -561,6 +581,7 @@ class EPShardedMoeBlock(nn.Module):
         ep_size: int,
         ep_group: Optional[dist.ProcessGroup],
         expert_backend: str = "sequential",
+        layer_idx: Optional[int] = None,
     ):
         super().__init__()
         self.gate = original_block.gate
@@ -572,6 +593,9 @@ class EPShardedMoeBlock(nn.Module):
         self._lumen_moe_global_expert_layout = False
         self._sonic_first_forward = expert_backend == "sonic"
         self._offload_moe_activations = False
+        self._expert_slot: Optional[torch.Tensor] = None
+        self._remap_collect = False
+        self._remap_layer: Optional[int] = None
 
         experts = original_block.experts
         num_experts = getattr(experts, "num_experts", None)
@@ -587,6 +611,7 @@ class EPShardedMoeBlock(nn.Module):
         self.experts_per_rank = self.num_experts // ep_size
         self.local_expert_start = ep_rank * self.experts_per_rank
         end = self.local_expert_start + self.experts_per_rank
+        local_indices = self._expert_indices(layer_idx, expert_backend)
         if hasattr(experts, "gate_up_proj") and hasattr(experts, "down_proj"):
             if expert_backend == "te_grouped":
                 self.local_experts = _TEGroupedLocalExperts(
@@ -599,6 +624,7 @@ class EPShardedMoeBlock(nn.Module):
                     experts,
                     self.local_expert_start,
                     end,
+                    indices=local_indices,
                 )
             else:
                 self.local_experts = _FusedLocalExperts(experts, self.local_expert_start, end)
@@ -643,7 +669,8 @@ class EPShardedMoeBlock(nn.Module):
     def _route(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         gate_output = self.gate(hidden_states)
         if isinstance(gate_output, tuple) and len(gate_output) >= 3:
-            return gate_output[1], gate_output[2]
+            routing_weights, selected_experts = gate_output[1], gate_output[2]
+            return routing_weights, self._place_selected_experts(selected_experts)
 
         router_logits = gate_output
         if self._lumen_fused_router:
@@ -662,13 +689,55 @@ class EPShardedMoeBlock(nn.Module):
             routing_weights, selected_experts = torch.topk(
                 routing_probs, self.top_k, dim=-1
             )
-            return routing_weights.to(hidden_states.dtype), selected_experts
+            routing_weights = routing_weights.to(hidden_states.dtype)
+        else:
+            routing_scores = F.softmax(router_logits, dim=-1, dtype=torch.float32)
+            routing_weights, selected_experts = torch.topk(
+                routing_scores, self.top_k, dim=-1
+            )
+            if getattr(self.gate, "norm_topk_prob", getattr(self, "norm_topk_prob", False)):
+                routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+            routing_weights = routing_weights.to(hidden_states.dtype)
+        return routing_weights, self._place_selected_experts(selected_experts)
 
-        routing_scores = F.softmax(router_logits, dim=-1, dtype=torch.float32)
-        routing_weights, selected_experts = torch.topk(routing_scores, self.top_k, dim=-1)
-        if getattr(self.gate, "norm_topk_prob", getattr(self, "norm_topk_prob", False)):
-            routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
-        return routing_weights.to(hidden_states.dtype), selected_experts
+    def _place_selected_experts(self, selected_experts: torch.Tensor) -> torch.Tensor:
+        """Count original ids, then rewrite them once a runtime placement exists."""
+        if self._remap_collect:
+            from lumen.models.qwen3_30b_a3b.fsdp.expert_balance import (
+                accumulate_layer_counts,
+            )
+
+            counts = torch.histc(
+                selected_experts.detach().reshape(-1).to(torch.float32),
+                bins=self.num_experts,
+                min=0,
+                max=self.num_experts - 1,
+            )
+            accumulate_layer_counts(self._remap_layer, counts)
+        if self._expert_slot is not None:
+            selected_experts = self._expert_slot[selected_experts.long()]
+        return selected_experts
+
+    def _expert_indices(
+        self,
+        layer_idx: Optional[int],
+        expert_backend: str,
+    ) -> Optional[list[int]]:
+        """Keep the contiguous weight slice until runtime counts are packed.
+
+        Rank r still starts with experts ``[local*r, local*r+local)``. After
+        the warmup steps, those weights move and ``_expert_slot`` rewrites the
+        selected ids. Routing weights stay on the original experts.
+        """
+        if os.environ.get("LUMEN_EXPERT_REMAP", "0") != "1":
+            return None
+        if expert_backend != "sonic":
+            raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires expert_backend=sonic")
+        if layer_idx is None:
+            raise RuntimeError("LUMEN_EXPERT_REMAP=1 requires a decoder layer index")
+        self._remap_layer = layer_idx
+        self._remap_collect = True
+        return None
 
     def _exchange_counts(self, send_counts: torch.Tensor) -> torch.Tensor:
         if self.ep_size == 1:
@@ -728,45 +797,87 @@ class EPShardedMoeBlock(nn.Module):
         selected_experts: torch.Tensor,
     ) -> torch.Tensor:
         """Dispatch expert-major tokens and avoid receiver-side token sorting."""
-        from lumen.ops.moe.dispatch_layout import transpose_variable_chunks
-
-        token_ids = (
-            torch.arange(hidden_flat.shape[0], device=hidden_flat.device)
-            .unsqueeze(1)
-            .expand_as(selected_experts)
-            .reshape(-1)
+        from lumen.ops.moe.dispatch_layout import (
+            gather_tokens,
+            transpose_variable_chunks,
+            weighted_token_reduce,
         )
-        flat_experts = selected_experts.reshape(-1)
-        flat_weights = routing_weights.reshape(-1)
-        order = torch.argsort(flat_experts, stable=True)
-        send_token_ids = token_ids[order]
-        send_weights = flat_weights[order]
+        from lumen.ops.moe.dispatch_overlap import device_a2a_enabled, host_split_pair
 
-        local_counts = torch.bincount(flat_experts, minlength=self.num_experts)
-        global_counts = self._gather_expert_counts(local_counts)
+        flat_experts = selected_experts.reshape(-1)
+        order = torch.argsort(flat_experts, stable=True)
+
+        # torch.bincount calls max().item() and drains the compute stream
+        # before the count all-gather. histc writes the same 128 bins and
+        # leaves the following gather queued.
+        local_counts = torch.histc(
+            flat_experts.to(torch.float32),
+            bins=self.num_experts,
+            min=0,
+            max=self.num_experts - 1,
+        ).to(torch.int64)
+        # Count all-gather is a few KB. Run it beside the token gather, and
+        # materialize split lists on a side stream so RCCL does not drain the
+        # gather before launch. Payload bytes are unchanged.
+        use_device_splits = (
+            device_a2a_enabled()
+            and self.ep_size > 1
+            and local_counts.is_cuda
+        )
+        if use_device_splits:
+            gathered = torch.empty(
+                self.ep_size * self.num_experts,
+                dtype=local_counts.dtype,
+                device=local_counts.device,
+            )
+            count_work = dist.all_gather_into_tensor(
+                gathered,
+                local_counts.contiguous(),
+                group=self.ep_group,
+                async_op=True,
+            )
+            send_hidden, route_rows = gather_tokens(
+                hidden_flat,
+                order,
+                selected_experts.shape[1],
+            )
+            if count_work is not None:
+                count_work.wait()
+            global_counts = gathered.view(self.ep_size, self.num_experts)
+        else:
+            global_counts = self._gather_expert_counts(local_counts)
+            send_hidden, route_rows = gather_tokens(
+                hidden_flat,
+                order,
+                selected_experts.shape[1],
+            )
+        # Keep this slice a view. contiguous() would queue a copy on the
+        # default stream, behind the token gather, and the side-stream read
+        # would copy uninitialized memory.
         recv_counts_by_sender = global_counts[
             :,
             self.local_expert_start : self.local_expert_start
             + self.experts_per_rank,
-        ].contiguous()
-        send_splits = (
-            local_counts.view(self.ep_size, self.experts_per_rank)
-            .sum(dim=1)
-            .tolist()
+        ]
+        send_splits, recv_splits = host_split_pair(
+            local_counts.view(self.ep_size, self.experts_per_rank),
+            recv_counts_by_sender,
         )
-        recv_splits = recv_counts_by_sender.sum(dim=1).tolist()
+        recv_counts_by_sender = recv_counts_by_sender.contiguous()
 
         recv_hidden = self._exchange_tensor(
-            hidden_flat[send_token_ids],
+            send_hidden,
             send_splits,
             recv_splits,
             differentiable=True,
         )
+        # fused=True uses TE moe_sort_chunks_by_index and skips .tolist(),
+        # which would sync the compute stream before the expert GEMM.
         grouped_hidden = transpose_variable_chunks(
             recv_hidden,
             recv_counts_by_sender,
             source_layout="sender_major",
-            fused=False,
+            fused=True,
         )
         grouped_output = self.local_experts(
             grouped_hidden,
@@ -776,7 +887,7 @@ class EPShardedMoeBlock(nn.Module):
             grouped_output,
             recv_counts_by_sender,
             source_layout="expert_major",
-            fused=False,
+            fused=True,
         )
         returned = self._exchange_tensor(
             local_output,
@@ -784,13 +895,9 @@ class EPShardedMoeBlock(nn.Module):
             send_splits,
             differentiable=True,
         )
-        final_output = torch.zeros_like(hidden_flat)
-        final_output.index_add_(
-            0,
-            send_token_ids,
-            returned * send_weights.unsqueeze(-1),
-        )
-        return final_output
+        # index_add_ scatters duplicate token ids. Gathering each token's
+        # top-k rows and reducing them avoids those atomics.
+        return weighted_token_reduce(returned, route_rows, routing_weights)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Route tokens to local experts and restore their original ordering."""
@@ -907,7 +1014,7 @@ def shard_moe_experts(
 ) -> nn.Module:
     """Replace all HuggingFace Qwen3 MoE blocks with EP-sharded blocks."""
     replaced = 0
-    for layer in model.model.layers:
+    for layer_idx, layer in enumerate(model.model.layers):
         mlp = getattr(layer, "mlp", None)
         if mlp is not None and hasattr(mlp, "experts") and hasattr(mlp, "gate"):
             layer.mlp = EPShardedMoeBlock(
@@ -916,6 +1023,7 @@ def shard_moe_experts(
                 ep_size=groups.ep_size,
                 ep_group=groups.ep_group,
                 expert_backend=expert_backend,
+                layer_idx=layer_idx,
             )
             replaced += 1
     _rank0_log(
@@ -923,6 +1031,11 @@ def shard_moe_experts(
         replaced,
         QWEN3_30B_A3B_CONFIG["num_experts"] // groups.ep_size,
     )
+    if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
+        _rank0_log(
+            "expert remap will pack placement from the first batch before "
+            "the optimizer is created"
+        )
     return model
 
 
@@ -1061,6 +1174,133 @@ class AlpacaDataset(Dataset):
         }
 
 
+def _install_apex_rope() -> None:
+    """Replace HuggingFace RoPE with apex's native cached kernel.
+
+    Query and key arrive as ``[batch, heads, seq, dim]``. Apex wants
+    ``[seq, batch, heads, dim]`` plus ``[seq, 1, 1, dim]`` cosine and sine.
+    ``USE_ROCM_AITER_ROPE_BACKEND`` must stay off; that backend rounds
+    differently and is not this kernel.
+    """
+    import sys
+
+    os.environ["USE_ROCM_AITER_ROPE_BACKEND"] = "0"
+    already = "apex.transformer.functional.fused_rope" in sys.modules
+    from apex.transformer.functional import fused_rope as fused_rope_mod
+    import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
+
+    if already and getattr(fused_rope_mod, "AITER_ROPE_BACKEND", False):
+        raise RuntimeError(
+            "apex RoPE was imported with the AITER backend; restart with "
+            "USE_ROCM_AITER_ROPE_BACKEND=0"
+        )
+    cached = fused_rope_mod.fused_apply_rotary_pos_emb_cached
+    checked = False
+
+    def _rotate(states, cos, sin):
+        nonlocal checked
+        if not checked:
+            if cos.shape[0] > 1 and not torch.equal(cos, cos[:1].expand_as(cos)):
+                raise RuntimeError(
+                    "apex RoPE expects the same positions on every row of the microbatch"
+                )
+            if sin.shape[0] > 1 and not torch.equal(sin, sin[:1].expand_as(sin)):
+                raise RuntimeError(
+                    "apex RoPE expects the same positions on every row of the microbatch"
+                )
+            checked = True
+        seq_batch_heads = states.permute(2, 0, 1, 3).contiguous()
+        freq_cos = cos[0].unsqueeze(1).unsqueeze(1).contiguous()
+        freq_sin = sin[0].unsqueeze(1).unsqueeze(1).contiguous()
+        # Store the result as contiguous BSHD. HF sees the equivalent BHSD
+        # view, then the patched SDPA immediately transposes it back to BSHD.
+        # This removes the full-size post-RoPE BHSD copy.
+        rotated = cached(
+            seq_batch_heads,
+            freq_cos,
+            freq_sin,
+            transpose_output_memory=True,
+        )
+        return rotated.transpose(0, 1).transpose(1, 2)
+
+    def lumen_apex_rotary(query, key, cos, sin, unsqueeze_dim=1):
+        if unsqueeze_dim != 1:
+            raise RuntimeError(
+                f"apex RoPE only covers unsqueeze_dim=1, got {unsqueeze_dim}"
+            )
+        return _rotate(query, cos, sin), _rotate(key, cos, sin)
+
+    modeling_qwen3_moe.apply_rotary_pos_emb = lumen_apex_rotary
+    _rank0_log("Enabled apex native fused rotary embedding")
+
+
+def _install_async_aux_loss_counts() -> None:
+    """Avoid the host synchronization in HF's per-layer expert histogram."""
+    import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
+
+    def load_balancing_loss_func(
+        gate_logits,
+        num_experts: Optional[int] = None,
+        top_k: int = 2,
+        attention_mask: Optional[torch.Tensor] = None,
+    ):
+        if gate_logits is None or not isinstance(gate_logits, tuple):
+            return 0
+
+        compute_device = gate_logits[0].device
+        tokens_per_expert_sum = torch.zeros(
+            num_experts, dtype=torch.float32, device=compute_device
+        )
+        router_prob_sum = torch.zeros(
+            num_experts, dtype=torch.float32, device=compute_device
+        )
+        total_rows = 0.0
+        if attention_mask is not None:
+            flat_mask = attention_mask.reshape(-1).to(
+                device=compute_device, dtype=torch.float32
+            )
+
+        for layer_gate in gate_logits:
+            routing_weights = F.softmax(layer_gate.to(compute_device), dim=-1)
+            _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+            if attention_mask is None:
+                # bincount determines its output size with max().item(), which
+                # drains all router work queued before this layer. Expert ids
+                # are exact integers below 128, so FP32 histc has identical
+                # counts without a host read.
+                layer_counts = torch.histc(
+                    selected_experts.to(torch.float32),
+                    bins=num_experts,
+                    min=0,
+                    max=num_experts - 1,
+                )
+                tokens_per_expert_sum = tokens_per_expert_sum + layer_counts
+                router_prob_sum = router_prob_sum + routing_weights.float().sum(dim=0)
+                total_rows = total_rows + routing_weights.shape[0]
+            else:
+                tokens_per_expert_sum = tokens_per_expert_sum + torch.zeros(
+                    num_experts, dtype=torch.float32, device=compute_device
+                ).scatter_add_(
+                    0,
+                    selected_experts.reshape(-1),
+                    flat_mask.repeat_interleave(top_k),
+                )
+                router_prob_sum = router_prob_sum + (
+                    routing_weights.float() * flat_mask.unsqueeze(-1)
+                ).sum(dim=0)
+                total_rows = total_rows + flat_mask.sum()
+
+        tokens_per_expert = tokens_per_expert_sum / total_rows
+        router_prob_per_expert = router_prob_sum / total_rows
+        overall_loss = torch.sum(
+            tokens_per_expert * router_prob_per_expert.unsqueeze(0)
+        )
+        return overall_loss * num_experts
+
+    modeling_qwen3_moe.load_balancing_loss_func = load_balancing_loss_func
+    _rank0_log("Auxiliary loss expert counts stay asynchronous")
+
+
 def build_model(args: argparse.Namespace) -> nn.Module:
     """Load Qwen3-30B-A3B or initialize the matching architecture."""
     from transformers import (
@@ -1068,6 +1308,9 @@ def build_model(args: argparse.Namespace) -> nn.Module:
         Qwen3MoeConfig,
         Qwen3MoeForCausalLM,
     )
+
+    if os.environ.get("LUMEN_ASYNC_AUX_COUNTS", "1") == "1":
+        _install_async_aux_loss_counts()
 
     if args.model_name_or_path:
         model = AutoModelForCausalLM.from_pretrained(
@@ -1116,7 +1359,11 @@ def build_model(args: argparse.Namespace) -> nn.Module:
     for module in model.modules():
         if hasattr(module, "top_k") and hasattr(module, "norm_topk_prob"):
             module.norm_topk_prob = args.norm_topk_prob
-    if args.fuse_rope:
+    if os.environ.get("LUMEN_APEX_ROPE", "1") == "1":
+        if args.fuse_rope:
+            raise RuntimeError("LUMEN_APEX_ROPE and --fuse-rope both replace RoPE")
+        _install_apex_rope()
+    elif args.fuse_rope:
         import transformers.models.qwen3_moe.modeling_qwen3_moe as modeling_qwen3_moe
         from lumen.ops.rope import apply_rotary_qk_autograd
 
@@ -1165,6 +1412,144 @@ def _enable_fsdp_sonic_fp8(model: nn.Module, lumen_config, manager) -> None:
     )
 
 
+def _enable_fused_qkv_fp8(model: nn.Module, lumen_config, manager) -> None:
+    """Run the three HF attention projections as one blockwise FP8 linear."""
+    from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+    from lumen.ops.quantize.linear import (
+        _quant_blockwise2d_weight,
+        quantized_linear,
+    )
+    from lumen.quantize import _materialize_linear_weight
+
+    qcfg = lumen_config.quant_config
+    scaling_type = (
+        qcfg.scaling.value if hasattr(qcfg.scaling, "value") else str(qcfg.scaling)
+    )
+    cache_weights = os.environ.get("LUMEN_DENSE_WEIGHT_QUANT_ONCE", "1") == "1"
+
+    def make_weight_cache(weight: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            fp8, scale = _quant_blockwise2d_weight(
+                weight.detach().contiguous(),
+                qcfg.torch_dtype,
+                qcfg.block_size,
+            )
+            # DGrad otherwise transposes this same weight every microbatch.
+            fp8._lumen_wt = (
+                fast_transpose_fp8(fp8),
+                scale.t().contiguous(),
+            )
+        return fp8, scale
+
+    count = 0
+    for name, attention in model.named_modules():
+        if "Attention" not in type(attention).__name__:
+            continue
+        if not all(hasattr(attention, proj) for proj in ("q_proj", "k_proj", "v_proj")):
+            continue
+        q_proj, k_proj, v_proj = attention.q_proj, attention.k_proj, attention.v_proj
+        if not all(getattr(proj, "_quant_enabled", False) for proj in (q_proj, k_proj, v_proj)):
+            continue
+        if any(proj.bias is not None for proj in (q_proj, k_proj, v_proj)):
+            raise RuntimeError("fused QKV FP8 requires bias-free projections")
+
+        sizes = tuple(proj.out_features for proj in (q_proj, k_proj, v_proj))
+        tensor_id = f"{name}.qkv_proj.weight"
+        activation_tensor_id = f"{name}.qkv_proj.activation"
+
+        def q_forward(
+            input_tensor,
+            *,
+            _attention=attention,
+            _sizes=sizes,
+            _tensor_id=tensor_id,
+            _activation_tensor_id=activation_tensor_id,
+        ):
+            weights = [
+                _materialize_linear_weight(proj, scaling_type, qcfg.block_size)
+                for proj in (_attention.q_proj, _attention.k_proj, _attention.v_proj)
+            ]
+            packed_weight = torch.cat(weights, dim=0)
+            weight_cache = getattr(_attention, "_lumen_qkv_weight_cache", None)
+            if cache_weights and weight_cache is None:
+                weight_cache = make_weight_cache(packed_weight)
+                _attention._lumen_qkv_weight_cache = weight_cache
+            packed = quantized_linear(
+                input_tensor,
+                packed_weight,
+                None,
+                scaling_manager=manager,
+                scaling_type=scaling_type,
+                fp8_dtype=qcfg.torch_dtype,
+                block_size=qcfg.block_size,
+                tensor_id=_tensor_id,
+                quantize_activation=qcfg.quantize_activation,
+                fp8_wgrad=qcfg.fp8_wgrad,
+                activation_tensor_id=_activation_tensor_id,
+                fp8_weight_cache=weight_cache[0] if weight_cache is not None else None,
+                fp8_weight_scale=weight_cache[1] if weight_cache is not None else None,
+            )
+            q, k, v = packed.split(_sizes, dim=-1)
+            _attention._lumen_qkv_cache = (input_tensor, k, v)
+            return q
+
+        def k_forward(input_tensor, *, _attention=attention):
+            cached_input, k, _ = _attention._lumen_qkv_cache
+            if input_tensor is not cached_input:
+                raise RuntimeError("fused QKV projection input mismatch")
+            return k
+
+        def v_forward(input_tensor, *, _attention=attention):
+            cached_input, _, v = _attention._lumen_qkv_cache
+            if input_tensor is not cached_input:
+                raise RuntimeError("fused QKV projection input mismatch")
+            del _attention._lumen_qkv_cache
+            return v
+
+        q_proj.forward = q_forward
+        k_proj.forward = k_forward
+        v_proj.forward = v_forward
+        if cache_weights:
+            original_o_forward = attention.o_proj.forward
+
+            def o_forward(
+                input_tensor,
+                *args,
+                _attention=attention,
+                _original_o_forward=original_o_forward,
+                **kwargs,
+            ):
+                o_proj = _attention.o_proj
+                if getattr(o_proj, "_fp8_weight_data", None) is None:
+                    weight = _materialize_linear_weight(
+                        o_proj, scaling_type, qcfg.block_size
+                    )
+                    fp8, scale = make_weight_cache(weight)
+                    o_proj._fp8_weight_data = fp8
+                    o_proj._fp8_weight_scale = scale
+                return _original_o_forward(input_tensor, *args, **kwargs)
+
+            attention.o_proj.forward = o_forward
+        count += 1
+    if count == 0:
+        raise RuntimeError("LUMEN_FUSED_QKV found no quantized attention projections")
+    _rank0_log("Enabled fused FP8 QKV projection on %d attention layers", count)
+
+
+def _invalidate_dense_weight_caches(model: nn.Module) -> None:
+    """Drop per-step dense FP8 weight caches after AdamW updates BF16 masters."""
+    if os.environ.get("LUMEN_DENSE_WEIGHT_QUANT_ONCE", "1") != "1":
+        return
+    for module in model.modules():
+        if "Attention" not in type(module).__name__:
+            continue
+        module._lumen_qkv_weight_cache = None
+        o_proj = getattr(module, "o_proj", None)
+        if o_proj is not None:
+            o_proj._fp8_weight_data = None
+            o_proj._fp8_weight_scale = None
+
+
 def _enable_lumen(
     model: nn.Module,
     args: argparse.Namespace,
@@ -1207,9 +1592,34 @@ def _enable_lumen(
         moe_global_expert_layout=args.lumen_moe_global_expert_layout,
     )
     manager, model = config.enable(model, dp_group=dp_group)
+    if args.mode == "fp8_blockwise2d" and os.environ.get("LUMEN_FUSED_QKV", "1") == "1":
+        _enable_fused_qkv_fp8(model, config, manager)
     if args.mode == "fp8_blockwise2d" and args.expert_backend == "sonic":
         _enable_fsdp_sonic_fp8(model, config, manager)
     return model
+
+
+def _configure_fsdp_microbatch(model: nn.Module, *, sync_grads: bool) -> None:
+    """Defer FSDP communication across the gradient-accumulation window.
+
+    ``shard_grad_op`` only keeps parameters unsharded between one microbatch's
+    forward and its backward. The next microbatch all-gathers them again, and
+    every backward reduce-scatters. Holding the unsharded parameters and
+    summing gradients locally until the last microbatch removes both.
+    """
+    from torch.distributed.fsdp import FSDPModule
+
+    if not isinstance(model, FSDPModule):
+        return
+    if not getattr(_configure_fsdp_microbatch, "_logged", False):
+        _configure_fsdp_microbatch._logged = True
+        _rank0_log(
+            "FSDP gradient accumulation keeps parameters unsharded and "
+            "reduce-scatters only on the last microbatch"
+        )
+    model.set_requires_gradient_sync(sync_grads, recurse=True)
+    model.set_reshard_after_backward(sync_grads, recurse=True)
+    model.set_is_last_backward(sync_grads)
 
 
 class FSDPTrainer:
@@ -1249,6 +1659,13 @@ class FSDPTrainer:
             )
         self.model = _enable_lumen(self.model, args, self.groups.dp_group)
         self.model = apply_fsdp2(self.model, self.groups, args.sharding)
+        self.tokenizer, self.train_loader, self.val_loader = self._build_data()
+        if os.environ.get("LUMEN_EXPERT_REMAP", "0") == "1":
+            self._probe_expert_counts()
+            from lumen.models.expert_remap import apply_counted_placement
+
+            apply_counted_placement(self.model)
+            self.model.zero_grad(set_to_none=True)
 
         decay_parameters = []
         no_decay_parameters = []
@@ -1276,7 +1693,6 @@ class FSDPTrainer:
             self.optimizer,
             self._lr_multiplier,
         )
-        self.tokenizer, self.train_loader, self.val_loader = self._build_data()
 
     def _lr_multiplier(self, step: int) -> float:
         if step < self.args.lr_warmup_steps:
@@ -1342,6 +1758,15 @@ class FSDPTrainer:
             else None
         )
         return tokenizer, train_loader, val_loader
+
+    def _probe_expert_counts(self) -> None:
+        """Count original expert ids on the first global batch, without stepping."""
+        self.model.train()
+        probe = iter(self.train_loader)
+        for _ in range(self.args.gradient_accumulation_steps):
+            loss, _, _ = self._loss_components(next(probe))
+            del loss
+        del probe
 
     def _loss_components(
         self,
@@ -1409,6 +1834,12 @@ class FSDPTrainer:
     def train(self) -> None:
         """Run the configured training loop."""
         self.model.train()
+        # Megatron's manual GC collects once, then leaves steady steps alone.
+        # Automatic collections were landing on some steps and opening a gap.
+        if os.environ.get("LUMEN_MANUAL_GC", "1") == "1":
+            gc.disable()
+            gc.collect()
+            _rank0_log("Manual GC: collected once and disabled automatic collection")
         data_iterator = iter(self.train_loader)
         profiler = None
         profile_output = os.environ.get("LUMEN_PROFILE_OUTPUT")
@@ -1429,10 +1860,11 @@ class FSDPTrainer:
             torch.cuda.reset_peak_memory_stats(self.local_rank)
             start = time.perf_counter()
             self.optimizer.zero_grad()
-            accumulated_loss = 0.0
-            accumulated_lm_loss = 0.0
-            accumulated_aux_loss = 0.0
-            for micro_step in range(self.args.gradient_accumulation_steps):
+            accumulated_loss = []
+            accumulated_lm_loss = []
+            accumulated_aux_loss = []
+            grad_acc = self.args.gradient_accumulation_steps
+            for micro_step in range(grad_acc):
                 try:
                     batch = next(data_iterator)
                 except StopIteration:
@@ -1465,16 +1897,25 @@ class FSDPTrainer:
                 # Both dense-DP and expert-DP FSDP groups use SUM reductions.
                 # Scaling each rank's local loss by dense DP produces the
                 # global-batch mean for shared and EP-local expert parameters.
+                # Only the last microbatch reduce-scatters; earlier ones keep
+                # the unsharded parameters and accumulate the local gradient.
+                if grad_acc > 1:
+                    _configure_fsdp_microbatch(
+                        self.model,
+                        sync_grads=micro_step + 1 >= grad_acc,
+                    )
                 (
                     loss
                     / (
-                        self.args.gradient_accumulation_steps
+                        grad_acc
                         * self.groups.dp_size
                     )
                 ).backward()
-                accumulated_loss += loss.item()
-                accumulated_lm_loss += lm_loss.item()
-                accumulated_aux_loss += aux_loss.item()
+                # Keep scalar metrics on device. Calling item() here drains the
+                # GPU queue three times between every pair of microbatches.
+                accumulated_loss.append(loss.detach())
+                accumulated_lm_loss.append(lm_loss.detach())
+                accumulated_aux_loss.append(aux_loss.detach())
 
             if self.args.max_grad_norm > 0:
                 grad_norm = _clip_grad_norm_mixed_mesh(
@@ -1484,6 +1925,7 @@ class FSDPTrainer:
             else:
                 grad_norm = torch.zeros((), device=f"cuda:{self.local_rank}")
             self.optimizer.step()
+            _invalidate_dense_weight_caches(self.model)
             self.scheduler.step()
             torch.cuda.synchronize()
             elapsed_ms = (time.perf_counter() - start) * 1000
@@ -1501,14 +1943,12 @@ class FSDPTrainer:
             throughput = global_batch_size * 1000 / elapsed_ms
 
             if step % self.args.log_interval == 0:
-                loss_metrics = torch.tensor(
+                loss_metrics = torch.stack(
                     [
-                        accumulated_loss,
-                        accumulated_lm_loss,
-                        accumulated_aux_loss,
-                    ],
-                    dtype=torch.float64,
-                    device=f"cuda:{self.local_rank}",
+                        torch.stack(accumulated_loss).sum(dtype=torch.float64),
+                        torch.stack(accumulated_lm_loss).sum(dtype=torch.float64),
+                        torch.stack(accumulated_aux_loss).sum(dtype=torch.float64),
+                    ]
                 )
                 if self.groups.dp_size > 1:
                     dist.all_reduce(loss_metrics, group=self.groups.dp_group)

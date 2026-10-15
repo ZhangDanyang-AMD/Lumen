@@ -14,9 +14,50 @@ from typing import Iterable, MutableMapping
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import triton
+import triton.language as tl
 
 from megatron.core.dist_checkpointing.mapping import ShardedTensor, ShardedTensorFactory
 from megatron.core.utils import get_pg_rank
+
+_EXPERT_BWD_RANGES: list[torch.autograd.profiler.record_function] = []
+
+
+class _SonicMoEExpertsBwdClose(torch.autograd.Function):
+    """Inner node: closes ``SonicMoE.experts.bwd`` after expert backward."""
+
+    @staticmethod
+    def forward(ctx, hidden: torch.Tensor) -> torch.Tensor:
+        return hidden
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor):
+        if _EXPERT_BWD_RANGES:
+            _EXPERT_BWD_RANGES.pop().__exit__(None, None, None)
+        return grad
+
+
+class _SonicMoEExpertsBwdOpen(torch.autograd.Function):
+    """Outer node: opens ``SonicMoE.experts.bwd`` before expert backward."""
+
+    @staticmethod
+    def forward(ctx, hidden: torch.Tensor) -> torch.Tensor:
+        return hidden
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor):
+        rec = torch.autograd.profiler.record_function("SonicMoE.experts.bwd")
+        rec.__enter__()
+        _EXPERT_BWD_RANGES.append(rec)
+        return grad
+
+
+def _profiled_experts(hidden: torch.Tensor, run):
+    """Time expert GEMM forward and the matching autograd backward separately."""
+    hidden = _SonicMoEExpertsBwdClose.apply(hidden)
+    with torch.profiler.record_function("SonicMoE.experts.fwd"):
+        output = run(hidden)
+    return _SonicMoEExpertsBwdOpen.apply(output)
 
 
 def _expert_weights(experts: nn.Module) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
@@ -74,6 +115,7 @@ def _stacked_expert_factory(
     sharded_offsets: tuple,
     split_swiglu: bool,
     singleton_local_shards: bool,
+    native_weight_layout: bool,
 ) -> ShardedTensorFactory:
     """Expose stacked Sonic weights using Megatron's per-expert checkpoint layout."""
     local_key = f"{prefix}{'w1' if layer_name == 'linear_fc1' else 'w2'}"
@@ -87,7 +129,11 @@ def _stacked_expert_factory(
         shards = []
         for local_index in range(num_local_experts):
             global_index = ep_rank * num_local_experts + local_index
-            expert_tensor = data[local_index].transpose(0, 1)
+            expert_tensor = (
+                data[local_index]
+                if native_weight_layout
+                else data[local_index].transpose(0, 1)
+            )
             if singleton_local_shards:
                 checkpoint_key = (
                     f"{prefix}experts.{global_index}.{layer_name}.weight"
@@ -140,7 +186,12 @@ def _stacked_expert_factory(
             ]
         else:
             experts = list(loaded)
-        return torch.stack(experts, dim=0).transpose(1, 2).contiguous()
+        stacked = torch.stack(experts, dim=0)
+        return (
+            stacked.contiguous()
+            if native_weight_layout
+            else stacked.transpose(1, 2).contiguous()
+        )
 
     return ShardedTensorFactory(
         key=local_key,
@@ -168,13 +219,17 @@ class SonicMoEExperts(nn.Module):
         self.tp_group = getattr(experts, "tp_group", None)
         self.dp_group = getattr(experts, "dp_group", None)
         self.gemm_backend = os.environ.get("SONIC_MOE_GEMM_BACKEND", "triton")
-        if self.gemm_backend != "triton":
+        if self.gemm_backend not in ("triton", "flydsl"):
             raise ValueError(
-                "SONIC_MOE_GEMM_BACKEND must be 'triton'; select its GEMM backend "
+                "SONIC_MOE_GEMM_BACKEND must be 'triton' or 'flydsl'; "
+                "select the AITER GEMM backend "
                 "with SONIC_MOE_GROUPED_GEMM_BACKEND="
                 "triton|hipblaslt|multistream|auto"
             )
-
+        self.native_weight_layout = (
+            self.gemm_backend == "flydsl"
+            and os.environ.get("SONIC_MOE_FLYDSL_NATIVE", "1") != "0"
+        )
         if getattr(self.config, "add_bias_linear", False):
             raise ValueError("SonicMoE integration currently requires --disable-bias-linear")
         if not getattr(self.config, "gated_linear_unit", False):
@@ -184,16 +239,13 @@ class SonicMoEExperts(nn.Module):
             raise ValueError("SonicMoE integration currently requires expert tensor parallel size 1")
 
         fc1, fc2 = _expert_weights(experts)
-        self.w1 = nn.Parameter(
-            torch.stack([weight.detach() for weight in fc1], dim=0)
-            .transpose(1, 2)
-            .contiguous()
-        )
-        self.w2 = nn.Parameter(
-            torch.stack([weight.detach() for weight in fc2], dim=0)
-            .transpose(1, 2)
-            .contiguous()
-        )
+        stacked_w1 = torch.stack([weight.detach() for weight in fc1], dim=0)
+        stacked_w2 = torch.stack([weight.detach() for weight in fc2], dim=0)
+        if not self.native_weight_layout:
+            stacked_w1 = stacked_w1.transpose(1, 2)
+            stacked_w2 = stacked_w2.transpose(1, 2)
+        self.w1 = nn.Parameter(stacked_w1.contiguous())
+        self.w2 = nn.Parameter(stacked_w2.contiguous())
         for parameter in self.parameters():
             parameter.allreduce = False
         self._register_load_state_dict_pre_hook(self._remap_checkpoint_state)
@@ -221,16 +273,22 @@ class SonicMoEExperts(nn.Module):
                 state_dict, prefix, "linear_fc1", self.num_local_experts
             )
             if weights is not None:
+                value = torch.stack(weights, dim=0)
                 state_dict[w1_key] = (
-                    torch.stack(weights, dim=0).transpose(1, 2).contiguous()
+                    value.contiguous()
+                    if self.native_weight_layout
+                    else value.transpose(1, 2).contiguous()
                 )
         if w2_key not in state_dict:
             weights = _pop_expert_weights(
                 state_dict, prefix, "linear_fc2", self.num_local_experts
             )
             if weights is not None:
+                value = torch.stack(weights, dim=0)
                 state_dict[w2_key] = (
-                    torch.stack(weights, dim=0).transpose(1, 2).contiguous()
+                    value.contiguous()
+                    if self.native_weight_layout
+                    else value.transpose(1, 2).contiguous()
                 )
         for key, parameter in ((w1_key, self.w1), (w2_key, self.w2)):
             value = state_dict.get(key)
@@ -261,6 +319,7 @@ class SonicMoEExperts(nn.Module):
                 sharded_offsets=sharded_offsets,
                 split_swiglu=True,
                 singleton_local_shards=singleton_local_shards,
+                native_weight_layout=self.native_weight_layout,
             ),
             f"{prefix}w2": _stacked_expert_factory(
                 self.w2,
@@ -272,6 +331,7 @@ class SonicMoEExperts(nn.Module):
                 sharded_offsets=sharded_offsets,
                 split_swiglu=False,
                 singleton_local_shards=singleton_local_shards,
+                native_weight_layout=self.native_weight_layout,
             ),
         }
 
@@ -310,46 +370,70 @@ class SonicMoEExperts(nn.Module):
             cpu_counts = tokens_per_expert
 
         if self.scaling_type != "none":
+            w1 = (
+                self.w1.transpose(1, 2).contiguous()
+                if self.native_weight_layout
+                else self.w1
+            )
+            w2 = (
+                self.w2.transpose(1, 2).contiguous()
+                if self.native_weight_layout
+                else self.w2
+            )
             return _fp8_pre_routed_forward(
                 permuted_local_hidden_states,
                 gpu_counts if gpu_counts is not None else cpu_counts,
                 permuted_probs,
-                self.w1,
-                self.w2,
+                w1,
+                w2,
                 scaling_manager=self.scaling_manager,
                 scaling_type=self.scaling_type,
                 fp8_dtype=self.fp8_dtype,
                 block_size=self.block_size,
             ), None
 
-        # Keep Megatron's dispatcher-produced host counts on the CPU. The
-        # pre-routed entry point creates the GPU offsets needed by Triton while
-        # the multi-stream hipBLASLt backend reuses host offsets, matching
-        # TEGroupedMLP's one-D2H-per-layer metadata boundary.
-        counts = torch.as_tensor(
-            cpu_counts if cpu_counts is not None else gpu_counts,
-            dtype=torch.int32,
-        )
+        counts_source = gpu_counts if gpu_counts is not None else cpu_counts
+        if self.gemm_backend == "flydsl":
+            from lumen.ops.moe.flydsl_grouped import flydsl_pre_routed
+
+            def _run(hidden):
+                return flydsl_pre_routed(
+                    hidden,
+                    counts_source,
+                    permuted_probs,
+                    self.w1,
+                    self.w2,
+                    native_weight_layout=self.native_weight_layout,
+                )
+
+            return _profiled_experts(permuted_local_hidden_states, _run), None
+
+        # Prefer device-side counts. AITER builds cu_seqlens on GPU; do not
+        # .cpu() a GPU tensor here — that D2H is the per-layer host wait.
+        counts = torch.as_tensor(counts_source, dtype=torch.int32)
 
         from aiter.ops.triton.sonicmoe import (
             SonicMoEActivationType,
             moe_pre_routed_inputs,
         )
 
-        output, _expert_frequency = moe_pre_routed_inputs(
-            permuted_local_hidden_states,
-            permuted_probs.reshape(-1).float(),
-            counts,
-            self.w1,
-            None,
-            self.w2,
-            None,
-            torch.cuda.current_stream().cuda_stream,
-            SonicMoEActivationType.SWIGLU,
-            False,
-            True,
-        )
-        return output, None
+        def _run(hidden):
+            output, _expert_frequency = moe_pre_routed_inputs(
+                hidden,
+                permuted_probs.reshape(-1).float(),
+                counts,
+                self.w1,
+                None,
+                self.w2,
+                None,
+                torch.cuda.current_stream().cuda_stream,
+                SonicMoEActivationType.SWIGLU,
+                False,
+                True,
+            )
+            return output
+
+        return _profiled_experts(permuted_local_hidden_states, _run), None
 
 
 def _group_sizes_on_device(tokens_per_expert, num_experts: int, device) -> torch.Tensor:
@@ -403,6 +487,64 @@ def _quantized_expert_linear(
         block_size=block_size,
         tensor_id=tensor_id,
     )
+
+
+@triton.jit
+def _expert_score_bwd_kernel(
+    dy_ptr, y_ptr, s_ptr, dx_ptr, ds_ptr, stride_dy, stride_y, H, BLOCK: tl.constexpr,
+):
+    row = tl.program_id(0)
+    score = tl.load(s_ptr + row).to(tl.float32)
+    acc = tl.zeros((), dtype=tl.float32)
+    for h in range(0, H, BLOCK):
+        offs = h + tl.arange(0, BLOCK)
+        dy = tl.load(dy_ptr + row * stride_dy + offs).to(tl.float32)
+        y = tl.load(y_ptr + row * stride_y + offs).to(tl.float32)
+        tl.store(dx_ptr + row * stride_dy + offs, (dy * score).to(tl.bfloat16))
+        acc += tl.sum((dy * y).to(tl.bfloat16).to(tl.float32))
+    # Keep the reduced score gradient in fp32. The eager path sums the bf16
+    # products in fp32 and does not quantize that scalar.
+    tl.store(ds_ptr + row, acc)
+
+
+def _expert_score_bwd(grad: torch.Tensor, output: torch.Tensor, scores: torch.Tensor):
+    """One-pass backward of ``output * scores`` (scores is ``[M, 1]`` bf16)."""
+    rows, hidden = grad.shape
+    dx = torch.empty_like(grad)
+    ds = torch.empty(rows, device=grad.device, dtype=torch.float32)
+    _expert_score_bwd_kernel[(rows,)](
+        grad, output, scores.reshape(-1), dx, ds,
+        grad.stride(0), output.stride(0), hidden,
+        BLOCK=512, num_warps=4,
+    )
+    return dx, ds
+
+
+class _ExpertScoreMul(torch.autograd.Function):
+    """``output * probs`` with the cast-and-multiply forward left on aten."""
+
+    @staticmethod
+    def forward(ctx, output: torch.Tensor, probs: torch.Tensor):
+        scores = probs.reshape(-1, 1).to(dtype=output.dtype)
+        ctx.save_for_backward(output, scores)
+        ctx.probs_shape = probs.shape
+        return output * scores
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor):
+        output, scores = ctx.saved_tensors
+        if (
+            grad.shape != output.shape
+            or grad.stride(-1) != 1
+            or output.stride(-1) != 1
+            or grad.shape[-1] % 512 != 0
+            or grad.shape[0] == 0
+        ):
+            dx = grad * scores
+            dprobs = (grad * output).sum(dim=-1).to(torch.float32)
+        else:
+            dx, dprobs = _expert_score_bwd(grad, output, scores)
+        return dx, dprobs.view(ctx.probs_shape)
 
 
 def _fp8_pre_routed_forward(
@@ -478,13 +620,12 @@ def _fp8_pre_routed_forward(
             torch.cat(outputs, dim=0) if outputs else hidden_states.new_empty(0, hidden)
         )
 
-    scores = permuted_probs.reshape(-1, 1).to(dtype=output.dtype)
-    if scores.numel() != output.shape[0]:
+    if permuted_probs.numel() != output.shape[0]:
         raise ValueError(
             f"Expected one router score per pre-routed token ({output.shape[0]}), "
-            f"got {scores.numel()}"
+            f"got {permuted_probs.numel()}"
         )
-    return output * scores
+    return _ExpertScoreMul.apply(output, permuted_probs)
 
 
 def replace_megatron_moe_experts(model: nn.Module) -> int:

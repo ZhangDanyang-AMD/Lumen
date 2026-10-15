@@ -311,6 +311,33 @@ def _patch_all_norms(model, normalization="RMSNorm", grad_quant_type=None):
         _patch_layernorm(model, grad_quant_type)
 
 
+def _patch_qk_rmsnorms(model):
+    """Replace the large Q per-head RMSNorm with the Triton implementation.
+
+    K has eight times fewer rows on Qwen3 GQA.  The native PyTorch kernel is
+    faster at that size, so it is intentionally left unchanged.
+    """
+    from lumen.ops.normalization import LumenRMSNorm
+
+    count = 0
+    for module in model.modules():
+        child = getattr(module, "q_layernorm", None)
+        if child is None or isinstance(child, LumenRMSNorm):
+            continue
+        weight = getattr(child, "weight", None)
+        if weight is None or weight.ndim != 1:
+            continue
+        eps = getattr(child, "eps", getattr(child, "epsilon", 1e-6))
+        replacement = LumenRMSNorm(weight.shape[0], eps=eps)
+        # Keep the original Parameter object so checkpoint names, optimizer
+        # attributes, dtype, and sequence-parallel metadata are unchanged.
+        replacement.weight = weight
+        setattr(module, "q_layernorm", replacement)
+        count += 1
+
+    print_rank_0(f"> Replaced {count} Q RMSNorm modules with LumenRMSNorm")
+
+
 # ---------------------------------------------------------------------------
 # Override defaults for Lumen
 # ---------------------------------------------------------------------------
@@ -333,6 +360,7 @@ _BACKEND_MAP = {
     "triton": ("aiter_triton", "aiter_triton_fp8"),
     "csrc": ("aiter_csrc", "aiter_csrc_fp8"),
     "asm": ("aiter_csrc", "aiter_asm_fp8"),
+    "opus": ("aiter_opus", "aiter_triton_fp8"),
 }
 
 
@@ -475,8 +503,17 @@ def lumen_gpt_builder(
 
     _override_te_args_for_lumen(args)
 
+    # get_model() builds the config before the provider runs, so the flag has
+    # to be stamped onto that object. The provider-built path still reads args.
+    if getattr(args, "lumen_fused_rope", False):
+        args.apply_rope_fusion = True
+        if config is not None:
+            config.apply_rope_fusion = True
+        print_rank_0("> Lumen fused RoPE enabled")
+
     if config is None:
-        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
+        if not getattr(args, "lumen_fused_rope", False):
+            args.apply_rope_fusion = False
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -521,6 +558,8 @@ def lumen_gpt_builder(
 
     if getattr(args, "lumen_rmsnorm", False) or getattr(args, "lumen_norm", False):
         _patch_all_norms(model, normalization, grad_quant_type)
+    elif os.environ.get("LUMEN_QK_RMSNORM", "0") == "1":
+        _patch_qk_rmsnorms(model)
 
     return model
 
@@ -552,8 +591,17 @@ def lumen_gpt_builder_with_spec(
 
     _override_te_args_for_lumen(args)
 
+    # get_model() builds the config before the provider runs, so the flag has
+    # to be stamped onto that object. The provider-built path still reads args.
+    if getattr(args, "lumen_fused_rope", False):
+        args.apply_rope_fusion = True
+        if config is not None:
+            config.apply_rope_fusion = True
+        print_rank_0("> Lumen fused RoPE enabled")
+
     if config is None:
-        args.apply_rope_fusion = getattr(args, "lumen_fused_rope", False)
+        if not getattr(args, "lumen_fused_rope", False):
+            args.apply_rope_fusion = False
         config = core_transformer_config_from_args(args)
         config.persist_layer_norm = False
         config.bias_swiglu_fusion = False
@@ -614,6 +662,8 @@ def lumen_gpt_builder_with_spec(
 
     if getattr(args, "lumen_fused_mlp", False):
         _patch_fused_swiglu_mlp(model)
+    if os.environ.get("LUMEN_QK_RMSNORM", "0") == "1":
+        _patch_qk_rmsnorms(model)
 
     return model
 
@@ -2166,9 +2216,11 @@ def add_common_megatron_args(parser):
         "--lumen-attn-backend",
         type=str,
         default="auto",
-        choices=["auto", "triton", "csrc", "asm"],
+        choices=["auto", "triton", "csrc", "asm", "opus"],
         help="Lumen attention kernel backend. 'auto' prefers csrc with triton fallback. "
-        "'asm' uses ASM kernels with fallback chain: asm -> csrc -> triton.",
+        "'asm' uses ASM kernels with fallback chain: asm -> csrc -> triton. "
+        "'opus' uses the gfx950 BF16 OPUS forward with the csrc backward, "
+        "falling back to csrc for unsupported shapes.",
     )
     safe_add_argument(
         lumen,
@@ -2354,7 +2406,7 @@ def add_common_megatron_args(parser):
         "--lumen-fused-rope",
         action="store_true",
         default=False,
-        help="Use AITER fused RoPE kernel for rotary positional embeddings.",
+        help="Use apex native fused RoPE. AITER RoPE is a different rounding path.",
     )
     safe_add_argument(
         lumen,

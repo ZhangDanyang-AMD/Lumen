@@ -25,6 +25,7 @@ Layout handling:
 from __future__ import annotations
 
 import logging
+import os
 
 import torch
 import torch.nn.functional as F
@@ -32,6 +33,28 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 _original_sdpa = None
+
+_BACKEND_ALIASES = {
+    "": "auto",
+    "auto": "auto",
+    "csrc": "aiter_csrc",
+    "aiter_csrc": "aiter_csrc",
+    "opus": "aiter_opus",
+    "aiter_opus": "aiter_opus",
+    "triton": "aiter_triton",
+    "aiter_triton": "aiter_triton",
+}
+
+
+def _resolve_backend() -> str:
+    raw = os.environ.get("LUMEN_ATTN_BACKEND", "").strip().lower()
+    backend = _BACKEND_ALIASES.get(raw)
+    if backend is None:
+        raise ValueError(
+            f"LUMEN_ATTN_BACKEND={raw!r} is not one of "
+            f"{sorted(set(_BACKEND_ALIASES) - {''})}"
+        )
+    return backend
 
 
 def patch_sdpa() -> None:
@@ -46,6 +69,7 @@ def patch_sdpa() -> None:
     from lumen.ops.attention import attention as _lumen_attention
 
     _original_sdpa = F.scaled_dot_product_attention
+    backend = _resolve_backend()
 
     def _lumen_sdpa(
         query: torch.Tensor,
@@ -70,13 +94,19 @@ def patch_sdpa() -> None:
             softmax_scale=scale,
             causal=is_causal,
             bias=attn_mask,
+            backend_type=backend,
         )
 
         # Back to (B, H, T, D)
         return out.transpose(1, 2)
 
     F.scaled_dot_product_attention = _lumen_sdpa
-    logger.info("Patched F.scaled_dot_product_attention with Lumen/AITER attention")
+    # Logging is usually configured after this patch runs, so print instead.
+    print(
+        f"Patched F.scaled_dot_product_attention with Lumen/AITER attention "
+        f"(backend={backend})",
+        flush=True,
+    )
 
 
 def patch_hf_sdpa() -> None:

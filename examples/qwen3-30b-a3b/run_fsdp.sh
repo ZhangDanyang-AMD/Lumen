@@ -8,6 +8,7 @@ source "${CONFIG}"
 EXPERT_BACKEND=${EXPERT_BACKEND:-te_grouped}
 SHARDING=${SHARDING:-full_shard}
 LUMEN_NORM=${LUMEN_NORM:-1}
+AITER_ATTN=${AITER_ATTN:-0}
 FUSED_ROUTER=${FUSED_ROUTER:-0}
 MOE_DISPATCH_OVERLAP=${MOE_DISPATCH_OVERLAP:-0}
 MOE_GLOBAL_EXPERT_LAYOUT=${MOE_GLOBAL_EXPERT_LAYOUT:-0}
@@ -17,6 +18,7 @@ if [ -n "${MODEL_PATH:-}" ]; then
 fi
 FEATURE_ARGS=()
 [ "${LUMEN_NORM}" = "1" ] && FEATURE_ARGS+=(--lumen-norm)
+[ "${AITER_ATTN}" = "1" ] && FEATURE_ARGS+=(--aiter-attn)
 [ "${FUSED_ROUTER}" = "1" ] && FEATURE_ARGS+=(--fused-router)
 [ "${MOE_DISPATCH_OVERLAP}" = "1" ] && FEATURE_ARGS+=(--lumen-moe-dispatch-overlap)
 [ "${MOE_GLOBAL_EXPERT_LAYOUT}" = "1" ] && FEATURE_ARGS+=(--lumen-moe-global-expert-layout)

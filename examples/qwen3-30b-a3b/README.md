@@ -7,10 +7,22 @@ Expert implementations:
 - `te_grouped`: Transformer Engine `TEGroupedMLP`
 - `sonic`: AITER SonicMoE (replaces `MoELayer.experts` only)
 
-## Fastest Megatron SonicMoE recipe (default)
+## Current best 20-step results
 
-These knobs are the script defaults. Set `MOE_IMPL=sonic` and, for the
-reported numbers, `MBS=2 GBS=256` with a real checkpoint and FineWeb.
+Measured 2026-10-13 on `dev/qwen3-30b-a3b-opt-fsdp-fp8`, 8×MI350X, seq=4096, MBS=2, GBS=256. The step time is the median of steps 11–20. Expert seats are packed from the first batch before optimizer state exists. Commands, tokenizer pinning, and the step-1 check are in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md) ([中文](docs/qwen3-30b-a3b-reproduce.md)).
+
+| Path | Median step | samples/s |
+|---|---:|---:|
+| Megatron BF16 | 8.562 s | 29.90 |
+| Megatron FP8 blockwise2d | 8.292 s | 30.87 |
+| FSDP BF16 | 10.251 s | 24.97 |
+| FSDP FP8 blockwise2d | 9.561 s | 26.77 |
+
+## Megatron SonicMoE script defaults
+
+These knobs are the script defaults. They are not the current best recipe;
+that recipe overrides attention, RoPE, and the expert backend as documented
+in [`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
 
 | Knob | Default | What it does |
 |---|---|---|
@@ -33,9 +45,29 @@ process. Anything the Python job must see (`LUMEN_ATTN_BACKEND`,
 in `run_docker.sh --env` (already true for the table above) **or**
 `export`ed again inside `COMMAND`.
 
-### Production e2e (real weights + FineWeb)
+### Experimental FlyDSL gemm1/gemm2 + grouped backward
+
+`SONIC_MOE_GEMM_BACKEND=flydsl` keeps Megatron routing and EP all-to-all, then
+runs FlyDSL gfx950 **gemm1/gemm2** (MFMA-preshuffled weights, fused SwiGLU and
+score scatter) for the pre-routed expert forward and FlyDSL grouped NN/TN
+kernels for dgrad/wgrad. Do not use this with `FP8_MODE=blockwise2d`.
+
+```bash
+MOE_IMPL=sonic \
+SONIC_MOE_GEMM_BACKEND=flydsl \
+FLYDSL_ROOT=/home/leiwu/FlyDSL \
+FP8_MODE=bf16 \
+CUDA_GRAPH_SCOPE=none \
+TRAIN_STEPS=2 GBS=16 \
+./run_docker.sh
+```
+
+### Early Megatron e2e snapshot (real weights + FineWeb)
 
 Image: `zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream`.
+This table is the early CK + CUDA-graph stack, not the current best.
+Current four-path commands are in
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
 BF16, seq=4096, 20 steps, median of steps 11–20. Loss matches the
 pre-graph recipe (step 20 lm loss 2.3846 vs 2.3847).
 
@@ -43,7 +75,7 @@ pre-graph recipe (step 20 lm loss 2.3846 vs 2.3847).
 |---|---|---|---|---|
 | Triton attn + multistream GEMM (no overlap extras) | 24.71 s | 10.36 samples/s | 122.0 | 0.609 |
 | 4 opts (CK + Triton GEMM + EP overlap + CONN=8) | 17.47 s | 14.66 samples/s | 172.7 | 0.710 |
-| **4 opts + attn CUDA Graph (current default)** | **12.72 s** | **20.13 samples/s** | **237.2** | 0.692 |
+| 4 opts + attn CUDA Graph | 12.72 s | 20.13 samples/s | 237.2 | 0.692 |
 
 ```bash
 cd /home/leiwu/Lumen   # or your clone
@@ -61,8 +93,9 @@ bash examples/qwen3-30b-a3b/run_docker.sh
 ```
 
 Host paths under `HOST_ASSET_ROOT` are mounted at `/nobackup` in the
-container. Attribution, profiles, and A/B notes:
-`docs/qwen3-30b-a3b-perf-optimization.md`.
+container. The reproduction runbook is
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md)
+([中文](docs/qwen3-30b-a3b-reproduce.md)).
 
 ### Smoke (mock data, default MBS=1 GBS=8)
 
@@ -275,7 +308,9 @@ Performance is the median of steps 11–20.
 
 ![Qwen3-30B-A3B MoE benchmark](results/qwen3-30b-a3b-real-optimized20-speed.png)
 
-Best validated configurations:
+The current four best runs are in
+[`docs/qwen3-30b-a3b-reproduce.en.md`](docs/qwen3-30b-a3b-reproduce.en.md).
+The six rows below are an earlier backend matrix:
 
 - **FSDP Sequential:** 32.413 s/step, 7.898 samples/s, 161.2 GiB peak memory.
 - **FSDP SonicMoE:** 22.356 s/step, 11.451 samples/s, 128.0 GiB peak memory.

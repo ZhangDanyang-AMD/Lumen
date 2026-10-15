@@ -140,6 +140,7 @@ class LumenConfig:
 
     # -- Tier 2: Attention FP8 --
     fp8_attn: str = "none"
+    # auto | triton | csrc | asm | opus  (see lumen.models.megatron._BACKEND_MAP)
     attn_backend: str = "auto"
     attn_quant_type: str = "blockwise"
 

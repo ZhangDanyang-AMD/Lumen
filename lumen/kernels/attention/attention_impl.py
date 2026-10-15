@@ -11,7 +11,13 @@ environment variable ``LUMEN_ATTN_KERNEL_BACKEND``:
 
     LUMEN_ATTN_KERNEL_BACKEND=auto    # (default) prefer csrc, fallback triton
     LUMEN_ATTN_KERNEL_BACKEND=csrc    # force csrc, fallback triton if missing
+    LUMEN_ATTN_KERNEL_BACKEND=opus    # probe csrc + the OPUS forward as well
     LUMEN_ATTN_KERNEL_BACKEND=triton  # always use triton
+
+Note that this variable only controls *kernel probing / preference* inside this
+module. Selecting the OPUS backend for a training run is done with
+``--lumen-attn-backend opus``, which routes through
+:func:`lumen.ops.attention.attention.attention`.
 
 **Extending with new aiter kernels**
 
@@ -101,13 +107,18 @@ def _probe_aiter_csrc():
     To support a newly-added aiter kernel, add a ``hasattr`` check here
     and handle it in the corresponding dispatch function (Section 6).
     """
-    if _BACKEND_PREF not in ("auto", "csrc"):
+    if _BACKEND_PREF not in ("auto", "csrc", "opus"):
         return
     try:
         mha = _get_aiter_mha()
         _CSRC_OPS["flash_attn_fwd"] = hasattr(mha, "_flash_attn_forward")
         _CSRC_OPS["flash_attn_bwd"] = hasattr(mha, "_flash_attn_backward")
         _CSRC_OPS["flash_attn_fp8_pertensor_fwd"] = hasattr(mha, "flash_attn_fp8_pertensor_func")
+        # OPUS gfx950 bf16 dense forward. Forward-only: there is no OPUS backward
+        # kernel, so the opus backend pairs this with the csrc (CK/asm) backward.
+        _CSRC_OPS["fmha_fwd_bf16_opus_fwd"] = hasattr(mha, "fmha_fwd_bf16_opus_fwd") and hasattr(
+            mha, "fmha_fwd_bf16_opus_supported"
+        )
         # ── future aiter csrc kernels ──────────────────────────────
         # _CSRC_OPS["flash_attn_fp8_bwd"] = hasattr(mha, "_flash_attn_fp8_backward")
         # _CSRC_OPS["flash_attn_mxfp8_fwd"] = hasattr(mha, "_flash_attn_mxfp8_forward")
@@ -399,6 +410,128 @@ if csrc_available("flash_attn_fp8_pertensor_fwd"):
             device=q.device,
         )
         return out, softmax_lse
+
+
+# ── 4.1c  opus – gfx950 bf16 dense forward (forward-only) ─────────────
+#
+# aiter has no OPUS backward kernel, so this only replaces the forward; the
+# opus backend reuses attention_aiter_csrc_backward_impl for the backward.
+# That pairing is sound because the OPUS LSE is the same quantity in the same
+# layout the CK/asm backward already consumes: log-sum-exp of the *scaled*
+# scores, natural log, float32, [B, H_q, S], contiguous along the query dim.
+
+if csrc_available("fmha_fwd_bf16_opus_fwd"):
+
+    def opus_forward_eligible(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        dropout_p: float,
+        window_size_left: int,
+        window_size_right: int,
+        bias: Optional[torch.Tensor],
+        alibi_slopes: Optional[torch.Tensor],
+    ) -> bool:
+        """Whether the OPUS forward can serve this call.
+
+        Splits into the kernel's own arch / dtype / head-dim / KV-extent gate
+        (owned by aiter) and the features the OPUS path has no code for at all
+        (dropout, additive bias, alibi, sliding window).
+        """
+        if dropout_p != 0.0 or bias is not None or alibi_slopes is not None:
+            return False
+        if window_size_left != -1 or window_size_right != -1:
+            return False
+        return bool(_get_aiter_mha().fmha_fwd_bf16_opus_supported(q, k, v))
+
+    @_torch_custom_op_wrapper(
+        "lumen::attention_opus_forward_impl",
+        mutates_args=(),
+        device_types="cuda",
+    )
+    def attention_opus_forward_impl(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float,
+        causal: bool,
+        seq_major_out: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        _mha = _get_aiter_mha()
+        batch, seqlen_q, nhead_q, _ = q.shape
+        hdim_v = v.shape[3]
+
+        # The kernel reads out's strides, so a seq-major buffer costs it nothing
+        # and lets a Megatron-style [s, b, ...] consumer transpose for free.
+        if seq_major_out:
+            out = torch.empty(
+                (seqlen_q, batch, nhead_q, hdim_v), dtype=q.dtype, device=q.device
+            ).permute(1, 0, 2, 3)
+        else:
+            out = torch.empty(
+                (batch, seqlen_q, nhead_q, hdim_v), dtype=q.dtype, device=q.device
+            )
+
+        softmax_lse = torch.empty(
+            (batch, nhead_q, seqlen_q), dtype=torch.float32, device=q.device
+        )
+
+        _mha.fmha_fwd_bf16_opus_fwd(
+            q,
+            k,
+            v,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            out=out,
+            lse=softmax_lse,
+        )
+        return out, softmax_lse
+
+    @attention_opus_forward_impl.register_fake
+    def _attention_opus_forward_impl_fake(
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        softmax_scale: float,
+        causal: bool,
+        seq_major_out: bool,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch, seqlen_q, nhead_q, _ = q.shape
+        hdim_v = v.shape[3]
+        if seq_major_out:
+            out = torch.empty(
+                (seqlen_q, batch, nhead_q, hdim_v), dtype=q.dtype, device=q.device
+            ).permute(1, 0, 2, 3)
+        else:
+            out = torch.empty(
+                (batch, seqlen_q, nhead_q, hdim_v), dtype=q.dtype, device=q.device
+            )
+        softmax_lse = torch.empty(
+            (batch, nhead_q, seqlen_q), dtype=torch.float32, device=q.device
+        )
+        return out, softmax_lse
+
+
+def opus_available(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    dropout_p: float = 0.0,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    bias: Optional[torch.Tensor] = None,
+    alibi_slopes: Optional[torch.Tensor] = None,
+) -> bool:
+    """Public eligibility probe for the OPUS forward (False when not compiled in)."""
+    if not csrc_available("fmha_fwd_bf16_opus_fwd"):
+        return False
+    try:
+        return opus_forward_eligible(
+            q, k, v, dropout_p, window_size_left, window_size_right, bias, alibi_slopes
+        )
+    except Exception as e:  # arch probe / aiter import problems are not fatal
+        logger.warning("opus_available: eligibility probe failed: %s", e)
+        return False
 
 
 # ── 4.2  Triton – FP8 blockwise ────────────────────────────────────────
