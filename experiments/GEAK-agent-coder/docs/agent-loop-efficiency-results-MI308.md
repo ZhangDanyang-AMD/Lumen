@@ -70,6 +70,82 @@ Timing: `torch.profiler` device-only (GPU kernel execution only).
 | 101-150 | 11 | 10 | MHA/MLA need 100+ turns |
 | 151-200 | 6 | 5 | Long runs, some rms_norm |
 
+### SFT-4F Kernel Optimization Analysis
+
+#### MHA (5.26-5.46x): Simple attention vs flash attention
+
+| Aspect | AITER (2892 lines) | SFT-4F (61-65 lines) |
+|--------|-------------------|---------------------|
+| Algorithm | Flash attention with XCD remapping, paged KV, alibi, RoPE, FP8, window mask | Simple dot-product attention |
+| Kernels | General `attn_fwd` supporting all attention variants | Single fused `_mha_kernel` |
+| Grid | Complex 2D with XCD remapping | Simple `(B*SQ*HQ,)` 1D |
+| GQA | Full group-query attention dispatch | Inline `hk = hq // (HQ//HK)` |
+| Softmax | Multi-pass online softmax | Single-pass with `tl.max` + `tl.exp` |
+
+AITER's flash attention is a 2892-line general implementation supporting every
+attention variant (paged KV, alibi slopes, RoPE, FP8 scaling, sliding window,
+causal mask). On the tiny benchmark shape (B=2, SQ=16, SK=24, HQ=8, D=64),
+the general code paths have overhead that exceeds the actual compute.
+
+SFT-4F writes a 61-line kernel that does exactly causal dot-product attention:
+load Q row, dot with all K rows, softmax, weighted sum V. No tiling needed
+for SK=24 (fits in one block). **This is the key SFT-4F capability that
+SFT-2F and Base cannot achieve** — the model learned to write correct attention
+with causal masking from the training data.
+
+On production shapes (SQ=2048+), AITER's flash attention would be far superior
+due to its tiled softmax and memory-efficient design.
+
+#### MLA (8.04x): Fused latent attention vs tensor preparation
+
+| Aspect | AITER (890 lines) | SFT-4F (59 lines) |
+|--------|-------------------|-------------------|
+| Setup | `torch.cat` × 2, `torch.zeros` padding, `.contiguous()`, `torch.arange` × 3 | Direct tensor indexing |
+| Kernel | `_mla_prefill_fwd_kernel` via complex config selection | Single `_mla_kernel` |
+| Q construction | Cat q_latent+q_rope → reshape → build paged format | In-kernel: load q_latent and q_rope separately, dot product |
+| KV construction | Cat latent_kv+rope_k → pad to power-of-2 → unsqueeze | In-kernel: load and compute directly |
+
+SFT-4F fuses the entire MLA forward into one Triton kernel that reads
+q_latent, q_rope, latent_kv, rope_k directly and computes attention scores
+inline. AITER spends GPU time on tensor cat/pad/reshape before calling its
+Triton kernel. On tiny B=2, S=24, this preparation overhead dominates.
+
+#### GEMM (0.98-1.94x): Consistent shape-aware tuning
+
+SFT-4F uses the same optimization strategy as SFT-2F:
+
+| Config | AITER default | SFT-4F |
+|--------|-------------|--------|
+| BLOCK_M | 128 → conditional | Matched to M (16/32) |
+| BLOCK_K | 32-64 | 32-64 (varies by shape) |
+| Grid | 1D + GROUP_SIZE_M | 2D direct |
+
+SFT-4F gemm-02 achieves 1.94x (vs SFT-2F's 1.49x on same task) by using
+32×32×32 blocks — smaller tiles that fit the M=9 workload better. SFT-4F
+shows marginally better block size selection than SFT-2F on some shapes.
+
+#### RMS_NORM (0.69-6.28x): Same simplification pattern
+
+SFT-4F rms_norm (42 lines) is identical in approach to SFT-2F (64 lines):
+one-row-per-program, `BLOCK=next_power_of_2(N)`. SFT-4F's kernels are
+slightly shorter (42 vs 64 lines) with less boilerplate, achieving similar
+speedups (6.28x vs 6.63x).
+
+### What SFT-4F Learned That SFT-2F Didn't
+
+1. **Attention pattern**: SFT-4F can write correct causal dot-product attention
+   with softmax normalization. SFT-2F always fails at attention — it gets
+   stuck on Triton API errors (`tl.dot` shape mismatches, `tl.trans` issues).
+
+2. **Multi-head dispatch**: SFT-4F correctly implements GQA head mapping
+   (`hk = hq // (HQ // HK)`) — a pattern that SFT-2F doesn't produce.
+
+3. **Latent attention**: SFT-4F understands MLA's split latent+rope structure
+   and computes attention scores from concatenated Q dimensions.
+
+The additional 2 epochs of training (from 2 to 4) teach the model complex
+attention patterns not present in the simpler complete_implementation samples.
+
 ---
 
 ## SFT-2F — Qwen3-Coder-30B-A3B-SFT-TH-2epoch
