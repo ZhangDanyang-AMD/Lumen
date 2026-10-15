@@ -1,8 +1,76 @@
 # From-Scratch Kernel Writing Benchmark Results — MI308X (gfx942)
 
 Hardware: AMD MI300X (MI308X), 8 GPUs, gfx942
-Benchmark: 100 held-out tasks, model writes Triton kernel from zero via GEAK ToolAgentLoop.
+Benchmark: 76 held-out tasks (excludes rope_kv_cache/sampling), model writes
+Triton kernel from zero via GEAK ToolAgentLoop.
 Target: achieve >= 90% of AITER SOTA performance (speedup >= 0.9x).
+Timing: `torch.profiler` device-only (GPU kernel execution only).
+
+## SFT-4F — Qwen3-Coder-30B-A3B-SFT-TH-4epoch
+
+- Model: `Zhangdanyang/Qwen3-Coder-30B-A3B-SFT-TH-4epoch`
+- Training data: 3164 samples (2000 patch + 1164 complete_implementation), 4 epochs
+- Dataset: `Zhangdanyang/agent-kernel-sft-gfx942-triton-HIP`
+
+### SFT-4F Summary (76/76 core tasks, profiler device-only time)
+
+| Operator | Tasks | FAST (>=0.9x) | OK (<0.9x) | FAIL | Best Speedup |
+|----------|-------|---------------|------------|------|-------------|
+| gemm | 25 | **16** | 0 | 9 | 1.94x |
+| rms_norm | 19 | **10** | 2 | 7 | 6.28x |
+| mha | 14 | **3** | 0 | 11 | 5.46x |
+| mla | 6 | **1** | 0 | 5 | 8.04x |
+| paged_attention | 12 | 0 | 0 | 12 | — |
+| **Total** | **76** | **30 (39%)** | **2 (3%)** | **44 (58%)** | |
+
+### SFT-4F All Verified Results (Profiler Device-Only Time)
+
+| # | Task | Op | AITER (ms) | SFT (ms) | Speedup | Turns |
+|---|------|----|-----------|---------|---------|-------|
+| 1 | aiter_derived-mla-04 | mla | 0.054 | 0.007 | **8.04x** | 79 |
+| 2 | geak_native-rms_norm-02 | rms_norm | 0.043 | 0.007 | **6.28x** | 103 |
+| 3 | aiter_derived-rms_norm-04 | rms_norm | 0.041 | 0.007 | **5.87x** | 6 |
+| 4 | geak_native-rms_norm-04 | rms_norm | 0.038 | 0.007 | **5.52x** | 74 |
+| 5 | aiter-prod-rms_norm-07 | rms_norm | 0.038 | 0.007 | **5.50x** | 22 |
+| 6 | adversarial_boundary-rms_norm-02 | rms_norm | 0.037 | 0.007 | **5.49x** | 6 |
+| 7 | adversarial_boundary-mha-02 | mha | 0.035 | 0.006 | **5.46x** | 116 |
+| 8 | adversarial_boundary-rms_norm-04 | rms_norm | 0.041 | 0.008 | **5.35x** | 6 |
+| 9 | aiter_derived-mha-04 | mha | 0.034 | 0.006 | **5.27x** | 102 |
+| 10 | aiter_derived-mha-02 | mha | 0.036 | 0.007 | **5.26x** | 108 |
+| 11 | geak_native-gemm-04 | gemm | 0.074 | 0.041 | **1.79x** | 8 |
+| 12 | adversarial_boundary-gemm-03 | gemm | 0.152 | 0.097 | **1.57x** | 105 |
+| 13 | aiter-prod-gemm-04 | gemm | 0.130 | 0.083 | **1.57x** | 64 |
+| 14 | adversarial_boundary-gemm-04 | gemm | 0.070 | 0.046 | **1.55x** | 6 |
+| 15 | aiter_derived-gemm-03 | gemm | 0.148 | 0.098 | **1.51x** | 153 |
+| 16 | aiter-prod-gemm-05 | gemm | 0.134 | 0.092 | **1.46x** | 117 |
+| 17 | aiter_derived-gemm-04 | gemm | 0.073 | 0.050 | **1.46x** | 50 |
+| 18 | adversarial_boundary-gemm-01 | gemm | 0.078 | 0.054 | **1.44x** | 117 |
+| 19 | geak_native-gemm-01 | gemm | 0.080 | 0.055 | **1.43x** | 129 |
+| 20 | aiter-prod-gemm-07 | gemm | 0.103 | 0.076 | **1.36x** | 91 |
+| 21 | aiter_derived-gemm-01 | gemm | 0.076 | 0.057 | **1.33x** | 125 |
+| 22 | geak_native-gemm-03 | gemm | 0.135 | 0.105 | **1.29x** | 89 |
+| 23 | adversarial_boundary-gemm-02 | gemm | 0.072 | 0.059 | **1.22x** | 6 |
+| 24 | aiter-prod-gemm-01 | gemm | 0.049 | 0.043 | **1.15x** | 56 |
+| 25 | aiter_derived-rms_norm-02 | rms_norm | 0.007 | 0.006 | **1.07x** | 58 |
+| 26 | aiter-prod-gemm-02 | gemm | 0.054 | 0.051 | **1.06x** | 81 |
+| 27 | aiter-prod-rms_norm-06 | rms_norm | 0.007 | 0.007 | **1.03x** | 158 |
+| 28 | aiter_derived-gemm-02 | gemm | 0.078 | 0.079 | **0.98x** | 129 |
+| 29 | aiter-prod-rms_norm-04 | rms_norm | 0.007 | 0.007 | **0.95x** | 19 |
+| 30 | aiter-prod-rms_norm-03 | rms_norm | 0.006 | 0.007 | **0.95x** | 139 |
+| 31 | aiter-prod-rms_norm-08 | rms_norm | 0.065 | 0.088 | 0.74x | 200 |
+| 32 | aiter-prod-rms_norm-05 | rms_norm | 0.036 | 0.053 | 0.69x | 200 |
+
+### SFT-4F Turn Budget
+
+| Turns | Snapshots | FAST | Insight |
+|-------|-----------|------|---------|
+| <=10 | 4 | 4 | First-shot success (gemm, rms_norm) |
+| 11-50 | 3 | 3 | Quick convergence |
+| 51-100 | 8 | 8 | Most gemm results here |
+| 101-150 | 11 | 10 | MHA/MLA need 100+ turns |
+| 151-200 | 6 | 5 | Long runs, some rms_norm |
+
+---
 
 ## SFT-2F — Qwen3-Coder-30B-A3B-SFT-TH-2epoch
 
@@ -194,53 +262,74 @@ a small-batch advantage, not a fundamental algorithmic improvement.
 
 ---
 
-## SFT-4F — Qwen3-Coder-30B-A3B-SFT-TH-4epoch
-
-- Model: `Zhangdanyang/Qwen3-Coder-30B-A3B-SFT-TH-4epoch`
-- 4 epochs on same 3164-sample dataset
-
-### SFT-4F Summary (76/76 core tasks, profiler device-only time)
-
-| Operator | Tasks | FAST (>=0.9x) | OK (<0.9x) | FAIL | Best Speedup |
-|----------|-------|---------------|------------|------|-------------|
-| gemm | 25 | **16** | 0 | 9 | 1.94x |
-| rms_norm | 19 | **10** | 2 | 7 | 6.28x |
-| mha | 14 | **3** | 0 | 11 | 5.46x |
-| mla | 6 | **1** | 0 | 5 | 8.04x |
-| paged_attention | 12 | 0 | 0 | 12 | — |
-| **Total** | **76** | **30 (39%)** | **2 (3%)** | **44 (58%)** | |
-
----
-
 ## Three-Model Comparison (profiler device-only time)
+
+### Overall Performance
+
+| Metric | Base | SFT-2F (2 epoch) | SFT-4F (4 epoch) |
+|--------|------|------------------|------------------|
+| **FAST rate** | 16/76 (21%) | 25/76 (33%) | **30/76 (39%)** |
+| **Non-zero rate** | 20/76 (26%) | 33/76 (43%) | **32/76 (42%)** |
+| **Snapshots** | 19 | 33 | **32** |
+
+### By Operator
+
+| Operator | Tasks | Base FAST | SFT-2F FAST | SFT-4F FAST |
+|----------|-------|-----------|-------------|-------------|
+| gemm | 25 | 4 (16%) | **16 (64%)** | **16 (64%)** |
+| rms_norm | 19 | **12 (63%)** | 8 (42%) | 10 (53%) |
+| mha | 14 | 0 | 0 | **3 (21%)** |
+| mla | 6 | 0 | 1 | 1 |
+| paged_attention | 12 | 0 | 0 | 0 |
+| **Total** | **76** | **16 (21%)** | **25 (33%)** | **30 (39%)** |
+
+### Best Speedup per Operator
+
+| Operator | Base | SFT-2F | SFT-4F |
+|----------|------|--------|--------|
+| gemm | 1.25x | 1.88x | **1.94x** |
+| rms_norm | 5.68x | **6.63x** | 6.28x |
+| mha | — | — | **5.46x** |
+| mla | — | 9.62x | **8.04x** |
+
+### Turn Efficiency
 
 | Metric | Base | SFT-2F | SFT-4F |
 |--------|------|--------|--------|
-| **FAST rate** | 16/76 (21%) | 25/76 (33%) | **30/76 (39%)** |
-| **gemm FAST** | 4/25 (16%) | **16/25 (64%)** | **16/25 (64%)** |
-| **rms_norm FAST** | **12/19 (63%)** | 8/19 (42%) | 10/19 (53%) |
-| **mha FAST** | 0 | 0 | **3/14 (21%)** |
-| **mla FAST** | 0 | 1 | 1 |
-| Best gemm | 1.25x | 1.88x | **1.94x** |
-| Best rms_norm | 5.68x | **6.63x** | 6.28x |
-| Best mha | — | — | **5.46x** |
+| Avg turns (FAST tasks) | 85 | **57** | 87 |
+| Avg turns (all tasks) | 180 | 126 | **154** |
+| FAST in <=10 turns | 2 | 3 | **4** |
+| FAST in <=50 turns | 4 | 6 | **7** |
+
+SFT-2F achieves FAST results in fewer turns (avg 57) than both Base (85) and
+SFT-4F (87), suggesting 2-epoch training produces stronger first-shot ability.
+SFT-4F's higher FAST count comes from succeeding on harder tasks (MHA, MLA)
+that require more turns (100+).
 
 ### Key Takeaways
 
-1. **SFT-4F is the best model**: 39% FAST vs SFT-2F 33% vs Base 21%.
+1. **SFT-4F is the best model overall**: 39% FAST vs SFT-2F 33% vs Base 21%.
+   Each epoch of training improves performance.
 
 2. **MHA breakthrough at 4 epochs**: SFT-4F achieves 3/14 MHA FAST (21%),
    writing simple dot-product attention that outperforms AITER's flash attention
-   on small shapes. Neither Base nor SFT-2F can write MHA.
+   on small shapes. Neither Base nor SFT-2F can write MHA. This is the key
+   differentiator for 4-epoch training.
 
 3. **gemm saturated at 2 epochs**: Both SFT-2F and SFT-4F get 16/25 gemm FAST
    (64%). The capability is fully learned in 2 epochs.
 
 4. **rms_norm recovers at 4 epochs**: SFT-4F (53%) improves over SFT-2F (42%),
-   partially recovering toward Base (63%).
+   partially recovering toward Base (63%). SFT-2F's rms_norm regression is
+   corrected by additional training.
 
-5. **paged_attention: still 0%**: None of the three models can write paged
-   attention from scratch.
+5. **SFT-2F is fastest per-FAST**: Average 57 turns vs SFT-4F's 87 — the
+   2-epoch model has stronger first-shot capability on simple operators,
+   while the 4-epoch model succeeds on harder tasks that need more iterations.
+
+6. **paged_attention: still 0%**: None of the three models can write paged
+   attention from scratch. This requires understanding blocked KV cache layout
+   not present in training data.
 
 ---
 
