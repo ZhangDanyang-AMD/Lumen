@@ -1,7 +1,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
-	url = https://github.com/ZhangDanyang-AMD/aiter.git
-	branch = lumen/triton_kernels
+	url = https://github.com/ROCm/aiter.git
 [submodule "third_party/mori"]
 	path = third_party/mori
 	url = https://github.com/ZhangDanyang-AMD/mori.git
