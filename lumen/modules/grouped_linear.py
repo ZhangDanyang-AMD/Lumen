@@ -11,24 +11,24 @@ Parameter names and dist-checkpoint sharding follow Megatron TE grouped linear
 spec load without key remapping.
 """
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from megatron.core.dist_checkpointing.utils import replace_prefix_for_sharding
 from megatron.core.tensor_parallel.utils import divide
 from megatron.core.transformer.moe.moe_utils import ProcessGroupCollection
 from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
 from megatron.core.utils import get_pg_rank, get_pg_size
+from torch import nn
 from torch.nn.parameter import Parameter
 
 from lumen.modules._megatron_compat import ensure_metadata_has_dp_cp_group
 from lumen.modules.parallel_linear import _DeferredWgrad, _get_tp_group, _pg_size
 
 __all__ = [
-    "LumenGroupedLinear",
     "LumenColumnParallelGroupedLinear",
+    "LumenGroupedLinear",
     "LumenRowParallelGroupedLinear",
 ]
 
@@ -42,14 +42,14 @@ class LumenGroupedLinear(nn.Module):
         input_size: int,
         output_size: int,
         *,
-        parallel_mode: Optional[str],
+        parallel_mode: str | None,
         config,
         init_method: Callable,
         bias: bool = True,
         skip_bias_add: bool = False,
         is_expert: bool = False,
-        tp_comm_buffer_name: Optional[str] = None,
-        tp_group: Optional[torch.distributed.ProcessGroup] = None,
+        tp_comm_buffer_name: str | None = None,
+        tp_group: torch.distributed.ProcessGroup | None = None,
         pg_collection=None,
         **kwargs,
     ):
@@ -121,13 +121,19 @@ class LumenGroupedLinear(nn.Module):
                 init_method(getattr(self, f"weight{gemm_idx}"))
 
         for param in self.parameters():
-            setattr(param, "allreduce", not (is_expert and self.expert_parallel))
+            param.allreduce = not (is_expert and self.expert_parallel)
 
     def forward(self, x: torch.Tensor, m_splits, m_splits_gpu=None):
+        if hasattr(self, "_mxfp4_fc"):
+            from lumen.models.mxfp4_moe import module_forward
+
+            return module_forward(self, x, m_splits)
         outputs = []
         offset = 0
         for i in range(self.num_gemms):
-            count = int(m_splits[i]) if not isinstance(m_splits[i], int) else m_splits[i]
+            count = (
+                int(m_splits[i]) if not isinstance(m_splits[i], int) else m_splits[i]
+            )
             if count == 0:
                 continue
             xi = x[offset : offset + count]
@@ -161,12 +167,20 @@ class LumenGroupedLinear(nn.Module):
             output = torch.cat(outputs, dim=0)
 
         if self.skip_bias_add and self.use_bias:
-            output_bias = torch.stack([getattr(self, f"bias{i}") for i in range(self.num_gemms)], dim=0)
+            output_bias = torch.stack(
+                [getattr(self, f"bias{i}") for i in range(self.num_gemms)], dim=0
+            )
         else:
             output_bias = None
         return output, output_bias
 
-    def enable_fp8(self, scaling_manager=None, scaling_type="dynamic", fp8_dtype=None, block_size=None):
+    def enable_fp8(
+        self,
+        scaling_manager=None,
+        scaling_type="dynamic",
+        fp8_dtype=None,
+        block_size=None,
+    ):
         from lumen.quantize import QuantConfig, ScalingManager
 
         self.scaling_type = scaling_type
@@ -194,7 +208,9 @@ class LumenGroupedLinear(nn.Module):
         sharded_state_dict = {}
         full_state_dict = self.state_dict(prefix="", keep_vars=True)
         num_global_experts = get_pg_size(self._pg_collection.ep) * self.num_gemms
-        local_expert_indices_offset = get_pg_rank(self._pg_collection.ep) * self.num_gemms
+        local_expert_indices_offset = (
+            get_pg_rank(self._pg_collection.ep) * self.num_gemms
+        )
         ep_axis = len(sharded_offsets)
         extra_state = full_state_dict.get("_extra_state", self._empty_extra_state())
         extra_states = self._split_extra_state(extra_state)
@@ -235,7 +251,9 @@ class LumenGroupedLinear(nn.Module):
                 }
             )
             if self.use_bias:
-                sharded_state_dict[f"{prefix}bias{gemm_idx}"] = sub_sd[f"{gemm_idx}.bias"]
+                sharded_state_dict[f"{prefix}bias{gemm_idx}"] = sub_sd[
+                    f"{gemm_idx}.bias"
+                ]
 
         for sh_ten in sharded_state_dict.values():
             replica_id = sh_ten.replica_id
@@ -274,8 +292,8 @@ class LumenColumnParallelGroupedLinear(LumenGroupedLinear):
         bias: bool = True,
         skip_bias_add: bool = False,
         is_expert: bool = False,
-        tp_comm_buffer_name: Optional[str] = None,
-        tp_group: Optional[torch.distributed.ProcessGroup] = None,
+        tp_comm_buffer_name: str | None = None,
+        tp_group: torch.distributed.ProcessGroup | None = None,
         pg_collection=None,
         **kwargs,
     ):
@@ -299,7 +317,9 @@ class LumenColumnParallelGroupedLinear(LumenGroupedLinear):
         tp_axis_map = {}
         for gemm_idx in range(self.num_gemms):
             tp_axis_map.update({f"{gemm_idx}.weight": 0, f"{gemm_idx}.bias": 0})
-        return self._sharded_state_dict_grouped(tp_axis_map, prefix, sharded_offsets, metadata)
+        return self._sharded_state_dict_grouped(
+            tp_axis_map, prefix, sharded_offsets, metadata
+        )
 
 
 class LumenRowParallelGroupedLinear(LumenGroupedLinear):
@@ -316,8 +336,8 @@ class LumenRowParallelGroupedLinear(LumenGroupedLinear):
         bias: bool = True,
         skip_bias_add: bool = False,
         is_expert: bool = False,
-        tp_comm_buffer_name: Optional[str] = None,
-        tp_group: Optional[torch.distributed.ProcessGroup] = None,
+        tp_comm_buffer_name: str | None = None,
+        tp_group: torch.distributed.ProcessGroup | None = None,
         pg_collection=None,
         **kwargs,
     ):
@@ -339,4 +359,6 @@ class LumenRowParallelGroupedLinear(LumenGroupedLinear):
 
     def sharded_state_dict(self, prefix="", sharded_offsets=(), metadata=None):
         tp_axis_map = {f"{gemm_idx}.weight": 1 for gemm_idx in range(self.num_gemms)}
-        return self._sharded_state_dict_grouped(tp_axis_map, prefix, sharded_offsets, metadata)
+        return self._sharded_state_dict_grouped(
+            tp_axis_map, prefix, sharded_offsets, metadata
+        )
