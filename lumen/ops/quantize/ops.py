@@ -20,6 +20,16 @@ import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
 try:
+    from aiter.ops.triton.quant.quant_fp8_blockwise import (
+        quant_fp8_blockwise as _aiter_quant_fp8_blockwise,
+        quant_fp8_blockwise_for_act_grad as _aiter_quant_fp8_blockwise_for_act_grad,
+        requant_fp8_row_to_col as _aiter_requant_fp8_row_to_col,
+    )
+except (ImportError, ModuleNotFoundError):
+    _aiter_quant_fp8_blockwise = None
+    _aiter_quant_fp8_blockwise_for_act_grad = None
+    _aiter_requant_fp8_row_to_col = None
+try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         quant_fp8_blockwise_for_act_grad_kernel,
         quant_fp8_blockwise_kernel,
@@ -113,6 +123,18 @@ def quant_fp8_blockwise_impl(
     assert axis in (-2, -1, 0, 1), f"axis must be 0 or 1 (or -1, -2), got {axis}"
     axis = axis % 2
 
+    # AITER 0.1.27 changed this private kernel's signature and Triton wrapper
+    # type. Its public API preserves the operation and dispatches the gfx1250
+    # implementation correctly.
+    if triton_arch() == "gfx1250" and _aiter_quant_fp8_blockwise is not None:
+        return _aiter_quant_fp8_blockwise(
+            x,
+            block_size=block_size,
+            fp8_max=torch.finfo(dtype).max,
+            axis=axis,
+            quant_dtype=dtype,
+        )
+
     M, N = x.shape
     x_fp8 = torch.empty((M, N), dtype=dtype, device=x.device)
     scales_shape = (triton.cdiv(M, block_size), N) if axis == 0 else (M, triton.cdiv(N, block_size))
@@ -169,6 +191,14 @@ def quant_fp8_blockwise_dual_axis_impl(
     convention of ``quant_fp8_blockwise_impl``.
     """
     assert x.is_contiguous() and x.dim() == 2, "Input must be 2D and contiguous"
+    if triton_arch() == "gfx1250" and _aiter_quant_fp8_blockwise_for_act_grad is not None:
+        return _aiter_quant_fp8_blockwise_for_act_grad(
+            x,
+            block_size=block_size,
+            fp8_max=torch.finfo(dtype).max,
+            quant_dtype=dtype,
+        )
+
     M, N = x.shape
 
     x_fp8_row = torch.empty((M, N), dtype=dtype, device=x.device)
@@ -223,6 +253,15 @@ if _HAVE_REQUANT_ROW_TO_COL:
         WGrad backward to avoid a BF16 intermediate activation copy.
         """
         assert x_fp8.is_contiguous() and x_fp8.dim() == 2, "x_fp8 must be 2D and contiguous"
+        if triton_arch() == "gfx1250" and _aiter_requant_fp8_row_to_col is not None:
+            return _aiter_requant_fp8_row_to_col(
+                x_fp8,
+                x_scales,
+                block_size=block_size,
+                fp8_max=torch.finfo(dtype).max,
+                quant_dtype=dtype,
+            )
+
         M, K = x_fp8.shape
         y_fp8 = torch.empty((M, K), dtype=dtype, device=x_fp8.device)
         y_scales = torch.empty((triton.cdiv(M, block_size), K), dtype=torch.float32, device=x_fp8.device)

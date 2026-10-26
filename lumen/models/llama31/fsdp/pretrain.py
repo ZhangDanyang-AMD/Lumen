@@ -32,6 +32,7 @@ Example::
 import argparse
 import logging
 import os
+from functools import partial
 
 import torch
 import torch.distributed as dist
@@ -106,7 +107,13 @@ def build_model(args) -> nn.Module:
             torch_dtype=torch.bfloat16,
             attn_implementation="sdpa",
         )
+        # Construct directly in BF16. Building 8B parameters in FP32 and then
+        # asking FSDP to flatten/cast them takes many minutes and temporarily
+        # duplicates tens of GB of host memory.
+        previous_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.bfloat16)
         model = LlamaForCausalLM(config)
+        torch.set_default_dtype(previous_dtype)
 
     return model
 
@@ -153,8 +160,14 @@ class FSDPTrainer:
         cfg = LumenConfig.from_args(args)
         _manager, self.model = cfg.enable(self.model)
 
+        if self.rank == 0:
+            logger.info("Wrapping model with FSDP")
         self.model = self._wrap_fsdp(self.model)
+        if self.rank == 0:
+            logger.info("FSDP wrapping complete")
 
+        if self.rank == 0:
+            logger.info("Building optimizer")
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=args.lr,
@@ -162,6 +175,8 @@ class FSDPTrainer:
             eps=1e-5,
             weight_decay=args.weight_decay,
         )
+        if self.rank == 0:
+            logger.info("Optimizer ready")
         register_quant_optimizer_hooks(self.model, self.optimizer, args)
         self.scheduler = self._build_scheduler()
         sync_scheduler_to_ckpt_step(self.scheduler, args)
@@ -191,12 +206,18 @@ class FSDPTrainer:
         if getattr(self.args, "fsdp_version", 1) == 2:
             from lumen.models.fsdp import apply_fsdp2
 
+            # FSDP2 does not honor FSDP1's device_id argument and expects the
+            # module to already reside on the mesh device.
+            if self.rank == 0:
+                logger.info("Moving BF16 model to GPU before FSDP2 sharding")
+            model.to(device=self.local_rank, dtype=torch.bfloat16)
             apply_fsdp2(model, self.args)
             return model
 
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-        wrap_policy = transformer_auto_wrap_policy(
+        wrap_policy = partial(
+            transformer_auto_wrap_policy,
             transformer_layer_cls={LlamaDecoderLayer},
         )
         mp = MixedPrecision(

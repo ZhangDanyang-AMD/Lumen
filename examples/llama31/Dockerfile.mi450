@@ -1,0 +1,46 @@
+ARG BASE_IMAGE=local/qwen38-gfx1250-aiter:0.1.26.dev21-g9fd025efd-gemmtuned-prefill
+FROM ${BASE_IMAGE}
+
+USER root
+WORKDIR /workspace
+
+# Supplied by build_mi450.sh as a named build context. Keep AITER outside the
+# /workspace/Lumen bind mount used by the launcher.
+COPY --from=aiter_source . /opt/aiter
+COPY . /workspace/Lumen
+
+# The gfx1250 base already contains the matching ROCm, PyTorch, Triton and
+# compiled AITER dependencies. Install the checked-out AITER package without
+# replacing that toolchain.
+RUN AITER_USE_SYSTEM_TRITON=1 pip install --no-deps -e /opt/aiter
+
+ARG MEGATRON_COMMIT=8dd45f5a51378ec1ee7937dee3c20d8626df4763
+RUN git clone https://github.com/ROCm/Megatron-LM.git /workspace/megatron_lm && \
+    cd /workspace/megatron_lm && \
+    git checkout ${MEGATRON_COMMIT}
+RUN pip uninstall -y megatron-core || true
+# The base image's Apex Python package has no usable gfx1250 amp_C binary and
+# its JIT build fails. Removing it makes Megatron select torch.optim.AdamW.
+RUN pip uninstall -y apex || true
+RUN cd /workspace/megatron_lm && \
+    pip install -e . --no-deps && \
+    cd megatron/core/datasets && make
+
+# --no-deps is intentional: normal PyPI resolution replaces the gfx1250 ROCm
+# torch/triton builds with CUDA wheels. These are the pure-Python/tokenizer
+# dependencies needed by the Megatron launcher.
+RUN pip install --no-deps \
+      "numpy==2.5.3" "transformers==4.57.1" "tokenizers==0.22.1" \
+      "huggingface_hub==0.36.0" "safetensors>=0.4" \
+      "setuptools-scm" "pyyaml" "nltk" "tiktoken" "sentencepiece" && \
+    cd /workspace/Lumen && pip install --no-deps -e .
+
+ENV GPU_ARCHS=gfx1250
+ENV ENABLE_CK=1
+ENV PYTHONPATH="/workspace/Lumen:/workspace/megatron_lm:/opt/aiter"
+ENV MORI_ENABLE_SDMA=0
+ENV TOKENIZERS_PARALLELISM=false
+
+WORKDIR /workspace/Lumen/examples/llama31
+ENTRYPOINT []
+CMD ["bash"]

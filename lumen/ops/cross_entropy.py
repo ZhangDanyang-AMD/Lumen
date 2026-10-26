@@ -23,15 +23,25 @@ from typing import Union
 import torch
 import torch.distributed as dist
 import triton
-from aiter.ops.triton._triton_kernels.cross_entropy import (
-    cross_entropy_kernel,
-    online_softmax_kernel,
-)
-from aiter.ops.triton.cross_entropy import (
-    MAX_FUSED_SIZE,
-    NUM_WARPS,
-    cross_entropy_backward,
-)
+try:
+    from aiter.ops.triton._triton_kernels.cross_entropy import (
+        cross_entropy_kernel,
+        online_softmax_kernel,
+    )
+except ImportError:
+    # AITER >= 0.1.27 replaced these private kernels with
+    # _ce_local_softmax_stats_kernel/_ce_fused_loss_grad_kernel. The normal
+    # path below uses AITER's stable cross_entropy_forward API and remains
+    # available; only Lumen's legacy SDMA orchestration needs the old symbols.
+    cross_entropy_kernel = None
+    online_softmax_kernel = None
+from aiter.ops.triton.cross_entropy import cross_entropy_backward
+try:
+    from aiter.ops.triton.cross_entropy import MAX_FUSED_SIZE, NUM_WARPS
+except ImportError:
+    # Removed together with the legacy private kernels in AITER 0.1.27.
+    MAX_FUSED_SIZE = 65536
+    NUM_WARPS = 16
 from aiter.ops.triton.cross_entropy import cross_entropy_forward as _aiter_ce_forward
 
 
@@ -63,6 +73,12 @@ def _cross_entropy_forward_sdma(
     each chunk's allgather transfers only ``chunk_rows * 3`` floats instead
     of ``n_rows * 3``, reducing peak activation memory.
     """
+    if cross_entropy_kernel is None or online_softmax_kernel is None:
+        raise RuntimeError(
+            "Lumen SDMA cross entropy requires AITER's legacy private cross-entropy "
+            "kernels; disable use_sdma with AITER >= 0.1.27"
+        )
+
     from lumen.modules.sdma_comm import SdmaTpComm
 
     B, SQ, V = _input.shape

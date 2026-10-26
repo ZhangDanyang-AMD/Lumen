@@ -145,6 +145,12 @@ def add_common_fsdp_args(parser):
         help="Lumen attention kernel backend. 'auto' prefers csrc with triton fallback.",
     )
     afp8.add_argument(
+        "--hf-attn-patch",
+        action="store_true",
+        default=False,
+        help="Route HuggingFace SDPA through Lumen/AITER attention.",
+    )
+    afp8.add_argument(
         "--lumen-fp8-attn",
         type=str,
         default="none",
@@ -306,6 +312,12 @@ def add_common_fsdp_args(parser):
         action="store_true",
         default=False,
         help="Replace all norm modules (RMSNorm and LayerNorm) with Lumen implementations.",
+    )
+    norm.add_argument(
+        "--lumen-linear",
+        action="store_true",
+        default=False,
+        help="Route HuggingFace BF16 linear layers through Lumen/AITER GEMM.",
     )
 
     # -- Warmup + Early stopping --

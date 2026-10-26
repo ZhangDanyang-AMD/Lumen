@@ -58,9 +58,22 @@ def patch_sdpa() -> None:
         **kwargs,
     ) -> torch.Tensor:
         # F.sdpa: (B, H, T, D) → AITER: (B, T, H, D)
-        q = query.transpose(1, 2)
-        k = key.transpose(1, 2)
-        v = value.transpose(1, 2)
+        # HF supplies BHSD views. Materialize BSHD so AITER's gfx1250 FMHA
+        # assembly capability gate is selected (and its head-dim-contiguous
+        # contract is explicit).
+        q = query.transpose(1, 2).contiguous()
+        k = key.transpose(1, 2).contiguous()
+        v = value.transpose(1, 2).contiguous()
+
+        # HF Llama may materialize its ordinary decoder causal mask as a 4-D
+        # additive SDPA mask even when no user attention mask was supplied.
+        # The gfx1250 ASM kernel represents that mask through its causal flag
+        # and does not accept it as an arbitrary bias tensor.
+        bias = attn_mask
+        causal = is_causal
+        if attn_mask is not None and attn_mask.dim() == 4 and q.shape[1] == k.shape[1]:
+            bias = None
+            causal = True
 
         out = _lumen_attention(
             q,
@@ -68,8 +81,8 @@ def patch_sdpa() -> None:
             v,
             dropout_p=dropout_p,
             softmax_scale=scale,
-            causal=is_causal,
-            bias=attn_mask,
+            causal=causal,
+            bias=bias,
         )
 
         # Back to (B, H, T, D)

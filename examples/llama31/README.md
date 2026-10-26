@@ -17,6 +17,32 @@ BACKEND=fsdp bash examples/llama31/run_pretrain.sh
 
 The entry point (`pretrain_llama31.py`) selects the backend via `--backend megatron|fsdp`.
 
+## MI450X (gfx1250)
+
+Build the MI450 image with the local AITER checkout, then run the single-GPU
+FP8 blockwise smoke recipe:
+
+```bash
+AITER_DIR=../aiter bash examples/llama31/build_mi450.sh
+
+IMAGE=lumen/llama31:mi450 AITER_DIR=../aiter \
+NPROC=1 ATTN_BACKEND=csrc PRECISION=fp8 FP8_SCALING=blockwise \
+MBS=1 GBS=1 SEQ_LEN=1024 TRAIN_STEPS=3 \
+  bash examples/llama31/run_pretrain_llama31_8b.sh
+```
+
+For prepared training data, use the platform config:
+
+```bash
+CONFIG=examples/llama31/config_MI450X_1x1x1.sh \
+  bash examples/llama31/run_pretrain.sh
+```
+
+Set `NGPU=2` with that config if a larger recipe requires two GPUs. On gfx1250,
+Lumen FP8 blockwise quantization and linear/norm operators dispatch to the local
+AITER kernels. BF16 attention forward and backward use AITER's gfx1250 FMHA v3
+assembly code objects.
+
 ## CLI Flags
 
 | Feature | CLI Flag | Default |

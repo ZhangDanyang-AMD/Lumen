@@ -19,6 +19,7 @@ Usage:
 See run_pretrain.sh for a complete launch example.
 """
 
+import logging
 import sys
 
 from lumen.models.utils import peek_backend
@@ -61,6 +62,12 @@ def _run_megatron():
 
 
 def _run_fsdp():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        force=True,
+    )
+
     from lumen.models.llama31.fsdp import FSDPTrainer, get_args
 
     args = get_args()

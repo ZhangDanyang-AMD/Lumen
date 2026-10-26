@@ -7,7 +7,7 @@
 #   PRECISION=fp8  bash run_pretrain_llama31_8b.sh   # default
 #
 # All paths are relative to this script; no absolute/user-specific paths.
-# Override any of IMAGE / MBS / GBS / SEQ_LEN / TRAIN_STEPS / SEED via env.
+# Override IMAGE / NPROC / MBS / GBS / SEQ_LEN / TRAIN_STEPS / SEED via env.
 ###############################################################################
 set -euo pipefail
 
@@ -17,6 +17,9 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 PRECISION="${PRECISION:-fp8}"          # bf16 | fp8
 IMAGE="${IMAGE:-lumen:dev}"
+NPROC="${NPROC:-8}"
+AITER_DIR="${AITER_DIR:-}"
+ATTN_BACKEND="${ATTN_BACKEND:-csrc}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${LUMEN_DIR}/examples/llama31/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
 CONTAINER_NAME="${CONTAINER_NAME:-lumen_llama31_8b_${PRECISION}}"
@@ -26,9 +29,22 @@ GBS="${GBS:-128}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 SEED="${SEED:-1234}"
+FP8_SCALING="${FP8_SCALING:-delayed}"
 
 mkdir -p "${RESULTS_DIR}"
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+EXTRA_MOUNTS=()
+if [[ -n "${AITER_DIR}" ]]; then
+    if [[ ! -f "${AITER_DIR}/setup.py" ]]; then
+        echo "ERROR: AITER_DIR does not contain setup.py: ${AITER_DIR}" >&2
+        exit 1
+    fi
+    EXTRA_MOUNTS=(-v "${AITER_DIR}:/opt/aiter")
+fi
+
+GPU_GID="$(stat -c '%g' /dev/kfd)"
+HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$(seq -s, 0 $((NPROC - 1)))}"
 
 # ---- FP8-only env switches (validated forward optimizations) ----------------
 FP8_ENV=()
@@ -54,7 +70,7 @@ if [ "${PRECISION}" = "fp8" ]; then
     FP8_ARGS=(
         --linear-fp8
         --fp8-format hybrid
-        --linear-fp8-scaling delayed
+        --linear-fp8-scaling "${FP8_SCALING}"
         --linear-fp8-amax-algo max
         --linear-fp8-amax-history 1024
     )
@@ -63,14 +79,20 @@ fi
 docker run --rm --init \
     --name "${CONTAINER_NAME}" \
     --device /dev/dri --device /dev/kfd \
-    --group-add video --group-add render \
+    --group-add "${GPU_GID}" \
     --ipc=host --network=host \
+    --ulimit nofile=1048576:1048576 \
+    --ulimit memlock=-1:-1 \
     --security-opt=seccomp=unconfined \
     --cap-add=SYS_PTRACE \
     --shm-size 16G \
     -v "${LUMEN_DIR}:/workspace/Lumen" \
     -v "${TOKENIZER_DIR}:/tokenizer:ro" \
     -v "${RESULTS_DIR}:/results" \
+    "${EXTRA_MOUNTS[@]}" \
+    -e GPU_ARCHS=gfx1250 \
+    -e ENABLE_CK=1 \
+    -e HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES}" \
     -e HF_HUB_OFFLINE=1 \
     -e TRANSFORMERS_OFFLINE=1 \
     -e TOKENIZERS_PARALLELISM=false \
@@ -92,7 +114,8 @@ docker run --rm --init \
     -e LUMEN_FUSED_RES_BWD=1 \
     -e LUMEN_SKIP_BACKEND_SYNC=1 \
     "${FP8_ENV[@]}" \
-    -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
+    -e NPROC="${NPROC}" -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
+    -e ATTN_BACKEND="${ATTN_BACKEND}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
     "${IMAGE}" \
     bash -c '
@@ -130,7 +153,7 @@ PYEOF
 
 cd "${PRETRAIN_DIR}"
 set -x
-torchrun --nproc_per_node=8 --nnodes=1 pretrain_llama31.py \
+torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --backend megatron \
     --num-layers 32 \
     --hidden-size 4096 \
@@ -178,7 +201,8 @@ torchrun --nproc_per_node=8 --nnodes=1 pretrain_llama31.py \
     --eval-interval "${TRAIN_STEPS}" \
     --save-interval 1000000 \
     --log-interval 1 \
-    --lumen-attn-backend csrc \
+    --lumen-attn-backend "${ATTN_BACKEND}" \
+    --lumen-linear \
     '"${FP8_ARGS[*]}"' \
     2>&1 | tee "/results/lumen_llama31_8b_'"${PRECISION}"'.log"
 '
