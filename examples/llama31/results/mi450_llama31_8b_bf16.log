@@ -685,22 +685,22 @@ WARNING:megatron.core.rerun_state_machine:RerunStateMachine initialized in mode 
 make: Entering directory '/workspace/megatron_lm/megatron/core/datasets'
 make: Nothing to be done for 'default'.
 make: Leaving directory '/workspace/megatron_lm/megatron/core/datasets'
->>> done with dataset index builder. Compilation time: 0.015 seconds
+>>> done with dataset index builder. Compilation time: 0.014 seconds
 WARNING: constraints for invoking optimized fused softmax kernel are not met. We default back to unfused kernel invocations.
 > compiling and loading fused kernels ...
 /root/venv/rocm-venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
   return func(*args, **kwargs)
-[rank0]:[W1026 04:51:22.657443767 ProcessGroupNCCL.cpp:5310] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+[rank0]:[W1026 10:29:52.692695688 ProcessGroupNCCL.cpp:5310] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
 RCCL version : 2.31.2-HEAD:e99c9df
 HIP version  : 7.17.26374-0000000
 ROCm version : 10.2.0.0-9999-e99c9df0
 Hostname     : heliosp-1b114-d07-2.mnb.dcgpu
 Librccl path : /root/venv/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/librccl.so.1
 
-[2026-10-26 04:51:23] heliosp-1b114-d07-2:23:23 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:248 NCCL WARN lib wrapper not initialized.
->>> done with compiling and loading fused kernels. Compilation time: 0.828 seconds
-time to initialize megatron (seconds): 2.736
-[after megatron is initialized] datetime: 2026-10-26 04:51:24 
+[2026-10-26 10:29:53] heliosp-1b114-d07-2:23:23 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:248 NCCL WARN lib wrapper not initialized.
+>>> done with compiling and loading fused kernels. Compilation time: 0.843 seconds
+time to initialize megatron (seconds): 2.832
+[after megatron is initialized] datetime: 2026-10-26 10:29:54 
 building LLaMA 3.1 model with Lumen spec provider ...
 > Patched cross-entropy with Lumen Triton kernel
 INFO:lumen.config:> LumenConfig enabled (format=fp8_e4m3, scaling=none, lumen_linear, features=[fused_rope])
@@ -708,204 +708,204 @@ INFO:lumen.config:> LumenConfig enabled (format=fp8_e4m3, scaling=none, lumen_li
 INFO:megatron.core.distributed.distributed_data_parallel:Setting up DistributedDataParallel with config DistributedDataParallelConfig(grad_reduce_in_fp32=True, overlap_grad_reduce=False, overlap_param_gather=False, align_param_gather=False, use_distributed_optimizer=False, num_distributed_optimizer_instances=1, check_for_nan_in_grad=True, check_for_large_grads=False, bucket_size=None, pad_buckets_for_high_nccl_busbw=False, average_in_collective=False, fp8_param_gather=False, reuse_grad_buf_for_mxfp8_param_ag=False, use_megatron_fsdp=False, use_custom_fsdp=False, data_parallel_sharding_strategy='no_shard', gradient_reduce_div_fusion=True, suggested_communication_unit_size=None, preserve_fp32_weights=True, keep_fp8_transpose_cache=False, nccl_ub=False, fsdp_double_buffer=False, outer_dp_sharding_strategy='no_shard', disable_symmetric_registration=False, delay_wgrad_compute=False)
 INFO:megatron.core.distributed.param_and_grad_buffer:Number of buckets for gradient all-reduce / reduce-scatter: 1
 Params for bucket 1 (8030261248 elements, 8030261248 padded size):
-	module.decoder.layers.29.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.23.mlp.linear_fc2.weight
-	module.decoder.layers.18.self_attention.linear_qkv.weight
-	module.decoder.layers.12.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.2.mlp.linear_fc1.weight
-	module.decoder.layers.26.self_attention.linear_qkv.weight
-	module.decoder.layers.24.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.21.self_attention.linear_proj.weight
-	module.decoder.layers.14.mlp.linear_fc2.weight
-	module.decoder.layers.7.mlp.linear_fc2.weight
-	module.decoder.layers.1.self_attention.linear_proj.weight
-	module.decoder.layers.28.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.22.mlp.linear_fc2.weight
-	module.decoder.layers.17.mlp.linear_fc2.weight
-	module.decoder.layers.10.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.5.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.31.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.25.self_attention.linear_qkv.weight
-	module.decoder.layers.19.mlp.linear_fc1.weight
-	module.decoder.layers.13.mlp.linear_fc2.weight
-	module.decoder.layers.12.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.6.mlp.linear_fc2.weight
-	module.decoder.layers.1.mlp.linear_fc2.weight
-	module.decoder.layers.28.self_attention.linear_proj.weight
-	module.decoder.layers.22.self_attention.linear_proj.weight
-	module.decoder.layers.17.self_attention.linear_proj.weight
-	module.decoder.layers.9.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.4.self_attention.linear_qkv.layer_norm_weight
 	module.decoder.layers.30.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.24.mlp.linear_fc2.weight
-	module.decoder.layers.20.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.18.mlp.linear_fc1.weight
-	module.decoder.layers.14.self_attention.linear_proj.weight
-	module.decoder.layers.11.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.6.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.2.self_attention.linear_qkv.weight
-	module.decoder.layers.31.mlp.linear_fc2.weight
-	module.decoder.layers.27.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.26.mlp.linear_fc1.weight
-	module.decoder.layers.20.mlp.linear_fc1.weight
-	module.decoder.layers.16.self_attention.linear_proj.weight
-	module.decoder.layers.8.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.3.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.29.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.24.self_attention.linear_proj.weight
-	module.decoder.layers.17.self_attention.linear_qkv.weight
-	module.decoder.layers.10.self_attention.linear_proj.weight
-	module.decoder.layers.4.mlp.linear_fc2.weight
-	module.decoder.layers.30.mlp.linear_fc2.weight
-	module.decoder.layers.25.mlp.linear_fc1.weight
-	module.decoder.layers.19.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.15.self_attention.linear_proj.weight
-	module.decoder.layers.12.self_attention.linear_proj.weight
-	module.decoder.layers.7.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.0.mlp.linear_fc2.weight
-	module.decoder.layers.27.mlp.linear_fc1.weight
-	module.decoder.layers.22.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.16.self_attention.linear_qkv.weight
-	module.decoder.layers.9.self_attention.linear_proj.weight
-	module.decoder.layers.3.mlp.linear_fc2.weight
-	module.decoder.layers.29.mlp.linear_fc2.weight
-	module.decoder.layers.24.self_attention.linear_qkv.weight
-	module.decoder.layers.18.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.13.mlp.linear_fc1.weight
-	module.decoder.layers.11.self_attention.linear_proj.weight
-	module.decoder.layers.6.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.3.self_attention.linear_proj.weight
-	module.embedding.word_embeddings.weight
-	module.output_layer.weight
-	module.decoder.layers.26.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.21.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.17.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.15.self_attention.linear_qkv.weight
-	module.decoder.layers.8.self_attention.linear_proj.weight
-	module.decoder.layers.2.mlp.linear_fc2.weight
-	module.decoder.layers.28.mlp.linear_fc2.weight
-	module.decoder.layers.23.self_attention.linear_qkv.weight
-	module.decoder.layers.21.mlp.linear_fc2.weight
-	module.decoder.layers.18.self_attention.linear_proj.weight
-	module.decoder.layers.5.self_attention.linear_qkv.weight
-	module.decoder.final_layernorm.weight
-	module.decoder.layers.25.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.20.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.14.self_attention.linear_qkv.weight
-	module.decoder.layers.12.mlp.linear_fc2.weight
+	module.decoder.layers.24.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.19.self_attention.linear_qkv.weight
+	module.decoder.layers.12.mlp.linear_fc1.layer_norm_weight
 	module.decoder.layers.7.self_attention.linear_proj.weight
-	module.decoder.layers.1.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.28.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.23.self_attention.linear_proj.weight
-	module.decoder.layers.16.mlp.linear_fc1.weight
-	module.decoder.layers.10.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.5.self_attention.linear_proj.weight
-	module.decoder.layers.31.self_attention.linear_proj.weight
-	module.decoder.layers.25.self_attention.linear_proj.weight
-	module.decoder.layers.19.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.13.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.11.self_attention.linear_qkv.weight
-	module.decoder.layers.6.self_attention.linear_proj.weight
-	module.decoder.layers.2.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.1.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.0.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.2.self_attention.linear_proj.weight
 	module.decoder.layers.27.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.22.self_attention.linear_qkv.weight
-	module.decoder.layers.15.mlp.linear_fc1.weight
+	module.decoder.layers.21.mlp.linear_fc1.weight
+	module.decoder.layers.17.self_attention.linear_proj.weight
 	module.decoder.layers.9.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.4.self_attention.linear_proj.weight
-	module.decoder.layers.30.self_attention.linear_proj.weight
-	module.decoder.layers.23.mlp.linear_fc1.weight
-	module.decoder.layers.17.mlp.linear_fc1.weight
-	module.decoder.layers.10.self_attention.linear_qkv.weight
-	module.decoder.layers.5.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.3.self_attention.linear_qkv.weight
+	module.decoder.layers.28.mlp.linear_fc2.weight
+	module.decoder.layers.23.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.18.self_attention.linear_qkv.weight
+	module.decoder.layers.10.mlp.linear_fc2.weight
+	module.decoder.layers.6.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.1.mlp.linear_fc1.layer_norm_weight
 	module.decoder.layers.31.self_attention.linear_qkv.weight
 	module.decoder.layers.26.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.19.mlp.linear_fc2.weight
+	module.decoder.layers.20.mlp.linear_fc1.weight
+	module.decoder.layers.16.self_attention.linear_proj.weight
+	module.decoder.layers.14.self_attention.linear_proj.weight
+	module.decoder.layers.8.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.0.mlp.linear_fc1.weight
+	module.decoder.layers.27.mlp.linear_fc2.weight
+	module.decoder.layers.22.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.17.self_attention.linear_qkv.weight
+	module.decoder.layers.9.mlp.linear_fc2.weight
+	module.decoder.layers.4.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.3.mlp.linear_fc2.weight
+	module.decoder.layers.31.self_attention.linear_proj.weight
+	module.decoder.layers.25.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.19.mlp.linear_fc1.weight
+	module.decoder.layers.15.self_attention.linear_proj.weight
+	module.decoder.layers.12.self_attention.linear_proj.weight
+	module.decoder.layers.6.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.1.mlp.linear_fc1.weight
+	module.decoder.layers.29.mlp.linear_fc2.weight
+	module.decoder.layers.26.mlp.linear_fc2.weight
+	module.decoder.layers.21.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.16.self_attention.linear_qkv.weight
+	module.decoder.layers.8.mlp.linear_fc2.weight
+	module.decoder.layers.3.mlp.linear_fc1.weight
+	module.decoder.layers.30.self_attention.linear_qkv.weight
+	module.decoder.layers.24.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.18.mlp.linear_fc1.weight
+	module.decoder.layers.11.self_attention.linear_proj.weight
+	module.decoder.layers.5.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.31.mlp.linear_fc1.weight
+	module.decoder.final_layernorm.weight
+	module.decoder.layers.25.mlp.linear_fc2.weight
+	module.decoder.layers.20.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.15.self_attention.linear_qkv.weight
+	module.decoder.layers.13.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.7.mlp.linear_fc2.weight
+	module.decoder.layers.1.self_attention.linear_proj.weight
+	module.decoder.layers.29.self_attention.linear_proj.weight
+	module.decoder.layers.23.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.17.mlp.linear_fc1.weight
+	module.decoder.layers.11.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.5.self_attention.linear_qkv.layer_norm_weight
+	module.output_layer.weight
+	module.decoder.layers.30.mlp.linear_fc1.weight
+	module.decoder.layers.24.mlp.linear_fc2.weight
+	module.decoder.layers.19.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.14.self_attention.linear_qkv.weight
+	module.decoder.layers.13.self_attention.linear_proj.weight
+	module.decoder.layers.7.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.2.mlp.linear_fc1.weight
+	module.decoder.layers.2.self_attention.linear_qkv.weight
+	module.decoder.layers.28.self_attention.linear_proj.weight
+	module.decoder.layers.22.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.16.mlp.linear_fc1.weight
+	module.decoder.layers.10.self_attention.linear_proj.weight
+	module.decoder.layers.3.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.29.self_attention.linear_qkv.weight
+	module.decoder.layers.23.mlp.linear_fc2.weight
+	module.decoder.layers.18.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.11.self_attention.linear_qkv.weight
+	module.decoder.layers.6.mlp.linear_fc1.weight
+	module.decoder.layers.31.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.27.self_attention.linear_proj.weight
+	module.decoder.layers.21.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.15.mlp.linear_fc1.weight
+	module.decoder.layers.13.self_attention.linear_qkv.weight
+	module.decoder.layers.9.self_attention.linear_proj.weight
+	module.decoder.layers.0.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.0.self_attention.linear_qkv.weight
+	module.decoder.layers.28.self_attention.linear_qkv.weight
+	module.decoder.layers.22.mlp.linear_fc2.weight
+	module.decoder.layers.17.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.10.self_attention.linear_qkv.weight
+	module.decoder.layers.4.mlp.linear_fc2.weight
+	module.decoder.layers.30.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.26.self_attention.linear_proj.weight
+	module.decoder.layers.20.self_attention.linear_qkv.layer_norm_weight
 	module.decoder.layers.14.mlp.linear_fc1.weight
 	module.decoder.layers.12.self_attention.linear_qkv.weight
-	module.decoder.layers.8.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.0.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.29.self_attention.linear_proj.weight
-	module.decoder.layers.22.mlp.linear_fc1.weight
+	module.decoder.layers.8.self_attention.linear_proj.weight
+	module.decoder.layers.1.self_attention.linear_qkv.weight
+	module.decoder.layers.27.self_attention.linear_qkv.weight
+	module.decoder.layers.21.mlp.linear_fc2.weight
 	module.decoder.layers.16.mlp.linear_fc1.layer_norm_weight
 	module.decoder.layers.9.self_attention.linear_qkv.weight
-	module.decoder.layers.4.self_attention.linear_qkv.weight
-	module.decoder.layers.30.self_attention.linear_qkv.weight
-	module.decoder.layers.24.mlp.linear_fc1.weight
-	module.decoder.layers.18.mlp.linear_fc2.weight
-	module.decoder.layers.13.self_attention.linear_qkv.weight
+	module.decoder.layers.4.self_attention.linear_proj.weight
+	module.decoder.layers.29.mlp.linear_fc1.weight
+	module.decoder.layers.25.self_attention.linear_proj.weight
+	module.decoder.layers.19.self_attention.linear_qkv.layer_norm_weight
 	module.decoder.layers.11.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.7.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.1.mlp.linear_fc1.weight
-	module.decoder.layers.26.mlp.linear_fc2.weight
-	module.decoder.layers.21.self_attention.linear_qkv.weight
+	module.decoder.layers.6.self_attention.linear_proj.weight
+	module.decoder.layers.26.self_attention.linear_qkv.weight
+	module.decoder.layers.20.mlp.linear_fc2.weight
 	module.decoder.layers.15.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.13.mlp.linear_fc1.layer_norm_weight
 	module.decoder.layers.8.self_attention.linear_qkv.weight
-	module.decoder.layers.3.self_attention.linear_qkv.weight
-	module.decoder.layers.29.self_attention.linear_qkv.weight
-	module.decoder.layers.23.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.28.mlp.linear_fc1.weight
+	module.decoder.layers.24.self_attention.linear_proj.weight
 	module.decoder.layers.18.self_attention.linear_qkv.layer_norm_weight
 	module.decoder.layers.10.mlp.linear_fc1.weight
-	module.decoder.layers.5.mlp.linear_fc2.weight
-	module.decoder.layers.31.mlp.linear_fc1.weight
-	module.decoder.layers.25.mlp.linear_fc2.weight
-	module.decoder.layers.20.mlp.linear_fc2.weight
+	module.decoder.layers.5.self_attention.linear_qkv.weight
+	module.decoder.layers.1.mlp.linear_fc2.weight
+	module.decoder.layers.31.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.25.self_attention.linear_qkv.weight
+	module.decoder.layers.19.mlp.linear_fc2.weight
 	module.decoder.layers.14.mlp.linear_fc1.layer_norm_weight
 	module.decoder.layers.12.mlp.linear_fc1.weight
 	module.decoder.layers.7.self_attention.linear_qkv.weight
-	module.decoder.layers.0.mlp.linear_fc1.weight
-	module.decoder.layers.0.self_attention.linear_proj.weight
-	module.decoder.layers.28.self_attention.linear_qkv.weight
-	module.decoder.layers.22.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.2.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.27.mlp.linear_fc1.weight
+	module.decoder.layers.23.self_attention.linear_proj.weight
 	module.decoder.layers.17.self_attention.linear_qkv.layer_norm_weight
 	module.decoder.layers.9.mlp.linear_fc1.weight
-	module.decoder.layers.4.mlp.linear_fc1.weight
-	module.decoder.layers.30.mlp.linear_fc1.weight
-	module.decoder.layers.25.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.20.self_attention.linear_proj.weight
-	module.decoder.layers.13.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.4.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.29.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.24.self_attention.linear_qkv.weight
+	module.decoder.layers.18.mlp.linear_fc2.weight
 	module.decoder.layers.11.mlp.linear_fc1.weight
-	module.decoder.layers.6.self_attention.linear_qkv.weight
-	module.decoder.layers.2.self_attention.linear_proj.weight
-	module.decoder.layers.27.mlp.linear_fc2.weight
-	module.decoder.layers.21.mlp.linear_fc1.weight
+	module.decoder.layers.6.mlp.linear_fc2.weight
+	module.decoder.layers.3.self_attention.linear_proj.weight
+	module.decoder.layers.0.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.31.mlp.linear_fc2.weight
+	module.decoder.layers.26.mlp.linear_fc1.weight
+	module.decoder.layers.22.self_attention.linear_proj.weight
 	module.decoder.layers.16.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.8.mlp.linear_fc1.weight
-	module.decoder.layers.3.mlp.linear_fc1.weight
-	module.decoder.layers.2.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.29.mlp.linear_fc1.weight
-	module.decoder.layers.24.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.19.self_attention.linear_proj.weight
-	module.decoder.layers.10.mlp.linear_fc2.weight
-	module.decoder.layers.5.mlp.linear_fc1.weight
-	module.decoder.layers.31.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.27.self_attention.linear_proj.weight
-	module.decoder.layers.20.self_attention.linear_qkv.weight
-	module.decoder.layers.15.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.13.self_attention.linear_proj.weight
-	module.decoder.layers.7.mlp.linear_fc1.weight
-	module.decoder.layers.0.self_attention.linear_qkv.weight
-	module.decoder.layers.28.mlp.linear_fc1.weight
-	module.decoder.layers.23.self_attention.linear_qkv.layer_norm_weight
-	module.decoder.layers.16.mlp.linear_fc2.weight
-	module.decoder.layers.9.mlp.linear_fc2.weight
-	module.decoder.layers.4.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.30.mlp.linear_fc1.layer_norm_weight
-	module.decoder.layers.26.self_attention.linear_proj.weight
-	module.decoder.layers.19.self_attention.linear_qkv.weight
 	module.decoder.layers.14.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.8.mlp.linear_fc1.weight
+	module.decoder.layers.3.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.28.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.23.self_attention.linear_qkv.weight
+	module.decoder.layers.17.mlp.linear_fc2.weight
+	module.decoder.layers.10.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.5.mlp.linear_fc2.weight
+	module.embedding.word_embeddings.weight
+	module.decoder.layers.30.mlp.linear_fc2.weight
+	module.decoder.layers.25.mlp.linear_fc1.weight
+	module.decoder.layers.21.self_attention.linear_proj.weight
+	module.decoder.layers.15.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.12.mlp.linear_fc2.weight
+	module.decoder.layers.7.mlp.linear_fc1.weight
+	module.decoder.layers.0.mlp.linear_fc2.weight
+	module.decoder.layers.27.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.22.self_attention.linear_qkv.weight
+	module.decoder.layers.16.mlp.linear_fc2.weight
+	module.decoder.layers.9.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.5.self_attention.linear_proj.weight
+	module.decoder.layers.2.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.0.self_attention.linear_proj.weight
+	module.decoder.layers.30.self_attention.linear_proj.weight
+	module.decoder.layers.24.mlp.linear_fc1.weight
+	module.decoder.layers.20.self_attention.linear_proj.weight
 	module.decoder.layers.11.mlp.linear_fc2.weight
-	module.decoder.layers.6.mlp.linear_fc1.weight
-	module.decoder.layers.1.self_attention.linear_qkv.weight
-	module.decoder.layers.27.self_attention.linear_qkv.weight
-	module.decoder.layers.21.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.6.self_attention.linear_qkv.weight
+	module.decoder.layers.2.mlp.linear_fc2.weight
+	module.decoder.layers.26.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.21.self_attention.linear_qkv.weight
 	module.decoder.layers.15.mlp.linear_fc2.weight
-	module.decoder.layers.8.mlp.linear_fc2.weight
-	module.decoder.layers.3.mlp.linear_fc1.layer_norm_weight
-INFO:megatron.core.optimizer:Setting up optimizer with config OptimizerConfig(optimizer='adam', lr=1e-05, min_lr=0.0, decoupled_lr=None, decoupled_min_lr=None, weight_decay=0.1, fp8_recipe='delayed', fp16=False, bf16=True, reuse_grad_buf_for_mxfp8_param_ag=False, params_dtype=torch.bfloat16, use_precision_aware_optimizer=False, store_param_remainders=True, main_grads_dtype=torch.float32, main_params_dtype=torch.float32, exp_avg_dtype=torch.float32, exp_avg_sq_dtype=torch.float32, loss_scale=None, initial_loss_scale=4294967296, min_loss_scale=1.0, loss_scale_window=1000, hysteresis=2, adam_beta1=0.9, adam_beta2=0.95, adam_eps=1e-08, decoupled_weight_decay=True, sgd_momentum=0.9, use_distributed_optimizer=False, overlap_param_gather=False, overlap_param_gather_with_optimizer_step=False, optimizer_cpu_offload=False, optimizer_offload_fraction=1.0, use_torch_optimizer_for_cpu_offload=False, overlap_cpu_optimizer_d2h_h2d=False, pin_cpu_grads=True, pin_cpu_params=True, clip_grad=1.0, log_num_zeros_in_grad=False, barrier_with_L1_time=True, timers=<megatron.core.timers.Timers object at 0x7fa6924dd340>, config_logger_dir='')
+	module.decoder.layers.13.mlp.linear_fc2.weight
+	module.decoder.layers.8.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.4.self_attention.linear_qkv.weight
+	module.decoder.layers.29.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.23.mlp.linear_fc1.weight
+	module.decoder.layers.19.self_attention.linear_proj.weight
+	module.decoder.layers.12.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.5.mlp.linear_fc1.weight
+	module.decoder.layers.25.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.20.self_attention.linear_qkv.weight
+	module.decoder.layers.14.mlp.linear_fc2.weight
+	module.decoder.layers.13.mlp.linear_fc1.weight
+	module.decoder.layers.7.mlp.linear_fc1.layer_norm_weight
+	module.decoder.layers.1.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.28.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.22.mlp.linear_fc1.weight
+	module.decoder.layers.18.self_attention.linear_proj.weight
+	module.decoder.layers.10.self_attention.linear_qkv.layer_norm_weight
+	module.decoder.layers.4.mlp.linear_fc1.weight
+INFO:megatron.core.optimizer:Setting up optimizer with config OptimizerConfig(optimizer='adam', lr=1e-05, min_lr=0.0, decoupled_lr=None, decoupled_min_lr=None, weight_decay=0.1, fp8_recipe='delayed', fp16=False, bf16=True, reuse_grad_buf_for_mxfp8_param_ag=False, params_dtype=torch.bfloat16, use_precision_aware_optimizer=False, store_param_remainders=True, main_grads_dtype=torch.float32, main_params_dtype=torch.float32, exp_avg_dtype=torch.float32, exp_avg_sq_dtype=torch.float32, loss_scale=None, initial_loss_scale=4294967296, min_loss_scale=1.0, loss_scale_window=1000, hysteresis=2, adam_beta1=0.9, adam_beta2=0.95, adam_eps=1e-08, decoupled_weight_decay=True, sgd_momentum=0.9, use_distributed_optimizer=False, overlap_param_gather=False, overlap_param_gather_with_optimizer_step=False, optimizer_cpu_offload=False, optimizer_offload_fraction=1.0, use_torch_optimizer_for_cpu_offload=False, overlap_cpu_optimizer_d2h_h2d=False, pin_cpu_grads=True, pin_cpu_params=True, clip_grad=1.0, log_num_zeros_in_grad=False, barrier_with_L1_time=True, timers=<megatron.core.timers.Timers object at 0x7fc69875fe60>, config_logger_dir='')
 INFO:megatron.core.optimizer_param_scheduler:> learning rate decay style: cosine
-[after model, optimizer, and learning rate scheduler are built] datetime: 2026-10-26 04:51:24 
+[after model, optimizer, and learning rate scheduler are built] datetime: 2026-10-26 10:29:54 
 > building train, validation, and test datasets ...
  > datasets target sizes (minimum size):
     train:      6400
@@ -916,23 +916,17 @@ INFO:lumen.models.llama31.dataset:Built 6401 pretraining samples (seq_length=819
 INFO:lumen.models.llama31.dataset:Built 257 pretraining samples (seq_length=8192) from /results/mock_data/mock_train.jsonl (2106542 tokens total)
 INFO:lumen.models.llama31.dataset:Built 128 pretraining samples (seq_length=8192) from /results/mock_data/mock_train.jsonl (1053271 tokens total)
 > finished creating pretraining datasets ...
-[after dataloaders are built] datetime: 2026-10-26 04:51:59 
+[after dataloaders are built] datetime: 2026-10-26 10:30:28 
 done with setup ...
 /root/venv/rocm-venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: FutureWarning: `torch.distributed.all_gather_into_tensor` is deprecated. Please use `torch.distributed.all_gather_single` instead.
   return func(*args, **kwargs)
 (min, max) time across ranks (ms):
-    model-and-optimizer-setup ......................: (287.51, 287.51)
-    train/valid/test-data-iterators-setup ..........: (34191.47, 34191.47)
+    model-and-optimizer-setup ......................: (285.09, 285.09)
+    train/valid/test-data-iterators-setup ..........: (33429.71, 33429.71)
 training ...
 Overwriting rerun_state_machine.current_iteration from -1 to 0...
-[before the start of training step] datetime: 2026-10-26 04:51:59 
-[aiter] merge tuned file under model_configs/ and configs/ /opt/aiter/aiter/configs/bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/glm53_flash_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen38_flash_next_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/dsr1_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen3_8_2p4t_a95b_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/minimax_m3_mxfp4_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/wan22_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/muse_glimmer_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/dsv41_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/inkling_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen3_8_27b_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv:/opt/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv
-[aiter] shape is M:16384, N:6144, K:4096 dtype='torch.bfloat16' otype='torch.bfloat16' bias=False, scaleAB=False, bpreshuffle=False, not found tuned config in /tmp/aiter_configs/bf16_tuned_gemm.csv, will use default config! using triton solution:0
+[before the start of training step] datetime: 2026-10-26 10:30:28 
 [aiter] LoadKernel: _ZN5aiter41fmha_bf16_pertokenBf16_hd128_128x256_maskE hsaco: /opt/aiter/hsa//gfx1250/fmha_fwd_bf16/fmha_bf16_pertokenBf16_hd128_128x256_mask.co
-[aiter] shape is M:16384, N:4096, K:4096 dtype='torch.bfloat16' otype='torch.bfloat16' bias=False, scaleAB=False, bpreshuffle=False, not found tuned config in /tmp/aiter_configs/bf16_tuned_gemm.csv, will use default config! using triton solution:0
-[aiter] shape is M:16384, N:28672, K:4096 dtype='torch.bfloat16' otype='torch.bfloat16' bias=False, scaleAB=False, bpreshuffle=False, not found tuned config in /tmp/aiter_configs/bf16_tuned_gemm.csv, will use default config! using triton solution:0
-[aiter] shape is M:16384, N:4096, K:14336 dtype='torch.bfloat16' otype='torch.bfloat16' bias=False, scaleAB=False, bpreshuffle=False, not found tuned config in /tmp/aiter_configs/bf16_tuned_gemm.csv, will use default config! using triton solution:0
-[aiter] shape is M:16384, N:128256, K:4096 dtype='torch.bfloat16' otype='torch.bfloat16' bias=False, scaleAB=False, bpreshuffle=False, not found tuned config in /tmp/aiter_configs/bf16_tuned_gemm.csv, will use default config! using triton solution:0
 [aiter] import [module_fmha_v3_bwd] under /opt/aiter/aiter/jit/module_fmha_v3_bwd.so
 [aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
 [aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /opt/aiter/hsa//gfx1250/fmha_v3_bwd/bwd_hd128_odo_bf16.co
@@ -942,7 +936,7 @@ Overwriting rerun_state_machine.current_iteration from -1 to 0...
   Variable._execution_engine.run_backward(
 /root/venv/rocm-venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
   return func(*args, **kwargs)
- [2026-10-26 04:53:33] iteration        1/      50 | consumed samples:          128 | elapsed time per iteration (ms): 94347.7 | mem usages: 0.4181 | learning rate: 5.000000E-06 | global batch size:   128 | lm loss: 1.298925E+01 | loss scale: 1.0 | grad norm: 183.926 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:31:59] iteration        1/      50 | consumed samples:          128 | elapsed time per iteration (ms): 91040.6 | mem usages: 0.4176 | learning rate: 5.000000E-06 | global batch size:   128 | lm loss: 1.298925E+01 | loss scale: 1.0 | grad norm: 183.926 | number of skipped iterations:   0 | number of nan iterations:   0 |
 Number of parameters in transformer block in billions:  6.98
 Number of parameters in embedding layers in billions: 1.05
 Total number of parameters in billions: 8.03
@@ -951,85 +945,85 @@ compute_activation_memory_without_sp
 Activation memory footprint per transformer layer (precise, without SP): 2176.0 MB
 Theoretical memory footprints: weight and optimizer=137853.14 MB, activation=77523.73 MB, total=215376.87 MB
 
-[Rank 0] (after 1 iterations) memory (MB) | allocated: 138060.57275390625 | max allocated: 168690.57177734375 | reserved: 168908.0 | max reserved: 168908.0
+[Rank 0] (after 1 iterations) memory (MB) | allocated: 137980.58837890625 | max allocated: 168610.58740234375 | reserved: 168770.0 | max reserved: 168770.0
 /root/venv/rocm-venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: FutureWarning: `torch.distributed.all_gather_into_tensor` is deprecated. Please use `torch.distributed.all_gather_single` instead.
   return func(*args, **kwargs)
- [2026-10-26 04:55:04] iteration        2/      50 | consumed samples:          256 | elapsed time per iteration (ms): 90591.5 | mem usages: 0.5535 | learning rate: 1.000000E-05 | global batch size:   128 | lm loss: 1.298780E+01 | loss scale: 1.0 | grad norm: 183.636 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 04:56:33] iteration        3/      50 | consumed samples:          384 | elapsed time per iteration (ms): 89929.6 | mem usages: 0.5535 | learning rate: 9.989295E-06 | global batch size:   128 | lm loss: 1.241606E+01 | loss scale: 1.0 | grad norm: 546.183 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 04:58:04] iteration        4/      50 | consumed samples:          512 | elapsed time per iteration (ms): 90320.5 | mem usages: 0.5535 | learning rate: 9.957224E-06 | global batch size:   128 | lm loss: 1.082189E+01 | loss scale: 1.0 | grad norm: 210.796 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 04:59:34] iteration        5/      50 | consumed samples:          640 | elapsed time per iteration (ms): 90344.7 | mem usages: 0.5535 | learning rate: 9.903926E-06 | global batch size:   128 | lm loss: 1.403899E+01 | loss scale: 1.0 | grad norm: 186.709 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:01:04] iteration        6/      50 | consumed samples:          768 | elapsed time per iteration (ms): 90276.3 | mem usages: 0.5535 | learning rate: 9.829630E-06 | global batch size:   128 | lm loss: 9.740574E+00 | loss scale: 1.0 | grad norm: 183.707 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:02:35] iteration        7/      50 | consumed samples:          896 | elapsed time per iteration (ms): 90747.0 | mem usages: 0.5535 | learning rate: 9.734651E-06 | global batch size:   128 | lm loss: 1.037746E+01 | loss scale: 1.0 | grad norm: 121.390 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:04:05] iteration        8/      50 | consumed samples:         1024 | elapsed time per iteration (ms): 90289.4 | mem usages: 0.5535 | learning rate: 9.619398E-06 | global batch size:   128 | lm loss: 8.938299E+00 | loss scale: 1.0 | grad norm: 103.713 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:05:36] iteration        9/      50 | consumed samples:         1152 | elapsed time per iteration (ms): 90357.3 | mem usages: 0.5535 | learning rate: 9.484364E-06 | global batch size:   128 | lm loss: 7.944120E+00 | loss scale: 1.0 | grad norm: 66.562 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:07:06] iteration       10/      50 | consumed samples:         1280 | elapsed time per iteration (ms): 90460.3 | mem usages: 0.5535 | learning rate: 9.330127E-06 | global batch size:   128 | lm loss: 7.782300E+00 | loss scale: 1.0 | grad norm: 59.170 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:08:36] iteration       11/      50 | consumed samples:         1408 | elapsed time per iteration (ms): 90155.6 | mem usages: 0.5535 | learning rate: 9.157348E-06 | global batch size:   128 | lm loss: 7.017588E+00 | loss scale: 1.0 | grad norm: 22.774 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:10:06] iteration       12/      50 | consumed samples:         1536 | elapsed time per iteration (ms): 90061.2 | mem usages: 0.5535 | learning rate: 8.966766E-06 | global batch size:   128 | lm loss: 6.951092E+00 | loss scale: 1.0 | grad norm: 37.045 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:11:37] iteration       13/      50 | consumed samples:         1664 | elapsed time per iteration (ms): 90171.2 | mem usages: 0.5535 | learning rate: 8.759199E-06 | global batch size:   128 | lm loss: 6.559262E+00 | loss scale: 1.0 | grad norm: 22.043 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:13:07] iteration       14/      50 | consumed samples:         1792 | elapsed time per iteration (ms): 90446.2 | mem usages: 0.5535 | learning rate: 8.535534E-06 | global batch size:   128 | lm loss: 6.381075E+00 | loss scale: 1.0 | grad norm: 22.994 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:14:37] iteration       15/      50 | consumed samples:         1920 | elapsed time per iteration (ms): 90175.0 | mem usages: 0.5535 | learning rate: 8.296729E-06 | global batch size:   128 | lm loss: 6.193125E+00 | loss scale: 1.0 | grad norm: 19.060 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:16:07] iteration       16/      50 | consumed samples:         2048 | elapsed time per iteration (ms): 90084.8 | mem usages: 0.5535 | learning rate: 8.043807E-06 | global batch size:   128 | lm loss: 6.062764E+00 | loss scale: 1.0 | grad norm: 17.956 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:17:38] iteration       17/      50 | consumed samples:         2176 | elapsed time per iteration (ms): 90479.0 | mem usages: 0.5535 | learning rate: 7.777851E-06 | global batch size:   128 | lm loss: 5.890050E+00 | loss scale: 1.0 | grad norm: 10.737 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:19:08] iteration       18/      50 | consumed samples:         2304 | elapsed time per iteration (ms): 90091.3 | mem usages: 0.5535 | learning rate: 7.500000E-06 | global batch size:   128 | lm loss: 5.843162E+00 | loss scale: 1.0 | grad norm: 15.989 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:20:38] iteration       19/      50 | consumed samples:         2432 | elapsed time per iteration (ms): 90151.7 | mem usages: 0.5535 | learning rate: 7.211444E-06 | global batch size:   128 | lm loss: 5.693277E+00 | loss scale: 1.0 | grad norm: 7.579 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:22:09] iteration       20/      50 | consumed samples:         2560 | elapsed time per iteration (ms): 90448.0 | mem usages: 0.5535 | learning rate: 6.913417E-06 | global batch size:   128 | lm loss: 5.663225E+00 | loss scale: 1.0 | grad norm: 12.411 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:23:39] iteration       21/      50 | consumed samples:         2688 | elapsed time per iteration (ms): 90131.9 | mem usages: 0.5535 | learning rate: 6.607198E-06 | global batch size:   128 | lm loss: 5.585405E+00 | loss scale: 1.0 | grad norm: 11.419 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:25:09] iteration       22/      50 | consumed samples:         2816 | elapsed time per iteration (ms): 90114.0 | mem usages: 0.5535 | learning rate: 6.294095E-06 | global batch size:   128 | lm loss: 5.533603E+00 | loss scale: 1.0 | grad norm: 8.498 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:26:39] iteration       23/      50 | consumed samples:         2944 | elapsed time per iteration (ms): 90146.5 | mem usages: 0.5535 | learning rate: 5.975452E-06 | global batch size:   128 | lm loss: 5.488792E+00 | loss scale: 1.0 | grad norm: 11.230 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:28:09] iteration       24/      50 | consumed samples:         3072 | elapsed time per iteration (ms): 90464.2 | mem usages: 0.5535 | learning rate: 5.652631E-06 | global batch size:   128 | lm loss: 5.440157E+00 | loss scale: 1.0 | grad norm: 7.299 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:29:40] iteration       25/      50 | consumed samples:         3200 | elapsed time per iteration (ms): 90147.1 | mem usages: 0.5535 | learning rate: 5.327016E-06 | global batch size:   128 | lm loss: 5.398834E+00 | loss scale: 1.0 | grad norm: 7.268 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:31:10] iteration       26/      50 | consumed samples:         3328 | elapsed time per iteration (ms): 90149.0 | mem usages: 0.5535 | learning rate: 5.000000E-06 | global batch size:   128 | lm loss: 5.369778E+00 | loss scale: 1.0 | grad norm: 7.088 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:32:40] iteration       27/      50 | consumed samples:         3456 | elapsed time per iteration (ms): 90475.8 | mem usages: 0.5535 | learning rate: 4.672984E-06 | global batch size:   128 | lm loss: 5.321494E+00 | loss scale: 1.0 | grad norm: 3.893 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:34:10] iteration       28/      50 | consumed samples:         3584 | elapsed time per iteration (ms): 90084.9 | mem usages: 0.5535 | learning rate: 4.347369E-06 | global batch size:   128 | lm loss: 5.301671E+00 | loss scale: 1.0 | grad norm: 6.573 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:35:40] iteration       29/      50 | consumed samples:         3712 | elapsed time per iteration (ms): 90091.3 | mem usages: 0.5535 | learning rate: 4.024549E-06 | global batch size:   128 | lm loss: 5.261615E+00 | loss scale: 1.0 | grad norm: 3.832 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:37:11] iteration       30/      50 | consumed samples:         3840 | elapsed time per iteration (ms): 90416.3 | mem usages: 0.5535 | learning rate: 3.705905E-06 | global batch size:   128 | lm loss: 5.243554E+00 | loss scale: 1.0 | grad norm: 4.968 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:38:41] iteration       31/      50 | consumed samples:         3968 | elapsed time per iteration (ms): 90079.9 | mem usages: 0.5535 | learning rate: 3.392803E-06 | global batch size:   128 | lm loss: 5.222519E+00 | loss scale: 1.0 | grad norm: 4.664 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:40:11] iteration       32/      50 | consumed samples:         4096 | elapsed time per iteration (ms): 90096.4 | mem usages: 0.5535 | learning rate: 3.086583E-06 | global batch size:   128 | lm loss: 5.204400E+00 | loss scale: 1.0 | grad norm: 3.381 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:41:41] iteration       33/      50 | consumed samples:         4224 | elapsed time per iteration (ms): 90129.8 | mem usages: 0.5535 | learning rate: 2.788556E-06 | global batch size:   128 | lm loss: 5.190724E+00 | loss scale: 1.0 | grad norm: 3.981 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:43:11] iteration       34/      50 | consumed samples:         4352 | elapsed time per iteration (ms): 90434.6 | mem usages: 0.5535 | learning rate: 2.500000E-06 | global batch size:   128 | lm loss: 5.177265E+00 | loss scale: 1.0 | grad norm: 2.984 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:44:42] iteration       35/      50 | consumed samples:         4480 | elapsed time per iteration (ms): 90120.7 | mem usages: 0.5535 | learning rate: 2.222149E-06 | global batch size:   128 | lm loss: 5.163123E+00 | loss scale: 1.0 | grad norm: 2.545 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:46:12] iteration       36/      50 | consumed samples:         4608 | elapsed time per iteration (ms): 90096.8 | mem usages: 0.5535 | learning rate: 1.956193E-06 | global batch size:   128 | lm loss: 5.148848E+00 | loss scale: 1.0 | grad norm: 2.834 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:47:42] iteration       37/      50 | consumed samples:         4736 | elapsed time per iteration (ms): 90553.1 | mem usages: 0.5535 | learning rate: 1.703271E-06 | global batch size:   128 | lm loss: 5.141346E+00 | loss scale: 1.0 | grad norm: 1.768 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:49:12] iteration       38/      50 | consumed samples:         4864 | elapsed time per iteration (ms): 90090.3 | mem usages: 0.5535 | learning rate: 1.464466E-06 | global batch size:   128 | lm loss: 5.131042E+00 | loss scale: 1.0 | grad norm: 1.904 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:50:42] iteration       39/      50 | consumed samples:         4992 | elapsed time per iteration (ms): 90142.1 | mem usages: 0.5535 | learning rate: 1.240801E-06 | global batch size:   128 | lm loss: 5.124695E+00 | loss scale: 1.0 | grad norm: 2.107 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:52:12] iteration       40/      50 | consumed samples:         5120 | elapsed time per iteration (ms): 89962.7 | mem usages: 0.5535 | learning rate: 1.033233E-06 | global batch size:   128 | lm loss: 5.117990E+00 | loss scale: 1.0 | grad norm: 1.338 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:53:43] iteration       41/      50 | consumed samples:         5248 | elapsed time per iteration (ms): 90253.0 | mem usages: 0.5535 | learning rate: 8.426520E-07 | global batch size:   128 | lm loss: 5.112705E+00 | loss scale: 1.0 | grad norm: 1.039 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:55:13] iteration       42/      50 | consumed samples:         5376 | elapsed time per iteration (ms): 89927.7 | mem usages: 0.5535 | learning rate: 6.698730E-07 | global batch size:   128 | lm loss: 5.108644E+00 | loss scale: 1.0 | grad norm: 1.030 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:56:43] iteration       43/      50 | consumed samples:         5504 | elapsed time per iteration (ms): 89897.7 | mem usages: 0.5535 | learning rate: 5.156363E-07 | global batch size:   128 | lm loss: 5.103983E+00 | loss scale: 1.0 | grad norm: 1.090 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:58:13] iteration       44/      50 | consumed samples:         5632 | elapsed time per iteration (ms): 90595.9 | mem usages: 0.5535 | learning rate: 3.806023E-07 | global batch size:   128 | lm loss: 5.101429E+00 | loss scale: 1.0 | grad norm: 1.046 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 05:59:43] iteration       45/      50 | consumed samples:         5760 | elapsed time per iteration (ms): 90312.8 | mem usages: 0.5535 | learning rate: 2.653493E-07 | global batch size:   128 | lm loss: 5.099696E+00 | loss scale: 1.0 | grad norm: 1.018 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 06:01:14] iteration       46/      50 | consumed samples:         5888 | elapsed time per iteration (ms): 90308.2 | mem usages: 0.5535 | learning rate: 1.703709E-07 | global batch size:   128 | lm loss: 5.097158E+00 | loss scale: 1.0 | grad norm: 1.015 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 06:02:44] iteration       47/      50 | consumed samples:         6016 | elapsed time per iteration (ms): 89953.1 | mem usages: 0.5535 | learning rate: 9.607360E-08 | global batch size:   128 | lm loss: 5.095302E+00 | loss scale: 1.0 | grad norm: 0.991 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 06:04:14] iteration       48/      50 | consumed samples:         6144 | elapsed time per iteration (ms): 90255.2 | mem usages: 0.5535 | learning rate: 4.277569E-08 | global batch size:   128 | lm loss: 5.095254E+00 | loss scale: 1.0 | grad norm: 0.991 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 06:05:44] iteration       49/      50 | consumed samples:         6272 | elapsed time per iteration (ms): 89955.0 | mem usages: 0.5535 | learning rate: 1.070538E-08 | global batch size:   128 | lm loss: 5.093188E+00 | loss scale: 1.0 | grad norm: 0.997 | number of skipped iterations:   0 | number of nan iterations:   0 |
- [2026-10-26 06:07:14] iteration       50/      50 | consumed samples:         6400 | elapsed time per iteration (ms): 89815.1 | mem usages: 0.5535 | learning rate: 0.000000E+00 | global batch size:   128 | lm loss: 5.094933E+00 | loss scale: 1.0 | grad norm: 0.989 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:33:20] iteration        2/      50 | consumed samples:          256 | elapsed time per iteration (ms): 80679.9 | mem usages: 0.5419 | learning rate: 1.000000E-05 | global batch size:   128 | lm loss: 1.298780E+01 | loss scale: 1.0 | grad norm: 183.636 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:34:40] iteration        3/      50 | consumed samples:          384 | elapsed time per iteration (ms): 80233.9 | mem usages: 0.5419 | learning rate: 9.989295E-06 | global batch size:   128 | lm loss: 1.241601E+01 | loss scale: 1.0 | grad norm: 546.184 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:36:01] iteration        4/      50 | consumed samples:          512 | elapsed time per iteration (ms): 80609.6 | mem usages: 0.5419 | learning rate: 9.957224E-06 | global batch size:   128 | lm loss: 1.082192E+01 | loss scale: 1.0 | grad norm: 210.797 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:37:21] iteration        5/      50 | consumed samples:          640 | elapsed time per iteration (ms): 80163.5 | mem usages: 0.5419 | learning rate: 9.903926E-06 | global batch size:   128 | lm loss: 1.403893E+01 | loss scale: 1.0 | grad norm: 186.746 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:38:41] iteration        6/      50 | consumed samples:          768 | elapsed time per iteration (ms): 80139.8 | mem usages: 0.5419 | learning rate: 9.829630E-06 | global batch size:   128 | lm loss: 9.740196E+00 | loss scale: 1.0 | grad norm: 183.720 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:40:01] iteration        7/      50 | consumed samples:          896 | elapsed time per iteration (ms): 80244.2 | mem usages: 0.5419 | learning rate: 9.734651E-06 | global batch size:   128 | lm loss: 1.037787E+01 | loss scale: 1.0 | grad norm: 121.387 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:41:21] iteration        8/      50 | consumed samples:         1024 | elapsed time per iteration (ms): 80077.5 | mem usages: 0.5419 | learning rate: 9.619398E-06 | global batch size:   128 | lm loss: 8.937881E+00 | loss scale: 1.0 | grad norm: 103.703 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:42:42] iteration        9/      50 | consumed samples:         1152 | elapsed time per iteration (ms): 80451.1 | mem usages: 0.5419 | learning rate: 9.484364E-06 | global batch size:   128 | lm loss: 7.944669E+00 | loss scale: 1.0 | grad norm: 66.589 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:44:02] iteration       10/      50 | consumed samples:         1280 | elapsed time per iteration (ms): 80150.8 | mem usages: 0.5419 | learning rate: 9.330127E-06 | global batch size:   128 | lm loss: 7.781703E+00 | loss scale: 1.0 | grad norm: 59.161 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:45:22] iteration       11/      50 | consumed samples:         1408 | elapsed time per iteration (ms): 80216.1 | mem usages: 0.5419 | learning rate: 9.157348E-06 | global batch size:   128 | lm loss: 7.017877E+00 | loss scale: 1.0 | grad norm: 22.814 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:46:42] iteration       12/      50 | consumed samples:         1536 | elapsed time per iteration (ms): 80081.3 | mem usages: 0.5419 | learning rate: 8.966766E-06 | global batch size:   128 | lm loss: 6.951211E+00 | loss scale: 1.0 | grad norm: 37.041 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:48:02] iteration       13/      50 | consumed samples:         1664 | elapsed time per iteration (ms): 80453.2 | mem usages: 0.5419 | learning rate: 8.759199E-06 | global batch size:   128 | lm loss: 6.559222E+00 | loss scale: 1.0 | grad norm: 22.010 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:49:23] iteration       14/      50 | consumed samples:         1792 | elapsed time per iteration (ms): 80004.9 | mem usages: 0.5419 | learning rate: 8.535534E-06 | global batch size:   128 | lm loss: 6.381438E+00 | loss scale: 1.0 | grad norm: 23.011 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:50:43] iteration       15/      50 | consumed samples:         1920 | elapsed time per iteration (ms): 80091.7 | mem usages: 0.5419 | learning rate: 8.296729E-06 | global batch size:   128 | lm loss: 6.193077E+00 | loss scale: 1.0 | grad norm: 19.039 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:52:03] iteration       16/      50 | consumed samples:         2048 | elapsed time per iteration (ms): 80049.7 | mem usages: 0.5419 | learning rate: 8.043807E-06 | global batch size:   128 | lm loss: 6.062886E+00 | loss scale: 1.0 | grad norm: 17.966 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:53:23] iteration       17/      50 | consumed samples:         2176 | elapsed time per iteration (ms): 80418.6 | mem usages: 0.5419 | learning rate: 7.777851E-06 | global batch size:   128 | lm loss: 5.890078E+00 | loss scale: 1.0 | grad norm: 10.737 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:54:43] iteration       18/      50 | consumed samples:         2304 | elapsed time per iteration (ms): 80038.9 | mem usages: 0.5419 | learning rate: 7.500000E-06 | global batch size:   128 | lm loss: 5.843159E+00 | loss scale: 1.0 | grad norm: 15.989 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:56:03] iteration       19/      50 | consumed samples:         2432 | elapsed time per iteration (ms): 80060.1 | mem usages: 0.5419 | learning rate: 7.211444E-06 | global batch size:   128 | lm loss: 5.693315E+00 | loss scale: 1.0 | grad norm: 7.583 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:57:23] iteration       20/      50 | consumed samples:         2560 | elapsed time per iteration (ms): 80026.5 | mem usages: 0.5419 | learning rate: 6.913417E-06 | global batch size:   128 | lm loss: 5.663219E+00 | loss scale: 1.0 | grad norm: 12.409 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 10:58:44] iteration       21/      50 | consumed samples:         2688 | elapsed time per iteration (ms): 80407.3 | mem usages: 0.5419 | learning rate: 6.607198E-06 | global batch size:   128 | lm loss: 5.585423E+00 | loss scale: 1.0 | grad norm: 11.418 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:00:04] iteration       22/      50 | consumed samples:         2816 | elapsed time per iteration (ms): 80017.8 | mem usages: 0.5419 | learning rate: 6.294095E-06 | global batch size:   128 | lm loss: 5.533576E+00 | loss scale: 1.0 | grad norm: 8.498 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:01:24] iteration       23/      50 | consumed samples:         2944 | elapsed time per iteration (ms): 79976.9 | mem usages: 0.5419 | learning rate: 5.975452E-06 | global batch size:   128 | lm loss: 5.488801E+00 | loss scale: 1.0 | grad norm: 11.231 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:02:44] iteration       24/      50 | consumed samples:         3072 | elapsed time per iteration (ms): 79983.5 | mem usages: 0.5419 | learning rate: 5.652631E-06 | global batch size:   128 | lm loss: 5.440158E+00 | loss scale: 1.0 | grad norm: 7.300 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:04:04] iteration       25/      50 | consumed samples:         3200 | elapsed time per iteration (ms): 80308.8 | mem usages: 0.5419 | learning rate: 5.327016E-06 | global batch size:   128 | lm loss: 5.398790E+00 | loss scale: 1.0 | grad norm: 7.267 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:05:24] iteration       26/      50 | consumed samples:         3328 | elapsed time per iteration (ms): 79999.7 | mem usages: 0.5419 | learning rate: 5.000000E-06 | global batch size:   128 | lm loss: 5.369761E+00 | loss scale: 1.0 | grad norm: 7.089 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:06:44] iteration       27/      50 | consumed samples:         3456 | elapsed time per iteration (ms): 80040.1 | mem usages: 0.5419 | learning rate: 4.672984E-06 | global batch size:   128 | lm loss: 5.321440E+00 | loss scale: 1.0 | grad norm: 3.884 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:08:04] iteration       28/      50 | consumed samples:         3584 | elapsed time per iteration (ms): 80094.1 | mem usages: 0.5419 | learning rate: 4.347369E-06 | global batch size:   128 | lm loss: 5.301633E+00 | loss scale: 1.0 | grad norm: 6.573 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:09:24] iteration       29/      50 | consumed samples:         3712 | elapsed time per iteration (ms): 80398.1 | mem usages: 0.5419 | learning rate: 4.024549E-06 | global batch size:   128 | lm loss: 5.261590E+00 | loss scale: 1.0 | grad norm: 3.842 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:10:45] iteration       30/      50 | consumed samples:         3840 | elapsed time per iteration (ms): 80137.6 | mem usages: 0.5419 | learning rate: 3.705905E-06 | global batch size:   128 | lm loss: 5.243550E+00 | loss scale: 1.0 | grad norm: 4.965 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:12:05] iteration       31/      50 | consumed samples:         3968 | elapsed time per iteration (ms): 80138.4 | mem usages: 0.5419 | learning rate: 3.392803E-06 | global batch size:   128 | lm loss: 5.222516E+00 | loss scale: 1.0 | grad norm: 4.668 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:13:25] iteration       32/      50 | consumed samples:         4096 | elapsed time per iteration (ms): 80103.6 | mem usages: 0.5419 | learning rate: 3.086583E-06 | global batch size:   128 | lm loss: 5.204395E+00 | loss scale: 1.0 | grad norm: 3.384 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:14:45] iteration       33/      50 | consumed samples:         4224 | elapsed time per iteration (ms): 80350.2 | mem usages: 0.5419 | learning rate: 2.788556E-06 | global batch size:   128 | lm loss: 5.190719E+00 | loss scale: 1.0 | grad norm: 3.972 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:16:05] iteration       34/      50 | consumed samples:         4352 | elapsed time per iteration (ms): 80034.7 | mem usages: 0.5419 | learning rate: 2.500000E-06 | global batch size:   128 | lm loss: 5.177277E+00 | loss scale: 1.0 | grad norm: 2.992 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:17:25] iteration       35/      50 | consumed samples:         4480 | elapsed time per iteration (ms): 80018.5 | mem usages: 0.5419 | learning rate: 2.222149E-06 | global batch size:   128 | lm loss: 5.163099E+00 | loss scale: 1.0 | grad norm: 2.545 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:18:45] iteration       36/      50 | consumed samples:         4608 | elapsed time per iteration (ms): 79993.8 | mem usages: 0.5419 | learning rate: 1.956193E-06 | global batch size:   128 | lm loss: 5.148846E+00 | loss scale: 1.0 | grad norm: 2.825 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:20:06] iteration       37/      50 | consumed samples:         4736 | elapsed time per iteration (ms): 80322.2 | mem usages: 0.5419 | learning rate: 1.703271E-06 | global batch size:   128 | lm loss: 5.141337E+00 | loss scale: 1.0 | grad norm: 1.776 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:21:25] iteration       38/      50 | consumed samples:         4864 | elapsed time per iteration (ms): 79955.1 | mem usages: 0.5419 | learning rate: 1.464466E-06 | global batch size:   128 | lm loss: 5.131050E+00 | loss scale: 1.0 | grad norm: 1.916 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:22:45] iteration       39/      50 | consumed samples:         4992 | elapsed time per iteration (ms): 79950.5 | mem usages: 0.5419 | learning rate: 1.240801E-06 | global batch size:   128 | lm loss: 5.124660E+00 | loss scale: 1.0 | grad norm: 2.096 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:24:05] iteration       40/      50 | consumed samples:         5120 | elapsed time per iteration (ms): 79957.6 | mem usages: 0.5419 | learning rate: 1.033233E-06 | global batch size:   128 | lm loss: 5.117984E+00 | loss scale: 1.0 | grad norm: 1.338 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:25:26] iteration       41/      50 | consumed samples:         5248 | elapsed time per iteration (ms): 80289.8 | mem usages: 0.5419 | learning rate: 8.426520E-07 | global batch size:   128 | lm loss: 5.112689E+00 | loss scale: 1.0 | grad norm: 1.041 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:26:46] iteration       42/      50 | consumed samples:         5376 | elapsed time per iteration (ms): 79953.7 | mem usages: 0.5419 | learning rate: 6.698730E-07 | global batch size:   128 | lm loss: 5.108667E+00 | loss scale: 1.0 | grad norm: 1.027 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:28:06] iteration       43/      50 | consumed samples:         5504 | elapsed time per iteration (ms): 79992.0 | mem usages: 0.5419 | learning rate: 5.156363E-07 | global batch size:   128 | lm loss: 5.103969E+00 | loss scale: 1.0 | grad norm: 1.070 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:29:26] iteration       44/      50 | consumed samples:         5632 | elapsed time per iteration (ms): 79947.5 | mem usages: 0.5419 | learning rate: 3.806023E-07 | global batch size:   128 | lm loss: 5.101420E+00 | loss scale: 1.0 | grad norm: 1.040 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:30:46] iteration       45/      50 | consumed samples:         5760 | elapsed time per iteration (ms): 80232.0 | mem usages: 0.5419 | learning rate: 2.653493E-07 | global batch size:   128 | lm loss: 5.099672E+00 | loss scale: 1.0 | grad norm: 1.019 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:32:06] iteration       46/      50 | consumed samples:         5888 | elapsed time per iteration (ms): 79992.0 | mem usages: 0.5419 | learning rate: 1.703709E-07 | global batch size:   128 | lm loss: 5.097124E+00 | loss scale: 1.0 | grad norm: 1.010 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:33:26] iteration       47/      50 | consumed samples:         6016 | elapsed time per iteration (ms): 79914.2 | mem usages: 0.5419 | learning rate: 9.607360E-08 | global batch size:   128 | lm loss: 5.095296E+00 | loss scale: 1.0 | grad norm: 0.991 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:34:46] iteration       48/      50 | consumed samples:         6144 | elapsed time per iteration (ms): 79844.1 | mem usages: 0.5419 | learning rate: 4.277569E-08 | global batch size:   128 | lm loss: 5.095244E+00 | loss scale: 1.0 | grad norm: 0.991 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:36:05] iteration       49/      50 | consumed samples:         6272 | elapsed time per iteration (ms): 79812.6 | mem usages: 0.5419 | learning rate: 1.070538E-08 | global batch size:   128 | lm loss: 5.093174E+00 | loss scale: 1.0 | grad norm: 0.996 | number of skipped iterations:   0 | number of nan iterations:   0 |
+ [2026-10-26 11:37:25] iteration       50/      50 | consumed samples:         6400 | elapsed time per iteration (ms): 80130.0 | mem usages: 0.5419 | learning rate: 0.000000E+00 | global batch size:   128 | lm loss: 5.094898E+00 | loss scale: 1.0 | grad norm: 0.989 | number of skipped iterations:   0 | number of nan iterations:   0 |
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.DISABLED
 WARNING:lumen.ops.attention.attention:AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
 (min, max) time across ranks (ms):
-    evaluate .......................................: (18887.98, 18887.98)
+    evaluate .......................................: (16930.18, 16930.18)
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 ----------------------------------------------------------------------------------------------
- validation loss at iteration 50 | lm loss value: 5.094090E+00 | lm loss PPL: 1.630555E+02 | 
+ validation loss at iteration 50 | lm loss value: 5.094049E+00 | lm loss PPL: 1.630488E+02 | 
 ----------------------------------------------------------------------------------------------
-[after training is done] datetime: 2026-10-26 06:07:33 
+[after training is done] datetime: 2026-10-26 11:37:42 
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.DISABLED
 Evaluating on 128 samples
 Evaluating iter 1/1
 (min, max) time across ranks (ms):
-    evaluate .......................................: (19278.38, 19278.38)
+    evaluate .......................................: (16932.64, 16932.64)
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 ----------------------------------------------------------------------------------------------------------------
- validation loss at iteration 50 on validation set | lm loss value: 5.095035E+00 | lm loss PPL: 1.632095E+02 | 
+ validation loss at iteration 50 on validation set | lm loss value: 5.095033E+00 | lm loss PPL: 1.632093E+02 | 
 ----------------------------------------------------------------------------------------------------------------
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.DISABLED
 Evaluating on 128 samples
 Evaluating iter 1/1
 (min, max) time across ranks (ms):
-    evaluate .......................................: (18960.77, 18960.77)
+    evaluate .......................................: (16963.01, 16963.01)
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 WARNING:megatron.core.rerun_state_machine:Setting RerunStateMachine mode RerunMode.VALIDATE_RESULTS
 ----------------------------------------------------------------------------------------------------------
- validation loss at iteration 50 on test set | lm loss value: 5.094090E+00 | lm loss PPL: 1.630555E+02 | 
+ validation loss at iteration 50 on test set | lm loss value: 5.094049E+00 | lm loss PPL: 1.630488E+02 | 
 ----------------------------------------------------------------------------------------------------------
