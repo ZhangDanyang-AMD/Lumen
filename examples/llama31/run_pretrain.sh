@@ -133,6 +133,10 @@ run_megatron() {
     LUMEN_CE_ARGS=""
     [ "${LUMEN_CROSS_ENTROPY}" -eq 1 ] && LUMEN_CE_ARGS="--lumen-cross-entropy"
 
+    LUMEN_FUSED_ROPE=${LUMEN_FUSED_ROPE:-0}
+    LUMEN_ROPE_ARGS=""
+    [ "${LUMEN_FUSED_ROPE}" -eq 1 ] && LUMEN_ROPE_ARGS="--lumen-fused-rope"
+
     WARMUP_ARGS=""; [ "${WARMUP_STEPS}" -gt 0 ] && WARMUP_ARGS="--warmup-steps ${WARMUP_STEPS}"
     EARLY_STOP_ARGS=""; [ -n "${VAL_LOSS_TARGET}" ] && EARLY_STOP_ARGS="--val-loss-target ${VAL_LOSS_TARGET}"
 
@@ -217,7 +221,7 @@ run_megatron() {
         --eval-every ${EVAL_EVERY} \
         --start-eval-at ${START_EVAL_AT} \
         ${LORA_ARGS} ${FP8_ARGS} ${WARMUP_ARGS} ${EARLY_STOP_ARGS} ${LUMEN_RMSNORM_ARGS} \
-        ${LUMEN_LINEAR_ARGS} ${LUMEN_CE_ARGS} \
+        ${LUMEN_LINEAR_ARGS} ${LUMEN_CE_ARGS} ${LUMEN_ROPE_ARGS} \
         ${CMD_SUFFIX}
 }
 

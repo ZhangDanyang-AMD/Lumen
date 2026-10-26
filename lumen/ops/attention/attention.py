@@ -698,8 +698,16 @@ class AttentionCsrcSeqMajorOutFunction(torch.autograd.Function):
             # Invoke the public ASM wrapper directly from Lumen.
             from aiter.ops.mha import fmha_v3_bwd
 
+            dout_contiguous = dout.contiguous()
+            deterministic = (
+                ctx.deterministic
+                or _os.environ.get(
+                    "LUMEN_GFX1250_FMHA_BWD_DETERMINISTIC", "1"
+                )
+                == "1"
+            )
             dq, dk, dv, _ = fmha_v3_bwd(
-                dout.contiguous(),
+                dout_contiguous,
                 q,
                 k,
                 v,
@@ -710,7 +718,7 @@ class AttentionCsrcSeqMajorOutFunction(torch.autograd.Function):
                 ctx.causal,
                 int(ctx.window_size[0]),
                 int(ctx.window_size[1]),
-                ctx.deterministic,
+                deterministic,
                 True,
                 1,
                 dq,

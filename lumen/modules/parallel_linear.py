@@ -21,6 +21,7 @@ To enable FP8, call :func:`enable_fp8` on the module or set
 ``scaling_type`` to one of the supported quantization modes.
 """
 
+import os
 import threading
 import warnings
 from typing import Callable, Optional
@@ -47,6 +48,11 @@ from torch.nn.parameter import Parameter
 from lumen.modules._megatron_compat import condition_init_method, ensure_metadata_has_dp_cp_group
 
 __all__ = ["LumenColumnParallelLinear", "LumenRowParallelLinear", "_DeferredWgrad"]
+
+
+def _use_gemm_bf16_from_env() -> bool:
+    """Enable AITER ``gemm_a16w16`` for unquantized Lumen linears."""
+    return os.environ.get("LUMEN_GEMM_BF16", "0") == "1"
 
 
 class _DeferredWgrad:
@@ -452,7 +458,7 @@ class LumenColumnParallelLinear(nn.Module):
         self.delay_wgrad = False
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
-        self.use_gemm_bf16 = False
+        self.use_gemm_bf16 = _use_gemm_bf16_from_env()
 
         # Pipeline overlap config (fused comm-GEMM)
         _cfg_mode = getattr(config, "lumen_tp_comm_overlap_mode", None)
@@ -574,7 +580,7 @@ class LumenColumnParallelLinear(nn.Module):
             if self.use_sdma and self.tp_size > 1:
                 input_parallel = self._forward_sdma_pre_gemm(input_)
             else:
-                if self.sequence_parallel or self.explicit_expert_comm:
+                if self.tp_size == 1 or self.sequence_parallel or self.explicit_expert_comm:
                     input_parallel = input_
                 else:
                     # The copy region is the only source of the dgrad all-reduce here,
@@ -844,7 +850,7 @@ class LumenRowParallelLinear(nn.Module):
         self.delay_wgrad = False
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
-        self.use_gemm_bf16 = False
+        self.use_gemm_bf16 = _use_gemm_bf16_from_env()
 
         _cfg_mode = getattr(config, "lumen_tp_comm_overlap_mode", None)
         self._overlap_mode = _cfg_mode if _cfg_mode is not None else _overlap_mode_from_args()
@@ -931,7 +937,7 @@ class LumenRowParallelLinear(nn.Module):
         return NcclCommBackend(self.tp_group)
 
     def forward(self, input_: torch.Tensor):
-        if self.input_is_parallel:
+        if self.tp_size == 1 or self.input_is_parallel:
             input_parallel = input_
         else:
             from megatron.core.tensor_parallel.mappings import scatter_to_tensor_model_parallel_region
@@ -962,7 +968,7 @@ class LumenRowParallelLinear(nn.Module):
                 use_gemm_bf16=self.use_gemm_bf16,
             )
 
-            if self.explicit_expert_comm:
+            if self.tp_size == 1 or self.explicit_expert_comm:
                 output_ = output_parallel
             elif self.use_sdma and self.tp_size > 1 and self.tp_comm_overlap:
                 output_ = self._forward_sdma_overlap_row(output_parallel)

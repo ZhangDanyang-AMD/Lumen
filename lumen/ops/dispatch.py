@@ -438,11 +438,22 @@ def _probe_aiter_fused_ungated():
 def _probe_aiter_swiglu():
     """Check if AITER Triton fused SwiGLU fwd/bwd kernels are available."""
     try:
-        from aiter.ops.triton.activation import swiglu_fwd as _  # noqa: F401
+        from aiter.ops.triton.fusions.activation import (  # noqa: F401
+            fused_silu_mul as _fwd,
+            silu_and_mul_backward as _bwd,
+        )
 
         return True
     except (ImportError, OSError):
-        return False
+        try:
+            from aiter.ops.triton.activation import (  # noqa: F401
+                swiglu_bwd as _bwd,
+                swiglu_fwd as _fwd,
+            )
+
+            return True
+        except (ImportError, OSError):
+            return False
 
 
 @functools.lru_cache(maxsize=1)

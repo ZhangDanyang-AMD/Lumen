@@ -1696,6 +1696,39 @@ def _gemm_bf16_tuned(a, w, bias):
     return gemm_a16w16(a, w, bias=bias)
 
 
+def _gemm_bf16_gluon(a, w, bias=None, *, split_k=False):
+    """gfx1250 GEMM for training-only gradient shapes.
+
+    AITER Gluon handles regular dgrad/wgrad shapes. Very large-K wgrad uses
+    chunked hipBLASLt BF16 with FP32 accumulation because the gfx1250 Gluon
+    kernel is not numerically stable for the output projection's K=16384.
+    """
+    from aiter.ops.triton.gemm.basic.gemm_a16w16 import gemm_a16w16
+
+    output_shape = (*a.shape[:-1], w.shape[0])
+    a_2d = a.reshape(-1, a.shape[-1])
+    if split_k and a_2d.shape[1] > 8192:
+        out_fp32 = None
+        for start in range(0, a_2d.shape[1], 8192):
+            end = min(start + 8192, a_2d.shape[1])
+            partial = torch.mm(
+                a_2d[:, start:end],
+                w[:, start:end].t(),
+            )
+            out_fp32 = (
+                partial.float()
+                if out_fp32 is None
+                else out_fp32.add_(partial.float())
+            )
+        out = out_fp32.to(a.dtype)
+        if bias is not None:
+            out = out + bias
+        return out.reshape(output_shape)
+
+    out = gemm_a16w16(a_2d, w, bias=bias, backend="gluon")
+    return out.reshape(output_shape)
+
+
 # ---------------------------------------------------------------------------
 # Fast GEMM dispatch — bypass try_backends list/lambda overhead after warmup
 # ---------------------------------------------------------------------------
@@ -2189,13 +2222,15 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 input_tensor = input_tensor.view(ctx._input_shape)
             else:
                 input_tensor, weight = ctx.saved_tensors
-            grad_input = dispatch_gemm(
-                grad_output,
-                weight.t().contiguous(),
-                None,
-                None,
-                "none",
-            )
+            weight_t = weight.t().contiguous()
+            from lumen.ops.quantize.ops import triton_arch
+
+            if triton_arch() == "gfx1250":
+                grad_input = _gemm_bf16_gluon(grad_output, weight_t)
+            else:
+                grad_input = dispatch_gemm(
+                    grad_output, weight_t, None, None, "none"
+                )
 
             if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
                 grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
@@ -2204,13 +2239,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 gaf = ctx.gradient_accumulation_fusion
 
                 def _wgrad_fn():
-                    gw = dispatch_gemm(
-                        grad_flat.t().contiguous(),
-                        input_flat.t().contiguous(),
-                        None,
-                        None,
-                        "none",
-                    )
+                    grad_t = grad_flat.t().contiguous()
+                    input_t = input_flat.t().contiguous()
+                    from lumen.ops.quantize.ops import triton_arch
+
+                    if triton_arch() == "gfx1250":
+                        gw = _gemm_bf16_gluon(grad_t, input_t, split_k=True)
+                    else:
+                        gw = dispatch_gemm(grad_t, input_t, None, None, "none")
                     if gaf and hasattr(w_ref, "main_grad"):
                         w_ref.main_grad.add_(gw)
                     elif w_ref.grad is not None:
@@ -2223,18 +2259,32 @@ class QuantizedLinearFunction(torch.autograd.Function):
             else:
                 grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
                 input_flat = input_tensor.reshape(-1, input_tensor.shape[-1])
-                grad_weight = dispatch_gemm(
-                    grad_flat.t().contiguous(),
-                    input_flat.t().contiguous(),
-                    None,
-                    None,
-                    "none",
-                )
+                grad_t = grad_flat.t().contiguous()
+                input_t = input_flat.t().contiguous()
+                from lumen.ops.quantize.ops import triton_arch
+
+                if triton_arch() == "gfx1250":
+                    grad_weight = _gemm_bf16_gluon(
+                        grad_t, input_t, split_k=True
+                    )
+                else:
+                    grad_weight = dispatch_gemm(
+                        grad_t, input_t, None, None, "none"
+                    )
                 if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
                     ctx.weight_ref.main_grad.add_(grad_weight)
                     grad_weight = None
 
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
+            if (
+                triton_arch() == "gfx1250"
+                and os.environ.get("LUMEN_SYNC_BF16_LINEAR_BWD", "0") == "1"
+            ):
+                # Megatron's AccumulateGrad/DDP hooks may run on a stream that
+                # does not inherit AITER's wgrad completion dependency. Ensure
+                # the returned gradients are ready before those hooks consume
+                # or copy them into the main-grad buffer.
+                torch.cuda.synchronize()
             return (
                 grad_input, grad_weight, grad_bias,
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,

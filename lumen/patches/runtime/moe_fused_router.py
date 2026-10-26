@@ -39,7 +39,10 @@ def install_moe_fused_router() -> None:
         # a bad environment into a silent slow path for every MoE run.
         if exc.name is not None and not exc.name.startswith("lumen.ops.moe"):
             raise
-        logger.warning(
+        # This probe runs before model arguments are parsed, so dense models
+        # cannot be identified here. Missing optional router symbols are an
+        # expected no-op for them and should not produce a startup warning.
+        logger.debug(
             "Lumen fused router ops unavailable (%s), skipping MoE router patch",
             exc,
         )

@@ -40,6 +40,7 @@ from lumen.modules.parallel_linear import (
     _get_tp_group,
     _pg_rank,
     _pg_size,
+    _use_gemm_bf16_from_env,
     _use_sdma_from_args,
 )
 
@@ -390,6 +391,7 @@ class LumenLayerNormLinear(nn.Module):
         self.block_size = 128
         self.gradient_accumulation_fusion = False
         self.delay_wgrad = False
+        self.use_gemm_bf16 = _use_gemm_bf16_from_env()
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
 
@@ -670,6 +672,7 @@ class LumenLayerNormLinear(nn.Module):
             delay_wgrad=self.delay_wgrad,
             deferred_wgrad=self._deferred_wgrad if self.delay_wgrad else None,
             pre_quantized_input=pre_quantized_input,
+            use_gemm_bf16=self.use_gemm_bf16,
         )
 
         output_bias = self.bias if self.skip_bias_add else None

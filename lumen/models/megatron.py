@@ -331,6 +331,33 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         vp_stage=vp_stage,
     )
 
+    if (
+        post_process
+        and hasattr(model, "output_layer")
+        and getattr(model.output_layer, "weight", None) is not None
+    ):
+        from copy import copy
+        from lumen.modules.parallel_linear import LumenColumnParallelLinear
+
+        original_output = model.output_layer
+        output_config = copy(config)
+        output_config.perform_initialization = False
+        lumen_output = LumenColumnParallelLinear(
+            config.hidden_size,
+            model.vocab_size,
+            config=output_config,
+            init_method=config.init_method,
+            bias=False,
+            skip_bias_add=False,
+            gather_output=not model.parallel_output,
+            skip_weight_param_allocation=False,
+            tp_group=model.pg_collection.tp,
+        )
+        # Preserve the initialized Parameter object and its checkpoint/DDP
+        # metadata; only replace the execution module.
+        lumen_output.weight = original_output.weight
+        model.output_layer = lumen_output
+
     apply_model_build(
         config=config,
         args=args,

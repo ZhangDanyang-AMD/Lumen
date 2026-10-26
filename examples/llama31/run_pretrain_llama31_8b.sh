@@ -19,6 +19,7 @@ PRECISION="${PRECISION:-fp8}"          # bf16 | fp8
 IMAGE="${IMAGE:-lumen:dev}"
 NPROC="${NPROC:-8}"
 AITER_DIR="${AITER_DIR:-}"
+AITER_GFX1250_CONFIG_DIR="${AITER_GFX1250_CONFIG_DIR:-${SCRIPT_DIR}/aiter_configs/gfx1250}"
 ATTN_BACKEND="${ATTN_BACKEND:-csrc}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${LUMEN_DIR}/examples/llama31/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
@@ -28,8 +29,12 @@ MBS="${MBS:-2}"
 GBS="${GBS:-128}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
+NUM_LAYERS="${NUM_LAYERS:-32}"
 SEED="${SEED:-1234}"
 FP8_SCALING="${FP8_SCALING:-delayed}"
+LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
+LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
+LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
 
 mkdir -p "${RESULTS_DIR}"
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
@@ -40,7 +45,13 @@ if [[ -n "${AITER_DIR}" ]]; then
         echo "ERROR: AITER_DIR does not contain setup.py: ${AITER_DIR}" >&2
         exit 1
     fi
-    EXTRA_MOUNTS=(-v "${AITER_DIR}:/opt/aiter")
+    EXTRA_MOUNTS+=(-v "${AITER_DIR}:/opt/aiter")
+fi
+SWIGLU_BWD_CONFIG_DIR="${AITER_GFX1250_CONFIG_DIR}/triton/fusions/silu_and_mul_backward"
+if [[ -d "${SWIGLU_BWD_CONFIG_DIR}" ]]; then
+    EXTRA_MOUNTS+=(
+        -v "${SWIGLU_BWD_CONFIG_DIR}:/opt/aiter/aiter/ops/triton/configs/gfx1250/triton/fusions/silu_and_mul_backward:ro"
+    )
 fi
 
 GPU_GID="$(stat -c '%g' /dev/kfd)"
@@ -76,6 +87,45 @@ if [ "${PRECISION}" = "fp8" ]; then
     )
 fi
 
+# Single-rank gfx1250 uses no distributed communication and serializes kernel
+# submission to avoid the ROCm stream-dependency race seen with TP/DP size 1.
+if [ "${NPROC}" -eq 1 ]; then
+    USE_DISTRIBUTED_OPTIMIZER="${USE_DISTRIBUTED_OPTIMIZER:-0}"
+    OVERLAP_GRAD_REDUCE="${OVERLAP_GRAD_REDUCE:-0}"
+    AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-3}"
+    LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-1}"
+    LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-1}"
+else
+    USE_DISTRIBUTED_OPTIMIZER="${USE_DISTRIBUTED_OPTIMIZER:-1}"
+    OVERLAP_GRAD_REDUCE="${OVERLAP_GRAD_REDUCE:-1}"
+    AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}"
+    LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-0}"
+    LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-0}"
+fi
+
+DIST_ARGS=()
+if [ "${USE_DISTRIBUTED_OPTIMIZER}" = "1" ]; then
+    DIST_ARGS+=(--use-distributed-optimizer)
+fi
+if [ "${OVERLAP_GRAD_REDUCE}" = "1" ]; then
+    DIST_ARGS+=(--overlap-grad-reduce)
+fi
+
+CE_ARGS=()
+if [ "${LUMEN_CROSS_ENTROPY}" = "1" ]; then
+    CE_ARGS=(--lumen-cross-entropy)
+fi
+
+ROPE_ARGS=()
+if [ "${LUMEN_FUSED_ROPE}" = "1" ]; then
+    ROPE_ARGS=(--lumen-fused-rope)
+fi
+
+LINEAR_ARGS=()
+if [ "${LUMEN_LINEAR}" = "1" ]; then
+    LINEAR_ARGS=(--lumen-linear)
+fi
+
 docker run --rm --init \
     --name "${CONTAINER_NAME}" \
     --device /dev/dri --device /dev/kfd \
@@ -109,12 +159,19 @@ docker run --rm --init \
     -e TORCH_BLAS_PREFER_HIPBLASLT=1 \
     -e PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     -e LUMEN_PREFER_HIPBLASLT=1 \
-    -e LUMEN_FUSED_SWIGLU=1 \
-    -e LUMEN_FUSED_RESIDUAL_NORM=1 \
-    -e LUMEN_FUSED_RES_BWD=1 \
-    -e LUMEN_SKIP_BACKEND_SYNC=1 \
+    -e LUMEN_GEMM_BF16="${LUMEN_GEMM_BF16:-1}" \
+    -e LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}" \
+    -e LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}" \
+    -e LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}" \
+    -e LUMEN_FUSED_RES_BWD="${LUMEN_FUSED_RES_BWD:-1}" \
+    -e LUMEN_DISABLE_OPTIMIZER_PATCHES=1 \
+    -e LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM}" \
+    -e LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD}" \
+    -e LUMEN_SKIP_BACKEND_SYNC="${LUMEN_SKIP_BACKEND_SYNC:-1}" \
+    -e AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL}" \
     "${FP8_ENV[@]}" \
     -e NPROC="${NPROC}" -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
+    -e NUM_LAYERS="${NUM_LAYERS}" \
     -e ATTN_BACKEND="${ATTN_BACKEND}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
     "${IMAGE}" \
@@ -155,7 +212,7 @@ cd "${PRETRAIN_DIR}"
 set -x
 torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --backend megatron \
-    --num-layers 32 \
+    --num-layers "${NUM_LAYERS}" \
     --hidden-size 4096 \
     --ffn-hidden-size 14336 \
     --num-attention-heads 32 \
@@ -188,8 +245,7 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --adam-beta1 0.9 --adam-beta2 0.95 --adam-eps 1e-8 \
     --bf16 \
     --no-gradient-accumulation-fusion \
-    --use-distributed-optimizer \
-    --overlap-grad-reduce \
+    '"${DIST_ARGS[*]}"' \
     --tokenizer-type HuggingFaceTokenizer \
     --tokenizer-model /tokenizer \
     --train-data-path "${TRAIN_JSONL}" \
@@ -202,7 +258,9 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --save-interval 1000000 \
     --log-interval 1 \
     --lumen-attn-backend "${ATTN_BACKEND}" \
-    --lumen-linear \
+    '"${LINEAR_ARGS[*]}"' \
+    '"${CE_ARGS[*]}"' \
+    '"${ROPE_ARGS[*]}"' \
     '"${FP8_ARGS[*]}"' \
     2>&1 | tee "/results/lumen_llama31_8b_'"${PRECISION}"'.log"
 '

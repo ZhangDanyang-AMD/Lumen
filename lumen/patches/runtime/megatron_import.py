@@ -532,28 +532,76 @@ _FUSED_ROPE_INSTALLED = False
 
 
 def install_fused_rope():
-    """Register apex fused RoPE into Megatron's rope_utils.
+    """Register AITER cached RoPE into Megatron's ``rope_utils``.
 
-    Enables ``apply_rope_fusion=True`` without TransformerEngine.  The apex
-    kernel delegates to AITER on ROCm (MI300X), matching TE's fused path.
-
-    Megatron passes ``interleaved=`` kwarg that apex doesn't accept, so we
-    wrap to strip unsupported keywords.
+    Prefer AITER's training-capable forward/backward kernels directly.  Keep
+    the Apex bridge only as compatibility fallback for older AITER builds.
     """
     global _FUSED_ROPE_INSTALLED
     if _FUSED_ROPE_INSTALLED:
         return
     try:
-        from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
+        from aiter.ops.triton.rope.rope import rope_cached_bwd, rope_cached_fwd
         import megatron.core.models.common.embeddings.rope_utils as rope_utils
 
-        def _compat_fused_rope(t, freqs, **kwargs):
-            return _apex_rope(t, freqs)
+        class _AiterMegatronRoPE(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, t, freqs, interleaved):
+                rot_dim = freqs.shape[-1]
+                t_rot, t_pass = t[..., :rot_dim], t[..., rot_dim:]
+                cos = torch.cos(freqs).to(t.dtype)
+                sin = torch.sin(freqs).to(t.dtype)
+                rotate_style = 1 if interleaved else 0
+                out = rope_cached_fwd(
+                    t_rot, cos, sin, rotate_style, False, False
+                )
+                ctx.save_for_backward(cos, sin)
+                ctx.rotate_style = rotate_style
+                ctx.pass_dim = t_pass.shape[-1]
+                return torch.cat((out, t_pass), dim=-1) if ctx.pass_dim else out
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                cos, sin = ctx.saved_tensors
+                if ctx.pass_dim:
+                    grad_rot = grad_output[..., : -ctx.pass_dim]
+                    grad_pass = grad_output[..., -ctx.pass_dim :]
+                else:
+                    grad_rot, grad_pass = grad_output, None
+                grad_rot = rope_cached_bwd(
+                    grad_rot.contiguous(),
+                    cos,
+                    sin,
+                    ctx.rotate_style,
+                    False,
+                    False,
+                )
+                grad = (
+                    torch.cat((grad_rot, grad_pass), dim=-1)
+                    if grad_pass is not None
+                    else grad_rot
+                )
+                return grad, None, None
+
+        def _compat_fused_rope(t, freqs, interleaved=False, **kwargs):
+            return _AiterMegatronRoPE.apply(t, freqs, interleaved)
 
         rope_utils.fused_apply_rotary_pos_emb = _compat_fused_rope
         _FUSED_ROPE_INSTALLED = True
     except ImportError:
-        pass
+        try:
+            from apex.transformer.functional.fused_rope import (
+                fused_apply_rotary_pos_emb as _apex_rope,
+            )
+            import megatron.core.models.common.embeddings.rope_utils as rope_utils
+
+            def _compat_fused_rope(t, freqs, **kwargs):
+                return _apex_rope(t, freqs)
+
+            rope_utils.fused_apply_rotary_pos_emb = _compat_fused_rope
+            _FUSED_ROPE_INSTALLED = True
+        except ImportError:
+            pass
 
 
 # ── 8. Force activation recompute during eval ───────────────────────────────
@@ -1027,6 +1075,9 @@ def install_optimizer_patches():
     FP32 param groups keep original per-param assignment (no allocation overhead).
     Idempotent; safe to call multiple times.
     """
+    if os.environ.get("LUMEN_DISABLE_OPTIMIZER_PATCHES", "0") == "1":
+        return
+
     try:
         from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
     except ImportError:
@@ -1197,6 +1248,89 @@ def install_cross_entropy(**_kwargs) -> None:
     print_rank_0("> Patched cross-entropy with Lumen Triton kernel")
 
 
+def install_single_rank_grad_sync():
+    """Skip rank-0-only RCCL gradient collectives.
+
+    Megatron still needs overlap bucketing for practical 8B buffer allocation,
+    but RCCL's coalesced reduce-scatter can hang when the process group has one
+    member. Gradients are already local in that case, so communication is a
+    no-op.
+    """
+    try:
+        from megatron.core.distributed import param_and_grad_buffer as _pgb
+    except ImportError:
+        return
+
+    group_cls = _pgb._ParamAndGradBucketGroup
+    if getattr(group_cls, "_lumen_single_rank_sync_patched", False):
+        return
+
+    original_start = group_cls.start_grad_sync
+    original_finish = group_cls.finish_grad_sync
+    original_start_param = group_cls.start_param_sync
+    original_finish_param = group_cls.finish_param_sync
+
+    def _is_single_rank(self):
+        if self.ddp_config.use_distributed_optimizer:
+            return self.intra_distributed_optimizer_instance_size == 1
+        return self.data_parallel_group.size() == 1
+
+    def _start_grad_sync(self):
+        if _is_single_rank(self):
+            self.grad_reduce_handle = None
+            return
+        return original_start(self)
+
+    def _finish_grad_sync(self):
+        if _is_single_rank(self):
+            self.grad_reduce_handle = None
+            return
+        return original_finish(self)
+
+    def _start_param_sync(self, force_sync=False):
+        if _is_single_rank(self):
+            self.param_gather_handle = None
+            self.param_gather_dispatched = False
+            return
+        return original_start_param(self, force_sync=force_sync)
+
+    def _finish_param_sync(self, skip_next_bucket_dispatch=False):
+        if _is_single_rank(self):
+            self.param_gather_handle = None
+            self.param_gather_dispatched = False
+            return
+        return original_finish_param(
+            self, skip_next_bucket_dispatch=skip_next_bucket_dispatch
+        )
+
+    group_cls.start_grad_sync = _start_grad_sync
+    group_cls.finish_grad_sync = _finish_grad_sync
+    group_cls.start_param_sync = _start_param_sync
+    group_cls.finish_param_sync = _finish_param_sync
+    group_cls._lumen_single_rank_sync_patched = True
+
+
+def install_optimizer_grad_sync():
+    """Synchronize gfx1250 backward streams before reading/clipping gradients."""
+    if os.environ.get("LUMEN_SYNC_BEFORE_GRAD_NORM", "0") != "1":
+        return
+    try:
+        from megatron.core.optimizer.optimizer import MegatronOptimizer
+    except ImportError:
+        return
+    if getattr(MegatronOptimizer, "_lumen_grad_sync_patched", False):
+        return
+
+    original_clip_grad_norm = MegatronOptimizer.clip_grad_norm
+
+    def _clip_grad_norm(self, clip_grad):
+        torch.cuda.synchronize()
+        return original_clip_grad_norm(self, clip_grad)
+
+    MegatronOptimizer.clip_grad_norm = _clip_grad_norm
+    MegatronOptimizer._lumen_grad_sync_patched = True
+
+
 # ── Patch registry (Phase 1) ────────────────────────────────────────────────
 
 from lumen.patches.registry import PatchPhase, register_patch
@@ -1267,7 +1401,7 @@ register_patch(
 register_patch(
     "fused_rope",
     PatchPhase.IMPORT,
-    description="Apex fused RoPE into megatron.core.models.common.rope_utils",
+    description="AITER fused RoPE into megatron.core.models.common.rope_utils",
     tags=frozenset({"fusion", "rope", "megatron"}),
 )(install_fused_rope)
 
@@ -1301,6 +1435,20 @@ register_patch(
     description="DistributedOptimizer batched _foreach_copy_",
     tags=frozenset({"optimizer", "megatron"}),
 )(install_optimizer_patches)
+
+register_patch(
+    "single_rank_grad_sync",
+    PatchPhase.IMPORT,
+    description="Skip RCCL gradient collectives for one-rank DP groups",
+    tags=frozenset({"distributed", "megatron", "rocm"}),
+)(install_single_rank_grad_sync)
+
+register_patch(
+    "optimizer_grad_sync",
+    PatchPhase.IMPORT,
+    description="Synchronize gfx1250 streams before gradient norm and clipping",
+    tags=frozenset({"optimizer", "megatron", "rocm"}),
+)(install_optimizer_grad_sync)
 
 register_patch(
     "split_along_dim",

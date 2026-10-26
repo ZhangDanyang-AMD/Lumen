@@ -12,6 +12,7 @@ your own ``ModuleSpec`` tree to get Lumen-accelerated attention, norms,
 and (optionally FP8) linear layers.
 """
 
+import os
 from typing import Optional, Tuple
 
 from megatron.core.models.backends import BackendSpecProvider
@@ -57,7 +58,7 @@ class LumenSpecProvider(BackendSpecProvider):
         return LumenRowParallelLinear
 
     def fuse_layernorm_and_linear(self):
-        return True
+        return os.environ.get("LUMEN_FUSE_NORM_LINEAR", "1") == "1"
 
     def column_parallel_layer_norm_linear(self):
         return LumenLayerNormLinear

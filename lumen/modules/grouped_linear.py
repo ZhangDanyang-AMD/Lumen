@@ -24,7 +24,12 @@ from megatron.core.utils import get_pg_rank, get_pg_size
 from torch.nn.parameter import Parameter
 
 from lumen.modules._megatron_compat import ensure_metadata_has_dp_cp_group
-from lumen.modules.parallel_linear import _DeferredWgrad, _get_tp_group, _pg_size
+from lumen.modules.parallel_linear import (
+    _DeferredWgrad,
+    _get_tp_group,
+    _pg_size,
+    _use_gemm_bf16_from_env,
+)
 
 __all__ = [
     "LumenGroupedLinear",
@@ -94,7 +99,7 @@ class LumenGroupedLinear(nn.Module):
         self.delay_wgrad = False
         self.fp8_activation_store = False
         self._deferred_wgrad = _DeferredWgrad()
-        self.use_gemm_bf16 = False
+        self.use_gemm_bf16 = _use_gemm_bf16_from_env()
 
         for gemm_idx in range(num_gemms):
             weight = Parameter(

@@ -247,6 +247,11 @@ class _ParallelCrossEntropy(torch.autograd.Function):
         # causes out-of-bounds GPU memory reads.  Ensure full contiguity here.
         if not _input.is_contiguous():
             _input = _input.contiguous()
+        # A transposed [S, 1] target can report is_contiguous()==True because
+        # singleton-dimension strides are ignored, while retaining stride
+        # (1, S). The AITER kernel reads target.stride(-1), so canonicalize via
+        # a flat view before restoring the logical shape.
+        target = target.reshape(-1).contiguous().view(target.shape)
 
         if use_sdma and dist_process_group is not None:
             loss, grad_input = _cross_entropy_forward_sdma(
