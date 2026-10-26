@@ -27,11 +27,13 @@ export AITER_LOG_LEVEL="${AITER_LOG_LEVEL:-WARNING}"
 
 # Lumen parallel linears are required for --linear-fp8 to reach AITER GEMMs.
 # Blockwise FP8 selects AITER's gfx1250 gemm_a8w8_blockscale implementation;
-# BF16 linears select tuned_gemm -> gfx1250 gemm_a16w16.
+# BF16 linears use the LLaMA-shape-tuned gfx1250 FlyDSL A16W16 kernel.
 export LUMEN_LINEAR=1
 export LUMEN_RMSNORM=1
 export LUMEN_NORM=1
 export LUMEN_GEMM_BF16=1
+export LUMEN_GEMM_BF16_BACKEND="flydsl"
+export AITER_CONFIG_GEMM_BF16="${SCRIPT_DIR}/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv"
 export LUMEN_FUSED_SWIGLU=1
 export LUMEN_FUSED_RESIDUAL_NORM=1
 export LUMEN_CROSS_ENTROPY=1

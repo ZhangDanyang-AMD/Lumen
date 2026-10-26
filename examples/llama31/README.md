@@ -41,7 +41,9 @@ CONFIG=examples/llama31/config_MI450X_1x1x1.sh \
 Set `NGPU=2` with that config if a larger recipe requires two GPUs. On gfx1250,
 Lumen FP8 blockwise quantization and linear/norm operators dispatch to the local
 AITER kernels. BF16 attention forward and backward use AITER's gfx1250 FMHA v3
-assembly code objects.
+assembly code objects. BF16 linears dispatch to a LLaMA-shape-tuned AITER
+FlyDSL A16W16 kernel; the tuned shape table is under
+`examples/llama31/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv`.
 
 ## CLI Flags
 

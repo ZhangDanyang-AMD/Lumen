@@ -35,6 +35,7 @@ FP8_SCALING="${FP8_SCALING:-delayed}"
 LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
 LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
+LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND:-flydsl}"
 
 mkdir -p "${RESULTS_DIR}"
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
@@ -145,6 +146,7 @@ docker run --rm --init \
     -e HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES}" \
     -e HF_HUB_OFFLINE=1 \
     -e TRANSFORMERS_OFFLINE=1 \
+    -e PYTHONPATH="/workspace/Lumen/examples/llama31/aiter_configs/python:/workspace/Lumen:/workspace/megatron_lm:/opt/aiter" \
     -e TOKENIZERS_PARALLELISM=false \
     -e HSA_NO_SCRATCH_RECLAIM=1 \
     -e HIP_FORCE_DEV_KERNARG=1 \
@@ -160,6 +162,8 @@ docker run --rm --init \
     -e PYTORCH_HIP_ALLOC_CONF=expandable_segments:True \
     -e LUMEN_PREFER_HIPBLASLT=1 \
     -e LUMEN_GEMM_BF16="${LUMEN_GEMM_BF16:-1}" \
+    -e LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND}" \
+    -e AITER_CONFIG_GEMM_BF16="/workspace/Lumen/examples/llama31/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv" \
     -e LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}" \
     -e LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}" \
     -e LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}" \

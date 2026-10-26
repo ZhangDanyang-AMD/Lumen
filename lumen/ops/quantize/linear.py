@@ -67,6 +67,7 @@ def _to_2d(x: torch.Tensor) -> torch.Tensor:
 
 _PREFER_HIPBLASLT = os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
 _FAST_QUANT_DISPATCH = os.environ.get("LUMEN_FAST_QUANT_DISPATCH", "1") == "1"
+_BF16_GEMM_BACKEND = os.environ.get("LUMEN_GEMM_BF16_BACKEND", "aiter")
 _FP8_DGRAD_OUTPUT = os.environ.get("LUMEN_FP8_DGRAD_OUTPUT", "0") == "1"
 # Route mixed-dtype (hybrid) dgrad/wgrad through torch._scaled_mm, which reaches
 # hipBLASLt's F8B8 Tensile kernels (same path TE uses) instead of AITER Triton.
@@ -1696,6 +1697,43 @@ def _gemm_bf16_tuned(a, w, bias):
     return gemm_a16w16(a, w, bias=bias)
 
 
+def _gemm_bf16_flydsl(a, w, bias=None):
+    """Tuned gfx1250 FlyDSL A16W16 GEMM for LLaMA training shapes."""
+    import flydsl.runtime.device as flydsl_device
+
+    if not hasattr(flydsl_device, "check_smem_capacity"):
+        def _check_smem_capacity(size, arch):
+            limit = 128 * 1024 if str(arch).startswith("gfx1250") else 64 * 1024
+            if int(size) > limit:
+                raise ValueError(
+                    f"shared-memory requirement {size} exceeds {limit} on {arch}"
+                )
+
+        flydsl_device.check_smem_capacity = _check_smem_capacity
+
+    from aiter.ops.flydsl.gemm_kernels import flydsl_hgemm
+
+    output_shape = (*a.shape[:-1], w.shape[0])
+    a_2d = a.reshape(-1, a.shape[-1])
+    out = flydsl_hgemm(
+        a_2d,
+        w,
+        bias=bias,
+        block_m=256,
+        block_n=256,
+        block_k=32,
+        stages=3,
+        split_k=1,
+        m_waves=4,
+        n_waves=2,
+        k_waves=1,
+        group_m=0,
+        policy="ft",
+        out_dtype=a.dtype,
+    )
+    return out.reshape(output_shape)
+
+
 def _gemm_bf16_gluon(a, w, bias=None, *, split_k=False):
     """gfx1250 GEMM for training-only gradient shapes.
 
@@ -1760,7 +1798,11 @@ def _get_fast_gemm_fn(op_name):
         if _probe_aiter_hipblas():
             fn = _gemm_wgrad_hipblas
     elif op_name == "gemm_bf16":
-        if _probe_aiter_tuned_gemm_bf16():
+        from lumen.ops.quantize.ops import triton_arch
+
+        if triton_arch() == "gfx1250" and _BF16_GEMM_BACKEND == "flydsl":
+            fn = _gemm_bf16_flydsl
+        elif _probe_aiter_tuned_gemm_bf16():
             fn = _gemm_bf16_tuned
     _fast_gemm_cache[op_name] = fn
     return fn
@@ -2226,7 +2268,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
             from lumen.ops.quantize.ops import triton_arch
 
             if triton_arch() == "gfx1250":
-                grad_input = _gemm_bf16_gluon(grad_output, weight_t)
+                grad_input = (
+                    _gemm_bf16_flydsl(grad_output, weight_t)
+                    if _BF16_GEMM_BACKEND == "flydsl"
+                    else _gemm_bf16_gluon(grad_output, weight_t)
+                )
             else:
                 grad_input = dispatch_gemm(
                     grad_output, weight_t, None, None, "none"
@@ -2244,7 +2290,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     from lumen.ops.quantize.ops import triton_arch
 
                     if triton_arch() == "gfx1250":
-                        gw = _gemm_bf16_gluon(grad_t, input_t, split_k=True)
+                        gw = (
+                            _gemm_bf16_flydsl(grad_t, input_t)
+                            if _BF16_GEMM_BACKEND == "flydsl"
+                            else _gemm_bf16_gluon(grad_t, input_t, split_k=True)
+                        )
                     else:
                         gw = dispatch_gemm(grad_t, input_t, None, None, "none")
                     if gaf and hasattr(w_ref, "main_grad"):
@@ -2264,8 +2314,10 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 from lumen.ops.quantize.ops import triton_arch
 
                 if triton_arch() == "gfx1250":
-                    grad_weight = _gemm_bf16_gluon(
-                        grad_t, input_t, split_k=True
+                    grad_weight = (
+                        _gemm_bf16_flydsl(grad_t, input_t)
+                        if _BF16_GEMM_BACKEND == "flydsl"
+                        else _gemm_bf16_gluon(grad_t, input_t, split_k=True)
                     )
                 else:
                     grad_weight = dispatch_gemm(
