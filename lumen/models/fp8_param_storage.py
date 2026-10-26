@@ -550,6 +550,11 @@ def register_fp8_param_optimizer_hook(model, optimizer):
     if sm is not None and sm.num_fp8_params > 0:
         sm.register_fp8_optimizer_hook(optimizer)
         print_rank_0("> FP8 param optimizer hook registered")
+    if os.environ.get("LUMEN_WEIGHT_QUANT_ONCE", "0") == "1":
+        from lumen.quantize import register_native_fp8_weight_optimizer_hooks
+
+        register_native_fp8_weight_optimizer_hooks(model, optimizer)
+        print_rank_0("> Native Lumen FP8 weight-cache hook registered")
 
 
 def prepare_hipblaslt_for_fp8_storage(train_args) -> None:

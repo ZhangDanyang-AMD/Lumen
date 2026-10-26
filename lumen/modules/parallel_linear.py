@@ -359,6 +359,15 @@ def _do_gemm(
                 block_size,
                 gemm_rows=gemm_rows,
             )
+        elif scaling_type in ("blockwise", "blockwise2d"):
+            from lumen.ops.quantize.linear import _fp8_cached_weight
+
+            fp8_weight_cache, fp8_weight_scale = _fp8_cached_weight(
+                weight,
+                scaling_type,
+                fp8_dtype,
+                block_size,
+            )
         _pqi = _resolve_pre_quantized_input_with_swiglu_cache(
             pre_quantized_input,
             consume_fp8_activation=(scaling_type != "none"),

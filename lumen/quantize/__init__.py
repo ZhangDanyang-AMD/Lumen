@@ -1031,6 +1031,46 @@ def register_fp8_weight_optimizer_hooks(
     optimizer.register_step_post_hook(_post_step)
 
 
+def register_native_fp8_weight_optimizer_hooks(model, optimizer) -> None:
+    """Invalidate native Lumen blockwise weight caches after optimizer.step."""
+    chunks = list(model) if isinstance(model, (list, tuple)) else [model]
+
+    def _invalidate():
+        # AITER launches custom GEMMs asynchronously and some of its gfx1250
+        # paths are not visible to PyTorch's caching-allocator stream tracking.
+        # Do not release/reuse cached FP8 storage while a kernel may still read
+        # it.  One optimizer-step boundary sync is much cheaper than
+        # AMD_SERIALIZE_KERNEL=3, which serializes every kernel launch.
+        if _os.environ.get("LUMEN_SYNC_FP8_CACHE_INVALIDATE", "0") == "1":
+            torch.cuda.synchronize()
+        for chunk in chunks:
+            for module in chunk.modules():
+                for param in module._parameters.values():
+                    if param is None:
+                        continue
+                    for attr in ("_lumen_fp8_w_cache", "_lumen_fp8_w_scale"):
+                        if hasattr(param, attr):
+                            delattr(param, attr)
+
+    if hasattr(optimizer, "register_step_post_hook"):
+        optimizer.register_step_post_hook(lambda _opt, _a, _k: _invalidate())
+        logger.info(
+            "register_native_fp8_weight_optimizer_hooks: registered post-step hook"
+        )
+    else:
+        original_step = optimizer.step
+
+        def _wrapped_step(*args, **kwargs):
+            result = original_step(*args, **kwargs)
+            _invalidate()
+            return result
+
+        optimizer.step = _wrapped_step
+        logger.info(
+            "register_native_fp8_weight_optimizer_hooks: wrapped optimizer.step()"
+        )
+
+
 def register_mxfp4_weight_optimizer_hooks(
     model,
     optimizer,

@@ -886,6 +886,33 @@ def gemm_per_token(a_fp8, w_fp8, scale_a, scale_w):
 
 def _gemm_blockscale_triton(a_fp8, w_fp8, scale_a, scale_w):
     from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import gemm_a8w8_blockscale
+    from lumen.ops.quantize.ops import triton_arch
+
+    if (
+        os.environ.get("LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED", "0") == "1"
+        and triton_arch() == "gfx1250"
+        and a_fp8.shape[0] >= 256
+    ):
+        config = {
+            "BLOCK_SIZE_M": 256,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 128,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 8,
+            "NUM_BUFFERS": 3,
+            "waves_per_eu": 1,
+            "cache_modifier": None,
+            "NUM_KSPLIT": 1,
+        }
+        return gemm_a8w8_blockscale(
+            a_fp8,
+            w_fp8,
+            scale_a,
+            scale_w,
+            config=config,
+            backend="gluon",
+            kernel_type="compute_bound",
+        )
 
     return gemm_a8w8_blockscale(a_fp8, w_fp8, scale_a, scale_w)
 
@@ -1765,6 +1792,38 @@ def _gemm_bf16_gluon(a, w, bias=None, *, split_k=False):
 
     out = gemm_a16w16(a_2d, w, bias=bias, backend="gluon")
     return out.reshape(output_shape)
+
+
+def _fp8_cached_weight(
+    weight,
+    scaling_type,
+    fp8_dtype,
+    block_size,
+):
+    """Cache a trainable blockwise FP8 weight for one optimizer step."""
+    if (
+        not _WEIGHT_QUANT_ONCE
+        or scaling_type not in ("blockwise", "blockwise2d")
+    ):
+        return None, None
+
+    cached = getattr(weight, "_lumen_fp8_w_cache", None)
+    scale = getattr(weight, "_lumen_fp8_w_scale", None)
+    if cached is not None and scale is not None:
+        return cached, scale
+
+    desc = quantize_input(
+        weight.detach().contiguous(),
+        scaling_type,
+        fp8_dtype,
+        block_size,
+        manager=None,
+        tensor_id="weight_cache",
+        is_weight=True,
+    )
+    weight._lumen_fp8_w_cache = desc.data
+    weight._lumen_fp8_w_scale = desc.scale
+    return desc.data, desc.scale
 
 
 # ---------------------------------------------------------------------------
@@ -3053,6 +3112,14 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 grad_weight = None
 
         grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
+
+        from lumen.ops.quantize.ops import triton_arch
+
+        if (
+            triton_arch() == "gfx1250"
+            and os.environ.get("LUMEN_SYNC_LINEAR_BWD", "0") == "1"
+        ):
+            torch.cuda.synchronize()
 
         return (
             grad_input, grad_weight, grad_bias,

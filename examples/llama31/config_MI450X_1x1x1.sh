@@ -45,6 +45,7 @@ export FP8_BLOCK_SIZE=128
 # both BF16 forward and backward (head dim 128, causal, no dropout).
 export LUMEN_ATTN_BACKEND="aiter_csrc"
 export LUMEN_FP8_QUANT="blockwise"
+export LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED=1
 
 # AITER owns GEMM selection on gfx1250; a full PyTorch TunableOp sweep is both
 # redundant and very expensive during a short smoke run.
