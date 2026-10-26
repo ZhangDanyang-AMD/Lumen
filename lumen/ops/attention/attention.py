@@ -687,32 +687,63 @@ class AttentionCsrcSeqMajorOutFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dout, *args):
-        from aiter.ops.mha import _flash_attn_backward
-
         q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
 
-        _flash_attn_backward(
-            dout,
-            q,
-            k,
-            v,
-            out,
-            softmax_lse,
-            dq,
-            dk,
-            dv,
-            None,
-            0.0,
-            ctx.softmax_scale,
-            ctx.causal,
-            int(ctx.window_size[0]),
-            int(ctx.window_size[1]),
-            None,
-            None,
-            ctx.deterministic,
-            rng_state,
-        )
+        from aiter.ops.triton.utils._triton.arch_info import get_arch
+
+        if get_arch() == "gfx1250":
+            # AITER ships gfx1250 FMHA v3 backward HSACO but its public
+            # _flash_attn_backward capability gate does not select it yet.
+            # Invoke the public ASM wrapper directly from Lumen.
+            from aiter.ops.mha import fmha_v3_bwd
+
+            dq, dk, dv, _ = fmha_v3_bwd(
+                dout.contiguous(),
+                q,
+                k,
+                v,
+                out,
+                softmax_lse,
+                0.0,
+                ctx.softmax_scale,
+                ctx.causal,
+                int(ctx.window_size[0]),
+                int(ctx.window_size[1]),
+                ctx.deterministic,
+                True,
+                1,
+                dq,
+                dk,
+                dv,
+                None,
+                rng_state,
+                None,
+            )
+        else:
+            from aiter.ops.mha import _flash_attn_backward
+
+            _flash_attn_backward(
+                dout,
+                q,
+                k,
+                v,
+                out,
+                softmax_lse,
+                dq,
+                dk,
+                dv,
+                None,
+                0.0,
+                ctx.softmax_scale,
+                ctx.causal,
+                int(ctx.window_size[0]),
+                int(ctx.window_size[1]),
+                None,
+                None,
+                ctx.deterministic,
+                rng_state,
+            )
 
         gqt = ctx.grad_quant_type
         dq = quantize_grad_tensor(dq, gqt)
@@ -952,6 +983,32 @@ def attention(
                 window_size,
                 _csrc_bias,
                 alibi_slopes,
+                deterministic,
+                grad_quant_type,
+            )
+
+        from aiter.ops.triton.utils._triton.arch_info import get_arch
+
+        _gfx1250_asm_train = (
+            get_arch() == "gfx1250"
+            and _needs_grad
+            and q.dtype == torch.bfloat16
+            and q.shape[3] == 128
+            and v.shape[3] == 128
+            and dropout_p == 0.0
+            and _csrc_bias is None
+            and alibi_slopes is None
+            and not return_lse
+            and not _return_softmax
+        )
+        if _gfx1250_asm_train:
+            return AttentionCsrcSeqMajorOutFunction.apply(
+                q,
+                k,
+                v,
+                softmax_scale,
+                causal,
+                window_size,
                 deterministic,
                 grad_quant_type,
             )

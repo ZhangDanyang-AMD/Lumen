@@ -12,12 +12,6 @@ WORKDIR /workspace
 COPY --from=aiter_source . /opt/aiter
 COPY . /workspace/Lumen
 
-# Apply the reviewed gfx1250 FMHA ASM dispatch fix on top of the pinned AITER
-# revision. build_mi450.sh verifies that the named context exactly matches it.
-RUN cd /opt/aiter && \
-    git apply --check /workspace/Lumen/examples/llama31/aiter-gfx1250-fmha-asm.patch && \
-    git apply /workspace/Lumen/examples/llama31/aiter-gfx1250-fmha-asm.patch
-
 # The gfx1250 base already contains the matching ROCm, PyTorch, Triton and
 # compiled AITER dependencies. Install the checked-out AITER package without
 # replacing that toolchain.

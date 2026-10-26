@@ -23,7 +23,7 @@ if [[ "${ACTUAL_AITER_COMMIT}" != "${AITER_COMMIT}" ]]; then
     exit 1
 fi
 if [[ -n "$(git -C "${AITER_DIR}" status --porcelain --untracked-files=normal)" ]]; then
-    echo "ERROR: AITER checkout must be clean; the Dockerfile applies the reviewed gfx1250 patch." >&2
+    echo "ERROR: AITER checkout must be clean so the pinned build is reproducible." >&2
     git -C "${AITER_DIR}" status --short >&2
     exit 1
 fi
