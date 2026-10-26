@@ -1,6 +1,9 @@
 ARG BASE_IMAGE=local/qwen38-gfx1250-aiter:0.1.26.dev21-g9fd025efd-gemmtuned-prefill
 FROM ${BASE_IMAGE}
 
+ARG AITER_COMMIT=26f4f1fb2de14d122c71f5fed7afb97a5c97cade
+LABEL org.opencontainers.image.aiter.revision="${AITER_COMMIT}"
+
 USER root
 WORKDIR /workspace
 
@@ -8,6 +11,12 @@ WORKDIR /workspace
 # /workspace/Lumen bind mount used by the launcher.
 COPY --from=aiter_source . /opt/aiter
 COPY . /workspace/Lumen
+
+# Apply the reviewed gfx1250 FMHA ASM dispatch fix on top of the pinned AITER
+# revision. build_mi450.sh verifies that the named context exactly matches it.
+RUN cd /opt/aiter && \
+    git apply --check /workspace/Lumen/examples/llama31/aiter-gfx1250-fmha-asm.patch && \
+    git apply /workspace/Lumen/examples/llama31/aiter-gfx1250-fmha-asm.patch
 
 # The gfx1250 base already contains the matching ROCm, PyTorch, Triton and
 # compiled AITER dependencies. Install the checked-out AITER package without

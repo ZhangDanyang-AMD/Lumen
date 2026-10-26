@@ -1,0 +1,33 @@
+diff --git a/aiter/ops/mha.py b/aiter/ops/mha.py
+index 3f715e476..e43bcf3d1 100644
+--- a/aiter/ops/mha.py
++++ b/aiter/ops/mha.py
+@@ -2400,0 +2401,21 @@ def can_impl_fmha_v3_bwd(
++    def gfx1250():
++        # gfx1250 ships dedicated FMHA v3 assembly for the Llama/Qwen training
++        # shape. The code objects support BF16 hdim=128 in batch/group mode,
++        # atomic-f32 dQ accumulation, no bias/dropout, and no-mask or causal
++        # masks. Unlike the gfx942 path, deterministic mode is supported.
++        ret = get_gfx() == "gfx1250"
++        ret &= q.dtype == torch.bfloat16
++        ret &= hdim_q == 128 and hdim_v == 128
++        ret &= is_v3_atomic_fp32 == True
++        ret &= alibi_slopes is None
++        ret &= bias is None
++        ret &= dbias is None
++        ret &= dropout_p == 0.0
++        ret &= nhead_q % nhead_k == 0
++        ret &= nmask or mask
++        ret &= not swa
++        return ret
++
++    if gfx1250():
++        return True
++
+@@ -2843,2 +2864,5 @@ def flash_attn_func(
+-    if _FLYDSL_AVAILABLE and (
++    # gfx1250 has dedicated FMHA v3 assembly for this batch API. Keep it ahead
++    # of the generic FlyDSL path so training uses the shipped HSACO for both
++    # forward and backward.
++    if _FLYDSL_AVAILABLE and get_gfx() != "gfx1250" and (
+         cu_seqlens_q is None

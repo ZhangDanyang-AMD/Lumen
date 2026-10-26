@@ -8,14 +8,29 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-lumen/llama31:mi450}"
 BASE_IMAGE="${BASE_IMAGE:-local/qwen38-gfx1250-aiter:0.1.26.dev21-g9fd025efd-gemmtuned-prefill}"
 AITER_DIR="${AITER_DIR:-${REPO_ROOT}/../aiter}"
+AITER_COMMIT="${AITER_COMMIT:-26f4f1fb2de14d122c71f5fed7afb97a5c97cade}"
 
 if [[ ! -f "${AITER_DIR}/setup.py" ]]; then
     echo "ERROR: AITER_DIR does not contain setup.py: ${AITER_DIR}" >&2
     exit 1
 fi
 
+ACTUAL_AITER_COMMIT="$(git -C "${AITER_DIR}" rev-parse HEAD)"
+if [[ "${ACTUAL_AITER_COMMIT}" != "${AITER_COMMIT}" ]]; then
+    echo "ERROR: AITER revision mismatch." >&2
+    echo "  expected: ${AITER_COMMIT}" >&2
+    echo "  actual:   ${ACTUAL_AITER_COMMIT}" >&2
+    exit 1
+fi
+if [[ -n "$(git -C "${AITER_DIR}" status --porcelain --untracked-files=normal)" ]]; then
+    echo "ERROR: AITER checkout must be clean; the Dockerfile applies the reviewed gfx1250 patch." >&2
+    git -C "${AITER_DIR}" status --short >&2
+    exit 1
+fi
+
 docker build \
     --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+    --build-arg AITER_COMMIT="${AITER_COMMIT}" \
     --build-context "aiter_source=${AITER_DIR}" \
     -t "${IMAGE_NAME}" \
     -f "${SCRIPT_DIR}/Dockerfile.mi450" \
