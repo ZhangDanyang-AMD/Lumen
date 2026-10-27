@@ -991,6 +991,10 @@ class ScalingManager:
             and _FUSED_QUANT_AMAX
             and _probe_fused_quant_amax()
             and tensor.is_cuda
+            # A unit scale on the first delayed backward call underflows the
+            # small initial gradients to zero. Compute that first amax eagerly;
+            # later calls still use delayed history and the fused fast path.
+            and not backward
         )
         scale, _precomputed_amax = self.get_scale(
             tensor_id, tensor, backward=backward,

@@ -3,8 +3,9 @@
 # Lumen — Llama3.1-8B pretrain (BF16 or FP8 delayed/hybrid)
 #
 # Usage:
-#   PRECISION=bf16 bash run_pretrain_llama31_8b.sh
-#   PRECISION=fp8  bash run_pretrain_llama31_8b.sh   # default
+#   GPU_ARCHS=gfx1250 PRECISION=bf16 bash run_pretrain_llama31_8b.sh
+#   GPU_ARCHS=gfx950  PRECISION=fp8  bash run_pretrain_llama31_8b.sh
+#   GPU_ARCHS=gfx942  PRECISION=fp8  bash run_pretrain_llama31_8b.sh
 #
 # All paths are relative to this script; no absolute/user-specific paths.
 # Override IMAGE / NPROC / MBS / GBS / SEQ_LEN / TRAIN_STEPS / SEED via env.
@@ -18,8 +19,9 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 PRECISION="${PRECISION:-fp8}"          # bf16 | fp8
 IMAGE="${IMAGE:-lumen:dev}"
 NPROC="${NPROC:-8}"
+GPU_ARCHS="${GPU_ARCHS:-gfx1250}"      # gfx942 | gfx950 | gfx1250
 AITER_DIR="${AITER_DIR:-}"
-AITER_GFX1250_CONFIG_DIR="${AITER_GFX1250_CONFIG_DIR:-${SCRIPT_DIR}/aiter_configs/gfx1250}"
+AITER_CONFIG_DIR="${AITER_CONFIG_DIR:-${SCRIPT_DIR}/aiter_configs/${GPU_ARCHS}}"
 ATTN_BACKEND="${ATTN_BACKEND:-csrc}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${LUMEN_DIR}/examples/llama31/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
@@ -32,10 +34,32 @@ TRAIN_STEPS="${TRAIN_STEPS:-50}"
 NUM_LAYERS="${NUM_LAYERS:-32}"
 SEED="${SEED:-1234}"
 FP8_SCALING="${FP8_SCALING:-delayed}"
+if [[ -z "${FP8_FORMAT:-}" ]]; then
+    if [[ "${FP8_SCALING}" == "delayed" ]]; then
+        FP8_FORMAT="fp8_e4m3"
+    else
+        FP8_FORMAT="hybrid"
+    fi
+fi
 LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
 LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
-LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND:-flydsl}"
+
+BF16_CONFIG_ENV=()
+case "${GPU_ARCHS}" in
+    gfx1250)
+        LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND:-flydsl}"
+        AITER_CONFIG_GEMM_BF16="${AITER_CONFIG_GEMM_BF16:-/workspace/Lumen/examples/llama31/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv}"
+        BF16_CONFIG_ENV=(-e AITER_CONFIG_GEMM_BF16="${AITER_CONFIG_GEMM_BF16}")
+        ;;
+    gfx950|gfx942)
+        LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND:-aiter}"
+        ;;
+    *)
+        echo "ERROR: unsupported GPU_ARCHS=${GPU_ARCHS}; expected gfx942, gfx950, or gfx1250" >&2
+        exit 1
+        ;;
+esac
 
 mkdir -p "${RESULTS_DIR}"
 docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
@@ -48,10 +72,10 @@ if [[ -n "${AITER_DIR}" ]]; then
     fi
     EXTRA_MOUNTS+=(-v "${AITER_DIR}:/opt/aiter")
 fi
-SWIGLU_BWD_CONFIG_DIR="${AITER_GFX1250_CONFIG_DIR}/triton/fusions/silu_and_mul_backward"
+SWIGLU_BWD_CONFIG_DIR="${AITER_CONFIG_DIR}/triton/fusions/silu_and_mul_backward"
 if [[ -d "${SWIGLU_BWD_CONFIG_DIR}" ]]; then
     EXTRA_MOUNTS+=(
-        -v "${SWIGLU_BWD_CONFIG_DIR}:/opt/aiter/aiter/ops/triton/configs/gfx1250/triton/fusions/silu_and_mul_backward:ro"
+        -v "${SWIGLU_BWD_CONFIG_DIR}:/opt/aiter/aiter/ops/triton/configs/${GPU_ARCHS}/triton/fusions/silu_and_mul_backward:ro"
     )
 fi
 
@@ -74,8 +98,10 @@ if [ "${PRECISION}" = "fp8" ]; then
         -e LUMEN_FAST_QUANT_DISPATCH=1
         -e LUMEN_WEIGHT_QUANT_ONCE=1
         -e LUMEN_SYNC_FP8_CACHE_INVALIDATE=1
-        -e LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED=1
     )
+    if [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
+        FP8_ENV+=(-e LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED=1)
+    fi
 fi
 
 # ---- FP8-only training flags -----------------------------------------------
@@ -83,30 +109,40 @@ FP8_ARGS=()
 if [ "${PRECISION}" = "fp8" ]; then
     FP8_ARGS=(
         --linear-fp8
-        --fp8-format hybrid
+        --linear-fp8-format "${FP8_FORMAT}"
         --linear-fp8-scaling "${FP8_SCALING}"
         --linear-fp8-amax-algo max
         --linear-fp8-amax-history 1024
     )
 fi
 
-# Single-rank gfx1250 uses no distributed communication and serializes kernel
-# submission to avoid the ROCm stream-dependency race seen with TP/DP size 1.
+# Single-rank runs do not need distributed optimizer communication. gfx1250
+# FP8 is restricted to one hardware queue to avoid its ROCm cross-queue race.
 if [ "${NPROC}" -eq 1 ]; then
     USE_DISTRIBUTED_OPTIMIZER="${USE_DISTRIBUTED_OPTIMIZER:-0}"
     OVERLAP_GRAD_REDUCE="${OVERLAP_GRAD_REDUCE:-0}"
-    if [ "${PRECISION}" = "fp8" ]; then
+    if [[ "${GPU_ARCHS}" == "gfx1250" && "${PRECISION}" == "fp8" ]]; then
         AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}"
         GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
         CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
-    else
+    elif [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
         AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-3}"
         GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-8}"
         CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-8}"
+    else
+        AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}"
+        GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-8}"
+        CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
     fi
-    LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-1}"
-    LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-1}"
-    LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-1}"
+    if [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
+        LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-1}"
+        LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-1}"
+        LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-1}"
+    else
+        LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-0}"
+        LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-0}"
+        LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-0}"
+    fi
 else
     USE_DISTRIBUTED_OPTIMIZER="${USE_DISTRIBUTED_OPTIMIZER:-1}"
     OVERLAP_GRAD_REDUCE="${OVERLAP_GRAD_REDUCE:-1}"
@@ -155,7 +191,7 @@ docker run --rm --init \
     -v "${TOKENIZER_DIR}:/tokenizer:ro" \
     -v "${RESULTS_DIR}:/results" \
     "${EXTRA_MOUNTS[@]}" \
-    -e GPU_ARCHS=gfx1250 \
+    -e GPU_ARCHS="${GPU_ARCHS}" \
     -e ENABLE_CK=1 \
     -e HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES}" \
     -e HF_HUB_OFFLINE=1 \
@@ -177,7 +213,7 @@ docker run --rm --init \
     -e LUMEN_PREFER_HIPBLASLT=1 \
     -e LUMEN_GEMM_BF16="${LUMEN_GEMM_BF16:-1}" \
     -e LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND}" \
-    -e AITER_CONFIG_GEMM_BF16="/workspace/Lumen/examples/llama31/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv" \
+    "${BF16_CONFIG_ENV[@]}" \
     -e LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}" \
     -e LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}" \
     -e LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}" \
