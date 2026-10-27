@@ -302,7 +302,15 @@ class LumenConfig:
         if self.hf_attn_patch:
             self._patch_sdpa()
 
-        # 1c. Linear GEMM patching (BF16 AITER Triton)
+        # 1c. HuggingFace RoPE patching
+        if self.fused_rope:
+            self._patch_hf_rope()
+
+        # 1d. HuggingFace fused MLP activation patching
+        if self.fused_mlp:
+            self._patch_hf_mlp(model)
+
+        # 1e. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
 
@@ -451,6 +459,32 @@ class LumenConfig:
         patch_sdpa()
 
     @staticmethod
+    def _patch_hf_rope() -> None:
+        """Patch HuggingFace LLaMA RoPE with the AITER autograd implementation."""
+        try:
+            import transformers.models.llama.modeling_llama as modeling_llama
+        except ImportError as exc:
+            raise RuntimeError(
+                "fused_rope currently supports HuggingFace LLaMA models only"
+            ) from exc
+
+        if hasattr(modeling_llama, "_lumen_rope_original"):
+            return
+
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        original = modeling_llama.apply_rotary_pos_emb
+
+        def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+            modeling_llama._lumen_rope_calls += 1
+            return apply_rotary_qk_autograd(q, k, cos, sin)
+
+        modeling_llama._lumen_rope_original = original
+        modeling_llama._lumen_rope_calls = 0
+        modeling_llama.apply_rotary_pos_emb = _lumen_rope
+        _rank0_print("> Fused RoPE: HF LLaMA apply_rotary_pos_emb -> AITER autograd RoPE")
+
+    @staticmethod
     def _auto_tune_bf16_gemm(model) -> None:
         """Placeholder — BF16 GEMM uses torch.mm fallback (safe on MI350).
 
@@ -493,20 +527,67 @@ class LumenConfig:
                 return grad_input, grad_weight, grad_bias
 
         count = 0
-        for _name, module in model.named_modules():
+        for name, module in model.named_modules():
             if isinstance(module, nn.Linear):
+                if not self.quantize_output_layer and name.rsplit(".", 1)[-1] == "lm_head":
+                    continue
 
                 def _make_aiter_forward(mod):
                     def _aiter_forward(input):
+                        mod._lumen_linear_calls += 1
                         return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
 
                     return _aiter_forward
 
+                module._lumen_linear_patched = True
+                module._lumen_linear_calls = 0
                 module.forward = _make_aiter_forward(module)
                 count += 1
 
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+
+    @staticmethod
+    def _patch_hf_mlp(model) -> None:
+        """Fuse HuggingFace LLaMA's separate SiLU and multiply kernels."""
+        from lumen.ops.fused_swiglu import fused_swiglu_pair
+
+        count = 0
+        for module in model.modules():
+            if type(module).__name__ != "LlamaMLP":
+                continue
+            if not all(hasattr(module, name) for name in ("gate_proj", "up_proj", "down_proj")):
+                continue
+            activation_name = (
+                getattr(module.act_fn, "__name__", "")
+                or type(module.act_fn).__name__
+            ).lower()
+            if "silu" not in activation_name:
+                continue
+
+            original_forward = module.forward
+
+            def _make_fused_forward(mod):
+                def _fused_forward(hidden_states):
+                    mod._lumen_fused_mlp_calls += 1
+                    gate = mod.gate_proj(hidden_states)
+                    up = mod.up_proj(hidden_states)
+                    return mod.down_proj(fused_swiglu_pair(gate, up))
+
+                return _fused_forward
+
+            module._lumen_fused_mlp_original_forward = original_forward
+            module._lumen_fused_mlp_patched = True
+            module._lumen_fused_mlp_calls = 0
+            module.forward = _make_fused_forward(module)
+            count += 1
+
+        if count == 0:
+            raise RuntimeError(
+                "fused_mlp=True requested, but no HuggingFace LlamaMLP with SiLU "
+                "activation was found"
+            )
+        _rank0_print(f"> Patched {count} HuggingFace LlamaMLP modules with fused SwiGLU")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.

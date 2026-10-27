@@ -341,3 +341,79 @@ peak allocated memory:
 | FP8 delayed | TransformerEngine | ~8.14 s | 111.6 GB |
 | FP8 delayed | Lumen | ~8.19 s | 113.5 GB |
 | FP8 delayed | Δ | +0.5% | +1.7% |
+
+## DeepSpeed Pretraining (Llama2-7B)
+
+The initial DeepSpeed integration supports ZeRO-1/2 with BF16 master weights
+and either BF16 compute or Lumen AITER FP8 Linear compute. Model patching still
+goes through `LumenConfig.enable()` before `deepspeed.initialize()`.
+
+Install a ROCm-compatible DeepSpeed build and the example dependencies:
+
+```bash
+pip install -e ".[aiter,deepspeed]"
+pip install -r examples/llama2/requirements.txt
+```
+
+Or build the tested ROCm 7.14 environment:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  -t lumen-deepspeed:rocm714 .
+```
+
+Launch the default eight-GPU ZeRO-2 BF16 run:
+
+```bash
+bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+Useful variants:
+
+```bash
+# FP8 dynamic scaling (enable after validating BF16)
+PRECISION=fp8 bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# FP8 blockwise2d
+PRECISION=fp8 FP8_SCALING=blockwise2d \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# ZeRO-1 or a smaller smoke test
+ZERO_STAGE=1 NPROC_PER_NODE=2 GBS=8 SEQ_LEN=512 TRAIN_STEPS=5 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+The launcher generates mock JSONL data when `TRAIN_DATA_PATH` does not exist.
+Set `TRAIN_DATA_PATH` to use an existing text/JSONL corpus.
+
+Current safety restrictions:
+
+- ZeRO-3 is rejected until gathered-parameter execution is validated.
+- FP8 parameter storage, communication quantization, MXFP4, LoRA, and
+  CPU/NVMe offload are rejected.
+- FP8 supports E4M3 with `dynamic` or `blockwise2d` scaling.
+- Attention, normalization, embeddings, and `lm_head` remain BF16.
+- `LUMEN_WEIGHT_QUANT_ONCE=1` is rejected because its cache has not yet been
+  wired to the DeepSpeed optimizer update boundary.
+
+### Validated BF16 result
+
+Validated on 8×MI350X with DeepSpeed 0.19.8, ZeRO-2, MBS=4, GBS=256,
+sequence length 4096, and 50 steps. The full log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log).
+
+- Final training loss: `2.286378` (acceptance target: at most `3.3`).
+- Steady-state mean/median: `7554.8 / 7512.9 ms/step` after excluding two
+  warmup steps (acceptance limit: `18000 ms`).
+- Global throughput: approximately `139.6K tokens/s` at the median step.
+- Peak allocated memory: `111.35 GiB/GPU`.
+- Runtime patch verification: `12800` Lumen/AITER SDPA calls, `12800`
+  AITER autograd RoPE calls, `12800` fused SwiGLU calls, and `89600`
+  BF16 Lumen Linear calls.
+- AITER loaded gfx950 FMHA v3 BF16 forward and backward kernels.
+
+The launcher enforces the loss and steady-state step-time limits and fails the
+run if any enabled attention, RoPE, fused MLP, or BF16 Linear patch receives
+zero runtime calls. `FUSED_MLP=0` and `LUMEN_LINEAR=0` can independently
+disable the two Linear/MLP optimizations for A/B testing.

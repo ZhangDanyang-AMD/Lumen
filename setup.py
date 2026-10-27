@@ -45,8 +45,10 @@ setup(
     extras_require={
         # CK attention backend (optional — falls back to Triton if absent)
         "aiter": ["amd-aiter"],
+        # Distributed training backend (kept optional for ROCm image control)
+        "deepspeed": ["deepspeed>=0.15.0"],
         # All optional runtime dependencies
-        "all": ["amd-aiter"],
+        "all": ["amd-aiter", "deepspeed>=0.15.0"],
         # Developer / CI dependencies
         "dev": [
             "amd-aiter",

@@ -1,0 +1,13 @@
+ARG BASE_IMAGE=amdagi/veomni:rocm7.14_torch2.12_py3.12
+FROM ${BASE_IMAGE}
+
+ENV DS_BUILD_OPS=0 \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONUNBUFFERED=1
+
+# Keep DeepSpeed's optional CUDA/HIP extensions disabled for the initial
+# ZeRO-1/2 path. Lumen/AITER owns the model kernels and torch.optim.AdamW avoids
+# DeepSpeedCPUAdam/fused-optimizer JIT compilation.
+RUN pip install --no-cache-dir "deepspeed==0.19.8"
+
+WORKDIR /workspace/Lumen

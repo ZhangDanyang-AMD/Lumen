@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+###############################################################################
+# Lumen — Llama2-7B pretrain with DeepSpeed ZeRO-1/2.
+#
+# Run from the repository checkout:
+#   bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+#
+# Common overrides:
+#   PRECISION=bf16 ZERO_STAGE=1 TRAIN_STEPS=10 ...
+#   FP8_SCALING=blockwise2d NPROC_PER_NODE=8 ...
+###############################################################################
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+
+NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
+ZERO_STAGE="${ZERO_STAGE:-2}"
+PRECISION="${PRECISION:-bf16}"
+FP8_SCALING="${FP8_SCALING:-dynamic}"
+FUSED_MLP="${FUSED_MLP:-1}"
+LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
+MBS="${MBS:-1}"
+GBS="${GBS:-256}"
+SEQ_LEN="${SEQ_LEN:-4096}"
+TRAIN_STEPS="${TRAIN_STEPS:-50}"
+SEED="${SEED:-1234}"
+TARGET_LOSS="${TARGET_LOSS:-3.3}"
+STEP_TIME_ATOL="${STEP_TIME_ATOL:-18000}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-0}"
+TOKENIZER_DIR="${TOKENIZER_DIR:-${SCRIPT_DIR}/tokenizer}"
+RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results/deepspeed}"
+TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-${SCRIPT_DIR}/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl}"
+
+DENOM=$((MBS * NPROC_PER_NODE))
+if (( GBS % DENOM != 0 )); then
+    echo "GBS=${GBS} must be divisible by MBS*NPROC_PER_NODE=${DENOM}" >&2
+    exit 2
+fi
+GRAD_ACCUM=$((GBS / DENOM))
+LOCAL_TRAIN_SAMPLES=$((MBS * GRAD_ACCUM * (TRAIN_STEPS + 2)))
+
+if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" ]]; then
+    echo "Initial Lumen DeepSpeed support is limited to ZERO_STAGE=1 or 2" >&2
+    exit 2
+fi
+if [[ "${PRECISION}" != "bf16" && "${PRECISION}" != "fp8" ]]; then
+    echo "PRECISION must be bf16 or fp8" >&2
+    exit 2
+fi
+
+mkdir -p "${RESULTS_DIR}" "$(dirname "${TRAIN_DATA_PATH}")"
+if [[ ! -f "${TRAIN_DATA_PATH}" ]]; then
+    TRAIN_DATA_PATH="${TRAIN_DATA_PATH}" \
+    SEQ_LEN="${SEQ_LEN}" GBS="${GBS}" TRAIN_STEPS="${TRAIN_STEPS}" SEED="${SEED}" \
+    NPROC_PER_NODE="${NPROC_PER_NODE}" \
+    python3 - <<'PY'
+import json
+import os
+import random
+
+path = os.environ["TRAIN_DATA_PATH"]
+seq_len = int(os.environ["SEQ_LEN"])
+samples = int(os.environ["GBS"]) * (int(os.environ["TRAIN_STEPS"]) + 2)
+random.seed(int(os.environ["SEED"]))
+words_per_doc = 4096
+estimated_tokens = samples * (seq_len + 1)
+documents = max(1, estimated_tokens // words_per_doc + 1)
+documents = max(documents, int(os.environ["NPROC_PER_NODE"]))
+with open(path, "w", encoding="utf-8") as output:
+    for _ in range(documents):
+        words = [str(random.randint(1, 31999)) for _ in range(words_per_doc)]
+        output.write(json.dumps({"text": " ".join(words)}) + "\n")
+print(f"Wrote {documents} mock documents to {path}")
+PY
+fi
+
+FP8_ARGS=()
+if [[ "${PRECISION}" == "fp8" ]]; then
+    FP8_ARGS=(
+        --linear-fp8
+        --linear-fp8-format fp8_e4m3
+        --linear-fp8-scaling "${FP8_SCALING}"
+        --linear-fp8-block-size 128
+    )
+fi
+
+PERF_ARGS=()
+if [[ "${FUSED_MLP}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-fused-mlp)
+fi
+if [[ "${LUMEN_LINEAR}" == "1" && "${PRECISION}" == "bf16" ]]; then
+    PERF_ARGS+=(--lumen-linear)
+fi
+
+export PYTHONPATH="${LUMEN_DIR}:${PYTHONPATH:-}"
+export TOKENIZERS_PARALLELISM=false
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-7200}"
+export HSA_NO_SCRATCH_RECLAIM=1
+export HIP_FORCE_DEV_KERNARG=1
+export GPU_MAX_HW_QUEUES=8
+export NCCL_IB_DISABLE=1
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
+export CUDA_DEVICE_MAX_CONNECTIONS=8
+export TORCHDYNAMO_DISABLE=1
+export USE_HIPBLASLT=1
+export TORCH_BLAS_PREFER_HIPBLASLT=1
+export LUMEN_PREFER_HIPBLASLT=1
+export LUMEN_SKIP_BACKEND_SYNC=1
+
+torchrun \
+    --standalone \
+    --nproc_per_node="${NPROC_PER_NODE}" \
+    "${SCRIPT_DIR}/pretrain_llama2_deepspeed.py" \
+    --tokenizer-name-or-path "${TOKENIZER_DIR}" \
+    --train-data-path "${TRAIN_DATA_PATH}" \
+    --val-data-path "${TRAIN_DATA_PATH}" \
+    --train-samples "${LOCAL_TRAIN_SAMPLES}" \
+    --val-samples 1 \
+    --eval-interval "${TRAIN_STEPS}" \
+    --eval-iters 1 \
+    --target-loss "${TARGET_LOSS}" \
+    --step-time-atol "${STEP_TIME_ATOL}" \
+    --performance-warmup-steps 2 \
+    --hidden-size 4096 \
+    --intermediate-size 11008 \
+    --num-layers 32 \
+    --num-attention-heads 32 \
+    --num-key-value-heads 32 \
+    --vocab-size 32000 \
+    --max-position-embeddings "${SEQ_LEN}" \
+    --rope-theta 10000 \
+    --seq-length "${SEQ_LEN}" \
+    --micro-batch-size "${MBS}" \
+    --gradient-accumulation-steps "${GRAD_ACCUM}" \
+    --max-steps "${TRAIN_STEPS}" \
+    --zero-stage "${ZERO_STAGE}" \
+    --linear-backend aiter \
+    --hf-attn-patch \
+    --lumen-fused-rope \
+    --no-gradient-checkpointing \
+    --lr 1.0e-5 \
+    --min-lr 0.0 \
+    --lr-warmup-steps 2 \
+    --weight-decay 0.1 \
+    --max-grad-norm 1.0 \
+    --seed "${SEED}" \
+    --log-interval 1 \
+    --save-interval "${SAVE_INTERVAL}" \
+    --save-dir "${RESULTS_DIR}/checkpoints" \
+    "${FP8_ARGS[@]}" \
+    "${PERF_ARGS[@]}" \
+    2>&1 | tee "${RESULTS_DIR}/llama2_7b_zero${ZERO_STAGE}_${PRECISION}.log"

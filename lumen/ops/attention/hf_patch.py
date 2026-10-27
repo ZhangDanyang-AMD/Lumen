@@ -32,6 +32,7 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 _original_sdpa = None
+_sdpa_calls = 0
 
 
 def patch_sdpa() -> None:
@@ -57,6 +58,8 @@ def patch_sdpa() -> None:
         scale: float | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        global _sdpa_calls
+        _sdpa_calls += 1
         # F.sdpa: (B, H, T, D) → AITER: (B, T, H, D)
         q = query.transpose(1, 2)
         k = key.transpose(1, 2)
@@ -77,6 +80,11 @@ def patch_sdpa() -> None:
 
     F.scaled_dot_product_attention = _lumen_sdpa
     logger.info("Patched F.scaled_dot_product_attention with Lumen/AITER attention")
+
+
+def get_sdpa_patch_calls() -> int:
+    """Return the number of calls routed through the patched SDPA function."""
+    return _sdpa_calls
 
 
 def patch_hf_sdpa() -> None:

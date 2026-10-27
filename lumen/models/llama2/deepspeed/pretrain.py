@@ -1,0 +1,448 @@
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE for license information.
+###############################################################################
+
+"""LLaMA2 causal-language-model pretraining with DeepSpeed + Lumen."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import statistics
+import time
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+from lumen.config import LumenConfig
+from lumen.models.deepspeed import (
+    add_common_deepspeed_args,
+    build_deepspeed_config,
+    initialize_deepspeed,
+    make_lumen_deepspeed_model_provider,
+)
+from lumen.models.fsdp import build_cosine_warmup_scheduler
+from lumen.models.llama31.dataset import PretrainTextDataset, check_sample_budget
+
+__all__ = ["DeepSpeedTrainer", "build_model", "get_args"]
+
+logger = logging.getLogger(__name__)
+
+
+def build_model(args) -> nn.Module:
+    """Build a HuggingFace LLaMA2 model from a checkpoint or from scratch."""
+    from transformers import LlamaConfig, LlamaForCausalLM
+
+    if args.model_name_or_path:
+        model = LlamaForCausalLM.from_pretrained(
+            args.model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="sdpa",
+        )
+    else:
+        config = LlamaConfig(
+            hidden_size=args.hidden_size,
+            intermediate_size=args.intermediate_size,
+            num_hidden_layers=args.num_layers,
+            num_attention_heads=args.num_attention_heads,
+            num_key_value_heads=args.num_key_value_heads,
+            vocab_size=args.vocab_size,
+            max_position_embeddings=args.max_position_embeddings,
+            rope_theta=args.rope_theta,
+            rms_norm_eps=1e-5,
+            attention_bias=False,
+            hidden_act="silu",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="sdpa",
+            use_cache=False,
+        )
+        model = LlamaForCausalLM(config).to(dtype=torch.bfloat16)
+
+    model.config.use_cache = False
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+    return model
+
+
+class DeepSpeedTrainer:
+    """LLaMA2 pretraining driver for the validated ZeRO-1/2 path."""
+
+    def __init__(self, args):
+        self.args = args
+        self._setup_distributed()
+
+        self.deepspeed_config = build_deepspeed_config(
+            args,
+            world_size=self.world_size,
+        )
+        self.lumen_config = LumenConfig.from_args(args)
+        provider = make_lumen_deepspeed_model_provider(
+            build_model,
+            self.lumen_config,
+            self.deepspeed_config,
+            backend=args.linear_backend,
+        )
+        self.manager, model = provider(args)
+        self._verify_patch_installation(model)
+
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=args.lr,
+            betas=(0.9, 0.95),
+            eps=1e-8,
+            weight_decay=args.weight_decay,
+        )
+        scheduler = build_cosine_warmup_scheduler(optimizer, args)
+        self.engine, self.optimizer, self.scheduler = initialize_deepspeed(
+            model,
+            args,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            manager=self.manager,
+        )
+
+        self.global_step = 0
+        self.last_train_loss = float("inf")
+        if args.resume_from_checkpoint:
+            _, client_state = self.engine.load_checkpoint(args.resume_from_checkpoint)
+            if client_state:
+                self.global_step = int(client_state.get("global_step", 0))
+
+        self.train_loader = self._build_dataloader(
+            args.train_data_path,
+            args.train_samples,
+            shuffle=True,
+        )
+        self.val_loader = (
+            self._build_dataloader(args.val_data_path, args.val_samples, shuffle=False)
+            if args.val_data_path
+            else None
+        )
+        if self.rank == 0:
+            parameter_count = sum(p.numel() for p in self.engine.module.parameters())
+            logger.info(
+                "DeepSpeed LLaMA2 ready | params=%d | world=%d | zero=%d | "
+                "micro_batch=%d | grad_accum=%d | seq=%d",
+                parameter_count,
+                self.world_size,
+                args.zero_stage,
+                args.micro_batch_size,
+                args.gradient_accumulation_steps,
+                args.seq_length,
+            )
+
+    def _setup_distributed(self) -> None:
+        try:
+            import deepspeed
+        except ImportError as exc:
+            raise ImportError(
+                "LLaMA2 DeepSpeed pretraining requires a ROCm-compatible DeepSpeed installation"
+            ) from exc
+
+        if not dist.is_initialized():
+            deepspeed.init_distributed(dist_backend="nccl")
+        self.rank = dist.get_rank()
+        self.world_size = dist.get_world_size()
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(self.local_rank)
+        torch.manual_seed(self.args.seed)
+
+    def _build_dataloader(self, data_path, max_samples, *, shuffle: bool):
+        from transformers import AutoTokenizer
+
+        tokenizer_path = self.args.tokenizer_name_or_path or self.args.model_name_or_path
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        dataset = PretrainTextDataset(
+            data_path=data_path,
+            seq_length=self.args.seq_length,
+            tokenizer=tokenizer,
+            is_hf_tokenizer=True,
+            max_samples=max_samples,
+            rank=self.rank,
+            world_size=self.world_size,
+            allow_repeat=shuffle and self.args.repeat_corpus,
+        )
+        if shuffle and max_samples:
+            warning = check_sample_budget(
+                dataset.n_samples_read,
+                max_samples,
+                self.args.repeat_corpus,
+            )
+            if warning and self.rank == 0:
+                logger.warning(warning)
+        generator = torch.Generator()
+        generator.manual_seed(self.args.seed + self.rank)
+        return DataLoader(
+            dataset,
+            batch_size=self.args.micro_batch_size,
+            shuffle=shuffle,
+            generator=generator,
+            num_workers=self.args.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+
+    def _next_batch(self, data_iter):
+        try:
+            return next(data_iter), data_iter
+        except StopIteration:
+            data_iter = iter(self.train_loader)
+            return next(data_iter), data_iter
+
+    def _verify_patch_installation(self, model: nn.Module) -> None:
+        if self.args.hf_attn_patch:
+            import torch.nn.functional as functional
+
+            if functional.scaled_dot_product_attention.__name__ != "_lumen_sdpa":
+                raise RuntimeError("Lumen/AITER SDPA patch was requested but is not installed")
+        if self.args.lumen_fused_rope:
+            import transformers.models.llama.modeling_llama as modeling_llama
+
+            if modeling_llama.apply_rotary_pos_emb.__name__ != "_lumen_rope":
+                raise RuntimeError("Lumen/AITER RoPE patch was requested but is not installed")
+        if self.args.lumen_fused_mlp:
+            mlps = [
+                module
+                for module in model.modules()
+                if type(module).__name__ == "LlamaMLP"
+            ]
+            if not mlps or any(
+                not getattr(module, "_lumen_fused_mlp_patched", False)
+                for module in mlps
+            ):
+                raise RuntimeError(
+                    "Lumen fused MLP was requested but not every LlamaMLP was patched"
+                )
+        if self.args.lumen_linear:
+            linear_modules = [
+                module
+                for module in model.modules()
+                if isinstance(module, nn.Linear)
+                and getattr(module, "_lumen_linear_patched", False)
+            ]
+            if not linear_modules:
+                raise RuntimeError(
+                    "Lumen BF16 Linear was requested but no nn.Linear was patched"
+                )
+
+        model._lumen_deepspeed_patch_contract = {
+            "hf_attn_patch": bool(self.args.hf_attn_patch),
+            "fused_rope": bool(self.args.lumen_fused_rope),
+            "fused_mlp": bool(self.args.lumen_fused_mlp),
+            "lumen_linear": bool(self.args.lumen_linear),
+            "gradient_checkpointing": bool(self.args.gradient_checkpointing),
+        }
+
+    def _verify_runtime_patch_calls(self) -> None:
+        sdpa_calls = 0
+        rope_calls = 0
+        mlp_calls = 0
+        linear_calls = 0
+        if self.args.hf_attn_patch:
+            from lumen.ops.attention.hf_patch import get_sdpa_patch_calls
+
+            sdpa_calls = get_sdpa_patch_calls()
+            if sdpa_calls <= 0:
+                raise RuntimeError(
+                    "Lumen/AITER SDPA was installed but no training call reached it"
+                )
+        if self.args.lumen_fused_rope:
+            import transformers.models.llama.modeling_llama as modeling_llama
+
+            rope_calls = int(getattr(modeling_llama, "_lumen_rope_calls", 0))
+            if rope_calls <= 0:
+                raise RuntimeError(
+                    "Lumen/AITER RoPE was installed but no training call reached it"
+                )
+        if self.args.lumen_fused_mlp:
+            mlp_calls = sum(
+                int(getattr(module, "_lumen_fused_mlp_calls", 0))
+                for module in self.engine.module.modules()
+            )
+            if mlp_calls <= 0:
+                raise RuntimeError(
+                    "Lumen fused MLP was installed but no training call reached it"
+                )
+        if self.args.lumen_linear:
+            linear_calls = sum(
+                int(getattr(module, "_lumen_linear_calls", 0))
+                for module in self.engine.module.modules()
+            )
+            if linear_calls <= 0:
+                raise RuntimeError(
+                    "Lumen BF16 Linear was installed but no training call reached it"
+                )
+        if self.rank == 0:
+            logger.info(
+                "Verified Lumen runtime patches | sdpa_calls=%d | rope_calls=%d | "
+                "mlp_calls=%d | linear_calls=%d",
+                sdpa_calls,
+                rope_calls,
+                mlp_calls,
+                linear_calls,
+            )
+
+    def train(self) -> None:
+        args = self.args
+        self.engine.train()
+        data_iter = iter(self.train_loader)
+        measured_step_times = []
+        torch.cuda.reset_peak_memory_stats(self.engine.device)
+
+        while self.global_step < args.max_steps:
+            torch.cuda.synchronize(self.engine.device)
+            step_start = time.perf_counter()
+            accumulated_loss = 0.0
+            for _ in range(args.gradient_accumulation_steps):
+                batch, data_iter = self._next_batch(data_iter)
+                input_ids = batch["input_ids"].to(self.engine.device, non_blocking=True)
+                labels = batch["labels"].to(self.engine.device, non_blocking=True)
+                outputs = self.engine(input_ids=input_ids, labels=labels)
+                accumulated_loss += outputs.loss.detach().float().item()
+                self.engine.backward(outputs.loss)
+                self.engine.step()
+
+            torch.cuda.synchronize(self.engine.device)
+            step_time_ms = (time.perf_counter() - step_start) * 1000.0
+            self.global_step += 1
+            if self.global_step > args.performance_warmup_steps:
+                measured_step_times.append(step_time_ms)
+            loss_sum = torch.tensor(
+                accumulated_loss / args.gradient_accumulation_steps,
+                dtype=torch.float64,
+                device=self.engine.device,
+            )
+            dist.all_reduce(loss_sum, op=dist.ReduceOp.SUM)
+            mean_loss = (loss_sum / self.world_size).item()
+            self.last_train_loss = mean_loss
+            if self.global_step % args.log_interval == 0 and self.rank == 0:
+                lr = self.scheduler.get_last_lr()[0] if self.scheduler is not None else args.lr
+                tokens_per_second = (
+                    args.micro_batch_size
+                    * args.gradient_accumulation_steps
+                    * self.world_size
+                    * args.seq_length
+                    / (step_time_ms / 1000.0)
+                )
+                peak_memory_gib = torch.cuda.max_memory_allocated(self.engine.device) / 2**30
+                logger.info(
+                    "step %d/%d | loss %.6f | lr %.2e | step_time_ms %.1f | "
+                    "tokens_per_second %.1f | peak_memory_gib %.2f",
+                    self.global_step,
+                    args.max_steps,
+                    mean_loss,
+                    lr,
+                    step_time_ms,
+                    tokens_per_second,
+                    peak_memory_gib,
+                )
+
+            if self.val_loader and args.eval_interval > 0 and self.global_step % args.eval_interval == 0:
+                val_loss = self.validate()
+                if self.rank == 0:
+                    logger.info("step %d | val_loss %.4f", self.global_step, val_loss)
+
+            if args.save_interval > 0 and self.global_step % args.save_interval == 0:
+                self.save_checkpoint()
+
+        self._verify_runtime_patch_calls()
+        if measured_step_times:
+            mean_step_time_ms = statistics.fmean(measured_step_times)
+            median_step_time_ms = statistics.median(measured_step_times)
+            if self.rank == 0:
+                logger.info(
+                    "Steady-state performance | mean_step_time_ms %.1f | "
+                    "median_step_time_ms %.1f | measured_steps %d",
+                    mean_step_time_ms,
+                    median_step_time_ms,
+                    len(measured_step_times),
+                )
+            if args.step_time_atol > 0 and mean_step_time_ms > args.step_time_atol:
+                raise RuntimeError(
+                    f"Steady-state mean step time {mean_step_time_ms:.1f} ms exceeds "
+                    f"the aligned limit {args.step_time_atol:.1f} ms"
+                )
+        if args.target_loss > 0 and self.last_train_loss > args.target_loss:
+            raise RuntimeError(
+                f"Training did not reach target loss: final={self.last_train_loss:.6f}, "
+                f"target={args.target_loss:.6f}"
+            )
+        if self.rank == 0:
+            logger.info(
+                "DeepSpeed pretraining complete at step %d | final_loss %.6f",
+                self.global_step,
+                self.last_train_loss,
+            )
+
+    def validate(self) -> float:
+        self.engine.eval()
+        total = torch.zeros(2, dtype=torch.float64, device=self.engine.device)
+        with torch.no_grad():
+            for index, batch in enumerate(self.val_loader):
+                input_ids = batch["input_ids"].to(self.engine.device, non_blocking=True)
+                labels = batch["labels"].to(self.engine.device, non_blocking=True)
+                loss = self.engine(input_ids=input_ids, labels=labels).loss
+                total[0] += loss.detach().double()
+                total[1] += 1
+                if index + 1 >= self.args.eval_iters:
+                    break
+        dist.all_reduce(total, op=dist.ReduceOp.SUM)
+        self.engine.train()
+        return (total[0] / total[1].clamp_min(1)).item()
+
+    def save_checkpoint(self) -> None:
+        os.makedirs(self.args.save_dir, exist_ok=True)
+        self.engine.save_checkpoint(
+            self.args.save_dir,
+            tag=f"global_step{self.global_step}",
+            client_state={"global_step": self.global_step},
+        )
+
+
+def get_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="LLaMA2 pretraining with DeepSpeed + Lumen",
+    )
+    model = parser.add_argument_group("model")
+    model.add_argument("--model-name-or-path", type=str, default=None)
+    model.add_argument("--tokenizer-name-or-path", type=str, required=True)
+    model.add_argument("--hidden-size", type=int, default=4096)
+    model.add_argument("--intermediate-size", type=int, default=11008)
+    model.add_argument("--num-layers", type=int, default=32)
+    model.add_argument("--num-attention-heads", type=int, default=32)
+    model.add_argument("--num-key-value-heads", type=int, default=32)
+    model.add_argument("--vocab-size", type=int, default=32000)
+    model.add_argument("--max-position-embeddings", type=int, default=4096)
+    model.add_argument("--rope-theta", type=float, default=10000.0)
+    model.add_argument("--seq-length", type=int, default=4096)
+
+    data = parser.add_argument_group("data")
+    data.add_argument("--train-data-path", type=str, required=True)
+    data.add_argument("--val-data-path", type=str, default=None)
+    data.add_argument("--train-samples", type=int, default=None)
+    data.add_argument("--val-samples", type=int, default=None)
+    data.add_argument("--repeat-corpus", action="store_true", default=False)
+    data.add_argument("--eval-iters", type=int, default=10)
+    data.add_argument(
+        "--target-loss",
+        type=float,
+        default=0.0,
+        help="Fail at the end when final training loss is above this value; 0 disables.",
+    )
+
+    add_common_deepspeed_args(parser)
+    parser.set_defaults(
+        linear_fp8_scaling="dynamic",
+        linear_fp8_format="fp8_e4m3",
+        gradient_checkpointing=False,
+        hf_attn_patch=True,
+        lumen_fused_rope=True,
+    )
+    return parser.parse_args()
