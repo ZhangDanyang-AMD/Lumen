@@ -23,12 +23,16 @@ from typing import Union
 import torch
 import torch.distributed as dist
 import triton
-try:
+
+import aiter.ops.triton._triton_kernels.cross_entropy as _ce_kernels
+import aiter.ops.triton.cross_entropy as _ce_api
+
+if hasattr(_ce_kernels, "cross_entropy_kernel"):
     from aiter.ops.triton._triton_kernels.cross_entropy import (
         cross_entropy_kernel,
         online_softmax_kernel,
     )
-except ImportError:
+else:
     # AITER >= 0.1.27 replaced these private kernels with
     # _ce_local_softmax_stats_kernel/_ce_fused_loss_grad_kernel. The normal
     # path below uses AITER's stable cross_entropy_forward API and remains
@@ -36,9 +40,10 @@ except ImportError:
     cross_entropy_kernel = None
     online_softmax_kernel = None
 from aiter.ops.triton.cross_entropy import cross_entropy_backward
-try:
+
+if hasattr(_ce_api, "MAX_FUSED_SIZE"):
     from aiter.ops.triton.cross_entropy import MAX_FUSED_SIZE, NUM_WARPS
-except ImportError:
+else:
     # Removed together with the legacy private kernels in AITER 0.1.27.
     MAX_FUSED_SIZE = 65536
     NUM_WARPS = 16

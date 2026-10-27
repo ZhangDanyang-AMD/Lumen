@@ -22,7 +22,6 @@ NPROC="${NPROC:-1}"
 GPU_ARCHS="${GPU_ARCHS:-gfx1250}"      # gfx942 | gfx950 | gfx1250
 AITER_DIR="${AITER_DIR:-}"
 AITER_CONFIG_DIR="${AITER_CONFIG_DIR:-${SCRIPT_DIR}/aiter_configs/${GPU_ARCHS}}"
-ATTN_BACKEND="${ATTN_BACKEND:-csrc}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${LUMEN_DIR}/examples/llama31/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results}"
 CONTAINER_NAME="${CONTAINER_NAME:-lumen_llama31_8b_${PRECISION}}"
@@ -258,7 +257,6 @@ docker run --rm --init \
     "${FP8_ENV[@]}" \
     -e NPROC="${NPROC}" -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
     -e NUM_LAYERS="${NUM_LAYERS}" \
-    -e ATTN_BACKEND="${ATTN_BACKEND}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
     -e MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS}" \
     "${IMAGE}" \
@@ -345,7 +343,7 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --eval-interval "${TRAIN_STEPS}" \
     --save-interval 1000000 \
     --log-interval 1 \
-    --lumen-attn-backend "${ATTN_BACKEND}" \
+    --lumen-attn-backend csrc \
     '"${LINEAR_ARGS[*]}"' \
     '"${CE_ARGS[*]}"' \
     '"${ROPE_ARGS[*]}"' \
