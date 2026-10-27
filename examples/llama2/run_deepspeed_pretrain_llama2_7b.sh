@@ -23,6 +23,7 @@ FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
 FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
 FP8_FUSED_KERNELS="${FP8_FUSED_KERNELS:-}"
 FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
+BLOCKWISE_TUNING_CONFIG="${BLOCKWISE_TUNING_CONFIG:-${SCRIPT_DIR}/configs/deepspeed_llama2_7b_blockwise2d_triton_gfx950.json}"
 if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
     # ROCm 7.0 fused quant+amax produces an invalid delayed-history scale on
     # the second accumulation micro-batch. Dynamic/blockwise recipes are safe.
@@ -102,6 +103,12 @@ if [[ "${PRECISION}" == "fp8" ]]; then
     if [[ "${FP8_WEIGHT_CACHE}" == "1" ]]; then
         FP8_ARGS+=(--deepspeed-fp8-weight-cache)
     fi
+    if [[ "${FP8_SCALING}" == "blockwise2d" ]]; then
+        FP8_ARGS+=(
+            --deepspeed-blockwise-tuning-config
+            "${BLOCKWISE_TUNING_CONFIG}"
+        )
+    fi
 fi
 
 PERF_ARGS=()
@@ -128,6 +135,22 @@ export USE_HIPBLASLT=1
 export TORCH_BLAS_PREFER_HIPBLASLT=1
 export LUMEN_PREFER_HIPBLASLT=1
 export LUMEN_SKIP_BACKEND_SYNC=1
+if [[ "${PRECISION}" == "fp8" ]]; then
+    # Build AITER's HIP quant extension once before torchrun. This avoids an
+    # eight-rank first-use race on runtime-only ROCm images.
+    python3 - <<'PY'
+import torch
+from aiter.ops.enum import QuantType
+from aiter.ops.quant import get_hip_quant
+
+torch.cuda.set_device(0)
+x = torch.zeros(128, 128, device="cuda", dtype=torch.bfloat16)
+get_hip_quant(QuantType.per_1x128)(
+    x, quant_dtype=torch.float8_e4m3fn
+)
+torch.cuda.synchronize()
+PY
+fi
 if [[ "${PRECISION}" == "fp8" ]]; then
     export LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1
     export LUMEN_FUSED_QUANT_SCALE=1
@@ -182,4 +205,5 @@ torchrun \
     --save-dir "${RESULTS_DIR}/checkpoints" \
     "${FP8_ARGS[@]}" \
     "${PERF_ARGS[@]}" \
+    "$@" \
     2>&1 | tee "${RESULTS_DIR}/llama2_7b_zero${ZERO_STAGE}_${PRECISION}.log"

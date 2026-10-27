@@ -18,8 +18,11 @@ yet safe under DeepSpeed and are rejected before the model is patched.
 
 from __future__ import annotations
 
+import json
+import inspect
 import os
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 import torch
@@ -213,6 +216,55 @@ def _install_deepspeed_mixed_wgrad() -> None:
     linear_ops.gemm_wgrad_mixed = _deepspeed_mixed_wgrad
 
 
+def _install_deepspeed_tuned_blockscale(config_path: str) -> None:
+    """Install shape-specific Triton configs from an external JSON file."""
+    import lumen.ops.quantize.linear as linear_ops
+
+    if hasattr(linear_ops, "_deepspeed_tuned_blockscale_original"):
+        return
+
+    path = Path(config_path)
+    raw_configs = json.loads(path.read_text(encoding="utf-8"))
+    tuned_configs = {
+        tuple(int(value) for value in shape.split(",")): config
+        for shape, config in raw_configs.items()
+    }
+
+    try:
+        from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import (
+            gemm_a8w8_blockscale,
+        )
+
+    except ImportError:
+        from aiter.ops.triton.gemm_a8w8_blockscale import (
+            gemm_a8w8_blockscale,
+        )
+
+    accepts_backend = "backend" in inspect.signature(
+        gemm_a8w8_blockscale
+    ).parameters
+
+    original = linear_ops._gemm_blockscale_triton
+
+    def _tuned_blockscale(a_fp8, w_fp8, scale_a, scale_w):
+        shape = (a_fp8.shape[0], w_fp8.shape[0], a_fp8.shape[1])
+        config = tuned_configs.get(shape)
+        if config is None:
+            return original(a_fp8, w_fp8, scale_a, scale_w)
+        kwargs = {
+            "dtype": torch.bfloat16,
+            "config": dict(config),
+        }
+        if accepts_backend:
+            kwargs["backend"] = "triton"
+        return gemm_a8w8_blockscale(
+            a_fp8, w_fp8, scale_a, scale_w, **kwargs
+        )
+
+    linear_ops._deepspeed_tuned_blockscale_original = original
+    linear_ops._gemm_blockscale_triton = _tuned_blockscale
+
+
 def prepare_deepspeed_model(
     model: nn.Module,
     config: LumenConfig,
@@ -220,6 +272,7 @@ def prepare_deepspeed_model(
     *,
     dp_group=None,
     backend: str = "aiter",
+    blockwise_tuning_config: Optional[str] = None,
 ):
     """Apply Lumen before ``deepspeed.initialize`` and preserve parameters."""
     validate_deepspeed_quant_config(config, deepspeed_config)
@@ -229,6 +282,8 @@ def prepare_deepspeed_model(
         and config.fp8_wgrad
     ):
         _install_deepspeed_mixed_wgrad()
+    if config.scaling == "blockwise2d" and blockwise_tuning_config:
+        _install_deepspeed_tuned_blockscale(blockwise_tuning_config)
     before = _parameter_ids(model)
     original_model = model
     manager, model = config.enable(model, dp_group=dp_group, backend=backend)
@@ -253,6 +308,7 @@ def make_lumen_deepspeed_model_provider(
     deepspeed_config: Mapping[str, Any],
     *,
     backend: str = "aiter",
+    blockwise_tuning_config: Optional[str] = None,
 ) -> Callable[..., tuple[Any, nn.Module]]:
     """Return a Megatron-style provider that builds and patches one model.
 
@@ -272,6 +328,7 @@ def make_lumen_deepspeed_model_provider(
                 deepspeed_config,
                 dp_group=dp_group,
                 backend=backend,
+                blockwise_tuning_config=blockwise_tuning_config,
             )
 
     return model_provider
@@ -379,6 +436,18 @@ def add_common_deepspeed_args(parser):
         default=2,
         help="Number of initial steps excluded from the performance mean.",
     )
+    training.add_argument(
+        "--profile-step",
+        type=int,
+        default=0,
+        help="Capture a rank-0 torch profiler table for this global step.",
+    )
+    training.add_argument(
+        "--profile-output",
+        type=str,
+        default="",
+        help="Profiler table output path (empty chooses a file under save-dir).",
+    )
     training.add_argument("--save-interval", type=int, default=0)
     training.add_argument("--save-dir", type=str, default="./checkpoints")
     training.add_argument("--seed", type=int, default=1234)
@@ -399,6 +468,12 @@ def add_common_deepspeed_args(parser):
         action="store_true",
         default=False,
         help="Quantize each ZeRO-1/2 FP8 weight once per optimizer update.",
+    )
+    deepspeed_group.add_argument(
+        "--deepspeed-blockwise-tuning-config",
+        type=str,
+        default=None,
+        help="JSON map of M,N,K shapes to Triton blockscale configs.",
     )
     deepspeed_group.add_argument(
         "--hf-attn-patch",

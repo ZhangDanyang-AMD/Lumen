@@ -88,6 +88,7 @@ class DeepSpeedTrainer:
             self.lumen_config,
             self.deepspeed_config,
             backend=args.linear_backend,
+            blockwise_tuning_config=args.deepspeed_blockwise_tuning_config,
         )
         self.manager, model = provider(args)
         self._verify_patch_installation(model)
@@ -340,6 +341,16 @@ class DeepSpeedTrainer:
         while self.global_step < args.max_steps:
             torch.cuda.synchronize(self.engine.device)
             step_start = time.perf_counter()
+            profiler = None
+            if self.rank == 0 and args.profile_step == self.global_step + 1:
+                profiler = torch.profiler.profile(
+                    activities=[
+                        torch.profiler.ProfilerActivity.CPU,
+                        torch.profiler.ProfilerActivity.CUDA,
+                    ],
+                    record_shapes=True,
+                )
+                profiler.__enter__()
             accumulated_loss = 0.0
             for micro_step in range(args.gradient_accumulation_steps):
                 batch, data_iter = self._next_batch(data_iter)
@@ -357,6 +368,28 @@ class DeepSpeedTrainer:
                 self.engine.step()
 
             torch.cuda.synchronize(self.engine.device)
+            if profiler is not None:
+                profiler.__exit__(None, None, None)
+                profile_output = args.profile_output or os.path.join(
+                    args.save_dir,
+                    f"profile_step_{self.global_step + 1}.txt",
+                )
+                os.makedirs(os.path.dirname(profile_output) or ".", exist_ok=True)
+                with open(profile_output, "w", encoding="utf-8") as output:
+                    output.write(
+                        profiler.key_averages().table(
+                            sort_by="self_cuda_time_total",
+                            row_limit=100,
+                        )
+                    )
+                    output.write("\n\n")
+                    output.write(
+                        profiler.key_averages(group_by_input_shape=True).table(
+                            sort_by="self_cuda_time_total",
+                            row_limit=200,
+                        )
+                    )
+                logger.info("Profiler table written to %s", profile_output)
             step_time_ms = (time.perf_counter() - step_start) * 1000.0
             self.global_step += 1
             if self.global_step > args.performance_warmup_steps:

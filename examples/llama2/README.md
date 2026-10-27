@@ -355,12 +355,24 @@ pip install -e ".[aiter,deepspeed]"
 pip install -r examples/llama2/requirements.txt
 ```
 
-Or build the tested ROCm 7.14 environment:
+Build the compatibility ROCm 7.0 environment:
 
 ```bash
 docker build --network host \
   -f examples/llama2/Dockerfile.deepspeed \
-  -t lumen-deepspeed:rocm714 .
+  -t lumen-deepspeed:rocm70 .
+```
+
+The same Dockerfile builds the advanced ROCm 7.14 / PyTorch 2.12 /
+Triton 3.8 image with ROCm/AITER main:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  --build-arg BUILD_FLAVOR=advanced_base \
+  --build-arg AITER_SOURCE=upstream \
+  --build-arg TORCHAO_VERSION=0.18.0 \
+  -t lumen-deepspeed:rocm714-aiter-main .
 ```
 
 Launch the default eight-GPU ZeRO-2 BF16 run:
@@ -459,11 +471,13 @@ The E4M3 blockwise2d recipe also completed the full 50-step convergence run.
 Its full log is
 [`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log).
 
-- Final training loss: `2.286579`.
-- Steady-state mean/median: `13518.9 / 13494.8 ms/step`.
-- Global throughput: approximately `77.7K tokens/s`.
+- Final training loss: `2.287017`.
+- Steady-state mean/median: `12476.1 / 12439.1 ms/step`.
+- Global throughput: approximately `84.3K tokens/s`.
 - Peak allocated memory: `122.84 GiB/GPU`.
 
 Blockwise2d is numerically supported but is not the recommended performance
 recipe on this DeepSpeed/HuggingFace path; its activation and WGrad kernels are
-substantially slower than hybrid delayed at these Llama2-7B shapes.
+substantially slower than hybrid delayed at these Llama2-7B shapes. The
+gfx950 shape-specific Triton tuning table improves mean step time by about
+`7.7%` over the untuned `13518.9 ms/step` baseline.
