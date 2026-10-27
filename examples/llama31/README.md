@@ -19,31 +19,56 @@ The entry point (`pretrain_llama31.py`) selects the backend via `--backend megat
 
 ## MI450X (gfx1250)
 
-Build the MI450 image with the local AITER checkout, then run the single-GPU
-FP8 blockwise smoke recipe:
+All MI450 training commands use the published image
+`zhangdanyangamd/lumen:dev-gfx1250`. Pull it once before launching:
 
 ```bash
-AITER_DIR=../aiter bash examples/llama31/build_mi450.sh
-
-IMAGE=lumen/llama31:mi450 AITER_DIR=../aiter \
-NPROC=1 ATTN_BACKEND=csrc PRECISION=fp8 FP8_SCALING=blockwise \
-MBS=1 GBS=1 SEQ_LEN=1024 TRAIN_STEPS=3 \
-  bash examples/llama31/run_pretrain_llama31_8b.sh
+docker pull zhangdanyangamd/lumen:dev-gfx1250
 ```
 
-For prepared training data, use the platform config:
+The launcher mounts the current Lumen checkout, tokenizer, and results directory
+into the container. It passes `/dev/kfd` and `/dev/dri` through automatically.
+The host therefore needs Docker access to those devices and a tokenizer under
+`examples/llama31/tokenizer`.
+
+### Reproduce the single-MI450 results
+
+Run commands from the repository root. These commands use one GPU, MBS=2,
+GBS=128, sequence length 8192, and 50 optimizer steps.
 
 ```bash
-CONFIG=examples/llama31/config_MI450X_1x1x1.sh \
-  bash examples/llama31/run_pretrain.sh
+# BF16
+GPU_ARCHS=gfx1250 NPROC=1 HIP_VISIBLE_DEVICES=0 \
+PRECISION=bf16 MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
+RESULTS_DIR=examples/llama31/results/repro_mi450_bf16 \
+bash examples/llama31/run_pretrain_llama31_8b.sh
+
+# FP8 blockwise
+GPU_ARCHS=gfx1250 NPROC=1 HIP_VISIBLE_DEVICES=0 \
+PRECISION=fp8 FP8_SCALING=blockwise \
+MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
+RESULTS_DIR=examples/llama31/results/repro_mi450_fp8_blockwise \
+bash examples/llama31/run_pretrain_llama31_8b.sh
+
+# FP8 delayed
+GPU_ARCHS=gfx1250 NPROC=1 HIP_VISIBLE_DEVICES=0 \
+PRECISION=fp8 FP8_SCALING=delayed \
+MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
+RESULTS_DIR=examples/llama31/results/repro_mi450_fp8_delayed \
+bash examples/llama31/run_pretrain_llama31_8b.sh
 ```
 
-Set `NGPU=2` with that config if a larger recipe requires two GPUs. On gfx1250,
-Lumen FP8 blockwise quantization and linear/norm operators dispatch to the local
-AITER kernels. BF16 attention forward and backward use AITER's gfx1250 FMHA v3
-assembly code objects. BF16 linears dispatch to a LLaMA-shape-tuned AITER
-FlyDSL A16W16 kernel; the tuned shape table is under
-`examples/llama31/configs/llama31_8b_bf16_gfx1250_flydsl_tuned.csv`.
+`IMAGE` defaults to `zhangdanyangamd/lumen:dev-gfx1250`. Each run writes
+`lumen_llama31_8b_<precision>.log` and generated mock data under its
+`RESULTS_DIR`. Published reference logs are:
+
+- BF16: `results/mi450_llama31_8b_bf16.log`
+- FP8 blockwise: `results/mi450_llama31_8b_fp8.log`
+- FP8 delayed: `results/mi450_llama31_8b_fp8_delayed.log`
+
+On gfx1250, BF16 linears use tuned FlyDSL A16W16. FP8 blockwise uses tuned
+Gluon blockscale GEMMs. FP8 delayed dispatches forward, DGrad, and WGrad to
+gfx1250 FlyDSL A8W8 kernels. Attention forward/backward uses AITER FMHA v3.
 
 ## CLI Flags
 
@@ -60,7 +85,7 @@ FlyDSL A16W16 kernel; the tuned shape table is under
 
 See `run_pretrain.sh` for all environment variables.
 
-## Standalone Pretraining Launcher (Llama3.1-8B, 8×MI325X)
+## Standalone Docker Launcher
 
 `run_pretrain_llama31_8b.sh` is a self-contained launcher that runs Llama3.1-8B
 in either BF16 or FP8 delayed/hybrid with all validated Lumen fusion
@@ -73,7 +98,10 @@ The non-Docker ``run_pretrain.sh`` Megatron path does the same when ``MEGATRON_R
 ### Launch
 
 ```bash
-# FP8 delayed/hybrid (default) — 50 steps on 8 GPUs
+# Pull the default image
+docker pull zhangdanyangamd/lumen:dev-gfx1250
+
+# FP8 delayed/hybrid (default)
 bash examples/llama31/run_pretrain_llama31_8b.sh
 
 # BF16
@@ -89,16 +117,19 @@ PRECISION=fp8 MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `PRECISION` | `fp8` | `fp8` (delayed/hybrid) or `bf16` |
-| `IMAGE` | `lumen:dev` | Docker image |
+| `IMAGE` | `zhangdanyangamd/lumen:dev-gfx1250` | Published gfx1250 Docker image |
+| `GPU_ARCHS` | `gfx1250` | Kernel architecture selector |
+| `NPROC` | `1` | Number of visible training GPUs |
 | `MBS` / `GBS` | `2` / `128` | micro / global batch size |
 | `SEQ_LEN` | `8192` | sequence length |
 | `TRAIN_STEPS` | `50` | training iterations |
 | `TOKENIZER_DIR` | `examples/llama31/tokenizer` | HuggingFace tokenizer dir |
 | `RESULTS_DIR` | `examples/llama31/results` | logs + mock data output |
 
-FP8 mode enables the validated forward optimizations (fused quant+amax, fused
-cast-transpose, fused SwiGLU/norm quant, transpose cache, weight-quant-once,
-etc.) plus `--linear-fp8 --fp8-format hybrid --linear-fp8-scaling delayed`.
+FP8 mode enables fused quantization, fused SwiGLU/norm paths, transpose and
+weight caches, and architecture-specific GEMMs. Delayed mode uses hybrid FP8
+configuration with the gfx1250 FlyDSL A8W8 fast path; blockwise mode uses the
+gfx1250 Gluon kernel.
 BF16 keeps only the precision-agnostic fusions (SwiGLU, residual-norm).
 
 ### Model config

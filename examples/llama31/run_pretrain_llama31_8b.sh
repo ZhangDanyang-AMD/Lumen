@@ -17,8 +17,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 PRECISION="${PRECISION:-fp8}"          # bf16 | fp8
-IMAGE="${IMAGE:-lumen:dev}"
-NPROC="${NPROC:-8}"
+IMAGE="${IMAGE:-zhangdanyangamd/lumen:dev-gfx1250}"
+NPROC="${NPROC:-1}"
 GPU_ARCHS="${GPU_ARCHS:-gfx1250}"      # gfx942 | gfx950 | gfx1250
 AITER_DIR="${AITER_DIR:-}"
 AITER_CONFIG_DIR="${AITER_CONFIG_DIR:-${SCRIPT_DIR}/aiter_configs/${GPU_ARCHS}}"
