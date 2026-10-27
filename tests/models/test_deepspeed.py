@@ -79,7 +79,33 @@ def test_validate_rejects_offload_and_weight_cache():
 
 
 def test_validate_rejects_unvalidated_quant_recipe():
-    with pytest.raises(ValueError, match="dynamic.*blockwise2d"):
+    with pytest.raises(ValueError, match="dynamic.*delayed.*blockwise2d"):
+        validate_deepspeed_quant_config(
+            LumenConfig(format="fp8_e4m3", scaling="per_token"),
+            _ds_config(),
+        )
+
+
+def test_validate_accepts_dynamic_e4m3_recipe():
+    validate_deepspeed_quant_config(
+        LumenConfig(format="fp8_e4m3", scaling="dynamic"),
+        _ds_config(),
+    )
+
+
+def test_validate_accepts_hybrid_delayed():
+    validate_deepspeed_quant_config(
+        LumenConfig(
+            format="hybrid",
+            scaling="delayed",
+            history_len=1024,
+        ),
+        _ds_config(),
+    )
+
+
+def test_validate_rejects_e4m3_delayed():
+    with pytest.raises(ValueError, match="requires format='hybrid'"):
         validate_deepspeed_quant_config(
             LumenConfig(format="fp8_e4m3", scaling="delayed"),
             _ds_config(),

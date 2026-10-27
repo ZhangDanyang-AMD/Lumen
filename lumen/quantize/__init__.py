@@ -422,6 +422,7 @@ def _patch_linear_layers(
             module._quant_enabled = True
             module._quant_tensor_id = tensor_id
             module._quant_scaling_type = scaling_type
+            module._lumen_quant_linear_calls = 0
             # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
             # already frozen the base weight, so requires_grad is reliable here.
             # Under FSDP the gathered view can falsely report requires_grad=True.
@@ -712,6 +713,7 @@ def _replace_forward(
     if not is_megatron:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            module._lumen_quant_linear_calls += 1
             _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
             w = module.weight
             _wcache = getattr(module, "_fp8_weight_data", None)
@@ -750,6 +752,7 @@ def _replace_forward(
     else:
 
         def quant_forward(input_tensor, *args, **kwargs):
+            module._lumen_quant_linear_calls += 1
             skip_bias_add = getattr(module, "skip_bias_add", False)
             bias = getattr(module, "bias", None)
             bias_for_gemm = None if skip_bias_add else bias

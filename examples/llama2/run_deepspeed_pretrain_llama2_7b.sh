@@ -7,7 +7,7 @@
 #
 # Common overrides:
 #   PRECISION=bf16 ZERO_STAGE=1 TRAIN_STEPS=10 ...
-#   FP8_SCALING=blockwise2d NPROC_PER_NODE=8 ...
+#   PRECISION=fp8 FP8_FORMAT=hybrid FP8_SCALING=delayed ...
 ###############################################################################
 set -euo pipefail
 
@@ -17,7 +17,21 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
 PRECISION="${PRECISION:-bf16}"
-FP8_SCALING="${FP8_SCALING:-dynamic}"
+FP8_FORMAT="${FP8_FORMAT:-hybrid}"
+FP8_SCALING="${FP8_SCALING:-delayed}"
+FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
+FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
+FP8_FUSED_KERNELS="${FP8_FUSED_KERNELS:-}"
+FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
+if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
+    # ROCm 7.0 fused quant+amax produces an invalid delayed-history scale on
+    # the second accumulation micro-batch. Dynamic/blockwise recipes are safe.
+    if [[ "${FP8_SCALING}" == "delayed" ]]; then
+        FP8_FUSED_KERNELS=0
+    else
+        FP8_FUSED_KERNELS=1
+    fi
+fi
 FUSED_MLP="${FUSED_MLP:-1}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
 MBS="${MBS:-1}"
@@ -79,10 +93,15 @@ FP8_ARGS=()
 if [[ "${PRECISION}" == "fp8" ]]; then
     FP8_ARGS=(
         --linear-fp8
-        --linear-fp8-format fp8_e4m3
+        --linear-fp8-format "${FP8_FORMAT}"
         --linear-fp8-scaling "${FP8_SCALING}"
         --linear-fp8-block-size 128
+        --linear-fp8-amax-algo "${FP8_AMAX_ALGO}"
+        --linear-fp8-amax-history "${FP8_AMAX_HISTORY}"
     )
+    if [[ "${FP8_WEIGHT_CACHE}" == "1" ]]; then
+        FP8_ARGS+=(--deepspeed-fp8-weight-cache)
+    fi
 fi
 
 PERF_ARGS=()
@@ -109,7 +128,18 @@ export USE_HIPBLASLT=1
 export TORCH_BLAS_PREFER_HIPBLASLT=1
 export LUMEN_PREFER_HIPBLASLT=1
 export LUMEN_SKIP_BACKEND_SYNC=1
-
+if [[ "${PRECISION}" == "fp8" ]]; then
+    export LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1
+    export LUMEN_FUSED_QUANT_SCALE=1
+    export LUMEN_FUSED_CAST_TRANSPOSE=1
+    export LUMEN_FAST_QUANT_DISPATCH=1
+    if [[ "${FP8_FUSED_KERNELS}" == "1" ]]; then
+        export LUMEN_FUSED_QUANT_AMAX=1
+    fi
+    if [[ "${FP8_SCALING}" == "delayed" ]]; then
+        export LUMEN_STEP_BATCH_SCALES=1
+    fi
+fi
 torchrun \
     --standalone \
     --nproc_per_node="${NPROC_PER_NODE}" \

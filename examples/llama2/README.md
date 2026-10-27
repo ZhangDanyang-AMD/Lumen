@@ -392,7 +392,13 @@ Current safety restrictions:
 - ZeRO-3 is rejected until gathered-parameter execution is validated.
 - FP8 parameter storage, communication quantization, MXFP4, LoRA, and
   CPU/NVMe offload are rejected.
-- FP8 supports E4M3 with `dynamic` or `blockwise2d` scaling.
+- FP8 supports E4M3 `dynamic`/`blockwise2d` and hybrid
+  E4M3-forward/E5M2-backward `delayed` scaling.
+- On the ROCm 7.0 image, delayed scaling disables fused quant+amax because its
+  history output is invalid on the second accumulation micro-batch. Other
+  quantization fusions remain enabled.
+- Hybrid WGrad uses a DeepSpeed-local `torch._scaled_mm` hipBLASLt path; the
+  shared FSDP/Megatron Linear implementation and API are not modified.
 - Attention, normalization, embeddings, and `lm_head` remain BF16.
 - `LUMEN_WEIGHT_QUANT_ONCE=1` is rejected because its cache has not yet been
   wired to the DeepSpeed optimizer update boundary.
@@ -403,10 +409,10 @@ Validated on 8×MI350X with DeepSpeed 0.19.8, ZeRO-2, MBS=4, GBS=256,
 sequence length 4096, and 50 steps. The full log is
 [`results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log).
 
-- Final training loss: `2.286378` (acceptance target: at most `3.3`).
-- Steady-state mean/median: `7554.8 / 7512.9 ms/step` after excluding two
+- Final training loss: `2.286021` (acceptance target: at most `3.3`).
+- Steady-state mean/median: `7979.8 / 7980.2 ms/step` after excluding two
   warmup steps (acceptance limit: `18000 ms`).
-- Global throughput: approximately `139.6K tokens/s` at the median step.
+- Global throughput: approximately `131.4K tokens/s` at the median step.
 - Peak allocated memory: `111.35 GiB/GPU`.
 - Runtime patch verification: `12800` Lumen/AITER SDPA calls, `12800`
   AITER autograd RoPE calls, `12800` fused SwiGLU calls, and `89600`
@@ -417,3 +423,47 @@ The launcher enforces the loss and steady-state step-time limits and fails the
 run if any enabled attention, RoPE, fused MLP, or BF16 Linear patch receives
 zero runtime calls. `FUSED_MLP=0` and `LUMEN_LINEAR=0` can independently
 disable the two Linear/MLP optimizations for A/B testing.
+
+### Validated FP8 result
+
+The default hybrid delayed recipe was validated on the same 8×MI350X, ZeRO-2,
+MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log).
+
+- Final training loss: `2.286749`.
+- Steady-state mean/median: `7630.3 / 7577.5 ms/step`.
+- Global throughput: approximately `138.4K tokens/s`.
+- Peak allocated memory: `122.09 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, plus `12800` calls each
+  for AITER SDPA, AITER RoPE, and fused SwiGLU.
+- All 50 steps completed without a non-finite loss.
+
+Against the BF16 run in the same ROCm 7.0 image, delayed FP8 reduces mean
+step time by `4.4%` and median step time by `5.0%`. The per-update FP8 weight
+cache trades approximately `10.74 GiB/GPU` of additional resident memory for
+this speedup.
+
+The alternative E4M3 dynamic recipe was also validated on the same
+MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log).
+
+- Final training loss: `2.286721`.
+- Steady-state mean/median: `8445.4 / 8427.5 ms/step`.
+- Global throughput: approximately `124.5K tokens/s`.
+- Peak allocated memory: `116.02 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, plus `12800` calls each
+  for AITER SDPA, AITER RoPE, and fused SwiGLU.
+- All 50 steps completed without a non-finite loss.
+
+The E4M3 blockwise2d recipe also completed the full 50-step convergence run.
+Its full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log).
+
+- Final training loss: `2.286579`.
+- Steady-state mean/median: `13518.9 / 13494.8 ms/step`.
+- Global throughput: approximately `77.7K tokens/s`.
+- Peak allocated memory: `122.84 GiB/GPU`.
+
+Blockwise2d is numerically supported but is not the recommended performance
+recipe on this DeepSpeed/HuggingFace path; its activation and WGrad kernels are
+substantially slower than hybrid delayed at these Llama2-7B shapes.

@@ -107,6 +107,17 @@ class DeepSpeedTrainer:
             scheduler=scheduler,
             manager=self.manager,
         )
+        if args.deepspeed_fp8_weight_cache:
+            if self.manager is None or self.manager.num_fp8_params <= 0:
+                raise RuntimeError(
+                    "DeepSpeed FP8 weight cache was requested but no parameters "
+                    "were registered"
+                )
+            if self.rank == 0:
+                logger.info(
+                    "DeepSpeed FP8 per-update weight cache enabled for %d parameters",
+                    self.manager.num_fp8_params,
+                )
 
         self.global_step = 0
         self.last_train_loss = float("inf")
@@ -231,12 +242,31 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen BF16 Linear was requested but no nn.Linear was patched"
                 )
+        if self.args.linear_fp8:
+            quantized_linears = [
+                module
+                for module in model.modules()
+                if isinstance(module, nn.Linear)
+                and getattr(module, "_quant_enabled", False)
+            ]
+            if not quantized_linears:
+                raise RuntimeError(
+                    "Lumen FP8 Linear was requested but no nn.Linear was patched"
+                )
+            if any(
+                getattr(module, "_quant_backend", None) != self.args.linear_backend
+                for module in quantized_linears
+            ):
+                raise RuntimeError(
+                    "Lumen FP8 Linear backend does not match the requested backend"
+                )
 
         model._lumen_deepspeed_patch_contract = {
             "hf_attn_patch": bool(self.args.hf_attn_patch),
             "fused_rope": bool(self.args.lumen_fused_rope),
             "fused_mlp": bool(self.args.lumen_fused_mlp),
             "lumen_linear": bool(self.args.lumen_linear),
+            "linear_fp8": bool(self.args.linear_fp8),
             "gradient_checkpointing": bool(self.args.gradient_checkpointing),
         }
 
@@ -245,6 +275,7 @@ class DeepSpeedTrainer:
         rope_calls = 0
         mlp_calls = 0
         linear_calls = 0
+        fp8_linear_calls = 0
         if self.args.hf_attn_patch:
             from lumen.ops.attention.hf_patch import get_sdpa_patch_calls
 
@@ -279,14 +310,24 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen BF16 Linear was installed but no training call reached it"
                 )
+        if self.args.linear_fp8:
+            fp8_linear_calls = sum(
+                int(getattr(module, "_lumen_quant_linear_calls", 0))
+                for module in self.engine.module.modules()
+            )
+            if fp8_linear_calls <= 0:
+                raise RuntimeError(
+                    "Lumen FP8 Linear was installed but no training call reached it"
+                )
         if self.rank == 0:
             logger.info(
                 "Verified Lumen runtime patches | sdpa_calls=%d | rope_calls=%d | "
-                "mlp_calls=%d | linear_calls=%d",
+                "mlp_calls=%d | linear_calls=%d | fp8_linear_calls=%d",
                 sdpa_calls,
                 rope_calls,
                 mlp_calls,
                 linear_calls,
+                fp8_linear_calls,
             )
 
     def train(self) -> None:
@@ -300,11 +341,17 @@ class DeepSpeedTrainer:
             torch.cuda.synchronize(self.engine.device)
             step_start = time.perf_counter()
             accumulated_loss = 0.0
-            for _ in range(args.gradient_accumulation_steps):
+            for micro_step in range(args.gradient_accumulation_steps):
                 batch, data_iter = self._next_batch(data_iter)
                 input_ids = batch["input_ids"].to(self.engine.device, non_blocking=True)
                 labels = batch["labels"].to(self.engine.device, non_blocking=True)
                 outputs = self.engine(input_ids=input_ids, labels=labels)
+                if not torch.isfinite(outputs.loss).item():
+                    raise RuntimeError(
+                        f"Non-finite forward loss at global step "
+                        f"{self.global_step + 1}, micro step {micro_step + 1}: "
+                        f"{outputs.loss.item()}"
+                    )
                 accumulated_loss += outputs.loss.detach().float().item()
                 self.engine.backward(outputs.loss)
                 self.engine.step()
@@ -321,6 +368,11 @@ class DeepSpeedTrainer:
             )
             dist.all_reduce(loss_sum, op=dist.ReduceOp.SUM)
             mean_loss = (loss_sum / self.world_size).item()
+            if not torch.isfinite(loss_sum).item():
+                raise RuntimeError(
+                    f"Non-finite training loss at global step {self.global_step}: "
+                    f"{mean_loss}"
+                )
             self.last_train_loss = mean_loss
             if self.global_step % args.log_interval == 0 and self.rank == 0:
                 lr = self.scheduler.get_last_lr()[0] if self.scheduler is not None else args.lr

@@ -1,0 +1,1211 @@
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] [pid=22 pname=MainProcess] start build [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_aiter_core
+[aiter] [pid=25 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=26 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=24 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=19 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=21 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=23 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=20 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_aiter_core
+[aiter] [pid=22 pname=MainProcess] [32mfinish build [module_aiter_core], cost 12.7s [0m
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/Lumen/third_party/aiter/aiter/jit/module_aiter_core.so
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/workspace/Lumen/third_party/aiter/aiter/ops/triton/gluon/__init__.py:16: UserWarning: [aiter] AITER_USE_SYSTEM_TRITON=1: aiter gluon kernels require triton>=3.6.0, found 3.4.0+rocm7.0.0.gitf9e5bf54. Please install a compatible version via .github/scripts/install_triton.sh, otherwise unexpected errors may occur.
+  warnings.warn(
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.10/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:19:19 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:19:19 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:19:19 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:19:19 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+RCCL version : 2.26.6-HEAD:17055da
+HIP version  : 7.0.51831-a3e329ad8
+ROCm version : 7.0.0.0-82-9428210
+Hostname     : ctr-smc-mi350x-rack65-6
+Librccl path : /opt/rocm/lib/librccl.so.1
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:25:25 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:23:23 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:21:21 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:24:24 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:26:26 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:21:21 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:25:25 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:23:23 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:20:20 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:24:24 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:26:26 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:20:20 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:22:22 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:140 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-27 08:04:13] ctr-smc-mi350x-rack65-6:22:22 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/init.cc:161 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:21:507 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:19:504 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:22:505 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:25:506 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:20:509 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:24:511 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:23:510 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:04:17] ctr-smc-mi350x-rack65-6:26:508 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+2026-10-27 08:05:02,954 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:02,957 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:02,961 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:02,964 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:03,485 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:03,492 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:04,804 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:04,812 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:05,225 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:05,233 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:08,150 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:08,151 | INFO | lumen.config | > Fused RoPE: HF LLaMA apply_rotary_pos_emb -> AITER autograd RoPE
+2026-10-27 08:05:08,153 | INFO | lumen.config | > Patched 32 HuggingFace LlamaMLP modules with fused SwiGLU
+2026-10-27 08:05:08,159 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:08,159 | INFO | lumen.config | > LumenConfig enabled (format=fp8_e4m3, scaling=dynamic, hf_attn_patch, features=[fused_mlp, fused_rope])
+2026-10-27 08:05:10,086 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:10,094 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-27 08:05:12,906 | INFO | lumen.ops.attention.hf_patch | Patched F.scaled_dot_product_attention with Lumen/AITER attention
+2026-10-27 08:05:12,914 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:26:556 [7] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:19:569 [0] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:22:565 [3] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:21:563 [2] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:20:571 [1] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:25:575 [6] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:23:559 [4] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 3 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 6 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 7 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 0 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 5 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 4 to net.
+
+[2026-10-27 08:05:17] ctr-smc-mi350x-rack65-6:24:553 [5] /longer_pathname_so_that_rpms_can_support_packaging_the_debug_info_for_all_os_profiles/src/out/ubuntu-22.04/22.04/build/rccl/hipify/src/graph/topo.cc:1550 NCCL WARN Could not find any local path from gpu 2 to net.
+2026-10-27 08:05:21,324 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830096 tokens total)
+2026-10-27 08:05:21,344 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6831150 tokens total)
+2026-10-27 08:05:21,351 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6831750 tokens total)
+2026-10-27 08:05:21,356 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830869 tokens total)
+2026-10-27 08:05:21,374 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830895 tokens total)
+2026-10-27 08:05:21,423 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23128 tokens total)
+2026-10-27 08:05:21,443 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830683 tokens total)
+2026-10-27 08:05:21,444 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23131 tokens total)
+2026-10-27 08:05:21,447 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830423 tokens total)
+2026-10-27 08:05:21,449 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23199 tokens total)
+2026-10-27 08:05:21,452 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (6830765 tokens total)
+2026-10-27 08:05:21,454 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23165 tokens total)
+2026-10-27 08:05:21,474 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23124 tokens total)
+2026-10-27 08:05:21,543 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23240 tokens total)
+2026-10-27 08:05:21,544 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed LLaMA2 ready | params=6738415616 | world=8 | zero=2 | micro_batch=4 | grad_accum=8 | seq=4096
+2026-10-27 08:05:21,547 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23167 tokens total)
+2026-10-27 08:05:21,550 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_50step.jsonl (23120 tokens total)
+[aiter] [pid=26 pname=MainProcess] start build [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_hipbsolgemm
+[aiter] [pid=19 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=23 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=20 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=24 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=22 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=25 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=21 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=26 pname=MainProcess] [32mfinish build [module_hipbsolgemm], cost 24.8s [0m
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/Lumen/third_party/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] [pid=19 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+2026-10-27 08:05:49,677 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+2026-10-27 08:05:49,758 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] [pid=23 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] [pid=22 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/Lumen/third_party/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/Lumen/third_party/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] [pid=24 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+2026-10-27 08:05:49,768 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:49,790 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:49,871 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:49,962 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:49,964 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:49,967 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-27 08:05:50,092 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=26 pname=MainProcess] start build [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_fwd
+2026-10-27 08:05:50,109 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=21 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,124 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=25 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,127 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=20 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,159 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=19 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,172 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=23 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,174 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=22 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+2026-10-27 08:05:50,177 | WARNING | lumen.ops.attention.attention | AITER CK module not found in JIT cache — the first aiter_csrc call may trigger HIP/CK kernel compilation, which can take several minutes. To pre-build: PREBUILD_KERNELS=1 pip install -e third_party/aiter. If the process hangs, check for stale lock files: find <aiter_jit_dir>/build -name 'lock*' -mmin +30 -delete
+[aiter] [pid=24 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_fwd
+[aiter] [pid=26 pname=MainProcess] [32mfinish build [module_fmha_v3_fwd], cost 20.8s [0m
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] import [module_fmha_v3_fwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_fwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, return_softmax_lse: bool, return_dropout_randval: bool, how_v3_bf16_cvt: int, out: Optional[torch.Tensor] = None, bias: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, q_descale: Optional[torch.Tensor] = None, k_descale: Optional[torch.Tensor] = None, v_descale: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter26fmha_fwd_hd128_bf16_causalE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_fwd/fwd_hd128_bf16_causal.co
+[aiter] [pid=23 pname=MainProcess] start build [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/build/module_fmha_v3_bwd
+[aiter] [pid=21 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=24 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=25 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=22 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=20 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=19 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=26 pname=MainProcess] waiting for baton release at /workspace/Lumen/third_party/aiter/aiter/jit/build/lock_module_fmha_v3_bwd
+[aiter] [pid=23 pname=MainProcess] [32mfinish build [module_fmha_v3_bwd], cost 23.5s [0m
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+[aiter] import [module_fmha_v3_bwd] under /workspace/Lumen/third_party/aiter/aiter/jit/module_fmha_v3_bwd.so
+[aiter] type hints mismatch, override to --> fmha_v3_bwd(dout: torch.Tensor, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, out: torch.Tensor, softmax_lse: torch.Tensor, dropout_p: float, softmax_scale: float, is_causal: bool, window_size_left: int, window_size_right: int, deterministic: bool, is_v3_atomic_fp32: bool, how_v3_bf16_cvt: int, dq: Optional[torch.Tensor] = None, dk: Optional[torch.Tensor] = None, dv: Optional[torch.Tensor] = None, alibi_slopes: Optional[torch.Tensor] = None, rng_state: Optional[torch.Tensor] = None, gen: Optional[torch.Generator] = None) -> List[torch.Tensor]
+[aiter] LoadKernel: _ZN5aiter23fmha_bwd_hd128_odo_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_odo_bf16.co
+[aiter] LoadKernel: _ZN5aiter41fmha_bwd_hd128_bf16_causal_br_a32_psskddvE hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_bf16_causal_br_a32_psskddv.co
+[aiter] LoadKernel: _ZN5aiter30fmha_bwd_hd128_dq_convert_bf16E hsaco: /workspace/Lumen/third_party/aiter/hsa//gfx950/fmha_v3_bwd/bwd_hd128_dq_convert_bf16.co
+2026-10-27 08:06:45,681 | INFO | lumen.models.llama2.deepspeed.pretrain | step 1/50 | loss 11.079427 | lr 5.00e-06 | step_time_ms 83857.4 | tokens_per_second 12504.3 | peak_memory_gib 109.75
+2026-10-27 08:06:54,088 | INFO | lumen.models.llama2.deepspeed.pretrain | step 2/50 | loss 11.088218 | lr 1.00e-05 | step_time_ms 8406.1 | tokens_per_second 124740.1 | peak_memory_gib 116.02
+2026-10-27 08:07:02,513 | INFO | lumen.models.llama2.deepspeed.pretrain | step 3/50 | loss 10.419444 | lr 9.99e-06 | step_time_ms 8424.1 | tokens_per_second 124473.4 | peak_memory_gib 116.02
+2026-10-27 08:07:10,955 | INFO | lumen.models.llama2.deepspeed.pretrain | step 4/50 | loss 7.988807 | lr 9.96e-06 | step_time_ms 8441.4 | tokens_per_second 124217.9 | peak_memory_gib 116.02
+2026-10-27 08:07:19,387 | INFO | lumen.models.llama2.deepspeed.pretrain | step 5/50 | loss 5.673369 | lr 9.90e-06 | step_time_ms 8431.1 | tokens_per_second 124369.4 | peak_memory_gib 116.02
+2026-10-27 08:07:27,899 | INFO | lumen.models.llama2.deepspeed.pretrain | step 6/50 | loss 6.085376 | lr 9.83e-06 | step_time_ms 8512.2 | tokens_per_second 123185.2 | peak_memory_gib 116.02
+2026-10-27 08:07:36,325 | INFO | lumen.models.llama2.deepspeed.pretrain | step 7/50 | loss 4.866223 | lr 9.73e-06 | step_time_ms 8425.4 | tokens_per_second 124454.3 | peak_memory_gib 116.02
+2026-10-27 08:07:44,760 | INFO | lumen.models.llama2.deepspeed.pretrain | step 8/50 | loss 4.782700 | lr 9.62e-06 | step_time_ms 8434.3 | tokens_per_second 124322.4 | peak_memory_gib 116.02
+2026-10-27 08:07:53,183 | INFO | lumen.models.llama2.deepspeed.pretrain | step 9/50 | loss 5.294487 | lr 9.48e-06 | step_time_ms 8422.8 | tokens_per_second 124493.0 | peak_memory_gib 116.02
+2026-10-27 08:08:01,634 | INFO | lumen.models.llama2.deepspeed.pretrain | step 10/50 | loss 4.950503 | lr 9.33e-06 | step_time_ms 8449.9 | tokens_per_second 124093.0 | peak_memory_gib 116.02
+2026-10-27 08:08:10,033 | INFO | lumen.models.llama2.deepspeed.pretrain | step 11/50 | loss 3.576704 | lr 9.16e-06 | step_time_ms 8398.4 | tokens_per_second 124854.6 | peak_memory_gib 116.02
+2026-10-27 08:08:18,467 | INFO | lumen.models.llama2.deepspeed.pretrain | step 12/50 | loss 3.357186 | lr 8.97e-06 | step_time_ms 8434.2 | tokens_per_second 124324.1 | peak_memory_gib 116.02
+2026-10-27 08:08:26,906 | INFO | lumen.models.llama2.deepspeed.pretrain | step 13/50 | loss 3.733289 | lr 8.76e-06 | step_time_ms 8438.7 | tokens_per_second 124258.4 | peak_memory_gib 116.02
+2026-10-27 08:08:35,335 | INFO | lumen.models.llama2.deepspeed.pretrain | step 14/50 | loss 3.511860 | lr 8.54e-06 | step_time_ms 8428.5 | tokens_per_second 124407.9 | peak_memory_gib 116.02
+2026-10-27 08:08:43,755 | INFO | lumen.models.llama2.deepspeed.pretrain | step 15/50 | loss 2.870967 | lr 8.30e-06 | step_time_ms 8419.5 | tokens_per_second 124541.4 | peak_memory_gib 116.02
+2026-10-27 08:08:52,167 | INFO | lumen.models.llama2.deepspeed.pretrain | step 16/50 | loss 2.694944 | lr 8.04e-06 | step_time_ms 8411.3 | tokens_per_second 124662.5 | peak_memory_gib 116.02
+2026-10-27 08:09:00,598 | INFO | lumen.models.llama2.deepspeed.pretrain | step 17/50 | loss 2.835473 | lr 7.78e-06 | step_time_ms 8430.6 | tokens_per_second 124376.9 | peak_memory_gib 116.02
+2026-10-27 08:09:09,028 | INFO | lumen.models.llama2.deepspeed.pretrain | step 18/50 | loss 2.784339 | lr 7.50e-06 | step_time_ms 8429.2 | tokens_per_second 124398.1 | peak_memory_gib 116.02
+2026-10-27 08:09:17,493 | INFO | lumen.models.llama2.deepspeed.pretrain | step 19/50 | loss 2.503846 | lr 7.21e-06 | step_time_ms 8464.5 | tokens_per_second 123879.6 | peak_memory_gib 116.02
+2026-10-27 08:09:25,912 | INFO | lumen.models.llama2.deepspeed.pretrain | step 20/50 | loss 2.497594 | lr 6.91e-06 | step_time_ms 8418.8 | tokens_per_second 124551.8 | peak_memory_gib 116.02
+2026-10-27 08:09:34,854 | INFO | lumen.models.llama2.deepspeed.pretrain | step 21/50 | loss 2.659358 | lr 6.61e-06 | step_time_ms 8941.8 | tokens_per_second 117266.8 | peak_memory_gib 116.02
+2026-10-27 08:09:43,274 | INFO | lumen.models.llama2.deepspeed.pretrain | step 22/50 | loss 2.551317 | lr 6.29e-06 | step_time_ms 8418.8 | tokens_per_second 124551.1 | peak_memory_gib 116.02
+2026-10-27 08:09:51,711 | INFO | lumen.models.llama2.deepspeed.pretrain | step 23/50 | loss 2.363797 | lr 5.98e-06 | step_time_ms 8437.2 | tokens_per_second 124279.4 | peak_memory_gib 116.02
+2026-10-27 08:10:00,143 | INFO | lumen.models.llama2.deepspeed.pretrain | step 24/50 | loss 2.416452 | lr 5.65e-06 | step_time_ms 8431.2 | tokens_per_second 124369.2 | peak_memory_gib 116.02
+2026-10-27 08:10:08,629 | INFO | lumen.models.llama2.deepspeed.pretrain | step 25/50 | loss 2.497130 | lr 5.33e-06 | step_time_ms 8485.8 | tokens_per_second 123568.4 | peak_memory_gib 116.02
+2026-10-27 08:10:17,083 | INFO | lumen.models.llama2.deepspeed.pretrain | step 26/50 | loss 2.413697 | lr 5.00e-06 | step_time_ms 8453.0 | tokens_per_second 124047.4 | peak_memory_gib 116.02
+2026-10-27 08:10:25,485 | INFO | lumen.models.llama2.deepspeed.pretrain | step 27/50 | loss 2.326802 | lr 4.67e-06 | step_time_ms 8401.7 | tokens_per_second 124805.3 | peak_memory_gib 116.02
+2026-10-27 08:10:33,892 | INFO | lumen.models.llama2.deepspeed.pretrain | step 28/50 | loss 2.353695 | lr 4.35e-06 | step_time_ms 8406.6 | tokens_per_second 124733.1 | peak_memory_gib 116.02
+2026-10-27 08:10:42,308 | INFO | lumen.models.llama2.deepspeed.pretrain | step 29/50 | loss 2.377045 | lr 4.02e-06 | step_time_ms 8415.8 | tokens_per_second 124596.3 | peak_memory_gib 116.02
+2026-10-27 08:10:50,750 | INFO | lumen.models.llama2.deepspeed.pretrain | step 30/50 | loss 2.332360 | lr 3.71e-06 | step_time_ms 8440.6 | tokens_per_second 124229.8 | peak_memory_gib 116.02
+2026-10-27 08:10:59,427 | INFO | lumen.models.llama2.deepspeed.pretrain | step 31/50 | loss 2.306478 | lr 3.39e-06 | step_time_ms 8677.4 | tokens_per_second 120839.5 | peak_memory_gib 116.02
+2026-10-27 08:11:07,867 | INFO | lumen.models.llama2.deepspeed.pretrain | step 32/50 | loss 2.322513 | lr 3.09e-06 | step_time_ms 8439.4 | tokens_per_second 124247.9 | peak_memory_gib 116.02
+2026-10-27 08:11:16,326 | INFO | lumen.models.llama2.deepspeed.pretrain | step 33/50 | loss 2.331304 | lr 2.79e-06 | step_time_ms 8458.1 | tokens_per_second 123973.1 | peak_memory_gib 116.02
+2026-10-27 08:11:24,775 | INFO | lumen.models.llama2.deepspeed.pretrain | step 34/50 | loss 2.306276 | lr 2.50e-06 | step_time_ms 8448.7 | tokens_per_second 124111.4 | peak_memory_gib 116.02
+2026-10-27 08:11:33,215 | INFO | lumen.models.llama2.deepspeed.pretrain | step 35/50 | loss 2.292907 | lr 2.22e-06 | step_time_ms 8439.1 | tokens_per_second 124252.3 | peak_memory_gib 116.02
+2026-10-27 08:11:41,634 | INFO | lumen.models.llama2.deepspeed.pretrain | step 36/50 | loss 2.302849 | lr 1.96e-06 | step_time_ms 8419.3 | tokens_per_second 124544.6 | peak_memory_gib 116.02
+2026-10-27 08:11:50,091 | INFO | lumen.models.llama2.deepspeed.pretrain | step 37/50 | loss 2.299882 | lr 1.70e-06 | step_time_ms 8456.3 | tokens_per_second 123999.5 | peak_memory_gib 116.02
+2026-10-27 08:11:58,529 | INFO | lumen.models.llama2.deepspeed.pretrain | step 38/50 | loss 2.290035 | lr 1.46e-06 | step_time_ms 8437.6 | tokens_per_second 124274.0 | peak_memory_gib 116.02
+2026-10-27 08:12:06,947 | INFO | lumen.models.llama2.deepspeed.pretrain | step 39/50 | loss 2.291552 | lr 1.24e-06 | step_time_ms 8417.8 | tokens_per_second 124566.8 | peak_memory_gib 116.02
+2026-10-27 08:12:15,361 | INFO | lumen.models.llama2.deepspeed.pretrain | step 40/50 | loss 2.294543 | lr 1.03e-06 | step_time_ms 8412.8 | tokens_per_second 124640.8 | peak_memory_gib 116.02
+2026-10-27 08:12:23,773 | INFO | lumen.models.llama2.deepspeed.pretrain | step 41/50 | loss 2.291066 | lr 8.43e-07 | step_time_ms 8411.6 | tokens_per_second 124658.7 | peak_memory_gib 116.02
+2026-10-27 08:12:32,200 | INFO | lumen.models.llama2.deepspeed.pretrain | step 42/50 | loss 2.288298 | lr 6.70e-07 | step_time_ms 8426.4 | tokens_per_second 124439.0 | peak_memory_gib 116.02
+2026-10-27 08:12:40,598 | INFO | lumen.models.llama2.deepspeed.pretrain | step 43/50 | loss 2.287976 | lr 5.16e-07 | step_time_ms 8397.5 | tokens_per_second 124867.8 | peak_memory_gib 116.02
+2026-10-27 08:12:49,013 | INFO | lumen.models.llama2.deepspeed.pretrain | step 44/50 | loss 2.289023 | lr 3.81e-07 | step_time_ms 8414.9 | tokens_per_second 124609.9 | peak_memory_gib 116.02
+2026-10-27 08:12:57,431 | INFO | lumen.models.llama2.deepspeed.pretrain | step 45/50 | loss 2.288541 | lr 2.65e-07 | step_time_ms 8417.9 | tokens_per_second 124564.7 | peak_memory_gib 116.02
+2026-10-27 08:13:05,845 | INFO | lumen.models.llama2.deepspeed.pretrain | step 46/50 | loss 2.287221 | lr 1.70e-07 | step_time_ms 8413.1 | tokens_per_second 124635.4 | peak_memory_gib 116.02
+2026-10-27 08:13:14,242 | INFO | lumen.models.llama2.deepspeed.pretrain | step 47/50 | loss 2.286548 | lr 9.61e-08 | step_time_ms 8396.1 | tokens_per_second 124887.7 | peak_memory_gib 116.02
+2026-10-27 08:13:22,667 | INFO | lumen.models.llama2.deepspeed.pretrain | step 48/50 | loss 2.286621 | lr 4.28e-08 | step_time_ms 8424.9 | tokens_per_second 124461.0 | peak_memory_gib 116.02
+2026-10-27 08:13:31,067 | INFO | lumen.models.llama2.deepspeed.pretrain | step 49/50 | loss 2.286860 | lr 1.07e-08 | step_time_ms 8400.0 | tokens_per_second 124830.2 | peak_memory_gib 116.02
+2026-10-27 08:13:39,491 | INFO | lumen.models.llama2.deepspeed.pretrain | step 50/50 | loss 2.286721 | lr 0.00e+00 | step_time_ms 8423.0 | tokens_per_second 124490.2 | peak_memory_gib 116.02
+2026-10-27 08:13:39,492 | INFO | lumen.models.llama2.deepspeed.pretrain | Verified Lumen runtime patches | sdpa_calls=12800 | rope_calls=12800 | mlp_calls=12800 | linear_calls=0 | fp8_linear_calls=89600
+2026-10-27 08:13:39,492 | INFO | lumen.models.llama2.deepspeed.pretrain | Steady-state performance | mean_step_time_ms 8445.4 | median_step_time_ms 8427.5 | measured_steps 48
+2026-10-27 08:13:39,492 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed pretraining complete at step 50 | final_loss 2.286721
+[rank0]:[W1027 08:13:40.521715589 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
