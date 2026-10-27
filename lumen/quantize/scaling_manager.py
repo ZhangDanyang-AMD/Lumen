@@ -1064,6 +1064,7 @@ class ScalingManager:
         if (
             _FUSED_QUANT_TRANSPOSE_CPP
             and backward
+            and dtype not in (torch.float8_e5m2, torch.float8_e5m2fnuz)
             and _probe_hip_cast_transpose()
             and tensor.is_cuda
             and tensor.dim() == 2

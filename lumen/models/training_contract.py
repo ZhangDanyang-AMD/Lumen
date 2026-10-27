@@ -157,6 +157,14 @@ def add_fsdp_fp8_contract_args(parser_or_group):
     )
     safe_add_argument(
         parser_or_group,
+        "--linear-fp8-quantize-output-layer",
+        dest="linear_fp8_quantize_output_layer",
+        action="store_true",
+        default=False,
+        help="Quantize the output/vocabulary projection; it remains BF16 by default.",
+    )
+    safe_add_argument(
+        parser_or_group,
         "--linear-fp8-activation",
         "--fp8-activation",
         dest="linear_fp8_activation",

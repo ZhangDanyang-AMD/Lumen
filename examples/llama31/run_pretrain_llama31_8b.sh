@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 PRECISION="${PRECISION:-fp8}"          # bf16 | fp8
+BACKEND="${BACKEND:-megatron}"         # megatron | fsdp
 IMAGE="${IMAGE:-zhangdanyangamd/lumen:dev-gfx1250}"
 NPROC="${NPROC:-1}"
 GPU_ARCHS="${GPU_ARCHS:-gfx1250}"      # gfx942 | gfx950 | gfx1250
@@ -32,6 +33,20 @@ SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 NUM_LAYERS="${NUM_LAYERS:-32}"
 SEED="${SEED:-1234}"
+if [[ "${BACKEND}" != "megatron" && "${BACKEND}" != "fsdp" ]]; then
+    echo "ERROR: BACKEND=${BACKEND}; expected megatron or fsdp" >&2
+    exit 1
+fi
+if (( GBS % (MBS * NPROC) != 0 )); then
+    echo "ERROR: GBS=${GBS} must be divisible by MBS*NPROC=$((MBS * NPROC))" >&2
+    exit 1
+fi
+GRAD_ACCUM="${GRAD_ACCUM:-$((GBS / (MBS * NPROC)))}"
+FSDP_SHARDING="${FSDP_SHARDING:-$([[ "${NPROC}" -eq 1 ]] && echo no_shard || echo full_shard)}"
+FSDP_TRAIN_SAMPLES="${FSDP_TRAIN_SAMPLES:-$((GBS * (TRAIN_STEPS + 5)))}"
+FSDP_VAL_SAMPLES="${FSDP_VAL_SAMPLES:-128}"
+FSDP_STEP_TIME_ATOL="${FSDP_STEP_TIME_ATOL:-300000}"
+FSDP_EVAL_INTERVAL="${FSDP_EVAL_INTERVAL:-0}"
 FP8_SCALING="${FP8_SCALING:-delayed}"
 if [[ -z "${FP8_FORMAT:-}" ]]; then
     FP8_FORMAT="hybrid"
@@ -59,6 +74,11 @@ else
     FP8_QUANTIZE_OUTPUT_LAYER="${FP8_QUANTIZE_OUTPUT_LAYER:-1}"
     LUMEN_WEIGHT_QUANT_ONCE="${LUMEN_WEIGHT_QUANT_ONCE:-1}"
     MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS:-0}"
+fi
+if [[ "${BACKEND}" == "fsdp" ]]; then
+    # FSDP replaces parameter storage while flattening/sharding. A cache made
+    # before wrapping would retain stale FP8 pointers into the old storage.
+    LUMEN_WEIGHT_QUANT_ONCE=0
 fi
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
 
@@ -120,10 +140,10 @@ if [ "${PRECISION}" = "fp8" ]; then
         FP8_ENV+=(-e LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED=1)
     fi
     if [[ "${FP8_SCALING}" == "delayed" ]]; then
-        FP8_ENV+=(
-            -e LUMEN_STEP_BATCH_SCALES="${LUMEN_STEP_BATCH_SCALES:-0}"
-            -e LUMEN_FP8_DELAYED_GFX1250_FLYDSL=1
-        )
+        FP8_ENV+=(-e LUMEN_STEP_BATCH_SCALES="${LUMEN_STEP_BATCH_SCALES:-0}")
+        if [[ "${BACKEND}" == "megatron" ]]; then
+            FP8_ENV+=(-e LUMEN_FP8_DELAYED_GFX1250_FLYDSL=1)
+        fi
     fi
 fi
 
@@ -147,7 +167,11 @@ fi
 if [ "${NPROC}" -eq 1 ]; then
     USE_DISTRIBUTED_OPTIMIZER="${USE_DISTRIBUTED_OPTIMIZER:-0}"
     OVERLAP_GRAD_REDUCE="${OVERLAP_GRAD_REDUCE:-0}"
-    if [[ "${GPU_ARCHS}" == "gfx1250" && "${PRECISION}" == "fp8" ]]; then
+    if [[ "${GPU_ARCHS}" == "gfx1250" && "${BACKEND}" == "fsdp" ]]; then
+        AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}"
+        GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
+        CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
+    elif [[ "${GPU_ARCHS}" == "gfx1250" && "${PRECISION}" == "fp8" ]]; then
         AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}"
         GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-1}"
         CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
@@ -255,7 +279,11 @@ docker run --rm --init \
     -e LUMEN_SKIP_BACKEND_SYNC="${LUMEN_SKIP_BACKEND_SYNC:-1}" \
     -e AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL}" \
     "${FP8_ENV[@]}" \
-    -e NPROC="${NPROC}" -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
+    -e BACKEND="${BACKEND}" -e NPROC="${NPROC}" -e MBS="${MBS}" -e GBS="${GBS}" -e SEQ_LEN="${SEQ_LEN}" \
+    -e GRAD_ACCUM="${GRAD_ACCUM}" -e FSDP_SHARDING="${FSDP_SHARDING}" \
+    -e FSDP_TRAIN_SAMPLES="${FSDP_TRAIN_SAMPLES}" -e FSDP_VAL_SAMPLES="${FSDP_VAL_SAMPLES}" \
+    -e FSDP_STEP_TIME_ATOL="${FSDP_STEP_TIME_ATOL}" \
+    -e FSDP_EVAL_INTERVAL="${FSDP_EVAL_INTERVAL}" \
     -e NUM_LAYERS="${NUM_LAYERS}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
     -e MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS}" \
@@ -270,10 +298,13 @@ DATA_DIR="/results/mock_data"
 TRAIN_JSONL="${DATA_DIR}/mock_train.jsonl"
 mkdir -p "${DATA_DIR}"
 
-python -c "import megatron" 2>/dev/null || { echo "ERROR: megatron not found in image"; exit 1; }
-
-MEGATRON_ROOT="${MEGATRON_ROOT:-/workspace/megatron_lm}"
-PYTHONPATH="${LUMEN_ROOT}" python3 "${PATCH_SCRIPT}" "${MEGATRON_ROOT}" --tag llama
+if [[ "${BACKEND}" == "megatron" ]]; then
+    python -c "import megatron" 2>/dev/null || { echo "ERROR: megatron not found in image"; exit 1; }
+    MEGATRON_ROOT="${MEGATRON_ROOT:-/workspace/megatron_lm}"
+    PYTHONPATH="${LUMEN_ROOT}" python3 "${PATCH_SCRIPT}" "${MEGATRON_ROOT}" --tag llama
+else
+    python -c "import transformers" 2>/dev/null || { echo "ERROR: transformers not found in image"; exit 1; }
+fi
 
 python - <<PYEOF
 import os, json, random
@@ -296,6 +327,43 @@ PYEOF
 
 cd "${PRETRAIN_DIR}"
 set -x
+if [[ "${BACKEND}" == "fsdp" ]]; then
+torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
+    --backend fsdp \
+    --hidden-size 4096 \
+    --intermediate-size 14336 \
+    --num-layers "${NUM_LAYERS}" \
+    --num-attention-heads 32 \
+    --num-key-value-heads 8 \
+    --vocab-size 128256 \
+    --max-position-embeddings "${SEQ_LEN}" \
+    --rope-theta 500000 \
+    --seq-length "${SEQ_LEN}" \
+    --tokenizer-name-or-path /tokenizer \
+    --micro-batch-size "${MBS}" \
+    --gradient-accumulation-steps "${GRAD_ACCUM}" \
+    --max-steps "${TRAIN_STEPS}" \
+    --lr 1.0e-5 --min-lr 0.0 \
+    --lr-warmup-steps 2 \
+    --weight-decay 0.1 \
+    --max-grad-norm 1.0 \
+    --log-interval 1 \
+    --save-interval 0 \
+    --num-workers 2 \
+    --train-data-path "${TRAIN_JSONL}" \
+    --val-data-path "${TRAIN_JSONL}" \
+    --train-samples "${FSDP_TRAIN_SAMPLES}" \
+    --val-samples "${FSDP_VAL_SAMPLES}" \
+    --sharding-strategy "${FSDP_SHARDING}" \
+    --fsdp-version 1 \
+    --warmup-steps 0 \
+    --eval-interval "${FSDP_EVAL_INTERVAL}" \
+    --step-time-atol "${FSDP_STEP_TIME_ATOL}" \
+    --hf-attn-patch \
+    --lumen-attn-backend csrc \
+    '"${FP8_ARGS[*]}"' \
+    2>&1 | tee "/results/lumen_llama31_8b_fsdp_'"${PRECISION}"'.log"
+else
 torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --backend megatron \
     --num-layers "${NUM_LAYERS}" \
@@ -349,7 +417,12 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     '"${ROPE_ARGS[*]}"' \
     '"${FP8_ARGS[*]}"' \
     2>&1 | tee "/results/lumen_llama31_8b_'"${PRECISION}"'.log"
+fi
 '
 
 echo ""
-echo "[DONE] log: ${RESULTS_DIR}/lumen_llama31_8b_${PRECISION}.log"
+if [[ "${BACKEND}" == "fsdp" ]]; then
+    echo "[DONE] log: ${RESULTS_DIR}/lumen_llama31_8b_fsdp_${PRECISION}.log"
+else
+    echo "[DONE] log: ${RESULTS_DIR}/lumen_llama31_8b_${PRECISION}.log"
+fi

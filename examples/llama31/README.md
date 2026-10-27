@@ -61,6 +61,33 @@ RESULTS_DIR=examples/llama31/results/repro_mi450_fp8_delayed \
 bash examples/llama31/run_pretrain_llama31_8b.sh
 ```
 
+### FSDP backend
+
+The same container launcher supports the HuggingFace/PyTorch FSDP flow. It
+derives gradient accumulation from `GBS / (MBS * NPROC)` and uses `no_shard`
+for one GPU or `full_shard` for multiple GPUs.
+
+```bash
+# FSDP BF16
+BACKEND=fsdp GPU_ARCHS=gfx1250 NPROC=1 HIP_VISIBLE_DEVICES=0 \
+PRECISION=bf16 MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
+RESULTS_DIR=examples/llama31/results/repro_mi450_fsdp_bf16 \
+bash examples/llama31/run_pretrain_llama31_8b.sh
+
+# FSDP FP8 delayed; use FP8_SCALING=blockwise for blockwise FP8
+BACKEND=fsdp GPU_ARCHS=gfx1250 NPROC=1 HIP_VISIBLE_DEVICES=0 \
+PRECISION=fp8 FP8_SCALING=delayed \
+MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
+RESULTS_DIR=examples/llama31/results/repro_mi450_fsdp_fp8 \
+bash examples/llama31/run_pretrain_llama31_8b.sh
+```
+
+FSDP evaluation is disabled by default because the first evaluation compiles
+additional inference attention kernels. Set `FSDP_EVAL_INTERVAL=50` and
+`FSDP_VAL_SAMPLES=128` to evaluate after step 50. FSDP disables the
+pre-wrapping FP8 weight cache because FSDP replaces parameter storage while
+flattening/sharding.
+
 `IMAGE` defaults to `zhangdanyangamd/lumen:dev-gfx1250`. Each run writes
 `lumen_llama31_8b_<precision>.log` and generated mock data under its
 `RESULTS_DIR`. Published reference logs are:
@@ -119,10 +146,14 @@ PRECISION=fp8 MBS=2 GBS=128 SEQ_LEN=8192 TRAIN_STEPS=50 \
 
 | Variable | Default | Notes |
 |----------|---------|-------|
+| `BACKEND` | `megatron` | `megatron` or `fsdp` |
 | `PRECISION` | `fp8` | `fp8` (delayed/hybrid) or `bf16` |
 | `IMAGE` | `zhangdanyangamd/lumen:dev-gfx1250` | Published gfx1250 Docker image |
 | `GPU_ARCHS` | `gfx1250` | Kernel architecture selector |
 | `NPROC` | `1` | Number of visible training GPUs |
+| `GRAD_ACCUM` | derived | FSDP gradient accumulation; defaults to `GBS/(MBS*NPROC)` |
+| `FSDP_SHARDING` | `no_shard` on one GPU | FSDP sharding strategy |
+| `FSDP_EVAL_INTERVAL` | `0` | Set above zero to enable FSDP validation |
 | `MBS` / `GBS` | `2` / `128` | micro / global batch size |
 | `SEQ_LEN` | `8192` | sequence length |
 | `TRAIN_STEPS` | `50` | training iterations |
