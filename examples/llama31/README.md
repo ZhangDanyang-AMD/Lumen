@@ -27,7 +27,7 @@ docker pull zhangdanyangamd/lumen:dev-gfx1250
 ```
 
 Published digest for this revision:
-`sha256:8d6ad43e9b98f03e4983ceb55612c5498a6c74ade3186c5e6b818774246d54d3`.
+`sha256:6dbc355d1be87c2fca943885a266b83a9afe8fc44361d2cc04b7efaca787e9bf`.
 
 The launcher mounts the current Lumen checkout, tokenizer, and results directory
 into the container. It passes `/dev/kfd` and `/dev/dri` through automatically.
