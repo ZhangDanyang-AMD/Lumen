@@ -1,13 +1,40 @@
-ARG BASE_IMAGE=amdagi/veomni:rocm7.14_torch2.12_py3.12
+ARG BASE_IMAGE=rocm/7.0:rocm7.0_ubuntu22.04_py3.10_pytorch_release_2.8.0_rc1
 FROM ${BASE_IMAGE}
 
+WORKDIR /workspace
+
+COPY . /workspace/Lumen
+
+ENV GPU_ARCHS=gfx950
+ENV AITER_USE_SYSTEM_TRITON=1
 ENV DS_BUILD_OPS=0 \
     TOKENIZERS_PARALLELISM=false \
     PYTHONUNBUFFERED=1
 
-# Keep DeepSpeed's optional CUDA/HIP extensions disabled for the initial
-# ZeRO-1/2 path. Lumen/AITER owns the model kernels and torch.optim.AdamW avoids
-# DeepSpeedCPUAdam/fused-optimizer JIT compilation.
+RUN groupadd -f video && groupadd -f render
+
+# Install DeepSpeed before exposing AITER on PYTHONPATH. DeepSpeed imports Apex
+# while generating package metadata; Apex otherwise imports AITER and attempts
+# runtime GPU detection, which is unavailable during docker build.
 RUN pip install --no-cache-dir "deepspeed==0.19.8"
 
-WORKDIR /workspace/Lumen
+# Build the repository's validated AITER revision, matching the main Llama2
+# image rather than inheriting kernels from an unrelated application image.
+RUN cd /workspace/Lumen/third_party/aiter && \
+    PREBUILD_KERNELS=1 pip install -e .
+
+# Lumen owns model kernels. DeepSpeed custom optimizer extensions stay disabled;
+# the ZeRO-1/2 path uses torch.optim.AdamW.
+RUN cd /workspace/Lumen && pip install -e . --no-deps && \
+    pip install "torchao==0.13.0" && \
+    pip install -r requirements.txt && \
+    pip install -r examples/llama2/requirements.txt
+
+ENV PYTHONPATH="/workspace/Lumen/third_party/aiter:/workspace/Lumen:${PYTHONPATH:-}"
+ENV HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+ENV USE_HIPBLASLT=1
+ENV TORCH_BLAS_PREFER_HIPBLASLT=1
+ENV CUDA_DEVICE_MAX_CONNECTIONS=8
+ENV OMP_NUM_THREADS=1
+
+WORKDIR /workspace/Lumen/examples/llama2
