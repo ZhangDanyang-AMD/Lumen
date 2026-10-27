@@ -26,6 +26,9 @@ All MI450 training commands use the published image
 docker pull zhangdanyangamd/lumen:dev-gfx1250
 ```
 
+Published digest for this revision:
+`sha256:76c583d4b2f66a343d56f1feefa0900488901861dd8a748547d496a02c6e9dcf`.
+
 The launcher mounts the current Lumen checkout, tokenizer, and results directory
 into the container. It passes `/dev/kfd` and `/dev/dri` through automatically.
 The host therefore needs Docker access to those devices and a tokenizer under
