@@ -22,7 +22,12 @@ def install_fp8_param_gather_hook() -> None:
         model, optimizer, scheduler = current_setup(*args, **kwargs)
         train_args = get_args()
         _weight_quant_once = os.environ.get("LUMEN_WEIGHT_QUANT_ONCE", "0") == "1"
-        if (getattr(train_args, "lumen_fp8_param_gather", False) or _weight_quant_once) and model:
+        _step_batch_scales = os.environ.get("LUMEN_STEP_BATCH_SCALES", "0") == "1"
+        if (
+            getattr(train_args, "lumen_fp8_param_gather", False)
+            or _weight_quant_once
+            or _step_batch_scales
+        ) and model:
             target = model[0] if isinstance(model, list) else model
             register_fp8_param_optimizer_hook(target, optimizer)
         return model, optimizer, scheduler

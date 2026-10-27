@@ -554,23 +554,34 @@ class ScalingManager:
         ``torch.stack(list(history)).amax()`` (CatArrayBatchedCopy kernel).
         """
         t = tensor.detach()
+        new_tensor_id = tensor_id not in self.amax_history
         if t.is_cuda and t.dim() >= 2:
             amax_t = _get_fused_amax_abs()(t)
         else:
             amax_t = t.abs().amax()
-        self.amax_history[tensor_id].append(amax_t.item())
         if self._step_batch_enabled:
+            # The fixed CUDA ring is the source of truth for MAX history.
+            # Keep only a host sentinel in the deque so bookkeeping does not
+            # force a scalar D2H sync or retain thousands of CUDA scalar objects.
+            self.amax_history[tensor_id].append(0.0)
             self._ring_append(tensor_id, amax_t)
+            if new_tensor_id:
+                self._batch_scales_valid = False
         else:
+            self.amax_history[tensor_id].append(amax_t.item())
             self._batch_scales_valid = False
 
     def update_amax_value(self, tensor_id: str, amax: torch.Tensor):
         """Record a pre-computed amax value, skipping the abs().amax() pass."""
-        amax_val = float(amax.detach().squeeze())
-        self.amax_history[tensor_id].append(amax_val)
+        new_tensor_id = tensor_id not in self.amax_history
         if self._step_batch_enabled:
-            self._ring_append(tensor_id, amax.detach().squeeze())
+            amax_scalar = amax.detach().squeeze()
+            self.amax_history[tensor_id].append(0.0)
+            self._ring_append(tensor_id, amax_scalar)
+            if new_tensor_id:
+                self._batch_scales_valid = False
         else:
+            self.amax_history[tensor_id].append(float(amax.detach().squeeze()))
             self._batch_scales_valid = False
 
     def _ring_append(self, tensor_id: str, amax: torch.Tensor) -> None:
@@ -1070,7 +1081,7 @@ class ScalingManager:
                 scale,
                 dtype,
             )
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1093,7 +1104,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1121,7 +1132,7 @@ class ScalingManager:
                     dtype,
                     clamp_max=float(fp8_max),
                 )
-                self.amax_history[tensor_id].append(float(amax.squeeze()))
+                self.update_amax_value(tensor_id, amax)
                 return FP8Descriptor(
                     data=fp8_data.view(tensor.shape),
                     scale=scale,
@@ -1165,7 +1176,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
             return self._eager_transpose(desc) if not backward else desc
 

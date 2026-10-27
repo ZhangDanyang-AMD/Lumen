@@ -35,14 +35,32 @@ NUM_LAYERS="${NUM_LAYERS:-32}"
 SEED="${SEED:-1234}"
 FP8_SCALING="${FP8_SCALING:-delayed}"
 if [[ -z "${FP8_FORMAT:-}" ]]; then
-    if [[ "${FP8_SCALING}" == "delayed" ]]; then
-        FP8_FORMAT="fp8_e4m3"
-    else
-        FP8_FORMAT="hybrid"
-    fi
+    FP8_FORMAT="hybrid"
 fi
-LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
-LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
+if [[ "${PRECISION}" == "fp8" && "${FP8_SCALING}" == "delayed" ]]; then
+    LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
+    LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
+    # LumenSpecProvider's norm/MLP/residual execution uses these fused
+    # equivalents of the reference Megatron modules; disabling them changes
+    # model semantics rather than merely selecting slower kernels.
+    LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}"
+    LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}"
+    LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}"
+    LUMEN_FUSED_RES_BWD="${LUMEN_FUSED_RES_BWD:-1}"
+    FP8_QUANTIZE_OUTPUT_LAYER="${FP8_QUANTIZE_OUTPUT_LAYER:-0}"
+    LUMEN_WEIGHT_QUANT_ONCE="${LUMEN_WEIGHT_QUANT_ONCE:-1}"
+    MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS:-207108371}"
+else
+    LUMEN_CROSS_ENTROPY="${LUMEN_CROSS_ENTROPY:-1}"
+    LUMEN_FUSED_ROPE="${LUMEN_FUSED_ROPE:-1}"
+    LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}"
+    LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}"
+    LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}"
+    LUMEN_FUSED_RES_BWD="${LUMEN_FUSED_RES_BWD:-1}"
+    FP8_QUANTIZE_OUTPUT_LAYER="${FP8_QUANTIZE_OUTPUT_LAYER:-1}"
+    LUMEN_WEIGHT_QUANT_ONCE="${LUMEN_WEIGHT_QUANT_ONCE:-1}"
+    MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS:-0}"
+fi
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
 
 BF16_CONFIG_ENV=()
@@ -96,11 +114,17 @@ if [ "${PRECISION}" = "fp8" ]; then
         -e LUMEN_FUSED_NORM_QUANT_V2=1
         -e LUMEN_TRANSPOSE_CACHE=1
         -e LUMEN_FAST_QUANT_DISPATCH=1
-        -e LUMEN_WEIGHT_QUANT_ONCE=1
+        -e LUMEN_WEIGHT_QUANT_ONCE="${LUMEN_WEIGHT_QUANT_ONCE}"
         -e LUMEN_SYNC_FP8_CACHE_INVALIDATE=1
     )
     if [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
         FP8_ENV+=(-e LUMEN_FP8_BLOCKSCALE_GFX1250_TUNED=1)
+    fi
+    if [[ "${FP8_SCALING}" == "delayed" ]]; then
+        FP8_ENV+=(
+            -e LUMEN_STEP_BATCH_SCALES="${LUMEN_STEP_BATCH_SCALES:-0}"
+            -e LUMEN_FP8_DELAYED_GFX1250_FLYDSL=1
+        )
     fi
 fi
 
@@ -114,6 +138,9 @@ if [ "${PRECISION}" = "fp8" ]; then
         --linear-fp8-amax-algo max
         --linear-fp8-amax-history 1024
     )
+    if [[ "${FP8_QUANTIZE_OUTPUT_LAYER}" == "1" ]]; then
+        FP8_ARGS+=(--linear-fp8-quantize-output-layer)
+    fi
 fi
 
 # Single-rank runs do not need distributed optimizer communication. gfx1250
@@ -137,7 +164,11 @@ if [ "${NPROC}" -eq 1 ]; then
     if [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
         LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-1}"
         LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-1}"
-        LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-1}"
+        if [[ "${FP8_SCALING}" == "delayed" ]]; then
+            LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-0}"
+        else
+            LUMEN_SYNC_LINEAR_BWD="${LUMEN_SYNC_LINEAR_BWD:-1}"
+        fi
     else
         LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM:-0}"
         LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD:-0}"
@@ -214,10 +245,10 @@ docker run --rm --init \
     -e LUMEN_GEMM_BF16="${LUMEN_GEMM_BF16:-1}" \
     -e LUMEN_GEMM_BF16_BACKEND="${LUMEN_GEMM_BF16_BACKEND}" \
     "${BF16_CONFIG_ENV[@]}" \
-    -e LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR:-1}" \
-    -e LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU:-1}" \
-    -e LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM:-1}" \
-    -e LUMEN_FUSED_RES_BWD="${LUMEN_FUSED_RES_BWD:-1}" \
+    -e LUMEN_FUSE_NORM_LINEAR="${LUMEN_FUSE_NORM_LINEAR}" \
+    -e LUMEN_FUSED_SWIGLU="${LUMEN_FUSED_SWIGLU}" \
+    -e LUMEN_FUSED_RESIDUAL_NORM="${LUMEN_FUSED_RESIDUAL_NORM}" \
+    -e LUMEN_FUSED_RES_BWD="${LUMEN_FUSED_RES_BWD}" \
     -e LUMEN_DISABLE_OPTIMIZER_PATCHES=1 \
     -e LUMEN_SYNC_BEFORE_GRAD_NORM="${LUMEN_SYNC_BEFORE_GRAD_NORM}" \
     -e LUMEN_SYNC_BF16_LINEAR_BWD="${LUMEN_SYNC_BF16_LINEAR_BWD}" \
@@ -229,6 +260,7 @@ docker run --rm --init \
     -e NUM_LAYERS="${NUM_LAYERS}" \
     -e ATTN_BACKEND="${ATTN_BACKEND}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
+    -e MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS}" \
     "${IMAGE}" \
     bash -c '
 set -euo pipefail
@@ -251,7 +283,8 @@ seq = int(os.environ["SEQ_LEN"])
 gbs = int(os.environ["GBS"])
 steps = int(os.environ["TRAIN_STEPS"])
 need_chunks = gbs * (steps + 5)
-need_tokens = int(need_chunks * (seq + 1) * 1.2)
+requested_tokens = int(os.environ.get("MOCK_DATA_TOKENS", "0"))
+need_tokens = requested_tokens or int(need_chunks * (seq + 1) * 1.2)
 random.seed(int(os.environ["SEED"]))
 path = "${TRAIN_JSONL}"
 words_per_doc = 4000

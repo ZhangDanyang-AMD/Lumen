@@ -314,6 +314,14 @@ def add_common_megatron_args(parser):
         default=False,
         help="Cache FP8-quantised frozen base weights to avoid re-quantisation on every forward/recompute.",
     )
+    safe_add_argument(
+        lfp8,
+        "--linear-fp8-quantize-output-layer",
+        dest="linear_fp8_quantize_output_layer",
+        action="store_true",
+        default=False,
+        help="Quantize the output/vocabulary projection; it remains BF16 by default.",
+    )
 
     safe_add_argument(
         _linear_quant_gate,

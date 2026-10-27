@@ -672,6 +672,33 @@ def _gemm_per_tensor_triton(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, b
     return out
 
 
+def _gemm_per_tensor_flydsl(a_fp8, w_fp8, scale_a, scale_w):
+    """gfx1250 FlyDSL A8W8 GEMM with per-tensor scales broadcast by row."""
+    from aiter.ops.gemm_op_a8w8 import gemm_a8w8_bpreshuffle_flydsl
+    from aiter.ops.shuffle import shuffle_weight
+
+    m, n = a_fp8.shape[0], w_fp8.shape[0]
+    w_shuffled = getattr(w_fp8, "_lumen_wsh_per_tensor", None)
+    if w_shuffled is None:
+        w_shuffled = shuffle_weight(w_fp8, layout=(16, 16))
+    sa = _expand_per_tensor_scale(scale_a, m).view(m, 1)
+    sw = _expand_per_tensor_scale(scale_w, n).view(n, 1)
+    out = torch.empty((m, n), dtype=torch.bfloat16, device=a_fp8.device)
+    return gemm_a8w8_bpreshuffle_flydsl(
+        a_fp8,
+        w_shuffled,
+        sa,
+        sw,
+        out,
+        {
+            "kernelName": (
+                "flydsl_bpreshuffle_wmma_t256x256x256_"
+                "mw2_nw2_nb2_sk1_cm1_cn1"
+            )
+        },
+    )
+
+
 def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None):
     """Per-tensor FP8 GEMM: Y = X @ W^T. Triton first, hipBLASLt as fallback.
 
@@ -681,6 +708,16 @@ def gemm_per_tensor(a_fp8, w_fp8, scale_a, scale_w, w_transposed=None, bias=None
     When *bias* is provided and hipBLASLt is the selected backend, the bias
     is fused into the GEMM epilogue, saving a separate kernel launch.
     """
+    if (
+        bias is None
+        and os.environ.get("LUMEN_FP8_DELAYED_GFX1250_FLYDSL", "0") == "1"
+    ):
+        from lumen.ops.quantize.ops import triton_arch
+
+        if triton_arch() == "gfx1250":
+            return _gemm_per_tensor_flydsl(
+                a_fp8, w_fp8, scale_a, scale_w
+            )
     if _FAST_GEMM_DISPATCH:
         fn = _get_fast_gemm_fn("gemm_per_tensor")
         if fn is not None:
@@ -822,7 +859,14 @@ def gemm_wgrad_fp8(grad_fp8, input_fp8, scale_grad, scale_input):
     return try_backends(backends, op_name="gemm_wgrad_fp8")
 
 
-def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
+def gemm_wgrad_mixed(
+    grad_fp8,
+    input_fp8,
+    scale_grad,
+    scale_input,
+    grad_t=None,
+    input_t=None,
+):
     """Mixed-dtype FP8 wgrad GEMM: ``dW = grad^T @ input``.
 
     For hybrid backward ``grad_fp8`` is E5M2 ``(M, N_out)`` and ``input_fp8``
@@ -842,7 +886,24 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
     wgrad skip the dedicated transpose kernel entirely — the fused quant already
     paid for it — so grad is transposed once instead of twice.
     """
-    if _probe_aiter_hipblas():
+    if grad_fp8.dtype != input_fp8.dtype and input_t is not None:
+        if grad_t is None:
+            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+            grad_t = fast_transpose_fp8(grad_fp8)
+        sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device).reshape(1)
+        si = _scale_to_f32_1x1(scale_input, input_fp8.device).reshape(1)
+        return torch._scaled_mm(
+            grad_t,
+            input_t.t(),
+            scale_a=sg,
+            scale_b=si,
+            out_dtype=torch.bfloat16,
+        )
+
+    # gfx1250 AITER's hipb_mm pybind does not expose E5M2, so hybrid
+    # E5M2-gradient × E4M3-activation wgrad must use the mixed Triton kernel.
+    if _probe_aiter_hipblas() and grad_fp8.dtype == input_fp8.dtype:
         ensure_hipblaslt_ready()
         if grad_t is None:
             from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
@@ -859,7 +920,30 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
         return hipb_mm(grad_t, input_fp8, sol, out_dtype=torch.bfloat16,
                        scaleA=sg, scaleB=si)
 
-    from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+    try:
+        from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+    except (ImportError, ModuleNotFoundError):
+        # The gfx1250 image predates AITER's mixed-dtype Triton GEMM. Preserve
+        # hybrid delayed semantics at the quantizer boundary, then requantize
+        # the E5M2 gradient to the activation's E4M3 dtype for hipBLASLt.
+        grad_bf16 = (
+            grad_fp8.bfloat16()
+            * _scale_to_f32_1x1(scale_grad, grad_fp8.device).bfloat16()
+        )
+        grad_e4 = quantize_input(
+            grad_bf16,
+            "dynamic",
+            input_fp8.dtype,
+            block_size=128,
+            manager=None,
+            tensor_id="hybrid_wgrad_requant",
+        )
+        return gemm_wgrad_fp8(
+            grad_e4.data,
+            input_fp8,
+            grad_e4.scale,
+            scale_input,
+        )
 
     N_out = grad_fp8.shape[1]
     K_in = input_fp8.shape[1]
@@ -1799,11 +1883,12 @@ def _fp8_cached_weight(
     scaling_type,
     fp8_dtype,
     block_size,
+    manager=None,
 ):
-    """Cache a trainable blockwise FP8 weight for one optimizer step."""
+    """Cache a trainable FP8 weight for one optimizer step."""
     if (
         not _WEIGHT_QUANT_ONCE
-        or scaling_type not in ("blockwise", "blockwise2d")
+        or scaling_type not in ("delayed", "blockwise", "blockwise2d")
     ):
         return None, None
 
@@ -1812,15 +1897,28 @@ def _fp8_cached_weight(
     if cached is not None and scale is not None:
         return cached, scale
 
+    if (
+        scaling_type == "delayed"
+        and manager is not None
+        and not manager.amax_history.get("weight_cache")
+    ):
+        manager.update_amax("weight_cache", weight.detach())
+
     desc = quantize_input(
         weight.detach().contiguous(),
         scaling_type,
         fp8_dtype,
         block_size,
-        manager=None,
+        manager=manager if scaling_type == "delayed" else None,
         tensor_id="weight_cache",
         is_weight=True,
     )
+    if scaling_type == "delayed":
+        from aiter.ops.shuffle import shuffle_weight
+
+        desc.data._lumen_wsh_per_tensor = shuffle_weight(
+            desc.data, layout=(16, 16)
+        )
     weight._lumen_fp8_w_cache = desc.data
     weight._lumen_fp8_w_scale = desc.scale
     return desc.data, desc.scale
@@ -2204,6 +2302,17 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if bias is not None and not _fuse_bias:
             output = output + bias
 
+        ctx.input_fp8_transpose = (
+            input_desc.transpose_cached
+            if scaling_type in ("delayed", "dynamic")
+            else None
+        )
+        ctx.weight_fp8_transpose = (
+            weight_desc.transpose_cached
+            if scaling_type in ("delayed", "dynamic")
+            else None
+        )
+
         # blockwise / blockwise2d bwd (Jet-RL §4.2): activation is stored in FP8
         # (1×128 quantized) for memory efficiency.  WGrad "Requantizes" it to
         # 128×1 by dequantizing back to BF16 and re-quantizing along axis=0.
@@ -2505,9 +2614,23 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     weight_desc = _cd
         if weight_desc is None:
             weight_desc = FP8Descriptor.from_tensors(weight_data, weight_scale, fp8_dtype)
+        weight_desc._transpose = getattr(ctx, "weight_fp8_transpose", None)
 
         mgr = ctx.scaling_manager
         bwd_dtype = getattr(mgr, "fp8_dtype_bwd", fp8_dtype) if mgr else fp8_dtype
+        _gfx1250_flydsl_bwd = False
+        if os.environ.get("LUMEN_FP8_DELAYED_GFX1250_FLYDSL", "0") == "1":
+            from lumen.ops.quantize.ops import triton_arch
+
+            _gfx1250_flydsl_bwd = (
+                scaling_type in ("delayed", "dynamic")
+                and triton_arch() == "gfx1250"
+            )
+            if _gfx1250_flydsl_bwd:
+                # gfx1250 FlyDSL A8W8 reads E4M3 operands. Quantize backward
+                # directly to E4M3 instead of producing E5M2 and immediately
+                # requantizing it before both gradient GEMMs.
+                bwd_dtype = fp8_dtype
 
         # ----- blockwise / blockwise2d: full FP8 DGrad + WGrad (Jet-RL §4.2) -----
         # Activation is stored in FP8 (1×128) from fwd for memory efficiency.
@@ -2960,23 +3083,67 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # fused quant kernel ran (LUMEN_FUSED_QUANT_TRANSPOSE_CPP). When present,
         # wgrad reuses it instead of transposing grad a second time.
         grad_t = None
+        grad_desc = None
         if _cached is not None:
             grad_fp8, grad_scale = _cached
         else:
             # Pass manager + backward=True so delayed scaling uses the
             # single-kernel static_quant_with_amax path instead of falling
             # through to the 2-kernel dynamic_per_tensor_quant_fp8_i8.
+            _grad_tensor_id = (ctx.tensor_id or "linear") + "_bwd"
+            if (
+                _gfx1250_flydsl_bwd
+                and mgr is not None
+                and not mgr.amax_history.get(_grad_tensor_id)
+            ):
+                mgr.update_amax(_grad_tensor_id, grad_flat)
             grad_desc = quantize_input(
                 grad_flat, bwd_scaling, bwd_dtype, block_size,
                 manager=mgr,
-                tensor_id=(ctx.tensor_id or "linear") + "_bwd",
-                backward=True,
+                tensor_id=_grad_tensor_id,
+                # gfx1250 FlyDSL consumes E4M3 on both sides. Reuse the
+                # manager's delayed forward-dtype history for gradients rather
+                # than quantizing E5M2 and immediately requantizing it.
+                backward=not _gfx1250_flydsl_bwd,
             )
             grad_fp8, grad_scale = grad_desc.data, grad_desc.scale
             grad_t = grad_desc._transpose
 
+        _flydsl_grad = None
+        if _gfx1250_flydsl_bwd:
+            if _is_e5m2(grad_fp8.dtype):
+                grad_bf16 = (
+                    grad_fp8.bfloat16()
+                    * _scale_to_f32_1x1(
+                        grad_scale, grad_fp8.device
+                    ).bfloat16()
+                )
+                _flydsl_grad = quantize_input(
+                    grad_bf16,
+                    "dynamic",
+                    fp8_dtype,
+                    block_size,
+                    manager=None,
+                    tensor_id="hybrid_bwd_flydsl",
+                )
+            else:
+                _flydsl_grad = (
+                    grad_desc
+                    if grad_desc is not None
+                    else FP8Descriptor.from_tensors(
+                        grad_fp8, grad_scale, fp8_dtype
+                    )
+                )
+
         _needs_dequant = scaling_type == "per_token"
-        if _needs_dequant:
+        if _flydsl_grad is not None:
+            grad_input = _gemm_per_tensor_flydsl(
+                _flydsl_grad.data,
+                weight_desc.transpose_cached,
+                _flydsl_grad.scale,
+                weight_desc.scale,
+            )
+        elif _needs_dequant:
             from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
 
             grad_bf16 = (grad_fp8.bfloat16() * grad_scale.bfloat16())
@@ -3016,6 +3183,17 @@ class QuantizedLinearFunction(torch.autograd.Function):
             _hipblas_ok or bwd_scaling not in ("delayed", "dynamic")
         )
 
+        def _flydsl_wgrad():
+            input_t = getattr(ctx, "input_fp8_transpose", None)
+            if input_t is None:
+                input_t = input_data.t().contiguous()
+            return _gemm_per_tensor_flydsl(
+                _flydsl_grad.transpose_cached,
+                input_t,
+                _flydsl_grad.scale,
+                input_scale,
+            )
+
         if ctx.delay_wgrad and ctx.deferred_wgrad is not None:
             _use_fp8 = _use_fp8_wgrad
             _use_hipblas = _hipblas_ok
@@ -3030,7 +3208,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
             _grad_t = grad_t  # fused grad^T (or None); reused by mixed wgrad
 
             def _wgrad_fn():
-                if _use_fp8:
+                if _flydsl_grad is not None:
+                    gw = _flydsl_wgrad()
+                elif _use_fp8:
                     if _use_hipblas and _bwd_scaling in ("delayed", "dynamic") \
                             and _grad_fp8.dtype == _input_data.dtype:
                         gw = gemm_wgrad_fp8(
@@ -3041,6 +3221,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                         gw = gemm_wgrad_mixed(
                             _grad_fp8, _input_data, _grad_scale, _input_scale,
                             grad_t=_grad_t,
+                            input_t=getattr(ctx, "input_fp8_transpose", None),
                         )
                     else:
                         gw = dispatch_gemm(
@@ -3072,7 +3253,9 @@ class QuantizedLinearFunction(torch.autograd.Function):
             ctx.deferred_wgrad.defer(_wgrad_fn)
             grad_weight = None
         else:
-            if _use_fp8_wgrad:
+            if _flydsl_grad is not None:
+                grad_weight = _flydsl_wgrad()
+            elif _use_fp8_wgrad:
                 if _hipblas_ok and bwd_scaling in ("delayed", "dynamic") \
                         and grad_fp8.dtype == input_data.dtype:
                     grad_weight = gemm_wgrad_fp8(
@@ -3084,6 +3267,7 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     grad_weight = gemm_wgrad_mixed(
                         grad_fp8, input_data, grad_scale, input_scale,
                         grad_t=grad_t,
+                        input_t=getattr(ctx, "input_fp8_transpose", None),
                     )
                 else:
                     grad_weight = dispatch_gemm(

@@ -492,6 +492,7 @@ def _enable_quantization_for_parallel_linear(
     # honours it, quantize._patch_linear_layers, only sees Megatron's own linear
     # types, which --lumen-linear has already swapped out by then.
     from lumen.quantize import is_under_bf16_prefix
+    from lumen.quantize import _is_output_layer
 
     bf16_prefixes: Set[str] = set()
     if quant_config is not None and quant_config.first_last_layers_bf16:
@@ -517,6 +518,13 @@ def _enable_quantization_for_parallel_linear(
             module, (LumenColumnParallelLinear, LumenRowParallelLinear, LumenLayerNormLinear, LumenGroupedLinear)
         ):
             if bf16_prefixes and is_under_bf16_prefix(name, bf16_prefixes):
+                skipped += 1
+                continue
+            if (
+                quant_config is not None
+                and not quant_config.quantize_output_layer
+                and _is_output_layer(name)
+            ):
                 skipped += 1
                 continue
             bad_mxfp4_weight = (

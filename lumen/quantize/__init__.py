@@ -1045,6 +1045,11 @@ def register_native_fp8_weight_optimizer_hooks(model, optimizer) -> None:
             torch.cuda.synchronize()
         for chunk in chunks:
             for module in chunk.modules():
+                manager = getattr(module, "scaling_manager", None)
+                if manager is not None and getattr(
+                    manager, "_step_batch_enabled", False
+                ):
+                    manager._batch_scales_valid = False
                 for param in module._parameters.values():
                     if param is None:
                         continue
