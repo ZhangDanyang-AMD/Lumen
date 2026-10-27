@@ -141,7 +141,7 @@ if [ "${PRECISION}" = "fp8" ]; then
     fi
     if [[ "${FP8_SCALING}" == "delayed" ]]; then
         FP8_ENV+=(-e LUMEN_STEP_BATCH_SCALES="${LUMEN_STEP_BATCH_SCALES:-0}")
-        if [[ "${BACKEND}" == "megatron" ]]; then
+        if [[ "${GPU_ARCHS}" == "gfx1250" ]]; then
             FP8_ENV+=(-e LUMEN_FP8_DELAYED_GFX1250_FLYDSL=1)
         fi
     fi
