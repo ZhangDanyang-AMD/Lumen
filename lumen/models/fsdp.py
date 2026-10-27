@@ -65,12 +65,14 @@ def add_common_fsdp_args(parser):
     t.add_argument("--max-steps", type=int, default=800)
     t.add_argument("--lr", type=float, default=4e-4)
     t.add_argument("--min-lr", type=float, default=0.0)
+    t.add_argument("--adam-eps", type=float, default=1e-8)
     t.add_argument("--weight-decay", type=float, default=0.01)
     t.add_argument("--max-grad-norm", type=float, default=1.0)
     t.add_argument("--log-interval", type=int, default=10)
     t.add_argument("--save-interval", type=int, default=0, help="Save checkpoint every N steps. 0 = disabled.")
     t.add_argument("--save-dir", type=str, default="./checkpoints")
     t.add_argument("--num-workers", type=int, default=4)
+    t.add_argument("--seed", type=int, default=1234)
     add_fsdp_runtime_contract_args(t)
 
     # -- Data --
@@ -318,6 +320,12 @@ def add_common_fsdp_args(parser):
         action="store_true",
         default=False,
         help="Route HuggingFace BF16 linear layers through Lumen/AITER GEMM.",
+    )
+    norm.add_argument(
+        "--fuse-hf-projections",
+        action="store_true",
+        default=False,
+        help="Structurally fuse HF Q/K/V and gate/up projections.",
     )
 
     # -- Warmup + Early stopping --

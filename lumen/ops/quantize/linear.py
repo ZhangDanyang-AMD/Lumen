@@ -3595,7 +3595,7 @@ def quantized_linear(
     """
     if fp8_dtype is None:
         fp8_dtype = _get_float8_e4m3()
-        _logger.info("quantized_linear: auto-detected fp8_dtype=%s", fp8_dtype)
+        _logger.debug("quantized_linear: auto-detected fp8_dtype=%s", fp8_dtype)
 
     if scaling_manager is None:
         from lumen.quantize import ScalingManager

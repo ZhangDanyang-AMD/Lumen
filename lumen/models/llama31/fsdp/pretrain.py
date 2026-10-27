@@ -32,6 +32,8 @@ Example::
 import argparse
 import logging
 import os
+import time
+import weakref
 from functools import partial
 
 import torch
@@ -76,6 +78,161 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+class _FusedProjection(nn.Module):
+    """One physical Linear shared by ordered projection-slice proxies."""
+
+    def __init__(self, projections):
+        super().__init__()
+        in_features = projections[0].in_features
+        self.widths = [projection.out_features for projection in projections]
+        self.linear = nn.Linear(
+            in_features,
+            sum(self.widths),
+            bias=projections[0].bias is not None,
+            dtype=projections[0].weight.dtype,
+            device=projections[0].weight.device,
+        )
+        with torch.no_grad():
+            self.linear.weight.copy_(
+                torch.cat([projection.weight for projection in projections])
+            )
+            if self.linear.bias is not None:
+                self.linear.bias.copy_(
+                    torch.cat([projection.bias for projection in projections])
+                )
+        self._cached_input = None
+        self._cached_outputs = None
+        self._remaining = 0
+
+    def project(self, input_tensor, index):
+        if self._cached_input is not input_tensor:
+            self._cached_input = input_tensor
+            self._cached_outputs = self.linear(input_tensor).split(
+                self.widths, dim=-1
+            )
+            self._remaining = len(self.widths)
+        output = self._cached_outputs[index]
+        self._remaining -= 1
+        if self._remaining == 0:
+            self._cached_input = None
+            self._cached_outputs = None
+        return output
+
+
+class _ProjectionSlice(nn.Module):
+    def __init__(self, fused, index):
+        super().__init__()
+        object.__setattr__(self, "_fused_ref", weakref.ref(fused))
+        self.index = index
+
+    def forward(self, input_tensor):
+        return self._fused_ref().project(input_tensor, self.index)
+
+
+def _fuse_hf_llama_projections(model):
+    """Fuse HF Q/K/V projections; gate/up stays separate after benchmarking."""
+    layers = model.model.layers
+    for layer in layers:
+        attention = layer.self_attn
+        qkv = _FusedProjection(
+            [attention.q_proj, attention.k_proj, attention.v_proj]
+        )
+        attention.qkv_fused = qkv
+        attention.q_proj = _ProjectionSlice(qkv, 0)
+        attention.k_proj = _ProjectionSlice(qkv, 1)
+        attention.v_proj = _ProjectionSlice(qkv, 2)
+
+        mlp = layer.mlp
+        gate_up = _FusedProjection([mlp.gate_proj, mlp.up_proj])
+        mlp.gate_up_fused = gate_up
+        mlp.gate_proj = nn.Identity()
+        mlp.up_proj = nn.Identity()
+
+        def _fused_mlp_forward(hidden_states, module=mlp):
+            from lumen.ops.fused_swiglu import fused_swiglu
+
+            gate_up_output = module.gate_up_fused.linear(hidden_states)
+            return module.down_proj(fused_swiglu(gate_up_output))
+
+        mlp.forward = _fused_mlp_forward
+
+    return model
+
+
+class FP32MasterAdamW(torch.optim.AdamW):
+    """AdamW with FP32 master parameters and optimizer state for BF16 FSDP."""
+
+    def __init__(self, model_params, **kwargs):
+        self.model_params = [p for p in model_params if p.requires_grad]
+        for model_param in self.model_params:
+            if getattr(model_param, "_lumen_use_main_grad", False):
+                model_param.main_grad = torch.zeros_like(
+                    model_param, dtype=torch.float32
+                )
+        self.fp32_grad_buffers = [
+            getattr(p, "main_grad", None)
+            if getattr(p, "main_grad", None) is not None
+            else torch.zeros_like(p, dtype=torch.float32)
+            for p in self.model_params
+        ]
+        self._has_accumulated_grad = False
+        self.master_params = [
+            nn.Parameter(p.detach().float(), requires_grad=True)
+            for p in self.model_params
+        ]
+        super().__init__(self.master_params, **kwargs)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        for grad_buffer, master_param in zip(
+            self.fp32_grad_buffers, self.master_params
+        ):
+            master_param.grad = (
+                grad_buffer if self._has_accumulated_grad else None
+            )
+        loss = super().step(closure)
+        for model_param, master_param in zip(
+            self.model_params, self.master_params
+        ):
+            model_param.copy_(master_param)
+        return loss
+
+    def zero_grad(self, set_to_none: bool = True):
+        super().zero_grad(set_to_none=set_to_none)
+        torch._foreach_zero_(self.fp32_grad_buffers)
+        self._has_accumulated_grad = False
+        for model_param in self.model_params:
+            model_param.grad = None
+
+    @torch.no_grad()
+    def accumulate_model_grads(self):
+        buffers = []
+        grads = []
+        for model_param, grad_buffer in zip(
+            self.model_params, self.fp32_grad_buffers
+        ):
+            if model_param.grad is not None:
+                buffers.append(grad_buffer)
+                grads.append(model_param.grad.detach())
+        if grads:
+            torch._foreach_add_(buffers, grads)
+            self._has_accumulated_grad = True
+        for model_param in self.model_params:
+            model_param.grad = None
+
+    @torch.no_grad()
+    def clip_grad_norm(self, max_norm: float):
+        total_sq = torch.zeros((), dtype=torch.float32, device="cuda")
+        for grad in self.fp32_grad_buffers:
+            total_sq.add_(grad.square().sum())
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            dist.all_reduce(total_sq, op=dist.ReduceOp.SUM)
+        total_norm = total_sq.sqrt()
+        clip_coef = (max_norm / (total_norm + 1e-6)).clamp(max=1.0)
+        torch._foreach_mul_(self.fp32_grad_buffers, clip_coef)
+        return total_norm
+
+
 # ---------------------------------------------------------------------------
 # Model builder
 # ---------------------------------------------------------------------------
@@ -115,6 +272,13 @@ def build_model(args) -> nn.Module:
         model = LlamaForCausalLM(config)
         torch.set_default_dtype(previous_dtype)
 
+    if getattr(args, "fuse_hf_projections", False):
+        model = _fuse_hf_llama_projections(model)
+        logger.info(
+            "Fused HF QKV and gate-up/SwiGLU projections across %d layers",
+            args.num_layers,
+        )
+
     return model
 
 
@@ -138,6 +302,8 @@ class FSDPTrainer:
 
         validate_fsdp_quant_args(args)
         self._setup_distributed()
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)
 
         if args.use_ckpt:
             resume_path = args.initial_ckpt_path or args.continual_ckpt_path
@@ -168,11 +334,11 @@ class FSDPTrainer:
 
         if self.rank == 0:
             logger.info("Building optimizer")
-        self.optimizer = torch.optim.AdamW(
+        self.optimizer = FP32MasterAdamW(
             self.model.parameters(),
             lr=args.lr,
             betas=(0.9, 0.95),
-            eps=1e-5,
+            eps=args.adam_eps,
             weight_decay=args.weight_decay,
         )
         if self.rank == 0:
@@ -203,6 +369,16 @@ class FSDPTrainer:
         torch.cuda.set_device(self.local_rank)
 
     def _wrap_fsdp(self, model: nn.Module) -> nn.Module:
+        if (
+            self.world_size == 1
+            and self.args.sharding_strategy == "no_shard"
+        ):
+            if self.rank == 0:
+                logger.info(
+                    "Single-rank no_shard: moving model to GPU without FSDP wrapper"
+                )
+            return model.to(device=self.local_rank, dtype=torch.bfloat16)
+
         if getattr(self.args, "fsdp_version", 1) == 2:
             from lumen.models.fsdp import apply_fsdp2
 
@@ -269,9 +445,29 @@ class FSDPTrainer:
         labels = fake_ids.clone()
 
         self.optimizer.zero_grad()
-        outputs = self.model(input_ids=fake_ids, labels=labels)
-        outputs.loss.backward()
+        self._forward_loss(fake_ids, labels).backward()
+        self.optimizer.accumulate_model_grads()
         self.optimizer.step()
+
+    def _forward_loss(self, input_ids, labels):
+        """Causal LM loss through Lumen's fused BF16 cross entropy."""
+        from lumen.ops.cross_entropy import parallel_cross_entropy
+
+        logits = self.model(input_ids=input_ids).logits
+        shifted_labels = torch.empty_like(labels)
+        shifted_labels[:, :-1] = labels[:, 1:]
+        shifted_labels[:, -1] = -100
+        return parallel_cross_entropy(
+            logits,
+            shifted_labels,
+            0.0,
+            True,
+            None,
+            -100,
+            False,
+            False,
+            0,
+        )
 
     # ------------------------------------------------------------------
 
@@ -308,6 +504,16 @@ class FSDPTrainer:
                 self.tracker.record_train_step_start(global_step)
                 self.optimizer.zero_grad()
                 accum_loss = 0.0
+                profile_step = os.environ.get(
+                    "LUMEN_FSDP_PROFILE_STEP", ""
+                ) == str(global_step + 1)
+                phase_ms = {
+                    "forward": 0.0,
+                    "backward": 0.0,
+                    "grad_accum": 0.0,
+                    "clip": 0.0,
+                    "optimizer": 0.0,
+                }
 
                 for _micro in range(args.gradient_accumulation_steps):
                     try:
@@ -319,18 +525,58 @@ class FSDPTrainer:
                     input_ids = batch["input_ids"].cuda(non_blocking=True)
                     labels = batch["labels"].cuda(non_blocking=True)
 
-                    outputs = self.model(input_ids=input_ids, labels=labels)
-                    loss = outputs.loss / args.gradient_accumulation_steps
+                    if profile_step:
+                        torch.cuda.synchronize()
+                        phase_start = time.perf_counter()
+                    loss = self._forward_loss(
+                        input_ids, labels
+                    ) / args.gradient_accumulation_steps
+                    if profile_step:
+                        torch.cuda.synchronize()
+                        phase_ms["forward"] += (
+                            time.perf_counter() - phase_start
+                        ) * 1000
+                        phase_start = time.perf_counter()
                     loss.backward()
+                    if profile_step:
+                        torch.cuda.synchronize()
+                        phase_ms["backward"] += (
+                            time.perf_counter() - phase_start
+                        ) * 1000
+                        phase_start = time.perf_counter()
+                    self.optimizer.accumulate_model_grads()
+                    if profile_step:
+                        torch.cuda.synchronize()
+                        phase_ms["grad_accum"] += (
+                            time.perf_counter() - phase_start
+                        ) * 1000
                     accum_loss += loss.item()
 
+                if profile_step:
+                    torch.cuda.synchronize()
+                    phase_start = time.perf_counter()
                 if args.max_grad_norm > 0:
-                    if getattr(args, "fsdp_version", 1) == 2:
+                    if hasattr(self.optimizer, "clip_grad_norm"):
+                        self.optimizer.clip_grad_norm(args.max_grad_norm)
+                    elif getattr(args, "fsdp_version", 1) == 2:
                         torch.nn.utils.clip_grad_norm_(self.model.parameters(), args.max_grad_norm)
                     else:
                         self.model.clip_grad_norm_(args.max_grad_norm)
+                if profile_step:
+                    torch.cuda.synchronize()
+                    phase_ms["clip"] = (
+                        time.perf_counter() - phase_start
+                    ) * 1000
+                    phase_start = time.perf_counter()
 
                 self.optimizer.step()
+                if profile_step:
+                    torch.cuda.synchronize()
+                    phase_ms["optimizer"] = (
+                        time.perf_counter() - phase_start
+                    ) * 1000
+                    if self.rank == 0:
+                        logger.info("FSDP phase profile (ms): %s", phase_ms)
                 self.scheduler.step()
                 global_step += 1
                 lr = self.scheduler.get_last_lr()[0]
@@ -387,12 +633,18 @@ class FSDPTrainer:
     def _validate(self) -> float:
         self.model.eval()
         total_loss, n_batches = 0.0, 0
-        with torch.no_grad():
+        # Keep autograd dispatch enabled so gfx1250 reuses the already-warmed
+        # FMHA v3 training forward. torch.no_grad() selects a separate AITER
+        # inference JIT path at step 50 and can spend minutes compiling while
+        # the GPU appears idle. No backward is issued and each graph is released
+        # after its scalar loss is detached.
+        with torch.enable_grad():
             for batch in self.val_loader:
                 input_ids = batch["input_ids"].cuda(non_blocking=True)
                 labels = batch["labels"].cuda(non_blocking=True)
-                outputs = self.model(input_ids=input_ids, labels=labels)
-                total_loss += outputs.loss.item()
+                total_loss += self._forward_loss(
+                    input_ids, labels
+                ).detach().item()
                 n_batches += 1
                 if n_batches >= 10:
                     break

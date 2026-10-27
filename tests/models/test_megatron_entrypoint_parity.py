@@ -17,6 +17,7 @@ LLAMA31_MEGATRON = REPO_ROOT / "lumen" / "models" / "llama31" / "megatron" / "pr
 LLAMA2_MEGATRON = REPO_ROOT / "lumen" / "models" / "llama2" / "megatron" / "sft.py"
 LLAMA_BUILDERS = REPO_ROOT / "lumen" / "patches" / "builders" / "llama.py"
 SHARED_MEGATRON = REPO_ROOT / "lumen" / "models" / "megatron.py"
+LUMEN_CONFIG = REPO_ROOT / "lumen" / "config.py"
 
 MOVED_SHARED_FLAGS = {
     "--use-ckpt",
@@ -61,7 +62,7 @@ def _string_literals(path: Path):
 
 def _get_call_keywords(path: Path, function_name: str, callee_name: str):
     tree = _parse_module(path)
-    for node in tree.body:
+    for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == function_name:
             for child in ast.walk(node):
                 if isinstance(child, ast.Call):
@@ -165,15 +166,22 @@ class TestSharedMegatronProviderParity:
         )
         assert {"pre_process", "post_process", "vp_stage", "config", "pg_collection"} <= params
 
-    def test_shared_provider_forwards_parallel_linear_state(self):
+    def test_lumen_config_forwards_parallel_linear_state(self):
         keywords = _get_call_keywords(
-            SHARED_MEGATRON,
-            "make_lumen_model_provider",
+            LUMEN_CONFIG,
+            "_apply_native_parallel_quant",
             "enable_fp8_for_parallel_linear",
         )
         assert "fp8_mha" in keywords
         assert "gradient_accumulation_fusion" in keywords
         assert "delay_wgrad" in keywords
+
+        provider_keywords = _get_call_keywords(
+            SHARED_MEGATRON,
+            "make_lumen_model_provider",
+            "enable_fp8_for_parallel_linear",
+        )
+        assert not provider_keywords
 
 
 class TestLlama2MegatronArgsParity:

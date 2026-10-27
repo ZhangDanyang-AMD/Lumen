@@ -898,7 +898,7 @@ def make_lumen_model_provider(
        separate from PEFT — handled by *lora_applier*)
     2. ``LumenConfig.enable()`` — FP8ParamManager, norm patching, pre-quant,
        ``quant.enable``, post-quant (PEFT LoRA skipped via ``lora_rank=0``)
-    3. Megatron-specific ``enable_fp8_for_parallel_linear`` (optional)
+    3. Native parallel-linear quantization, orchestrated by ``LumenConfig``
     """
 
     def model_provider(
@@ -962,34 +962,6 @@ def make_lumen_model_provider(
             f"This indicates unexpected model wrapping (e.g. LoRA) that may "
             f"break Megatron's parameter management."
         )
-
-        # 3. Megatron-specific native parallel linear quantization
-        fp8_enabled = getattr(args, "linear_fp8", False)
-        fp4_enabled = getattr(args, "linear_fp4", False)
-        if (fp8_enabled or fp4_enabled) and getattr(args, "lumen_linear", False):
-            # The resolved recipe, not the raw --linear-fp8-scaling string: MX
-            # formats carry scaling in the format, so an MXFP4 run passes
-            # "blockwise" here and would silently run FP8 blockwise instead.
-            if fp4_enabled:
-                enable_fp4_for_parallel_linear(
-                    model,
-                    scaling_type=cfg.quant_config.recipe,
-                    block_size=cfg.quant_config.block_size,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                    quant_config=cfg.quant_config,
-                )
-            else:
-                enable_fp8_for_parallel_linear(
-                    model,
-                    scaling_type=cfg.quant_config.recipe,
-                    block_size=cfg.quant_config.block_size,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                    quant_config=cfg.quant_config,
-                )
 
         if getattr(args, "fp8_param_storage", False):
             from lumen.models.fp8_param_storage import shrink_frozen_weights_to_fp8

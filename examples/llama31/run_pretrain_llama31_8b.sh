@@ -252,6 +252,7 @@ docker run --rm --init \
     -e TRANSFORMERS_OFFLINE=1 \
     -e PYTHONPATH="/workspace/Lumen/examples/llama31/aiter_configs/python:/workspace/Lumen:/workspace/megatron_lm:/opt/aiter" \
     -e TOKENIZERS_PARALLELISM=false \
+    -e PYTHONWARNINGS="ignore::UserWarning" \
     -e HSA_NO_SCRATCH_RECLAIM=1 \
     -e HIP_FORCE_DEV_KERNARG=1 \
     -e GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-8}" \
@@ -284,6 +285,7 @@ docker run --rm --init \
     -e FSDP_TRAIN_SAMPLES="${FSDP_TRAIN_SAMPLES}" -e FSDP_VAL_SAMPLES="${FSDP_VAL_SAMPLES}" \
     -e FSDP_STEP_TIME_ATOL="${FSDP_STEP_TIME_ATOL}" \
     -e FSDP_EVAL_INTERVAL="${FSDP_EVAL_INTERVAL}" \
+    -e LUMEN_FSDP_PROFILE_STEP="${LUMEN_FSDP_PROFILE_STEP:-}" \
     -e NUM_LAYERS="${NUM_LAYERS}" \
     -e TRAIN_STEPS="${TRAIN_STEPS}" -e SEED="${SEED}" \
     -e MOCK_DATA_TOKENS="${MOCK_DATA_TOKENS}" \
@@ -344,6 +346,7 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --gradient-accumulation-steps "${GRAD_ACCUM}" \
     --max-steps "${TRAIN_STEPS}" \
     --lr 1.0e-5 --min-lr 0.0 \
+    --adam-eps 1.0e-8 \
     --lr-warmup-steps 2 \
     --weight-decay 0.1 \
     --max-grad-norm 1.0 \
@@ -356,11 +359,17 @@ torchrun --nproc_per_node="${NPROC}" --nnodes=1 pretrain_llama31.py \
     --val-samples "${FSDP_VAL_SAMPLES}" \
     --sharding-strategy "${FSDP_SHARDING}" \
     --fsdp-version 1 \
+    --seed "${SEED}" \
+    --no-gradient-checkpointing \
     --warmup-steps 0 \
     --eval-interval "${FSDP_EVAL_INTERVAL}" \
     --step-time-atol "${FSDP_STEP_TIME_ATOL}" \
     --hf-attn-patch \
     --lumen-attn-backend csrc \
+    --lumen-linear \
+    --lumen-norm \
+    --fuse-hf-projections \
+    --lumen-gradient-accumulation-fusion \
     '"${FP8_ARGS[*]}"' \
     2>&1 | tee "/results/lumen_llama31_8b_fsdp_'"${PRECISION}"'.log"
 else

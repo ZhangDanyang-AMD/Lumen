@@ -325,6 +325,7 @@ class LumenConfig:
                 backend=backend,
                 dp_group=dp_group if qcfg.reduce_amax else None,
             )
+            self._apply_native_parallel_quant(model, qcfg)
 
         # 4. Post-quant features
         self._apply_post_quant(model, manager)
@@ -340,6 +341,35 @@ class LumenConfig:
     # -----------------------------------------------------------------------
     # Internal helpers
     # -----------------------------------------------------------------------
+
+    def _apply_native_parallel_quant(self, model, quant_config) -> None:
+        """Enable quantization on native Lumen parallel-linear modules.
+
+        ``quant.enable`` patches ``nn.Linear`` modules. Megatron's Lumen spec
+        provider instead builds ``LumenColumnParallelLinear`` /
+        ``LumenRowParallelLinear`` directly, so those modules need their native
+        enable method as part of this same orchestration flow.
+        """
+        if not self.lumen_linear:
+            return
+
+        from lumen.models.megatron import (
+            enable_fp4_for_parallel_linear,
+            enable_fp8_for_parallel_linear,
+        )
+
+        common = dict(
+            scaling_type=quant_config.recipe,
+            block_size=quant_config.block_size,
+            fp8_mha=self.fp8_attn == "mha",
+            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+            delay_wgrad=self.delay_wgrad,
+            quant_config=quant_config,
+        )
+        if self.format == "mxfp4":
+            enable_fp4_for_parallel_linear(model, **common)
+        else:
+            enable_fp8_for_parallel_linear(model, **common)
 
     def _apply_fp8_param_manager(self, model):
         """Replace linear weights with FP8 storage via FP8ParamManager.
@@ -466,31 +496,11 @@ class LumenConfig:
         Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
         configs exist, then patches forward with ``dispatch_gemm``.
         """
-        import torch
         import torch.nn as nn
 
         self._auto_tune_bf16_gemm(model)
 
-        from lumen.ops.quantize.linear import dispatch_gemm
-
-        class _GemmA16W16Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, input, weight, bias):
-                ctx.save_for_backward(input, weight)
-                ctx.has_bias = bias is not None
-                output = dispatch_gemm(input, weight, scaling_type="none", bias=bias)
-                return output
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                input, weight = ctx.saved_tensors
-                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-                input_flat = input.reshape(-1, input.shape[-1])
-                grad_input = grad_flat @ weight
-                grad_input = grad_input.reshape(input.shape)
-                grad_weight = grad_flat.t() @ input_flat
-                grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
-                return grad_input, grad_weight, grad_bias
+        from lumen.ops.quantize.linear import quantized_linear
 
         count = 0
         for _name, module in model.named_modules():
@@ -498,7 +508,13 @@ class LumenConfig:
 
                 def _make_aiter_forward(mod):
                     def _aiter_forward(input):
-                        return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
+                        return quantized_linear(
+                            input,
+                            mod.weight,
+                            mod.bias,
+                            scaling_type="none",
+                            gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                        )
 
                     return _aiter_forward
 
@@ -556,10 +572,14 @@ class LumenConfig:
                     lumen_count += 1
 
         linear_count = 0
-        if has_act_store:
+        if has_act_store or self.gradient_accumulation_fusion:
             for module in model.modules():
                 if isinstance(module, nn.Linear):
-                    module.fp8_activation_store = True
+                    if has_act_store:
+                        module.fp8_activation_store = True
+                    if self.gradient_accumulation_fusion:
+                        module.gradient_accumulation_fusion = True
+                        module.weight._lumen_use_main_grad = True
                     linear_count += 1
 
         opts = []
