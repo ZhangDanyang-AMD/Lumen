@@ -47,17 +47,20 @@ def _args(**overrides):
     return SimpleNamespace(**values)
 
 
-@pytest.mark.parametrize("stage", [1, 2])
+@pytest.mark.parametrize("stage", [1, 2, 3])
 def test_validate_accepts_supported_zero_stages(stage):
     validate_deepspeed_quant_config(
-        LumenConfig(format="fp8_e4m3", scaling="dynamic"),
+        LumenConfig(
+            format="fp8_e4m3",
+            scaling="none" if stage == 3 else "dynamic",
+        ),
         _ds_config(stage),
     )
 
 
-@pytest.mark.parametrize("stage", [0, 3])
+@pytest.mark.parametrize("stage", [0, 4])
 def test_validate_rejects_unvalidated_zero_stages(stage):
-    with pytest.raises(ValueError, match="ZeRO stages 1 and 2"):
+    with pytest.raises(ValueError, match="ZeRO stages 1, 2, and 3"):
         validate_deepspeed_quant_config(
             LumenConfig(format="fp8_e4m3", scaling="dynamic"),
             _ds_config(stage),
@@ -91,6 +94,14 @@ def test_validate_accepts_dynamic_e4m3_recipe():
         LumenConfig(format="fp8_e4m3", scaling="dynamic"),
         _ds_config(),
     )
+
+
+def test_validate_rejects_zero3_fp8_until_scaling_state_is_shard_safe():
+    with pytest.raises(ValueError, match="ZeRO-3.*BF16 only"):
+        validate_deepspeed_quant_config(
+            LumenConfig(format="fp8_e4m3", scaling="dynamic"),
+            _ds_config(3),
+        )
 
 
 def test_validate_accepts_hybrid_delayed():
@@ -223,6 +234,15 @@ def test_build_config_calculates_global_batch_and_bf16():
     assert config["zero_optimization"]["stage"] == 2
     assert config["bf16"]["enabled"] is True
     assert config["fp16"]["enabled"] is False
+
+
+def test_build_config_adds_zero3_prefetch_settings():
+    config = build_deepspeed_config(_args(zero_stage=3), world_size=8)
+    zero = config["zero_optimization"]
+
+    assert zero["stage"] == 3
+    assert zero["stage3_prefetch_bucket_size"] == 50_000_000
+    assert zero["stage3_param_persistence_threshold"] == 100_000
 
 
 def test_initialize_deepspeed_passes_external_optimizer_and_scheduler():

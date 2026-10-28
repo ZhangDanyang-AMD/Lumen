@@ -10,7 +10,7 @@
 module owns only DeepSpeed-specific validation, model-provider assembly, and
 runtime wiring.
 
-The initial support contract is deliberately narrow: ZeRO-1/2 with BF16
+The support contract covers ZeRO-1/2/3 with BF16
 master parameters and Lumen FP8 E4M3 Linear compute using dynamic or
 blockwise2d scaling.  Parameter/communication quantization and offload are not
 yet safe under DeepSpeed and are rejected before the model is patched.
@@ -92,10 +92,9 @@ def validate_deepspeed_quant_config(
     """Validate the initial DeepSpeed support contract before model mutation."""
     ds_config = _as_dict(deepspeed_config)
     stage = get_zero_stage(ds_config)
-    if stage not in (1, 2):
+    if stage not in (1, 2, 3):
         raise ValueError(
-            f"Lumen DeepSpeed currently supports ZeRO stages 1 and 2; got stage {stage}. "
-            "ZeRO-3 parameter materialization is not validated yet."
+            f"Lumen DeepSpeed supports ZeRO stages 1, 2, and 3; got stage {stage}."
         )
 
     zero = ds_config.get("zero_optimization", {})
@@ -131,6 +130,11 @@ def validate_deepspeed_quant_config(
         )
 
     qcfg = config.quant_config
+    if stage == 3 and qcfg.is_quantized:
+        raise ValueError(
+            "DeepSpeed ZeRO-3 is currently validated for BF16 only; FP8 scaling "
+            "state is not yet synchronized with stage-3 parameter release"
+        )
     if qcfg.is_quantized:
         if config.lumen_linear:
             raise ValueError(
@@ -312,14 +316,21 @@ def make_lumen_deepspeed_model_provider(
 ) -> Callable[..., tuple[Any, nn.Module]]:
     """Return a Megatron-style provider that builds and patches one model.
 
-    The provider is the canonical extension point for future ZeRO-3 support.
-    The current contract accepts only ZeRO-1/2, so model construction uses a
-    null context; once ZeRO-3 is validated this is where ``zero.Init`` belongs.
+    ZeRO-3 constructs the model inside ``deepspeed.zero.Init`` so parameters
+    are partitioned as they are created instead of materializing the full model
+    on every rank.
     """
     validate_deepspeed_quant_config(config, deepspeed_config)
 
     def model_provider(*args, **kwargs):
-        with nullcontext():
+        if get_zero_stage(deepspeed_config) == 3:
+            deepspeed = _load_deepspeed()
+            build_context = deepspeed.zero.Init(
+                config_dict_or_path=dict(_as_dict(deepspeed_config)),
+            )
+        else:
+            build_context = nullcontext()
+        with build_context:
             model = model_builder(*args, **kwargs)
             dp_group = dist.group.WORLD if config.reduce_amax and dist.is_initialized() else None
             return prepare_deepspeed_model(
@@ -361,22 +372,32 @@ def register_deepspeed_quant_hooks(
 
 
 def build_deepspeed_config(args, *, world_size: int) -> dict[str, Any]:
-    """Build the supported ZeRO-1/2 configuration from training arguments."""
+    """Build the supported ZeRO-1/2/3 configuration."""
     train_batch_size = (
         args.micro_batch_size * args.gradient_accumulation_steps * world_size
     )
+    zero_config = {
+        "stage": args.zero_stage,
+        "overlap_comm": True,
+        "contiguous_gradients": True,
+        "reduce_scatter": True,
+    }
+    if args.zero_stage == 3:
+        zero_config.update(
+            {
+                "stage3_prefetch_bucket_size": 50_000_000,
+                "stage3_param_persistence_threshold": 100_000,
+                "stage3_max_live_parameters": 1_000_000_000,
+                "stage3_max_reuse_distance": 1_000_000_000,
+            }
+        )
     return {
         "train_micro_batch_size_per_gpu": args.micro_batch_size,
         "gradient_accumulation_steps": args.gradient_accumulation_steps,
         "train_batch_size": train_batch_size,
         "bf16": {"enabled": True},
         "fp16": {"enabled": False},
-        "zero_optimization": {
-            "stage": args.zero_stage,
-            "overlap_comm": True,
-            "contiguous_gradients": True,
-            "reduce_scatter": True,
-        },
+        "zero_optimization": zero_config,
         "gradient_clipping": args.max_grad_norm,
         "zero_allow_untested_optimizer": True,
         "steps_per_print": max(int(args.log_interval), 1),
@@ -396,6 +417,11 @@ def initialize_deepspeed(
     deepspeed = _load_deepspeed()
     world_size = dist.get_world_size() if dist.is_initialized() else 1
     ds_config = build_deepspeed_config(args, world_size=world_size)
+    if args.zero_stage == 3 and getattr(args, "deepspeed_fp8_weight_cache", False):
+        raise ValueError(
+            "DeepSpeed FP8 weight cache is not supported with ZeRO-3 because "
+            "parameters are released after each module forward"
+        )
     engine, optimizer, _, scheduler = deepspeed.initialize(
         model=model,
         model_parameters=model.parameters(),
@@ -455,7 +481,12 @@ def add_common_deepspeed_args(parser):
     add_fsdp_runtime_contract_args(training)
 
     deepspeed_group = parser.add_argument_group("deepspeed")
-    deepspeed_group.add_argument("--zero-stage", type=int, choices=[1, 2], default=2)
+    deepspeed_group.add_argument(
+        "--zero-stage",
+        type=int,
+        choices=[1, 2, 3],
+        default=2,
+    )
     deepspeed_group.add_argument(
         "--linear-backend",
         choices=["aiter", "triton", "auto"],

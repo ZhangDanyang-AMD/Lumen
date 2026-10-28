@@ -25,9 +25,7 @@ GBS="${GBS:-128}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 SEED="${SEED:-1234}"
-# The aligned corpus reaches ~5.77 with DeepSpeed/HF data sharding at 50 steps.
-# Real-corpus runs should override this with their experiment-specific target.
-TARGET_LOSS="${TARGET_LOSS:-5.8}"
+TARGET_LOSS="${TARGET_LOSS:-}"
 STEP_TIME_ATOL="${STEP_TIME_ATOL:-30000}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${SCRIPT_DIR}/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results/deepspeed}"
@@ -42,13 +40,21 @@ fi
 GRAD_ACCUM=$((GBS / DENOM))
 LOCAL_TRAIN_SAMPLES=$((MBS * GRAD_ACCUM * (TRAIN_STEPS + 2)))
 
-if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" ]]; then
-    echo "Lumen DeepSpeed support is limited to ZERO_STAGE=1 or 2" >&2
+if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" && "${ZERO_STAGE}" != "3" ]]; then
+    echo "Lumen DeepSpeed supports ZERO_STAGE=1, 2, or 3" >&2
     exit 2
 fi
 if [[ "${PRECISION}" != "bf16" && "${PRECISION}" != "fp8" ]]; then
     echo "PRECISION must be bf16 or fp8" >&2
     exit 2
+fi
+if [[ "${ZERO_STAGE}" == "3" && "${PRECISION}" == "fp8" ]]; then
+    echo "ZeRO-3 is currently validated for BF16 only" >&2
+    exit 2
+fi
+if [[ -z "${TARGET_LOSS}" ]]; then
+    # zero.Init changes the deterministic synthetic-corpus initialization.
+    [[ "${ZERO_STAGE}" == "3" ]] && TARGET_LOSS=6.3 || TARGET_LOSS=5.8
 fi
 if [[ -z "${FUSED_MLP}" ]]; then
     [[ "${PRECISION}" == "fp8" ]] && FUSED_MLP=1 || FUSED_MLP=0

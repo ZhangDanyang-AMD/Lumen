@@ -138,7 +138,10 @@ class DeepSpeedTrainer:
             else None
         )
         if self.rank == 0:
-            parameter_count = sum(p.numel() for p in self.engine.module.parameters())
+            parameter_count = sum(
+                int(getattr(param, "ds_numel", param.numel()))
+                for param in self.engine.module.parameters()
+            )
             logger.info(
                 "DeepSpeed %s ready | params=%d | world=%d | zero=%d | "
                 "micro_batch=%d | grad_accum=%d | seq=%d",

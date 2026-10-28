@@ -14,7 +14,7 @@ BACKEND=megatron bash examples/llama31/run_pretrain.sh
 # 2. Or: FSDP backend (no Megatron dependency)
 BACKEND=fsdp bash examples/llama31/run_pretrain.sh
 
-# 2. Or: DeepSpeed ZeRO-2 backend
+# 2. Or: DeepSpeed backend (ZERO_STAGE=1, 2, or 3)
 BACKEND=deepspeed bash examples/llama31/run_pretrain.sh
 
 # Self-contained DeepSpeed BF16 smoke/performance run
@@ -25,8 +25,9 @@ PRECISION=fp8 bash examples/llama31/run_deepspeed_pretrain_llama31_8b.sh
 ```
 
 The entry point (`pretrain_llama31.py`) selects the backend via
-`--backend megatron|fsdp|deepspeed`. The DeepSpeed path supports ZeRO-1/2 and
-uses `LumenConfig.enable()` for BF16 and FP8 operator injection.
+`--backend megatron|fsdp|deepspeed`. The DeepSpeed path supports ZeRO-1/2/3 and
+uses `LumenConfig.enable()` for operator injection. ZeRO-3 is currently
+validated for BF16; FP8 remains limited to ZeRO-1/2.
 
 The DeepSpeed BF16 launcher defaults are aligned with
 `results/llama31_8b_pretrain_bf16.log` for direct speed comparisons:
@@ -41,6 +42,10 @@ FP8 runs automatically enable fused SwiGLU activation quantization, fused
 amax/cast-transpose, and the per-update weight cache. On 8×MI350X with the
 same aligned parameters, DeepSpeed measured 10.53 s/step for hybrid delayed
 and 10.85 s/step for dynamic scaling, versus 11.41 s/step for BF16.
+
+The validated BF16 ZeRO-3 run uses `deepspeed.zero.Init` for partitioned model
+construction. Its aligned 50-step MI350X result is 13.21 s/step with a
+143.91 GiB peak per rank.
 
 ## CLI Flags
 
