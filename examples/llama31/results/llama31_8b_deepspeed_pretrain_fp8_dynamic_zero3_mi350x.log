@@ -1,0 +1,299 @@
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+RCCL version : 2.30.4-HEAD:ca887ee
+HIP version  : 7.14.60850-0000000
+ROCm version : 7.14.1.0-9999-ca887ee8
+Hostname     : ctr-smc-mi350x-rack65-6
+Librccl path : /opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/librccl.so.1
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-28 09:01:42] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:44] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-28 09:01:45] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,603 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,631 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,635 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,635 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-28 09:01:46,636 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-28 09:01:46,636 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+[rank2]:W1028 09:01:46.751000 508 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank5]:W1028 09:01:46.762000 511 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank2]:W1028 09:01:46.769000 508 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank3]:W1028 09:01:46.773000 509 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank1]:W1028 09:01:46.777000 507 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank5]:W1028 09:01:46.781000 511 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank0]:W1028 09:01:46.782000 506 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank7]:W1028 09:01:46.784000 513 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank3]:W1028 09:01:46.792000 509 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank6]:W1028 09:01:46.794000 512 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank1]:W1028 09:01:46.796000 507 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank4]:W1028 09:01:46.798000 510 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank0]:W1028 09:01:46.802000 506 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank7]:W1028 09:01:46.804000 513 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank6]:W1028 09:01:46.813000 512 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank4]:W1028 09:01:46.817000 510 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+2026-10-28 09:01:47,335 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,347 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,354 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,361 | INFO | lumen.config | > Patched 32 HuggingFace LlamaMLP modules with fused SwiGLU
+2026-10-28 09:01:47,365 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,365 | INFO | lumen.config | > LumenConfig enabled (format=fp8_e4m3, scaling=dynamic, features=[fused_mlp])
+2026-10-28 09:01:47,366 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,377 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,385 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:47,389 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=dynamic, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-28 09:01:49,986 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658251 tokens total)
+2026-10-28 09:01:49,988 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658303 tokens total)
+2026-10-28 09:01:49,989 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658206 tokens total)
+2026-10-28 09:01:49,989 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658236 tokens total)
+2026-10-28 09:01:49,992 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658319 tokens total)
+2026-10-28 09:01:49,994 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658305 tokens total)
+2026-10-28 09:01:50,000 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658307 tokens total)
+2026-10-28 09:01:50,003 | INFO | lumen.models.llama31.dataset | Built 80 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (658273 tokens total)
+2026-10-28 09:01:50,168 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11974 tokens total)
+2026-10-28 09:01:50,172 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11966 tokens total)
+2026-10-28 09:01:50,174 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11971 tokens total)
+2026-10-28 09:01:50,175 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11975 tokens total)
+2026-10-28 09:01:50,177 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11985 tokens total)
+2026-10-28 09:01:50,178 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed LLaMA3.1 ready | params=8030261248 | world=8 | zero=3 | micro_batch=2 | grad_accum=8 | seq=8192
+2026-10-28 09:01:50,179 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11969 tokens total)
+2026-10-28 09:01:50,187 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11974 tokens total)
+2026-10-28 09:01:50,241 | INFO | lumen.models.llama31.dataset | Built 1 pretraining samples (seq_length=8192) from /workspace/Lumen/examples/llama31/results/mock_data/deepspeed_llama31_8b_aligned_train.jsonl (11966 tokens total)
+[aiter] [pid=510 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=512 pname=MainProcess] start build [module_hipbsolgemm] under /workspace/aiter/aiter/jit/build/module_hipbsolgemm
+[aiter] [pid=509 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=513 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=506 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=507 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=508 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] [pid=511 pname=MainProcess] waiting for baton release at /workspace/aiter/aiter/jit/build/lock_module_hipbsolgemm
+[aiter] Current hipcc not support: -mllvm -amdgpu-coerce-illegal-types=1, skip it.
+[aiter] [pid=512 pname=MainProcess] [32mfinish build [module_hipbsolgemm], cost 10.6s [0m
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+2026-10-28 09:02:01,700 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] import [module_hipbsolgemm] under /workspace/aiter/aiter/jit/module_hipbsolgemm.so
+[aiter] merge tuned file under model_configs/ and configs/ /workspace/aiter/aiter/configs/bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_8b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv4_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/gptoss_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimik3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm5_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen32B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm53_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/flux2_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/glm47_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/qwen3_5_397b_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/kimi_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/dsv3_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/q3vl_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama405B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/llama70B_bf16_tuned_gemm.csv:/workspace/aiter/aiter/configs/model_configs/minimax_m3_eagle_bf16_tuned_gemm.csv
+[aiter] [pid=510 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] [pid=513 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] [pid=506 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] [pid=508 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+[aiter] [pid=507 pname=MainProcess] waiting for baton release at /tmp/aiter_configs/bf16_tuned_gemm.csv.lock
+2026-10-28 09:02:01,743 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,762 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,934 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,937 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,937 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,940 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+2026-10-28 09:02:01,943 | INFO | lumen.ops.quantize.linear | hipBLASLt workspace pre-allocated (256 MiB)
+[rank7]: Traceback (most recent call last):
+[rank7]:   File "/workspace/Lumen/examples/llama31/pretrain_llama31.py", line 95, in <module>
+[rank7]:     _run_deepspeed()
+[rank7]:   File "/workspace/Lumen/examples/llama31/pretrain_llama31.py", line 84, in _run_deepspeed
+[rank7]:     DeepSpeedTrainer(get_args()).train()
+[rank7]:   File "/workspace/Lumen/lumen/models/llama2/deepspeed/pretrain.py", line 365, in train
+[rank7]:     raise RuntimeError(
+[rank7]: RuntimeError: Non-finite forward loss at global step 1, micro step 2: nan
+W1028 09:02:20.805000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 506 closing signal SIGTERM
+W1028 09:02:20.805000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 507 closing signal SIGTERM
+W1028 09:02:20.805000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 508 closing signal SIGTERM
+W1028 09:02:20.805000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 509 closing signal SIGTERM
+W1028 09:02:20.805000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 510 closing signal SIGTERM
+W1028 09:02:20.809000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 511 closing signal SIGTERM
+W1028 09:02:20.810000 497 torch/distributed/elastic/multiprocessing/api.py:1014] Sending process 512 closing signal SIGTERM
+E1028 09:02:21.890000 497 torch/distributed/elastic/multiprocessing/api.py:988] failed (exitcode: 1) local_rank: 7 (pid: 513) of binary: /opt/venv/bin/python
+Traceback (most recent call last):
+  File "/opt/venv/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 367, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/distributed/run.py", line 1016, in main
+    run(args)
+  File "/opt/venv/lib/python3.12/site-packages/torch/distributed/run.py", line 1007, in run
+    elastic_launch(
+  File "/opt/venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 191, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 371, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/workspace/Lumen/examples/llama31/pretrain_llama31.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 506)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 506
+[2]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 507)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 507
+[3]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 2 (local_rank: 2)
+  exitcode  : -15 (pid: 508)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 508
+[4]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 3 (local_rank: 3)
+  exitcode  : -15 (pid: 509)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 509
+[5]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 4 (local_rank: 4)
+  exitcode  : -15 (pid: 510)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 510
+[6]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 5 (local_rank: 5)
+  exitcode  : -15 (pid: 511)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 511
+[7]:
+  time      : 2026-10-28_09:02:21
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 6 (local_rank: 6)
+  exitcode  : -15 (pid: 512)  (SIGTERM)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 512
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-10-28_09:02:20
+  host      : ctr-smc-mi350x-rack65-6
+  rank      : 7 (local_rank: 7)
+  exitcode  : 1 (pid: 513) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
