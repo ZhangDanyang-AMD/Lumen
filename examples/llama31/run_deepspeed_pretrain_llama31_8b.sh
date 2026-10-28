@@ -10,16 +10,28 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
 PRECISION="${PRECISION:-bf16}"
-MBS="${MBS:-1}"
-GBS="${GBS:-32}"
+FP8_FORMAT="${FP8_FORMAT:-fp8_e4m3}"
+FP8_SCALING="${FP8_SCALING:-dynamic}"
+FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
+FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
+FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
+HF_ATTN_PATCH="${HF_ATTN_PATCH:-0}"
+FUSED_ROPE="${FUSED_ROPE:-0}"
+FUSED_MLP="${FUSED_MLP:-0}"
+LUMEN_LINEAR="${LUMEN_LINEAR:-0}"
+MBS="${MBS:-2}"
+GBS="${GBS:-128}"
 SEQ_LEN="${SEQ_LEN:-8192}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 SEED="${SEED:-1234}"
-TARGET_LOSS="${TARGET_LOSS:-3.3}"
+# The aligned corpus reaches ~5.77 with DeepSpeed/HF data sharding at 50 steps.
+# Real-corpus runs should override this with their experiment-specific target.
+TARGET_LOSS="${TARGET_LOSS:-5.8}"
 STEP_TIME_ATOL="${STEP_TIME_ATOL:-30000}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${SCRIPT_DIR}/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results/deepspeed}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-${SCRIPT_DIR}/results/mock_data/deepspeed_llama31_8b_train.jsonl}"
+LOG_PATH="${LOG_PATH:-${RESULTS_DIR}/llama31_8b_zero${ZERO_STAGE}_${PRECISION}.log}"
 
 DENOM=$((MBS * NPROC_PER_NODE))
 if (( GBS % DENOM != 0 )); then
@@ -28,6 +40,15 @@ if (( GBS % DENOM != 0 )); then
 fi
 GRAD_ACCUM=$((GBS / DENOM))
 LOCAL_TRAIN_SAMPLES=$((MBS * GRAD_ACCUM * (TRAIN_STEPS + 2)))
+
+if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" ]]; then
+    echo "Lumen DeepSpeed support is limited to ZERO_STAGE=1 or 2" >&2
+    exit 2
+fi
+if [[ "${PRECISION}" != "bf16" && "${PRECISION}" != "fp8" ]]; then
+    echo "PRECISION must be bf16 or fp8" >&2
+    exit 2
+fi
 
 mkdir -p "${RESULTS_DIR}" "$(dirname "${TRAIN_DATA_PATH}")"
 if [[ ! -f "${TRAIN_DATA_PATH}" ]]; then
@@ -41,17 +62,17 @@ import random
 
 path = os.environ["TRAIN_DATA_PATH"]
 seq_len = int(os.environ["SEQ_LEN"])
-samples = int(os.environ["GBS"]) * (int(os.environ["TRAIN_STEPS"]) + 2)
+samples = int(os.environ["GBS"]) * (int(os.environ["TRAIN_STEPS"]) + 5)
 random.seed(int(os.environ["SEED"]))
-words_per_doc = 8192
-estimated_tokens = samples * (seq_len + 1)
+words_per_doc = 4000
+estimated_tokens = int(samples * (seq_len + 1) * 1.2)
 documents = max(
     int(os.environ["NPROC_PER_NODE"]),
     estimated_tokens // words_per_doc + 1,
 )
 with open(path, "w", encoding="utf-8") as output:
     for _ in range(documents):
-        words = [str(random.randint(1, 128255)) for _ in range(words_per_doc)]
+        words = [str(random.randint(1, 127999)) for _ in range(words_per_doc)]
         output.write(json.dumps({"text": " ".join(words)}) + "\n")
 print(f"Wrote {documents} mock documents to {path}")
 PY
@@ -61,10 +82,35 @@ FP8_ARGS=()
 if [[ "${PRECISION}" == "fp8" ]]; then
     FP8_ARGS=(
         --linear-fp8
-        --linear-fp8-format fp8_e4m3
-        --linear-fp8-scaling dynamic
-        --deepspeed-fp8-weight-cache
+        --linear-fp8-format "${FP8_FORMAT}"
+        --linear-fp8-scaling "${FP8_SCALING}"
+        --linear-fp8-block-size 128
+        --linear-fp8-amax-algo "${FP8_AMAX_ALGO}"
+        --linear-fp8-amax-history "${FP8_AMAX_HISTORY}"
     )
+    if [[ "${FP8_WEIGHT_CACHE}" == "1" ]]; then
+        FP8_ARGS+=(--deepspeed-fp8-weight-cache)
+    fi
+fi
+
+PERF_ARGS=()
+if [[ "${HF_ATTN_PATCH}" == "1" ]]; then
+    PERF_ARGS+=(--hf-attn-patch)
+else
+    PERF_ARGS+=(--no-hf-attn-patch)
+fi
+if [[ "${FUSED_ROPE}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-fused-rope)
+else
+    PERF_ARGS+=(--no-lumen-fused-rope)
+fi
+if [[ "${FUSED_MLP}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-fused-mlp)
+else
+    PERF_ARGS+=(--no-lumen-fused-mlp)
+fi
+if [[ "${LUMEN_LINEAR}" == "1" && "${PRECISION}" == "bf16" ]]; then
+    PERF_ARGS+=(--lumen-linear)
 fi
 
 export PYTHONPATH="${LUMEN_DIR}:${PYTHONPATH:-}"
@@ -72,14 +118,36 @@ export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-7200}"
 export HSA_NO_SCRATCH_RECLAIM=1
+export HIP_FORCE_DEV_KERNARG=1
+export GPU_MAX_HW_QUEUES=8
 export NCCL_IB_DISABLE=1
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
+export CUDA_DEVICE_MAX_CONNECTIONS=8
 export TORCHDYNAMO_DISABLE=1
 export USE_HIPBLASLT=1
 export TORCH_BLAS_PREFER_HIPBLASLT=1
 export LUMEN_PREFER_HIPBLASLT=1
 export LUMEN_SKIP_BACKEND_SYNC=1
+if [[ "${PRECISION}" == "fp8" ]]; then
+    python3 - <<'PY'
+import torch
+from aiter.ops.enum import QuantType
+from aiter.ops.quant import get_hip_quant
+
+torch.cuda.set_device(0)
+x = torch.zeros(128, 128, device="cuda", dtype=torch.bfloat16)
+get_hip_quant(QuantType.per_1x128)(
+    x, quant_dtype=torch.float8_e4m3fn
+)
+torch.cuda.synchronize()
+PY
+    export LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1
+    export LUMEN_FUSED_QUANT_SCALE=1
+    export LUMEN_FUSED_CAST_TRANSPOSE=1
+    export LUMEN_FAST_QUANT_DISPATCH=1
+    export LUMEN_FUSED_QUANT_AMAX=1
+fi
 
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
     "${SCRIPT_DIR}/pretrain_llama31.py" \
@@ -93,13 +161,14 @@ torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
     --eval-iters 1 \
     --target-loss "${TARGET_LOSS}" \
     --step-time-atol "${STEP_TIME_ATOL}" \
+    --performance-warmup-steps 2 \
     --hidden-size 4096 \
     --intermediate-size 14336 \
     --num-layers 32 \
     --num-attention-heads 32 \
     --num-key-value-heads 8 \
     --vocab-size 128256 \
-    --max-position-embeddings 131072 \
+    --max-position-embeddings "${SEQ_LEN}" \
     --rope-theta 500000 \
     --seq-length "${SEQ_LEN}" \
     --micro-batch-size "${MBS}" \
@@ -107,17 +176,15 @@ torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
     --max-steps "${TRAIN_STEPS}" \
     --zero-stage "${ZERO_STAGE}" \
     --linear-backend aiter \
-    --hf-attn-patch \
-    --lumen-fused-rope \
-    --lumen-fused-mlp \
     --no-gradient-checkpointing \
-    --lr 8e-4 \
-    --min-lr 8e-5 \
-    --lr-warmup-steps 128 \
+    --lr 1.0e-5 \
+    --min-lr 0.0 \
+    --lr-warmup-steps 2 \
     --weight-decay 0.1 \
     --max-grad-norm 1.0 \
     --seed "${SEED}" \
     --log-interval 1 \
     "${FP8_ARGS[@]}" \
+    "${PERF_ARGS[@]}" \
     "$@" \
-    2>&1 | tee "${RESULTS_DIR}/llama31_8b_zero${ZERO_STAGE}_${PRECISION}.log"
+    2>&1 | tee "${LOG_PATH}"

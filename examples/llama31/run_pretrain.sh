@@ -165,7 +165,7 @@ run_megatron() {
         --num-attention-heads ${HEADS} \
         ${GQA_ARGS} \
         --seq-length ${SEQ_LEN} \
-        --max-position-embeddings 131072 \
+        --max-position-embeddings ${SEQ_LEN} \
         --use-rotary-position-embeddings \
         --rotary-base ${ROPE_THETA} \
         --no-position-embedding \

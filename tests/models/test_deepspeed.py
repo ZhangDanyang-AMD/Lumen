@@ -254,9 +254,15 @@ def test_llama31_deepspeed_parser_uses_8b_defaults():
     assert args.num_key_value_heads == 8
     assert args.vocab_size == 128256
     assert args.seq_length == 8192
-    assert args.max_position_embeddings == 131072
+    assert args.max_position_embeddings == 8192
     assert args.rope_theta == 500000.0
     assert args.zero_stage == 2
-    assert args.hf_attn_patch is True
-    assert args.lumen_fused_rope is True
-    assert args.lumen_fused_mlp is True
+    assert args.micro_batch_size == 2
+    assert args.gradient_accumulation_steps == 8
+    assert args.max_steps == 50
+    assert args.lr == 1e-5
+    assert args.min_lr == 0.0
+    assert args.lr_warmup_steps == 2
+    assert args.hf_attn_patch is False
+    assert args.lumen_fused_rope is False
+    assert args.lumen_fused_mlp is False

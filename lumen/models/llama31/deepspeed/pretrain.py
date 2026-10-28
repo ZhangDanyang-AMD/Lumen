@@ -82,7 +82,7 @@ def get_args() -> argparse.Namespace:
     model.add_argument("--num-attention-heads", type=int, default=32)
     model.add_argument("--num-key-value-heads", type=int, default=8)
     model.add_argument("--vocab-size", type=int, default=128256)
-    model.add_argument("--max-position-embeddings", type=int, default=131072)
+    model.add_argument("--max-position-embeddings", type=int, default=8192)
     model.add_argument("--rope-theta", type=float, default=500000.0)
     model.add_argument("--seq-length", type=int, default=8192)
 
@@ -99,17 +99,17 @@ def get_args() -> argparse.Namespace:
     parser.set_defaults(
         model_label="LLaMA3.1",
         micro_batch_size=2,
-        gradient_accumulation_steps=2,
-        max_steps=1200000,
-        lr=8e-4,
-        min_lr=8e-5,
-        lr_warmup_steps=128,
+        gradient_accumulation_steps=8,
+        max_steps=50,
+        lr=1e-5,
+        min_lr=0.0,
+        lr_warmup_steps=2,
         weight_decay=0.1,
         linear_fp8_format="fp8_e4m3",
         linear_fp8_scaling="dynamic",
         gradient_checkpointing=False,
-        hf_attn_patch=True,
-        lumen_fused_rope=True,
-        lumen_fused_mlp=True,
+        hf_attn_patch=False,
+        lumen_fused_rope=False,
+        lumen_fused_mlp=False,
     )
     return parser.parse_args()

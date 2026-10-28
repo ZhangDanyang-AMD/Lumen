@@ -28,6 +28,15 @@ The entry point (`pretrain_llama31.py`) selects the backend via
 `--backend megatron|fsdp|deepspeed`. The DeepSpeed path supports ZeRO-1/2 and
 uses `LumenConfig.enable()` for BF16 and FP8 operator injection.
 
+The DeepSpeed BF16 launcher defaults are aligned with
+`results/llama31_8b_pretrain_bf16.log` for direct speed comparisons:
+8 GPUs, MBS 2, GBS 128, sequence/max-position length 8192, 50 steps,
+LR 1e-5 with two warmup steps and cosine decay. Its BF16
+`LumenConfig.enable()` contract is exactly `format=fp8_e4m3, scaling=none`;
+optional attention, RoPE, MLP, and Linear patches are disabled. They can be
+enabled explicitly with `HF_ATTN_PATCH=1`, `FUSED_ROPE=1`, `FUSED_MLP=1`, and
+`LUMEN_LINEAR=1`.
+
 ## CLI Flags
 
 | Feature | CLI Flag | Default |

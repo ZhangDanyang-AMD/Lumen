@@ -504,6 +504,11 @@ def add_common_deepspeed_args(parser):
         help="Fuse HuggingFace LLaMA SwiGLU activation forward/backward.",
     )
     deepspeed_group.add_argument(
+        "--no-lumen-fused-mlp",
+        dest="lumen_fused_mlp",
+        action="store_false",
+    )
+    deepspeed_group.add_argument(
         "--lumen-linear",
         action="store_true",
         default=False,
