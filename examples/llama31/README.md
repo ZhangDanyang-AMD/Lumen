@@ -37,6 +37,11 @@ optional attention, RoPE, MLP, and Linear patches are disabled. They can be
 enabled explicitly with `HF_ATTN_PATCH=1`, `FUSED_ROPE=1`, `FUSED_MLP=1`, and
 `LUMEN_LINEAR=1`.
 
+FP8 runs automatically enable fused SwiGLU activation quantization, fused
+amax/cast-transpose, and the per-update weight cache. On 8×MI350X with the
+same aligned parameters, DeepSpeed measured 10.53 s/step for hybrid delayed
+and 10.85 s/step for dynamic scaling, versus 11.41 s/step for BF16.
+
 ## CLI Flags
 
 | Feature | CLI Flag | Default |

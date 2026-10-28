@@ -714,6 +714,17 @@ def _replace_forward(
 
         def quant_forward(input_tensor, *args, **kwargs):
             module._lumen_quant_linear_calls += 1
+            pre_quantized_input = None
+            if _os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1":
+                from lumen.models._swiglu_fp8_fuse import (
+                    pop_swiglu_fp8_cache,
+                )
+
+                cached = pop_swiglu_fp8_cache() if quantize_activation else None
+                if cached is not None:
+                    pre_quantized_input = (cached[0], cached[1])
+                    if cached[2] is not None:
+                        manager.update_amax_value(_act_tensor_id, cached[2])
             _maybe_cache_frozen_weight(module, scaling_type, fp8_dtype, block_size)
             w = module.weight
             _wcache = getattr(module, "_fp8_weight_data", None)
@@ -747,6 +758,7 @@ def _replace_forward(
                 fp8_weight_scale=_wscale,
                 pre_quantized_weight=_get_pre_quant_weight(),
                 activation_tensor_id=_act_tensor_id,
+                pre_quantized_input=pre_quantized_input,
             )
 
     else:

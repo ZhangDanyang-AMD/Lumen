@@ -15,9 +15,10 @@ FP8_SCALING="${FP8_SCALING:-dynamic}"
 FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
 FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
 FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
+FP8_FUSED_KERNELS="${FP8_FUSED_KERNELS:-}"
 HF_ATTN_PATCH="${HF_ATTN_PATCH:-0}"
 FUSED_ROPE="${FUSED_ROPE:-0}"
-FUSED_MLP="${FUSED_MLP:-0}"
+FUSED_MLP="${FUSED_MLP:-}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-0}"
 MBS="${MBS:-2}"
 GBS="${GBS:-128}"
@@ -48,6 +49,12 @@ fi
 if [[ "${PRECISION}" != "bf16" && "${PRECISION}" != "fp8" ]]; then
     echo "PRECISION must be bf16 or fp8" >&2
     exit 2
+fi
+if [[ -z "${FUSED_MLP}" ]]; then
+    [[ "${PRECISION}" == "fp8" ]] && FUSED_MLP=1 || FUSED_MLP=0
+fi
+if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
+    FP8_FUSED_KERNELS=1
 fi
 
 mkdir -p "${RESULTS_DIR}" "$(dirname "${TRAIN_DATA_PATH}")"
@@ -145,8 +152,19 @@ PY
     export LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1
     export LUMEN_FUSED_QUANT_SCALE=1
     export LUMEN_FUSED_CAST_TRANSPOSE=1
+    export LUMEN_FUSED_CAST_TRANSPOSE_V2=1
+    export LUMEN_TRANSPOSE_CACHE=1
     export LUMEN_FAST_QUANT_DISPATCH=1
-    export LUMEN_FUSED_QUANT_AMAX=1
+    if [[ "${FP8_FUSED_KERNELS}" == "1" ]]; then
+        export LUMEN_FUSED_QUANT_AMAX=1
+    fi
+    if [[ "${FP8_SCALING}" == "delayed" ]]; then
+        export LUMEN_STEP_BATCH_SCALES=1
+    fi
+    if [[ "${FUSED_MLP}" == "1" ]]; then
+        export LUMEN_FUSED_SWIGLU_QUANT=1
+        export LUMEN_HF_FUSED_SWIGLU_QUANT=1
+    fi
 fi
 
 torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \

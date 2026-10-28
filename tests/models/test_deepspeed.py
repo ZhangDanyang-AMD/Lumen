@@ -172,6 +172,34 @@ def test_hf_mlp_patch_preserves_parameters_and_matches_reference():
     assert model._lumen_fused_mlp_calls == 1
 
 
+def test_hf_mlp_patch_feeds_fused_fp8_activation_cache():
+    class LlamaMLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gate_proj = nn.Linear(4, 8, bias=False)
+            self.up_proj = nn.Linear(4, 8, bias=False)
+            self.down_proj = nn.Linear(8, 4, bias=False)
+            self.act_fn = F.silu
+
+        def forward(self, hidden_states):
+            return self.down_proj(
+                self.act_fn(self.gate_proj(hidden_states))
+                * self.up_proj(hidden_states)
+            )
+
+    model = LlamaMLP()
+    with (
+        patch.dict("os.environ", {"LUMEN_FUSED_SWIGLU_QUANT": "1"}),
+        patch(
+            "lumen.models._swiglu_fp8_fuse.try_fused_swiglu_fp8",
+        ) as fused_quant,
+    ):
+        LumenConfig._patch_hf_mlp(model)
+        model(torch.randn(2, 3, 4))
+
+    fused_quant.assert_called_once()
+
+
 def test_prepare_forwards_strict_aiter_backend():
     model = nn.Linear(4, 4)
     config = LumenConfig(scaling="none")

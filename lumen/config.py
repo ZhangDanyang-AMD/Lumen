@@ -572,7 +572,14 @@ class LumenConfig:
                     mod._lumen_fused_mlp_calls += 1
                     gate = mod.gate_proj(hidden_states)
                     up = mod.up_proj(hidden_states)
-                    return mod.down_proj(fused_swiglu_pair(gate, up))
+                    activated = fused_swiglu_pair(gate, up)
+                    if os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1":
+                        from lumen.models._swiglu_fp8_fuse import (
+                            try_fused_swiglu_fp8,
+                        )
+
+                        try_fused_swiglu_fp8(gate, activated)
+                    return mod.down_proj(activated)
 
                 return _fused_forward
 
