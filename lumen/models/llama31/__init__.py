@@ -6,7 +6,7 @@
 
 """LLaMA 3.1 pretraining components for Lumen.
 
-Two training backends are available:
+Three training backends are available:
 
 - **Megatron** (``lumen.models.llama31.megatron``)
   Pretraining using Megatron-LM-AMD with TP/PP/CP/VP/SP parallelism,
@@ -15,6 +15,10 @@ Two training backends are available:
 - **FSDP** (``lumen.models.llama31.fsdp``)
   Pretraining using PyTorch FSDP + HuggingFace LlamaForCausalLM,
   with LoRA (PEFT), FP8 training, and a standard PyTorch training loop.
+
+- **DeepSpeed** (``lumen.models.llama31.deepspeed``)
+  Pretraining using DeepSpeed ZeRO-1/2 + HuggingFace LlamaForCausalLM,
+  with Lumen BF16/FP8 operator injection.
 
 Both backends share the same :class:`PretrainTextDataset`.
 

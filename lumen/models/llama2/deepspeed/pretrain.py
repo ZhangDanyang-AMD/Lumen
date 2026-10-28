@@ -74,7 +74,7 @@ def build_model(args) -> nn.Module:
 class DeepSpeedTrainer:
     """LLaMA2 pretraining driver for the validated ZeRO-1/2 path."""
 
-    def __init__(self, args):
+    def __init__(self, args, *, model_builder=build_model):
         self.args = args
         self._setup_distributed()
 
@@ -84,7 +84,7 @@ class DeepSpeedTrainer:
         )
         self.lumen_config = LumenConfig.from_args(args)
         provider = make_lumen_deepspeed_model_provider(
-            build_model,
+            model_builder,
             self.lumen_config,
             self.deepspeed_config,
             backend=args.linear_backend,
@@ -140,8 +140,9 @@ class DeepSpeedTrainer:
         if self.rank == 0:
             parameter_count = sum(p.numel() for p in self.engine.module.parameters())
             logger.info(
-                "DeepSpeed LLaMA2 ready | params=%d | world=%d | zero=%d | "
+                "DeepSpeed %s ready | params=%d | world=%d | zero=%d | "
                 "micro_batch=%d | grad_accum=%d | seq=%d",
+                getattr(args, "model_label", "LLaMA2"),
                 parameter_count,
                 self.world_size,
                 args.zero_stage,

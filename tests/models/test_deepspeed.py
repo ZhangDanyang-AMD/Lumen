@@ -231,3 +231,32 @@ def test_deepspeed_parser_defaults_to_zero2_and_aiter():
     assert args.linear_backend == "aiter"
     assert args.linear_fp8 is False
     assert args.gradient_checkpointing is True
+
+
+def test_llama31_deepspeed_parser_uses_8b_defaults():
+    from lumen.models.llama31.deepspeed.pretrain import get_args
+
+    argv = [
+        "pretrain_llama31.py",
+        "--tokenizer-name-or-path",
+        "/tmp/tokenizer",
+        "--train-data-path",
+        "/tmp/train.jsonl",
+    ]
+    with patch.object(sys, "argv", argv):
+        args = get_args()
+
+    assert args.model_label == "LLaMA3.1"
+    assert args.hidden_size == 4096
+    assert args.intermediate_size == 14336
+    assert args.num_layers == 32
+    assert args.num_attention_heads == 32
+    assert args.num_key_value_heads == 8
+    assert args.vocab_size == 128256
+    assert args.seq_length == 8192
+    assert args.max_position_embeddings == 131072
+    assert args.rope_theta == 500000.0
+    assert args.zero_stage == 2
+    assert args.hf_attn_patch is True
+    assert args.lumen_fused_rope is True
+    assert args.lumen_fused_mlp is True

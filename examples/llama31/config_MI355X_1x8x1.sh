@@ -8,7 +8,7 @@
 #   CONFIG=config_MI300X_1x8x1.sh bash run_pretrain.sh         # uses MI300X config
 
 # ---- Backend selection -------------------------------------------------------
-export BACKEND="megatron"
+export BACKEND="${BACKEND:-megatron}"
 
 # ---- Hardware ----------------------------------------------------------------
 export NGPU=8
@@ -134,6 +134,9 @@ export NUM_WORKERS=4
 export TRAIN_SAMPLES=""
 export VAL_SAMPLES=""
 export SHARDING="full_shard"
+
+# ---- DeepSpeed backend -------------------------------------------------------
+export ZERO_STAGE="${ZERO_STAGE:-2}"
 
 # ---- MI355X platform ---------------------------------------------------------
 export MLPERF_SUBMISSION_ORG="AMD"

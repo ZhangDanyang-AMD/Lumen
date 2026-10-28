@@ -3,9 +3,10 @@
 #
 # LLaMA 3.1 pretraining — unified launcher.
 #
-# Supports two backends via the BACKEND environment variable:
+# Supports three backends via the BACKEND environment variable:
 #   BACKEND=megatron  — Megatron-LM-AMD (TP/PP/CP/VP/SP)  [default]
 #   BACKEND=fsdp      — PyTorch FSDP + HuggingFace
+#   BACKEND=deepspeed — DeepSpeed ZeRO-1/2 + HuggingFace
 #
 # Usage:
 #   bash run_pretrain.sh                                       # default config
@@ -314,6 +315,39 @@ run_fsdp() {
 
 
 ###############################################################################
+# DEEPSPEED BACKEND
+###############################################################################
+
+run_deepspeed() {
+    python -c "import deepspeed, transformers" 2>/dev/null || {
+        echo "ERROR: DeepSpeed and HuggingFace Transformers are required."
+        echo "  pip install -r ${SCRIPT_DIR}/requirements.txt"
+        exit 1
+    }
+    if [ "${NNODES}" -ne 1 ]; then
+        echo "ERROR: The LLaMA 3.1 DeepSpeed launcher currently supports one node."
+        exit 1
+    fi
+
+    local ds_precision="bf16"
+    [ "${FP8_TRAINING}" = "1" ] && ds_precision="fp8"
+
+    NPROC_PER_NODE="${NGPU}" \
+    ZERO_STAGE="${ZERO_STAGE:-2}" \
+    PRECISION="${ds_precision}" \
+    MBS="${MBS}" \
+    GBS="${GBS}" \
+    SEQ_LEN="${SEQ_LEN}" \
+    TRAIN_STEPS="${TRAIN_STEPS}" \
+    SEED="${SEED}" \
+    TOKENIZER_DIR="${TOKENIZER}" \
+    TRAIN_DATA_PATH="${TRAIN_DATA}" \
+    RESULTS_DIR="${SAVE_DIR}/logs" \
+        bash "${SCRIPT_DIR}/run_deepspeed_pretrain_llama31_8b.sh"
+}
+
+
+###############################################################################
 # DISPATCH
 ###############################################################################
 
@@ -327,8 +361,9 @@ ret_code=0
 case "${BACKEND}" in
     megatron) run_megatron || ret_code=$? ;;
     fsdp)     run_fsdp || ret_code=$? ;;
+    deepspeed) run_deepspeed || ret_code=$? ;;
     *)
-        echo "ERROR: Unknown BACKEND=${BACKEND}. Use 'megatron' or 'fsdp'."
+        echo "ERROR: Unknown BACKEND=${BACKEND}. Use 'megatron', 'fsdp', or 'deepspeed'."
         exit 1 ;;
 esac
 

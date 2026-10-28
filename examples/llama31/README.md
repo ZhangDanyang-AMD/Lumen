@@ -13,9 +13,20 @@ BACKEND=megatron bash examples/llama31/run_pretrain.sh
 
 # 2. Or: FSDP backend (no Megatron dependency)
 BACKEND=fsdp bash examples/llama31/run_pretrain.sh
+
+# 2. Or: DeepSpeed ZeRO-2 backend
+BACKEND=deepspeed bash examples/llama31/run_pretrain.sh
+
+# Self-contained DeepSpeed BF16 smoke/performance run
+bash examples/llama31/run_deepspeed_pretrain_llama31_8b.sh
+
+# DeepSpeed FP8 dynamic run
+PRECISION=fp8 bash examples/llama31/run_deepspeed_pretrain_llama31_8b.sh
 ```
 
-The entry point (`pretrain_llama31.py`) selects the backend via `--backend megatron|fsdp`.
+The entry point (`pretrain_llama31.py`) selects the backend via
+`--backend megatron|fsdp|deepspeed`. The DeepSpeed path supports ZeRO-1/2 and
+uses `LumenConfig.enable()` for BF16 and FP8 operator injection.
 
 ## CLI Flags
 
