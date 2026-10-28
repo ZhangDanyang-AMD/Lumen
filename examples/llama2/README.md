@@ -344,7 +344,7 @@ peak allocated memory:
 
 ## DeepSpeed Pretraining (Llama2-7B)
 
-The initial DeepSpeed integration supports ZeRO-1/2 with BF16 master weights
+The DeepSpeed integration supports ZeRO-1/2/3 with BF16 master weights
 and either BF16 compute or Lumen AITER FP8 Linear compute. Model patching still
 goes through `LumenConfig.enable()` before `deepspeed.initialize()`.
 
@@ -394,6 +394,10 @@ PRECISION=fp8 FP8_SCALING=blockwise2d \
 # ZeRO-1 or a smaller smoke test
 ZERO_STAGE=1 NPROC_PER_NODE=2 GBS=8 SEQ_LEN=512 TRAIN_STEPS=5 \
   bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# ZeRO-3 BF16 with partitioned model construction
+ZERO_STAGE=3 PRECISION=bf16 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
 ```
 
 The launcher generates mock JSONL data when `TRAIN_DATA_PATH` does not exist.
@@ -401,7 +405,7 @@ Set `TRAIN_DATA_PATH` to use an existing text/JSONL corpus.
 
 Current safety restrictions:
 
-- ZeRO-3 is rejected until gathered-parameter execution is validated.
+- ZeRO-3 is currently validated for BF16; FP8 remains limited to ZeRO-1/2.
 - FP8 parameter storage, communication quantization, MXFP4, LoRA, and
   CPU/NVMe offload are rejected.
 - FP8 supports E4M3 `dynamic`/`blockwise2d` and hybrid
@@ -430,6 +434,11 @@ sequence length 4096, and 50 steps. The full log is
   AITER autograd RoPE calls, `12800` fused SwiGLU calls, and `89600`
   BF16 Lumen Linear calls.
 - AITER loaded gfx950 FMHA v3 BF16 forward and backward kernels.
+
+The aligned BF16 ZeRO-3 run completed the same 50 steps with final loss
+`2.307275`, steady-state mean/median `8514.8 / 8448.0 ms/step`, and
+`103.21 GiB/GPU` peak allocation. Its full log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_zero3_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_zero3_mi350x.log).
 
 The launcher enforces the loss and steady-state step-time limits and fails the
 run if any enabled attention, RoPE, fused MLP, or BF16 Linear patch receives

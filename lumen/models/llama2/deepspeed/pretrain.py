@@ -72,7 +72,7 @@ def build_model(args) -> nn.Module:
 
 
 class DeepSpeedTrainer:
-    """LLaMA2 pretraining driver for the validated ZeRO-1/2 path."""
+    """LLaMA2 pretraining driver for validated ZeRO-1/2 and BF16 ZeRO-3."""
 
     def __init__(self, args, *, model_builder=build_model):
         self.args = args

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-# Lumen — Llama2-7B pretrain with DeepSpeed ZeRO-1/2.
+# Lumen — Llama2-7B pretrain with DeepSpeed ZeRO-1/2/3.
 #
 # Run from the repository checkout:
 #   bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
@@ -46,6 +46,7 @@ SAVE_INTERVAL="${SAVE_INTERVAL:-0}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${SCRIPT_DIR}/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results/deepspeed}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-${SCRIPT_DIR}/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl}"
+LOG_PATH="${LOG_PATH:-${RESULTS_DIR}/llama2_7b_zero${ZERO_STAGE}_${PRECISION}.log}"
 
 DENOM=$((MBS * NPROC_PER_NODE))
 if (( GBS % DENOM != 0 )); then
@@ -55,12 +56,16 @@ fi
 GRAD_ACCUM=$((GBS / DENOM))
 LOCAL_TRAIN_SAMPLES=$((MBS * GRAD_ACCUM * (TRAIN_STEPS + 2)))
 
-if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" ]]; then
-    echo "Initial Lumen DeepSpeed support is limited to ZERO_STAGE=1 or 2" >&2
+if [[ "${ZERO_STAGE}" != "1" && "${ZERO_STAGE}" != "2" && "${ZERO_STAGE}" != "3" ]]; then
+    echo "Lumen DeepSpeed supports ZERO_STAGE=1, 2, or 3" >&2
     exit 2
 fi
 if [[ "${PRECISION}" != "bf16" && "${PRECISION}" != "fp8" ]]; then
     echo "PRECISION must be bf16 or fp8" >&2
+    exit 2
+fi
+if [[ "${ZERO_STAGE}" == "3" && "${PRECISION}" == "fp8" ]]; then
+    echo "ZeRO-3 is currently validated for BF16 only" >&2
     exit 2
 fi
 
@@ -206,4 +211,4 @@ torchrun \
     "${FP8_ARGS[@]}" \
     "${PERF_ARGS[@]}" \
     "$@" \
-    2>&1 | tee "${RESULTS_DIR}/llama2_7b_zero${ZERO_STAGE}_${PRECISION}.log"
+    2>&1 | tee "${LOG_PATH}"
