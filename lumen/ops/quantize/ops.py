@@ -25,10 +25,21 @@ try:
         quant_fp8_blockwise_kernel,
         quant_fp8_blockwise_segment_m_kernel,
     )
+    _AITER_UNIFIED_BLOCKWISE = False
 except (ImportError, ModuleNotFoundError):
-    quant_fp8_blockwise_for_act_grad_kernel = None  # type: ignore[assignment]
-    quant_fp8_blockwise_kernel = None  # type: ignore[assignment]
-    quant_fp8_blockwise_segment_m_kernel = None  # type: ignore[assignment]
+    try:
+        from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+            quant_fp8_blockwise_kernel,
+            quant_fp8_blockwise_segment_m_kernel,
+        )
+
+        quant_fp8_blockwise_for_act_grad_kernel = None  # type: ignore[assignment]
+        _AITER_UNIFIED_BLOCKWISE = True
+    except (ImportError, ModuleNotFoundError):
+        quant_fp8_blockwise_for_act_grad_kernel = None  # type: ignore[assignment]
+        quant_fp8_blockwise_kernel = None  # type: ignore[assignment]
+        quant_fp8_blockwise_segment_m_kernel = None  # type: ignore[assignment]
+        _AITER_UNIFIED_BLOCKWISE = False
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         requant_fp8_row_to_col_kernel,
@@ -48,6 +59,16 @@ except (ImportError, ModuleNotFoundError):
 from torch.library import triton_op, wrap_triton
 
 logger = logging.getLogger(__name__)
+
+
+def _launch_triton_compat(kernel, grid, *args):
+    """Launch PyTorch-wrapped or newer AITER Triton JIT objects."""
+    try:
+        return wrap_triton(kernel)[grid](*args)
+    except RuntimeError as exc:
+        if "wrap_triton only works on functions annotated" not in str(exc):
+            raise
+        return kernel[grid](*args)
 
 
 @functools.lru_cache(maxsize=None)
@@ -119,16 +140,35 @@ def quant_fp8_blockwise_impl(
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    wrap_triton(quant_fp8_blockwise_kernel)[grid](
-        x,
-        x_fp8,
-        x_scales,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-        axis,
-    )
+    if _AITER_UNIFIED_BLOCKWISE:
+        _launch_triton_compat(
+            quant_fp8_blockwise_kernel,
+            grid,
+            x,
+            x_fp8,
+            x_scales,
+            x_fp8,
+            x_scales,
+            M,
+            N,
+            block_size,
+            torch.finfo(dtype).max,
+            axis,
+            False,
+        )
+    else:
+        _launch_triton_compat(
+            quant_fp8_blockwise_kernel,
+            grid,
+            x,
+            x_fp8,
+            x_scales,
+            M,
+            N,
+            block_size,
+            torch.finfo(dtype).max,
+            axis,
+        )
     return x_fp8, x_scales
 
 
@@ -177,17 +217,36 @@ def quant_fp8_blockwise_dual_axis_impl(
     x_scales_col = torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    wrap_triton(quant_fp8_blockwise_for_act_grad_kernel)[grid](
-        x,
-        x_fp8_row,
-        x_scales_row,
-        x_fp8_col,
-        x_scales_col,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-    )
+    if _AITER_UNIFIED_BLOCKWISE:
+        _launch_triton_compat(
+            quant_fp8_blockwise_kernel,
+            grid,
+            x,
+            x_fp8_row,
+            x_scales_row,
+            x_fp8_col,
+            x_scales_col,
+            M,
+            N,
+            block_size,
+            torch.finfo(dtype).max,
+            1,
+            True,
+        )
+    else:
+        _launch_triton_compat(
+            quant_fp8_blockwise_for_act_grad_kernel,
+            grid,
+            x,
+            x_fp8_row,
+            x_scales_row,
+            x_fp8_col,
+            x_scales_col,
+            M,
+            N,
+            block_size,
+            torch.finfo(dtype).max,
+        )
     return x_fp8_row, x_scales_row, x_fp8_col, x_scales_col
 
 
@@ -227,7 +286,9 @@ if _HAVE_REQUANT_ROW_TO_COL:
         y_fp8 = torch.empty((M, K), dtype=dtype, device=x_fp8.device)
         y_scales = torch.empty((triton.cdiv(M, block_size), K), dtype=torch.float32, device=x_fp8.device)
         grid = (triton.cdiv(M, block_size), triton.cdiv(K, block_size))
-        wrap_triton(requant_fp8_row_to_col_kernel)[grid](
+        _launch_triton_compat(
+            requant_fp8_row_to_col_kernel,
+            grid,
             x_fp8, x_scales, y_fp8, y_scales, M, K, block_size, torch.finfo(dtype).max,
         )
         return y_fp8, y_scales
