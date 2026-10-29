@@ -415,7 +415,8 @@ Current safety restrictions:
   quantization fusions remain enabled.
 - Hybrid WGrad uses a DeepSpeed-local `torch._scaled_mm` hipBLASLt path; the
   shared FSDP/Megatron Linear implementation and API are not modified.
-- Attention, normalization, embeddings, and `lm_head` remain BF16.
+- Attention, normalization, embeddings, and `lm_head` remain BF16 precision;
+  attention and normalization can still use Lumen kernels.
 - `LUMEN_WEIGHT_QUANT_ONCE=1` is rejected because its cache has not yet been
   wired to the DeepSpeed optimizer update boundary.
 
@@ -425,15 +426,19 @@ Validated on 8×MI350X with DeepSpeed 0.19.8, ZeRO-2, MBS=4, GBS=256,
 sequence length 4096, and 50 steps. The full log is
 [`results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log).
 
-- Final training loss: `2.286021` (acceptance target: at most `3.3`).
-- Steady-state mean/median: `7979.8 / 7980.2 ms/step` after excluding two
+- Final training loss: `2.285984` (acceptance target: at most `3.3`).
+- Steady-state mean/median: `6657.2 / 6627.9 ms/step` after excluding two
   warmup steps (acceptance limit: `18000 ms`).
-- Global throughput: approximately `131.4K tokens/s` at the median step.
-- Peak allocated memory: `111.35 GiB/GPU`.
+- Global throughput: approximately `158.2K tokens/s`.
+- Peak allocated memory: `95.10 GiB/GPU`.
 - Runtime patch verification: `12800` Lumen/AITER SDPA calls, `12800`
-  AITER autograd RoPE calls, `12800` fused SwiGLU calls, and `89600`
-  BF16 Lumen Linear calls.
+  AITER autograd RoPE calls, `12800` fused SwiGLU calls, `26000` Lumen norm
+  calls, and `89600` BF16 Lumen Linear calls.
 - AITER loaded gfx950 FMHA v3 BF16 forward and backward kernels.
+
+The no-patch BF16 baseline measured `9784.7 ms/step` and `122.10 GiB/GPU`;
+the full patch set reduces step time by `32.0%` (1.47× throughput). Its log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_baseline_mi350x.log).
 
 The aligned BF16 ZeRO-3 run completed the same 50 steps with final loss
 `2.307275`, steady-state mean/median `8514.8 / 8448.0 ms/step`, and
@@ -451,30 +456,37 @@ The default hybrid delayed recipe was validated on the same 8×MI350X, ZeRO-2,
 MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
 [`results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log).
 
-- Final training loss: `2.286749`.
-- Steady-state mean/median: `7630.3 / 7577.5 ms/step`.
-- Global throughput: approximately `138.4K tokens/s`.
-- Peak allocated memory: `122.09 GiB/GPU`.
-- Runtime verification: `89600` FP8 Linear calls, plus `12800` calls each
-  for AITER SDPA, AITER RoPE, and fused SwiGLU.
+- Final training loss: `2.286547`.
+- Steady-state mean/median: `6059.2 / 5990.9 ms/step`.
+- Global throughput: approximately `175.0K tokens/s`.
+- Peak allocated memory: `93.76 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, `38400` shared-input quant
+  cache hits, `26000` Lumen norm calls, plus `12800` calls each for AITER
+  SDPA, AITER RoPE, and fused SwiGLU.
 - All 50 steps completed without a non-finite loss.
 
-Against the BF16 run in the same ROCm 7.0 image, delayed FP8 reduces mean
-step time by `4.4%` and median step time by `5.0%`. The per-update FP8 weight
-cache trades approximately `10.74 GiB/GPU` of additional resident memory for
-this speedup.
+The delayed-only baseline measured `9579.5 ms/step`; the full patch set reduces
+its step time by `36.7%`. Against the no-patch BF16 baseline, optimized delayed
+FP8 reduces step time by `38.1%` (1.61× throughput). Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_delayed_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_delayed_baseline_mi350x.log).
 
 The alternative E4M3 dynamic recipe was also validated on the same
 MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
 [`results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log).
 
-- Final training loss: `2.286721`.
-- Steady-state mean/median: `8445.4 / 8427.5 ms/step`.
-- Global throughput: approximately `124.5K tokens/s`.
-- Peak allocated memory: `116.02 GiB/GPU`.
-- Runtime verification: `89600` FP8 Linear calls, plus `12800` calls each
-  for AITER SDPA, AITER RoPE, and fused SwiGLU.
+- Final training loss: `2.286683`.
+- Steady-state mean/median: `6392.7 / 6306.1 ms/step`.
+- Global throughput: approximately `166.4K tokens/s`.
+- Peak allocated memory: `99.86 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, `38400` shared-input quant
+  cache hits, `26000` Lumen norm calls, plus `12800` calls each for AITER
+  SDPA, AITER RoPE, and fused SwiGLU.
 - All 50 steps completed without a non-finite loss.
+
+The dynamic-only baseline measured `9499.7 ms/step`; full patches reduce its
+step time by `32.7%`; against no-patch BF16 it is a `34.7%` reduction
+(1.53× throughput). Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_dynamic_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_dynamic_baseline_mi350x.log).
 
 The E4M3 blockwise2d recipe also completed the full 50-step convergence run.
 Its full log is

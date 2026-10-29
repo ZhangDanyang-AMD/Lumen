@@ -35,6 +35,10 @@ if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
 fi
 FUSED_MLP="${FUSED_MLP:-1}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-1}"
+HF_ATTN_PATCH="${HF_ATTN_PATCH:-1}"
+FUSED_ROPE="${FUSED_ROPE:-1}"
+LUMEN_NORM="${LUMEN_NORM:-0}"
+SHARED_INPUT_QUANT="${SHARED_INPUT_QUANT:-1}"
 MBS="${MBS:-1}"
 GBS="${GBS:-256}"
 SEQ_LEN="${SEQ_LEN:-4096}"
@@ -117,11 +121,28 @@ if [[ "${PRECISION}" == "fp8" ]]; then
 fi
 
 PERF_ARGS=()
+if [[ "${HF_ATTN_PATCH}" == "1" ]]; then
+    PERF_ARGS+=(--hf-attn-patch)
+else
+    PERF_ARGS+=(--no-hf-attn-patch)
+fi
+if [[ "${FUSED_ROPE}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-fused-rope)
+else
+    PERF_ARGS+=(--no-lumen-fused-rope)
+fi
 if [[ "${FUSED_MLP}" == "1" ]]; then
     PERF_ARGS+=(--lumen-fused-mlp)
+else
+    PERF_ARGS+=(--no-lumen-fused-mlp)
 fi
 if [[ "${LUMEN_LINEAR}" == "1" && "${PRECISION}" == "bf16" ]]; then
     PERF_ARGS+=(--lumen-linear)
+fi
+if [[ "${LUMEN_NORM}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-norm)
+else
+    PERF_ARGS+=(--no-lumen-norm)
 fi
 
 export PYTHONPATH="${LUMEN_DIR}:${PYTHONPATH:-}"
@@ -160,12 +181,21 @@ if [[ "${PRECISION}" == "fp8" ]]; then
     export LUMEN_FUSED_QUANT_TRANSPOSE_CPP=1
     export LUMEN_FUSED_QUANT_SCALE=1
     export LUMEN_FUSED_CAST_TRANSPOSE=1
+    export LUMEN_FUSED_CAST_TRANSPOSE_V2=1
+    export LUMEN_TRANSPOSE_CACHE=1
     export LUMEN_FAST_QUANT_DISPATCH=1
+    if [[ "${SHARED_INPUT_QUANT}" == "1" ]]; then
+        export LUMEN_SHARED_INPUT_QUANT=1
+    fi
     if [[ "${FP8_FUSED_KERNELS}" == "1" ]]; then
         export LUMEN_FUSED_QUANT_AMAX=1
     fi
     if [[ "${FP8_SCALING}" == "delayed" ]]; then
         export LUMEN_STEP_BATCH_SCALES=1
+    fi
+    if [[ "${FUSED_MLP}" == "1" ]]; then
+        export LUMEN_FUSED_SWIGLU_QUANT=1
+        export LUMEN_HF_FUSED_SWIGLU_QUANT=1
     fi
 fi
 torchrun \
@@ -196,8 +226,6 @@ torchrun \
     --max-steps "${TRAIN_STEPS}" \
     --zero-stage "${ZERO_STAGE}" \
     --linear-backend aiter \
-    --hf-attn-patch \
-    --lumen-fused-rope \
     --no-gradient-checkpointing \
     --lr 1.0e-5 \
     --min-lr 0.0 \
