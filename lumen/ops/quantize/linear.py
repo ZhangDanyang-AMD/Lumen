@@ -2476,18 +2476,23 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # FP8 (128×1, col-wise) using a direct FP8→FP8 Triton kernel —
             # avoids the BF16 intermediate copy (dequant→BF16→requant(axis=0)).
             def _compute_grad_weight():
+                if not ctx.fp8_wgrad:
+                    return _bf16_wgrad()
                 if g_col is None:
                     return _bf16_wgrad()
                 try:
                     from lumen.ops.quantize.ops import requant_fp8_row_to_col
+                    from lumen.ops.quantize.fast_transpose import (
+                        fast_transpose_fp8,
+                    )
                     # FP8(1×128 row) → FP8(128×1 col) without BF16 roundtrip.
                     # input_scale shape: (M, K_in//block_size) — row dequant multipliers.
                     x_col, x_col_s = requant_fp8_row_to_col(
                         input_data, input_scale, fp8_dtype, block_size,
                     )
                     return _gemm_blockscale_triton(
-                        g_col.t().contiguous(),     # (N_out, M) ∇Y^T
-                        x_col.t().contiguous(),     # (K_in,  M) X^T
+                        fast_transpose_fp8(g_col),  # (N_out, M) ∇Y^T
+                        fast_transpose_fp8(x_col),  # (K_in,  M) X^T
                         g_col_s.t().contiguous(),   # (N_out, M/128)
                         x_col_s.t().contiguous(),   # (K_in,  M/128)
                     )

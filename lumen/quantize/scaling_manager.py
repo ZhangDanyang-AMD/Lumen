@@ -653,6 +653,7 @@ class ScalingManager:
                 if desc is not None:
                     desc.data = desc.data.detach()
                     desc.scale = desc.scale.detach()
+                    self._cache_blockwise2d_transpose(desc)
                 self._fp8_param_cache[tid] = desc
 
         if self._dp_group is not None:
@@ -679,8 +680,20 @@ class ScalingManager:
         if desc is not None:
             desc.data = desc.data.detach()
             desc.scale = desc.scale.detach()
+            self._cache_blockwise2d_transpose(desc)
         self._fp8_param_cache[tensor_id] = desc
         return desc
+
+    def _cache_blockwise2d_transpose(self, desc: FP8Descriptor) -> None:
+        """Cache the DGrad operand once per FP8 weight-cache generation."""
+        if self.config.scaling != ScalingType.BLOCKWISE2D:
+            return
+        if desc.data.ndim != 2 or desc.scale.ndim != 2:
+            return
+        desc.data._lumen_wt = (
+            desc.data.t().contiguous(),
+            desc.scale.t().contiguous(),
+        )
 
     def _collect_amaxes(self):
         """Gather the latest amax values from all registered FP8 params."""
@@ -1025,6 +1038,24 @@ class ScalingManager:
                 float8_dtype_pt=dtype,
             )
             return FP8Descriptor(data=fp8_tensor, scale=mx_scale, fp8_dtype=dtype)
+
+        if (
+            scale is None
+            and self.config.scaling == ScalingType.BLOCKWISE2D
+            and tensor_id in self._fp8_param_ids
+        ):
+            from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+            fp8_tensor, fp8_scales = _quant_blockwise2d_weight(
+                tensor.contiguous(),
+                dtype,
+                self.config.block_size,
+            )
+            return FP8Descriptor(
+                data=fp8_tensor,
+                scale=fp8_scales,
+                fp8_dtype=dtype,
+            )
 
         if scale is None and self.config.scaling in (ScalingType.BLOCKWISE, ScalingType.BLOCKWISE2D):
             _, _, quant_fp8_blockwise_impl = _get_quant_ops()

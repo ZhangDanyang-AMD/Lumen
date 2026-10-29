@@ -273,6 +273,24 @@ class TestFP8ParamLifecycle:
         mgr.check_and_mark_fp8_stale(0)
         assert "layer.weight" not in mgr._fp8_param_stale
 
+    def test_blockwise2d_param_cache_stores_transposed_dgrad_operand(self):
+        cfg = QuantConfig(
+            format=QuantFormat.FP8_E4M3,
+            scaling=ScalingType.BLOCKWISE2D,
+            block_size=128,
+        )
+        mgr = ScalingManager(cfg)
+        param = torch.nn.Parameter(
+            torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        )
+        mgr.register_fp8_param("layer.weight", param)
+        mgr.quantize_fp8_params()
+
+        desc = mgr.get_fp8_param_cached("layer.weight", param)
+        data_t, scale_t = desc.data._lumen_wt
+        assert data_t.shape == (128, 256)
+        assert scale_t.shape == (1, 2)
+
     def test_mxfp4_is_refused(self):
         """The param cache is an FP8 mechanism; no MXFP4 path reads it back.
 

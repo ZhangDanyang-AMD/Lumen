@@ -445,7 +445,7 @@ def _patch_linear_layers(
             module._lumen_quant_linear_calls = 0
             if (
                 _os.environ.get("LUMEN_SHARED_INPUT_QUANT", "0") == "1"
-                and scaling_type in ("dynamic", "delayed")
+                and scaling_type in ("dynamic", "delayed", "blockwise2d")
             ):
                 if name.endswith("self_attn.q_proj"):
                     module._lumen_shared_quant = (name.rsplit(".", 1)[0], "put")
