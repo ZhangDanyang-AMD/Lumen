@@ -51,6 +51,12 @@ quantization. With all Lumen patches, DeepSpeed measured 7.59 s/step for
 hybrid delayed and 8.00 s/step for dynamic scaling. Relative to native BF16,
 these are 33.5% and 29.9% step-time reductions.
 
+Blockwise2d measured 14.52 s/step with only quantization enabled and
+11.72 s/step with all applicable Lumen patches, a 19.3% reduction
+(1.24× throughput). It remains slower than the 11.41 s native BF16 baseline
+because Llama3.1-specific blockscale GEMM shapes do not yet have an external
+gfx950 tuning table.
+
 The validated BF16 ZeRO-3 run uses `deepspeed.zero.Init` for partitioned model
 construction. Its aligned 50-step MI350X result is 13.21 s/step with a
 143.91 GiB peak per rank.
