@@ -355,6 +355,49 @@ pip install -e ".[aiter,deepspeed]"
 pip install -r examples/llama2/requirements.txt
 ```
 
+### Docker image
+
+Pull the validated ROCm 7.14 / MI350X-MI355X image from Docker Hub:
+
+```bash
+docker pull zhangdanyangamd/lumen:deepspeed-rocm714-mi355
+```
+
+The image contains DeepSpeed 0.19.8, ROCm 7.14, PyTorch 2.12, current AITER,
+and the Lumen source used by the committed benchmark logs. To run a local
+checkout instead of the source baked into the image, mount it at
+`/workspace/Lumen`:
+
+```bash
+docker run --rm --ipc=host --network=host \
+  --device=/dev/kfd --device=/dev/dri \
+  --group-add video --group-add render \
+  -v "$PWD:/workspace/Lumen" \
+  -w /workspace/Lumen \
+  zhangdanyangamd/lumen:deepspeed-rocm714-mi355 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+Alternatively, build the same advanced image from the repository root. The
+single `Dockerfile.deepspeed` starts from its declared ROCm/PyTorch base images;
+no separate blockwise image is required:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  --build-arg BUILD_FLAVOR=advanced_base \
+  --build-arg AITER_SOURCE=upstream \
+  --build-arg AITER_BRANCH=main \
+  --build-arg TORCHAO_VERSION=0.18.0 \
+  -t zhangdanyangamd/lumen:deepspeed-rocm714-mi355 .
+```
+
+Push a locally built image only after its GPU smoke tests pass:
+
+```bash
+docker push zhangdanyangamd/lumen:deepspeed-rocm714-mi355
+```
+
 Build the compatibility ROCm 7.0 environment:
 
 ```bash
