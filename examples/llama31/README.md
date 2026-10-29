@@ -38,6 +38,12 @@ optional attention, RoPE, MLP, and Linear patches are disabled. They can be
 enabled explicitly with `HF_ATTN_PATCH=1`, `FUSED_ROPE=1`, `FUSED_MLP=1`, and
 `LUMEN_LINEAR=1`.
 
+On 8×MI350X, the aligned native DeepSpeed BF16 baseline measured
+11.41 s/step. Enabling all four Lumen patches measured 9.16 s/step, a 19.7%
+step-time reduction (1.25× throughput). The corresponding logs are
+`results/llama31_8b_deepspeed_pretrain_bf16_mi350x.log` and
+`results/llama31_8b_deepspeed_pretrain_bf16_lumen_patched_mi350x.log`.
+
 FP8 runs automatically enable fused SwiGLU activation quantization, fused
 amax/cast-transpose, and the per-update weight cache. On 8×MI350X with the
 same aligned parameters, DeepSpeed measured 10.53 s/step for hybrid delayed
