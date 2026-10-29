@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 import torch
 from torch.utils.data import Dataset
 
-__all__ = ["PretrainTextDataset"]
+__all__ = ["PretrainTextDataset", "check_sample_budget"]
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,11 @@ class PretrainTextDataset(Dataset):
         rank: Zero-based data-parallel rank. Each rank tokenizes only its
             assigned input lines instead of duplicating preprocessing.
         world_size: Number of data-parallel dataset shards.
+        allow_repeat: Serve ``max_samples`` samples even when this shard holds
+            fewer, wrapping back to chunk 0. Off by default so a dataset never
+            silently trains on repeated data. Callers that turn it on own
+            telling the user: the class does not warn, because it is built once
+            per rank and would say it once per rank.
     """
 
     def __init__(
@@ -63,9 +68,11 @@ class PretrainTextDataset(Dataset):
         max_samples: Optional[int] = None,
         rank: int = 0,
         world_size: int = 1,
+        allow_repeat: bool = False,
     ):
         if world_size < 1 or not 0 <= rank < world_size:
             raise ValueError(f"Invalid dataset shard rank={rank}, world_size={world_size}")
+        self._allow_repeat = allow_repeat
         self.seq_length = seq_length
         self.tokenizer = tokenizer
         self.is_hf_tokenizer = is_hf_tokenizer
@@ -102,11 +109,27 @@ class PretrainTextDataset(Dataset):
     # Dataset interface
     # ------------------------------------------------------------------
 
+    @property
+    def n_samples_read(self) -> int:
+        """Distinct samples this shard built, before ``max_samples`` or repeat.
+
+        ``__len__`` reports what the sampler is served, which under
+        ``allow_repeat`` says nothing about how much distinct data there is.
+
+        Reading stops once ``max_samples`` worth of tokens are in hand, so this
+        is samples read, not corpus size: a corpus at least as long as the
+        budget yields ``n_samples_read >= max_samples``, and anything less
+        means the corpus ran out.
+        """
+        return len(self._chunks)
+
     def __len__(self) -> int:
         n = len(self._chunks)
-        if self._max_samples is not None:
-            return min(n, self._max_samples)
-        return n
+        if self._max_samples is None:
+            return n
+        if self._allow_repeat and n:
+            return self._max_samples
+        return min(n, self._max_samples)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         idx = idx % len(self._chunks)
@@ -157,3 +180,37 @@ class PretrainTextDataset(Dataset):
                     break
 
         return all_ids
+
+
+def check_sample_budget(available: int, requested: int, allow_repeat: bool) -> Optional[str]:
+    """Settle a training corpus too short for the requested run before step 0.
+
+    Returns the message to report when the run proceeds on repeated data, and
+    ``None`` when there is nothing to say. Raises when the shortfall is real
+    and repeating was not asked for: a corpus that runs out partway through
+    surfaces as a ``StopIteration`` far from its cause, which reads as a crash
+    rather than the configuration problem it is.
+
+    ``available`` comes from :attr:`PretrainTextDataset.n_samples_read`, which
+    undercounts a sufficient corpus but never overcounts a short one, so this
+    never reports a corpus as short when it is not.
+
+    The remedies name Megatron flags even though this module imports nothing
+    from Megatron; the flag name is the actionable half of the message and
+    every caller reaches here from the same CLI.
+    """
+    if not available or requested <= available:
+        return None
+
+    if not allow_repeat:
+        raise ValueError(
+            f"The training corpus holds {available} samples but --train-iters and "
+            f"--global-batch-size ask for {requested}. Supply more data, shorten "
+            f"the run, or pass --lumen-repeat-corpus to train on repeated data."
+        )
+
+    return (
+        f"training corpus holds {available} samples but {requested} were requested; "
+        f"--lumen-repeat-corpus is set, so the data repeats "
+        f"{requested / available:.2f} times"
+    )
