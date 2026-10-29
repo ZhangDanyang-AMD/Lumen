@@ -1,5 +1,6 @@
 ARG COMPAT_BASE=rocm/7.0:rocm7.0_ubuntu22.04_py3.10_pytorch_release_2.8.0_rc1
 ARG ADVANCED_BASE=rocm/pytorch:rocm7.14.1_ubuntu24.04_py3.12_pytorch_release_2.12.0
+ARG BUILD_FLAVOR=compat_base
 
 FROM rocm/dev-ubuntu-24.04:7.14.1-full AS rocm714_sdk
 
@@ -13,7 +14,6 @@ ENV ROCM_HOME=/opt/rocm/core-7.14 \
     LD_LIBRARY_PATH="/opt/rocm/core-7.14/lib:${LD_LIBRARY_PATH:-}"
 RUN ln -sf /opt/rocm/core-7.14/bin/hipconfig /opt/venv/bin/hipconfig
 
-ARG BUILD_FLAVOR=compat_base
 FROM ${BUILD_FLAVOR} AS final
 
 ARG AITER_SOURCE=submodule
