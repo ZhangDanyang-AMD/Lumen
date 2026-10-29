@@ -408,6 +408,8 @@ class LumenConfig:
         return model
 
     def _patch_norms(self, model) -> None:
+        import types
+
         import torch
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
@@ -422,6 +424,23 @@ class LumenConfig:
                     "Qwen2RMSNorm",
                     "Qwen3RMSNorm",
                 ):
+                    if getattr(self, "_preserve_parameter_identity", False):
+                        from lumen.ops.normalization.rmsnorm import rmsnorm
+
+                        def _rms_forward(mod, hidden_states):
+                            mod._lumen_norm_calls += 1
+                            eps = getattr(
+                                mod,
+                                "eps",
+                                getattr(mod, "variance_epsilon", 1e-6),
+                            )
+                            return rmsnorm(hidden_states, mod.weight, eps)
+
+                        child._lumen_norm_original_forward = child.forward
+                        child._lumen_norm_calls = 0
+                        child.forward = types.MethodType(_rms_forward, child)
+                        count += 1
+                        continue
                     hidden = child.weight.shape[0]
                     eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
                     target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
@@ -434,6 +453,23 @@ class LumenConfig:
                     setattr(module, attr_name, repl)
                     count += 1
                 elif cls_name in ("LayerNorm",):
+                    if getattr(self, "_preserve_parameter_identity", False):
+                        from lumen.ops.normalization.layernorm import layernorm
+
+                        def _layer_forward(mod, hidden_states):
+                            mod._lumen_norm_calls += 1
+                            return layernorm(
+                                hidden_states,
+                                mod.weight,
+                                mod.bias,
+                                mod.eps,
+                            )
+
+                        child._lumen_norm_original_forward = child.forward
+                        child._lumen_norm_calls = 0
+                        child.forward = types.MethodType(_layer_forward, child)
+                        count += 1
+                        continue
                     hidden = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
                     eps = getattr(child, "eps", 1e-5)
                     repl = LumenLayerNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)

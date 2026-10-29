@@ -36,18 +36,20 @@ LR 1e-5 with two warmup steps and cosine decay. Its BF16
 `LumenConfig.enable()` contract is exactly `format=fp8_e4m3, scaling=none`;
 optional attention, RoPE, MLP, and Linear patches are disabled. They can be
 enabled explicitly with `HF_ATTN_PATCH=1`, `FUSED_ROPE=1`, `FUSED_MLP=1`, and
-`LUMEN_LINEAR=1`.
+`LUMEN_LINEAR=1`; use `LUMEN_NORM=1` for the in-place RMSNorm patch.
 
 On 8×MI350X, the aligned native DeepSpeed BF16 baseline measured
-11.41 s/step. Enabling all four Lumen patches measured 9.16 s/step, a 19.7%
-step-time reduction (1.25× throughput). The corresponding logs are
+11.41 s/step. Enabling attention, RoPE, MLP, Linear, and in-place RMSNorm
+patches measured 8.52 s/step, a 25.4% step-time reduction (1.34× throughput).
+The corresponding logs are
 `results/llama31_8b_deepspeed_pretrain_bf16_mi350x.log` and
 `results/llama31_8b_deepspeed_pretrain_bf16_lumen_patched_mi350x.log`.
 
 FP8 runs automatically enable fused SwiGLU activation quantization, fused
-amax/cast-transpose, and the per-update weight cache. On 8×MI350X with the
-same aligned parameters, DeepSpeed measured 10.53 s/step for hybrid delayed
-and 10.85 s/step for dynamic scaling, versus 11.41 s/step for BF16.
+amax/cast-transpose, the per-update weight cache, and shared QKV/gate-up input
+quantization. With all Lumen patches, DeepSpeed measured 7.59 s/step for
+hybrid delayed and 8.00 s/step for dynamic scaling. Relative to native BF16,
+these are 33.5% and 29.9% step-time reductions.
 
 The validated BF16 ZeRO-3 run uses `deepspeed.zero.Init` for partitioned model
 construction. Its aligned 50-step MI350X result is 13.21 s/step with a

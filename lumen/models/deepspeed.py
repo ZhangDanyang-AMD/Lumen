@@ -290,7 +290,11 @@ def prepare_deepspeed_model(
         _install_deepspeed_tuned_blockscale(blockwise_tuning_config)
     before = _parameter_ids(model)
     original_model = model
-    manager, model = config.enable(model, dp_group=dp_group, backend=backend)
+    config._preserve_parameter_identity = True
+    try:
+        manager, model = config.enable(model, dp_group=dp_group, backend=backend)
+    finally:
+        del config._preserve_parameter_identity
 
     if model is not original_model:
         raise RuntimeError(
@@ -537,6 +541,17 @@ def add_common_deepspeed_args(parser):
     deepspeed_group.add_argument(
         "--no-lumen-fused-mlp",
         dest="lumen_fused_mlp",
+        action="store_false",
+    )
+    deepspeed_group.add_argument(
+        "--lumen-norm",
+        action="store_true",
+        default=False,
+        help="Patch RMSNorm/LayerNorm forward in place with Lumen kernels.",
+    )
+    deepspeed_group.add_argument(
+        "--no-lumen-norm",
+        dest="lumen_norm",
         action="store_false",
     )
     deepspeed_group.add_argument(

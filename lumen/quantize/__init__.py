@@ -69,6 +69,26 @@ from lumen.quantize.scaling_manager import (
 
 logger = logging.getLogger(__name__)
 
+_shared_input_quant_cache = threading.local()
+
+
+def _shared_input_quant_get(group, *, consume: bool):
+    cache = getattr(_shared_input_quant_cache, "values", None)
+    if cache is None:
+        return None
+    value = cache.get(group)
+    if consume:
+        cache.pop(group, None)
+    return value
+
+
+def _shared_input_quant_put(group, value) -> None:
+    cache = getattr(_shared_input_quant_cache, "values", None)
+    if cache is None:
+        cache = {}
+        _shared_input_quant_cache.values = cache
+    cache[group] = value
+
 
 # ---------------------------------------------------------------------------
 # Backend detection
@@ -423,6 +443,23 @@ def _patch_linear_layers(
             module._quant_tensor_id = tensor_id
             module._quant_scaling_type = scaling_type
             module._lumen_quant_linear_calls = 0
+            if (
+                _os.environ.get("LUMEN_SHARED_INPUT_QUANT", "0") == "1"
+                and scaling_type in ("dynamic", "delayed")
+            ):
+                if name.endswith("self_attn.q_proj"):
+                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "put")
+                elif name.endswith("self_attn.k_proj"):
+                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "get")
+                elif name.endswith("self_attn.v_proj"):
+                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "pop")
+                elif name.endswith("mlp.gate_proj"):
+                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "put")
+                elif name.endswith("mlp.up_proj"):
+                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "pop")
+                if hasattr(module, "_lumen_shared_quant"):
+                    module._lumen_shared_quant_puts = 0
+                    module._lumen_shared_quant_hits = 0
             # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
             # already frozen the base weight, so requires_grad is reliable here.
             # Under FSDP the gathered view can falsely report requires_grad=True.
@@ -715,12 +752,43 @@ def _replace_forward(
         def quant_forward(input_tensor, *args, **kwargs):
             module._lumen_quant_linear_calls += 1
             pre_quantized_input = None
+            shared_quant = getattr(module, "_lumen_shared_quant", None)
+            if shared_quant is not None and quantize_activation:
+                group, action = shared_quant
+                if action == "put":
+                    from lumen.ops.quantize.linear import quantize_input
+
+                    input_2d = input_tensor.reshape(
+                        -1, input_tensor.shape[-1]
+                    ).contiguous()
+                    desc = quantize_input(
+                        input_2d,
+                        scaling_type,
+                        fp8_dtype,
+                        block_size,
+                        manager,
+                        _act_tensor_id,
+                    )
+                    pre_quantized_input = (desc.data, desc.scale)
+                    _shared_input_quant_put(group, pre_quantized_input)
+                    module._lumen_shared_quant_puts += 1
+                else:
+                    pre_quantized_input = _shared_input_quant_get(
+                        group,
+                        consume=action == "pop",
+                    )
+                    if pre_quantized_input is not None:
+                        module._lumen_shared_quant_hits += 1
             if _os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1":
                 from lumen.models._swiglu_fp8_fuse import (
                     pop_swiglu_fp8_cache,
                 )
 
-                cached = pop_swiglu_fp8_cache() if quantize_activation else None
+                cached = (
+                    pop_swiglu_fp8_cache()
+                    if quantize_activation and pre_quantized_input is None
+                    else None
+                )
                 if cached is not None:
                     pre_quantized_input = (cached[0], cached[1])
                     if cached[2] is not None:

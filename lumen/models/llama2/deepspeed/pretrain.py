@@ -236,6 +236,16 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen fused MLP was requested but not every LlamaMLP was patched"
                 )
+        if self.args.lumen_norm:
+            norms = [
+                module
+                for module in model.modules()
+                if hasattr(module, "_lumen_norm_calls")
+            ]
+            if not norms:
+                raise RuntimeError(
+                    "Lumen norm was requested but no norm module was patched"
+                )
         if self.args.lumen_linear:
             linear_modules = [
                 module
@@ -270,6 +280,7 @@ class DeepSpeedTrainer:
             "hf_attn_patch": bool(self.args.hf_attn_patch),
             "fused_rope": bool(self.args.lumen_fused_rope),
             "fused_mlp": bool(self.args.lumen_fused_mlp),
+            "lumen_norm": bool(self.args.lumen_norm),
             "lumen_linear": bool(self.args.lumen_linear),
             "linear_fp8": bool(self.args.linear_fp8),
             "gradient_checkpointing": bool(self.args.gradient_checkpointing),
@@ -279,8 +290,10 @@ class DeepSpeedTrainer:
         sdpa_calls = 0
         rope_calls = 0
         mlp_calls = 0
+        norm_calls = 0
         linear_calls = 0
         fp8_linear_calls = 0
+        shared_quant_hits = 0
         if self.args.hf_attn_patch:
             from lumen.ops.attention.hf_patch import get_sdpa_patch_calls
 
@@ -306,6 +319,15 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen fused MLP was installed but no training call reached it"
                 )
+        if self.args.lumen_norm:
+            norm_calls = sum(
+                int(getattr(module, "_lumen_norm_calls", 0))
+                for module in self.engine.module.modules()
+            )
+            if norm_calls <= 0:
+                raise RuntimeError(
+                    "Lumen norm was installed but no training call reached it"
+                )
         if self.args.lumen_linear:
             linear_calls = sum(
                 int(getattr(module, "_lumen_linear_calls", 0))
@@ -324,15 +346,27 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen FP8 Linear was installed but no training call reached it"
                 )
+            if os.environ.get("LUMEN_SHARED_INPUT_QUANT", "0") == "1":
+                shared_quant_hits = sum(
+                    int(getattr(module, "_lumen_shared_quant_hits", 0))
+                    for module in self.engine.module.modules()
+                )
+                if shared_quant_hits <= 0:
+                    raise RuntimeError(
+                        "Shared FP8 input quantization was enabled but never reused"
+                    )
         if self.rank == 0:
             logger.info(
                 "Verified Lumen runtime patches | sdpa_calls=%d | rope_calls=%d | "
-                "mlp_calls=%d | linear_calls=%d | fp8_linear_calls=%d",
+                "mlp_calls=%d | norm_calls=%d | linear_calls=%d | "
+                "fp8_linear_calls=%d | shared_quant_hits=%d",
                 sdpa_calls,
                 rope_calls,
                 mlp_calls,
+                norm_calls,
                 linear_calls,
                 fp8_linear_calls,
+                shared_quant_hits,
             )
 
     def train(self) -> None:

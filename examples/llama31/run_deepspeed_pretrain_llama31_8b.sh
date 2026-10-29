@@ -20,6 +20,7 @@ HF_ATTN_PATCH="${HF_ATTN_PATCH:-0}"
 FUSED_ROPE="${FUSED_ROPE:-0}"
 FUSED_MLP="${FUSED_MLP:-}"
 LUMEN_LINEAR="${LUMEN_LINEAR:-0}"
+LUMEN_NORM="${LUMEN_NORM:-0}"
 MBS="${MBS:-2}"
 GBS="${GBS:-128}"
 SEQ_LEN="${SEQ_LEN:-8192}"
@@ -125,6 +126,11 @@ fi
 if [[ "${LUMEN_LINEAR}" == "1" && "${PRECISION}" == "bf16" ]]; then
     PERF_ARGS+=(--lumen-linear)
 fi
+if [[ "${LUMEN_NORM}" == "1" ]]; then
+    PERF_ARGS+=(--lumen-norm)
+else
+    PERF_ARGS+=(--no-lumen-norm)
+fi
 
 export PYTHONPATH="${LUMEN_DIR}:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=false
@@ -161,6 +167,7 @@ PY
     export LUMEN_FUSED_CAST_TRANSPOSE_V2=1
     export LUMEN_TRANSPOSE_CACHE=1
     export LUMEN_FAST_QUANT_DISPATCH=1
+    export LUMEN_SHARED_INPUT_QUANT=1
     if [[ "${FP8_FUSED_KERNELS}" == "1" ]]; then
         export LUMEN_FUSED_QUANT_AMAX=1
     fi

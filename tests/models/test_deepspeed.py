@@ -154,6 +154,32 @@ def test_model_provider_uses_lumen_config_enable():
     assert prepared._lumen_config is config
 
 
+def test_deepspeed_lumen_norm_patch_preserves_parameter_identity():
+    class LlamaRMSNorm(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.ones(4))
+            self.variance_epsilon = 1e-5
+
+        def forward(self, hidden_states):
+            variance = hidden_states.float().pow(2).mean(-1, keepdim=True)
+            return (
+                hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+            ).to(hidden_states.dtype) * self.weight
+
+    model = nn.Sequential(LlamaRMSNorm()).cuda().to(torch.bfloat16)
+    weight_id = id(model[0].weight)
+    prepare_deepspeed_model(
+        model,
+        LumenConfig(scaling="none", lumen_norm=True),
+        _ds_config(),
+    )
+
+    assert id(model[0].weight) == weight_id
+    model(torch.randn(2, 3, 4, device="cuda", dtype=torch.bfloat16))
+    assert model[0]._lumen_norm_calls == 1
+
+
 def test_hf_mlp_patch_preserves_parameters_and_matches_reference():
     class LlamaMLP(nn.Module):
         def __init__(self):
