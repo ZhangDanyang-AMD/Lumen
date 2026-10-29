@@ -347,11 +347,16 @@ class DeepSpeedTrainer:
                     "Lumen FP8 Linear was installed but no training call reached it"
                 )
             if os.environ.get("LUMEN_SHARED_INPUT_QUANT", "0") == "1":
+                shared_quant_modules = [
+                    module
+                    for module in self.engine.module.modules()
+                    if hasattr(module, "_lumen_shared_quant")
+                ]
                 shared_quant_hits = sum(
                     int(getattr(module, "_lumen_shared_quant_hits", 0))
-                    for module in self.engine.module.modules()
+                    for module in shared_quant_modules
                 )
-                if shared_quant_hits <= 0:
+                if shared_quant_modules and shared_quant_hits <= 0:
                     raise RuntimeError(
                         "Shared FP8 input quantization was enabled but never reused"
                     )

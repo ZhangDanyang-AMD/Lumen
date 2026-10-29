@@ -492,13 +492,15 @@ The E4M3 blockwise2d recipe also completed the full 50-step convergence run.
 Its full log is
 [`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log).
 
-- Final training loss: `2.287017`.
-- Steady-state mean/median: `12476.1 / 12439.1 ms/step`.
-- Global throughput: approximately `84.3K tokens/s`.
-- Peak allocated memory: `122.84 GiB/GPU`.
+- Final training loss: `2.286625`.
+- Steady-state mean/median: `9990.0 / 9925.1 ms/step`.
+- Global throughput: approximately `105.8K tokens/s`.
+- Peak allocated memory: `106.63 GiB/GPU`.
 
 Blockwise2d is numerically supported but is not the recommended performance
 recipe on this DeepSpeed/HuggingFace path; its activation and WGrad kernels are
 substantially slower than hybrid delayed at these Llama2-7B shapes. The
-gfx950 shape-specific Triton tuning table improves mean step time by about
-`7.7%` over the untuned `13518.9 ms/step` baseline.
+blockwise-only baseline measured `12981.9 ms/step`; shape tuning plus the full
+patch set reduces it by `23.0%` (1.30× throughput), but remains slightly slower
+than the no-patch BF16 baseline. Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_baseline_mi350x.log).
