@@ -220,6 +220,7 @@ class _RoPEAutograd(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_out):
         cos4, sin4 = ctx.saved_tensors
+        grad_out = grad_out.contiguous()
         gx = _rope_cached_bhsd(grad_out, cos4, sin4, _get_aiter_rope_cached_bwd_lowlevel())
         return gx, None, None
 
@@ -230,14 +231,32 @@ def apply_rotary_qk_autograd(q, k, cos, sin):
     Args:
         q, k: [B, H, S, D] (BHSD).
         cos, sin: HF-style full cos/sin — [B, S, D] or [S, D] (NEOX, front half
-            duplicated). RoPE is batch-independent so batch dim (if present) is
-            dropped.
+            duplicated). Batch-specific frequencies are preserved.
 
     Returns:
         (q_rot, k_rot), same shapes as q, k, with gradients.
     """
-    if cos.dim() == 3:        # [B, S, D] -> [S, D]
-        cos, sin = cos[0], sin[0]
+    if cos.dim() == 3:
+        if cos.shape[0] != q.shape[0] or sin.shape[0] != q.shape[0]:
+            raise ValueError(
+                "Batch-specific RoPE frequencies must match the Q/K batch size"
+            )
+        if q.shape[0] == 1:
+            cos4 = cos[0].unsqueeze(1).unsqueeze(1)
+            sin4 = sin[0].unsqueeze(1).unsqueeze(1)
+            return _RoPEAutograd.apply(q, cos4, sin4), _RoPEAutograd.apply(
+                k, cos4, sin4
+            )
+        q_parts = []
+        k_parts = []
+        for batch_idx in range(q.shape[0]):
+            cos4 = cos[batch_idx].unsqueeze(1).unsqueeze(1)
+            sin4 = sin[batch_idx].unsqueeze(1).unsqueeze(1)
+            q_parts.append(_RoPEAutograd.apply(q[batch_idx : batch_idx + 1], cos4, sin4))
+            k_parts.append(_RoPEAutograd.apply(k[batch_idx : batch_idx + 1], cos4, sin4))
+        return torch.cat(q_parts, dim=0), torch.cat(k_parts, dim=0)
+    if cos.dim() != 2 or sin.dim() != 2:
+        raise ValueError("RoPE cos/sin must have shape [S,D] or [B,S,D]")
     cos4 = cos.unsqueeze(1).unsqueeze(1)   # [S, 1, 1, D]
     sin4 = sin.unsqueeze(1).unsqueeze(1)
     return _RoPEAutograd.apply(q, cos4, sin4), _RoPEAutograd.apply(k, cos4, sin4)

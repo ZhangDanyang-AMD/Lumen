@@ -10,8 +10,8 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
 PRECISION="${PRECISION:-bf16}"
-FP8_FORMAT="${FP8_FORMAT:-fp8_e4m3}"
 FP8_SCALING="${FP8_SCALING:-dynamic}"
+FP8_FORMAT="${FP8_FORMAT:-}"
 FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
 FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
 FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
@@ -33,6 +33,7 @@ STEP_TIME_ATOL="${STEP_TIME_ATOL:-30000}"
 TOKENIZER_DIR="${TOKENIZER_DIR:-${SCRIPT_DIR}/tokenizer}"
 RESULTS_DIR="${RESULTS_DIR:-${SCRIPT_DIR}/results/deepspeed}"
 TRAIN_DATA_PATH="${TRAIN_DATA_PATH:-${SCRIPT_DIR}/results/mock_data/deepspeed_llama31_8b_train.jsonl}"
+VAL_DATA_PATH="${VAL_DATA_PATH:-${TRAIN_DATA_PATH}}"
 LOG_PATH="${LOG_PATH:-${RESULTS_DIR}/llama31_8b_zero${ZERO_STAGE}_${PRECISION}.log}"
 
 DENOM=$((MBS * NPROC_PER_NODE))
@@ -62,8 +63,11 @@ fi
 if [[ -z "${FUSED_MLP}" ]]; then
     [[ "${PRECISION}" == "fp8" ]] && FUSED_MLP=1 || FUSED_MLP=0
 fi
+if [[ -z "${FP8_FORMAT}" ]]; then
+    [[ "${FP8_SCALING}" == "delayed" ]] && FP8_FORMAT=hybrid || FP8_FORMAT=fp8_e4m3
+fi
 if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
-    FP8_FUSED_KERNELS=1
+    [[ "${FP8_SCALING}" == "delayed" ]] && FP8_FUSED_KERNELS=0 || FP8_FUSED_KERNELS=1
 fi
 
 mkdir -p "${RESULTS_DIR}" "$(dirname "${TRAIN_DATA_PATH}")"
@@ -195,7 +199,7 @@ torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
     --backend deepspeed \
     --tokenizer-name-or-path "${TOKENIZER_DIR}" \
     --train-data-path "${TRAIN_DATA_PATH}" \
-    --val-data-path "${TRAIN_DATA_PATH}" \
+    --val-data-path "${VAL_DATA_PATH}" \
     --train-samples "${LOCAL_TRAIN_SAMPLES}" \
     --val-samples 1 \
     --eval-interval "${TRAIN_STEPS}" \
@@ -216,7 +220,7 @@ torchrun --standalone --nproc_per_node="${NPROC_PER_NODE}" \
     --gradient-accumulation-steps "${GRAD_ACCUM}" \
     --max-steps "${TRAIN_STEPS}" \
     --zero-stage "${ZERO_STAGE}" \
-    --linear-backend aiter \
+    --linear-backend auto \
     --no-gradient-checkpointing \
     --lr 1.0e-5 \
     --min-lr 0.0 \

@@ -20,12 +20,12 @@ export SIZE="8b"
 
 # ---- Training hyperparameters ------------------------------------------------
 export MBS=2
-export GBS=128
+export GBS=32
 export SEQ_LEN=8192
-export MAX_LR="1e-5"
-export MIN_LR="0.0"
-export TRAIN_STEPS=50
-export LR_WARMUP_STEPS=2
+export MAX_LR="8e-4"
+export MIN_LR="8e-5"
+export TRAIN_STEPS=1200000
+export LR_WARMUP_STEPS=128
 export LOG_INTERVAL=1
 export SAVE_INTERVAL=0
 export EVAL_INTERVAL=0
@@ -43,7 +43,7 @@ export LORA_ALPHA=32
 export LORA_DROPOUT=0.1
 
 # ---- FP8 training (MLPerf defaults) -----------------------------------------
-export FP8_TRAINING=0
+export FP8_TRAINING=1
 export FP8_FORMAT="fp8_e4m3"
 export FP8_SCALING="delayed"
 export FP8_BLOCK_SIZE=128
@@ -96,7 +96,7 @@ export DBG_ATTN_OUTPUT=0
 # ---- Lumen -------------------------------------------------------
 # Attention backend: "aiter_csrc", "aiter_triton", "aiter_triton_fp8", "aiter_csrc_fp8", "aiter_asm_fp8"
 #   aiter_asm_fp8 uses ASM kernels with fallback: asm -> csrc -> triton
-export LUMEN_ATTN_BACKEND="csrc"
+export LUMEN_ATTN_BACKEND="aiter_asm_fp8"
 # FP8 attention quantization type (used when LUMEN_ATTN_BACKEND is *_fp8):
 #   "blockwise"  — per-block FP8 scaling
 #   "dynamic"    — per-tensor dynamic FP8 scaling
@@ -137,6 +137,12 @@ export SHARDING="full_shard"
 
 # ---- DeepSpeed backend -------------------------------------------------------
 export ZERO_STAGE="${ZERO_STAGE:-2}"
+export DEEPSPEED_MBS="${DEEPSPEED_MBS:-2}"
+export DEEPSPEED_GBS="${DEEPSPEED_GBS:-128}"
+export DEEPSPEED_SEQ_LEN="${DEEPSPEED_SEQ_LEN:-8192}"
+export DEEPSPEED_TRAIN_STEPS="${DEEPSPEED_TRAIN_STEPS:-50}"
+export DEEPSPEED_TRAIN_DATA="${DEEPSPEED_TRAIN_DATA:-/data/train.jsonl}"
+export DEEPSPEED_VALID_DATA="${DEEPSPEED_VALID_DATA:-${DEEPSPEED_TRAIN_DATA}}"
 
 # ---- MI355X platform ---------------------------------------------------------
 export MLPERF_SUBMISSION_ORG="AMD"

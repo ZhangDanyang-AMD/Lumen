@@ -512,6 +512,8 @@ class LumenConfig:
         original = modeling_llama.apply_rotary_pos_emb
 
         def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+            if unsqueeze_dim != 1 or q.dim() != 4 or k.dim() != 4:
+                return original(q, k, cos, sin, position_ids, unsqueeze_dim)
             modeling_llama._lumen_rope_calls += 1
             return apply_rotary_qk_autograd(q, k, cos, sin)
 
@@ -609,13 +611,30 @@ class LumenConfig:
                     gate = mod.gate_proj(hidden_states)
                     up = mod.up_proj(hidden_states)
                     activated = fused_swiglu_pair(gate, up)
-                    if os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1":
+                    down_is_fp8 = getattr(mod.down_proj, "_quant_enabled", False)
+                    down_scaling = getattr(
+                        mod.down_proj,
+                        "_quant_scaling_type",
+                        None,
+                    )
+                    if (
+                        os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1"
+                        and down_is_fp8
+                        and down_scaling != "delayed"
+                    ):
                         from lumen.models._swiglu_fp8_fuse import (
                             try_fused_swiglu_fp8,
                         )
 
                         try_fused_swiglu_fp8(gate, activated)
-                    return mod.down_proj(activated)
+                    try:
+                        return mod.down_proj(activated)
+                    finally:
+                        from lumen.models._swiglu_fp8_fuse import (
+                            discard_swiglu_fp8_cache,
+                        )
+
+                        discard_swiglu_fp8_cache()
 
                 return _fused_forward
 
@@ -625,12 +644,8 @@ class LumenConfig:
             module.forward = _make_fused_forward(module)
             count += 1
 
-        if count == 0:
-            raise RuntimeError(
-                "fused_mlp=True requested, but no HuggingFace LlamaMLP with SiLU "
-                "activation was found"
-            )
-        _rank0_print(f"> Patched {count} HuggingFace LlamaMLP modules with fused SwiGLU")
+        if count:
+            _rank0_print(f"> Patched {count} HuggingFace LlamaMLP modules with fused SwiGLU")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.

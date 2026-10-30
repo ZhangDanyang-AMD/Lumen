@@ -137,6 +137,16 @@ class TestAmaxHistory:
         scale = mgr.get_scale("t", torch.ones(4, device="cuda"))
         assert isinstance(scale, torch.Tensor)
 
+    def test_state_dict_round_trip_restores_amax_history(self):
+        source = ScalingManager(recipe="delayed", history_len=4)
+        source.amax_history["layer"].extend([1.0, 2.0, 3.0])
+
+        restored = ScalingManager(recipe="delayed", history_len=4)
+        restored.load_state_dict(source.state_dict())
+
+        assert list(restored.amax_history["layer"]) == [1.0, 2.0, 3.0]
+        assert restored._batch_scales_valid is False
+
     def test_most_recent_algo(self):
         cfg = QuantConfig(scaling=ScalingType.DELAYED, amax_algo=AmaxAlgo.MOST_RECENT)
         mgr = ScalingManager(cfg)
@@ -273,6 +283,7 @@ class TestFP8ParamLifecycle:
         mgr.check_and_mark_fp8_stale(0)
         assert "layer.weight" not in mgr._fp8_param_stale
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
     def test_blockwise2d_param_cache_stores_transposed_dgrad_operand(self):
         cfg = QuantConfig(
             format=QuantFormat.FP8_E4M3,
@@ -290,6 +301,46 @@ class TestFP8ParamLifecycle:
         data_t, scale_t = desc.data._lumen_wt
         assert data_t.shape == (128, 256)
         assert scale_t.shape == (1, 2)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
+    @pytest.mark.parametrize(
+        "scaling",
+        [ScalingType.DYNAMIC, ScalingType.BLOCKWISE2D],
+    )
+    def test_weight_quantization_reads_registered_cache(self, scaling):
+        from lumen.ops.quantize.linear import quantize_input
+
+        cfg = QuantConfig(
+            format=QuantFormat.FP8_E4M3,
+            scaling=scaling,
+            block_size=128,
+        )
+        mgr = ScalingManager(cfg)
+        param = torch.nn.Parameter(
+            torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        )
+        mgr.register_fp8_param("layer.weight", param)
+        mgr.quantize_fp8_params()
+
+        first = quantize_input(
+            param,
+            cfg.recipe,
+            mgr.fp8_dtype,
+            cfg.block_size,
+            mgr,
+            "layer.weight",
+            is_weight=True,
+        )
+        second = quantize_input(
+            param,
+            cfg.recipe,
+            mgr.fp8_dtype,
+            cfg.block_size,
+            mgr,
+            "layer.weight",
+            is_weight=True,
+        )
+        assert first is second
 
     def test_mxfp4_is_refused(self):
         """The param cache is an FP8 mechanism; no MXFP4 path reads it back.
@@ -490,10 +541,7 @@ class TestQuantizeBwdDelayed:
 
         assert len(mgr.amax_history["grad_a"]) == 1
         assert len(mgr.amax_history["grad_b"]) == 1
-        assert not torch.equal(
-            mgr.amax_history["grad_a"][-1],
-            mgr.amax_history["grad_b"][-1],
-        )
+        assert mgr.amax_history["grad_a"][-1] != mgr.amax_history["grad_b"][-1]
 
     def test_zero_tensor_no_nan(self):
         """Zero input should not produce NaN/Inf in scale or output."""

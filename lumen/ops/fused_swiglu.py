@@ -178,6 +178,6 @@ class _FusedSwiGLUPair(torch.autograd.Function):
 
 def fused_swiglu_pair(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     """Compute ``silu(gate) * up`` without concatenating HF activations."""
-    if not gate.is_cuda or not up.is_cuda:
+    if not gate.is_cuda or not up.is_cuda or gate.shape[-1] > 65536:
         return torch.nn.functional.silu(gate) * up
     return _FusedSwiGLUPair.apply(gate, up)

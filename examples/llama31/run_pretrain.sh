@@ -165,7 +165,7 @@ run_megatron() {
         --num-attention-heads ${HEADS} \
         ${GQA_ARGS} \
         --seq-length ${SEQ_LEN} \
-        --max-position-embeddings ${SEQ_LEN} \
+        --max-position-embeddings 131072 \
         --use-rotary-position-embeddings \
         --rotary-base ${ROPE_THETA} \
         --no-position-embedding \
@@ -331,17 +331,26 @@ run_deepspeed() {
 
     local ds_precision="bf16"
     [ "${FP8_TRAINING}" = "1" ] && ds_precision="fp8"
+    local ds_train_data="${DEEPSPEED_TRAIN_DATA:-/data/train.jsonl}"
+    local ds_valid_data="${DEEPSPEED_VALID_DATA:-${ds_train_data}}"
+    case "${ds_train_data}" in
+        *.txt|*.json|*.jsonl) ;;
+        *)
+            echo "ERROR: DeepSpeed TRAIN_DATA must be text/JSONL, got ${ds_train_data}"
+            exit 1 ;;
+    esac
 
     NPROC_PER_NODE="${NGPU}" \
     ZERO_STAGE="${ZERO_STAGE:-2}" \
     PRECISION="${ds_precision}" \
-    MBS="${MBS}" \
-    GBS="${GBS}" \
-    SEQ_LEN="${SEQ_LEN}" \
-    TRAIN_STEPS="${TRAIN_STEPS}" \
+    MBS="${DEEPSPEED_MBS:-2}" \
+    GBS="${DEEPSPEED_GBS:-128}" \
+    SEQ_LEN="${DEEPSPEED_SEQ_LEN:-8192}" \
+    TRAIN_STEPS="${DEEPSPEED_TRAIN_STEPS:-50}" \
     SEED="${SEED}" \
     TOKENIZER_DIR="${TOKENIZER}" \
-    TRAIN_DATA_PATH="${TRAIN_DATA}" \
+    TRAIN_DATA_PATH="${ds_train_data}" \
+    VAL_DATA_PATH="${ds_valid_data}" \
     RESULTS_DIR="${SAVE_DIR}/logs" \
         bash "${SCRIPT_DIR}/run_deepspeed_pretrain_llama31_8b.sh"
 }

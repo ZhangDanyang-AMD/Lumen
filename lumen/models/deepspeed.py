@@ -172,54 +172,6 @@ def _parameter_ids(model: nn.Module) -> dict[str, int]:
     return {name: id(param) for name, param in model.named_parameters()}
 
 
-def _install_deepspeed_mixed_wgrad() -> None:
-    """Install a DeepSpeed-local hybrid FP8 WGrad path.
-
-    ROCm 7.0's AITER hipBLASLt wrapper rejects E5M2×E4M3 operands and its
-    Triton mixed kernel targets a newer Triton ABI. ``torch._scaled_mm`` reaches
-    the compatible hipBLASLt F8B8 implementation in the base PyTorch build.
-    This monkey patch is installed only when the DeepSpeed backend requests the
-    hybrid delayed recipe; FSDP and Megatron imports are untouched.
-    """
-    import lumen.ops.quantize.linear as linear_ops
-
-    if hasattr(linear_ops, "_deepspeed_mixed_wgrad_original"):
-        return
-
-    original = linear_ops.gemm_wgrad_mixed
-
-    def _deepspeed_mixed_wgrad(
-        grad_fp8,
-        input_fp8,
-        scale_grad,
-        scale_input,
-        grad_t=None,
-    ):
-        if grad_t is None:
-            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
-
-            grad_t = fast_transpose_fp8(grad_fp8)
-        # scaled_mm requires a column-major RHS. Materialize K×M row-major and
-        # transpose its view to M×K column-major.
-        input_col_major = input_fp8.t().contiguous().t()
-        scale_a = linear_ops._scale_to_f32_1x1(
-            scale_grad, grad_fp8.device
-        ).reshape(1)
-        scale_b = linear_ops._scale_to_f32_1x1(
-            scale_input, input_fp8.device
-        ).reshape(1)
-        return torch._scaled_mm(
-            grad_t,
-            input_col_major,
-            scale_a=scale_a,
-            scale_b=scale_b,
-            out_dtype=torch.bfloat16,
-        )
-
-    linear_ops._deepspeed_mixed_wgrad_original = original
-    linear_ops.gemm_wgrad_mixed = _deepspeed_mixed_wgrad
-
-
 def _install_deepspeed_tuned_blockscale(config_path: str) -> None:
     """Install shape-specific Triton configs from an external JSON file."""
     import lumen.ops.quantize.linear as linear_ops
@@ -280,12 +232,6 @@ def prepare_deepspeed_model(
 ):
     """Apply Lumen before ``deepspeed.initialize`` and preserve parameters."""
     validate_deepspeed_quant_config(config, deepspeed_config)
-    if (
-        config.format == "hybrid"
-        and config.scaling == "delayed"
-        and config.fp8_wgrad
-    ):
-        _install_deepspeed_mixed_wgrad()
     if config.scaling == "blockwise2d" and blockwise_tuning_config:
         _install_deepspeed_tuned_blockscale(blockwise_tuning_config)
     before = _parameter_ids(model)
@@ -372,6 +318,7 @@ def register_deepspeed_quant_hooks(
         # across accumulation micro-batches. The optimizer hook marks every
         # descriptor stale only after DeepSpeed performs a real update.
         manager.enable_fp8_params(engine.module)
+    if enable_fp8_weight_cache or manager.needs_optimizer_step_hook:
         manager.register_fp8_optimizer_hook(engine.optimizer)
 
 
@@ -493,9 +440,9 @@ def add_common_deepspeed_args(parser):
     )
     deepspeed_group.add_argument(
         "--linear-backend",
-        choices=["aiter", "triton", "auto"],
-        default="aiter",
-        help="Lumen quantization backend. Use 'aiter' to require AITER.",
+        choices=["auto"],
+        default="auto",
+        help="Use Lumen's validated automatic AITER/Triton fallback chain.",
     )
     deepspeed_group.add_argument("--resume-from-checkpoint", type=str, default=None)
     deepspeed_group.add_argument(

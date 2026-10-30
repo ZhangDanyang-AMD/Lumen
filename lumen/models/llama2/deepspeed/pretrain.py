@@ -122,11 +122,6 @@ class DeepSpeedTrainer:
 
         self.global_step = 0
         self.last_train_loss = float("inf")
-        if args.resume_from_checkpoint:
-            _, client_state = self.engine.load_checkpoint(args.resume_from_checkpoint)
-            if client_state:
-                self.global_step = int(client_state.get("global_step", 0))
-
         self.train_loader = self._build_dataloader(
             args.train_data_path,
             args.train_samples,
@@ -137,6 +132,37 @@ class DeepSpeedTrainer:
             if args.val_data_path
             else None
         )
+        local_val_batches = (
+            min(len(self.val_loader), args.eval_iters)
+            if self.val_loader is not None
+            else 0
+        )
+        common_val_batches = torch.tensor(
+            local_val_batches,
+            dtype=torch.int64,
+            device=self.engine.device,
+        )
+        dist.all_reduce(common_val_batches, op=dist.ReduceOp.MIN)
+        self.val_batches = int(common_val_batches.item())
+
+        self.train_batches_in_epoch = 0
+        self._resume_generator_state = None
+        self._resume_batches_in_epoch = 0
+        if args.resume_from_checkpoint:
+            _, client_state = self.engine.load_checkpoint(args.resume_from_checkpoint)
+            if self.manager is not None:
+                self.manager.mark_fp8_params_stale()
+            if client_state:
+                self.global_step = int(client_state.get("global_step", 0))
+                rank_states = client_state.get("rank_states", [])
+                if self.rank < len(rank_states):
+                    rank_state = rank_states[self.rank]
+                    self._resume_generator_state = rank_state.get("generator_state")
+                    self._resume_batches_in_epoch = int(
+                        rank_state.get("batches_in_epoch", 0)
+                    )
+                    if self.manager is not None and rank_state.get("scaling_manager"):
+                        self.manager.load_state_dict(rank_state["scaling_manager"])
         if self.rank == 0:
             parameter_count = sum(
                 int(getattr(param, "ds_numel", param.numel()))
@@ -195,6 +221,8 @@ class DeepSpeedTrainer:
                 logger.warning(warning)
         generator = torch.Generator()
         generator.manual_seed(self.args.seed + self.rank)
+        if shuffle:
+            self.train_generator = generator
         return DataLoader(
             dataset,
             batch_size=self.args.micro_batch_size,
@@ -202,15 +230,38 @@ class DeepSpeedTrainer:
             generator=generator,
             num_workers=self.args.num_workers,
             pin_memory=True,
-            drop_last=True,
+            drop_last=shuffle,
         )
+
+    def _new_train_iterator(self, *, resume: bool = False):
+        if resume and self._resume_generator_state is not None:
+            self.train_generator.set_state(self._resume_generator_state)
+        self._train_epoch_generator_state = self.train_generator.get_state()
+        data_iter = iter(self.train_loader)
+        skip_batches = self._resume_batches_in_epoch if resume else 0
+        for _ in range(skip_batches):
+            try:
+                next(data_iter)
+            except StopIteration as exc:
+                raise RuntimeError(
+                    "Checkpoint data-loader position exceeds the current corpus"
+                ) from exc
+        self.train_batches_in_epoch = skip_batches
+        return data_iter
 
     def _next_batch(self, data_iter):
         try:
-            return next(data_iter), data_iter
-        except StopIteration:
-            data_iter = iter(self.train_loader)
-            return next(data_iter), data_iter
+            batch = next(data_iter)
+        except StopIteration as exc:
+            if not self.args.repeat_corpus:
+                raise RuntimeError(
+                    "Training corpus exhausted; provide more data or pass "
+                    "--repeat-corpus"
+                ) from exc
+            data_iter = self._new_train_iterator()
+            batch = next(data_iter)
+        self.train_batches_in_epoch += 1
+        return batch, data_iter
 
     def _verify_patch_installation(self, model: nn.Module) -> None:
         if self.args.hf_attn_patch:
@@ -268,7 +319,7 @@ class DeepSpeedTrainer:
                 raise RuntimeError(
                     "Lumen FP8 Linear was requested but no nn.Linear was patched"
                 )
-            if any(
+            if self.args.linear_backend != "auto" and any(
                 getattr(module, "_quant_backend", None) != self.args.linear_backend
                 for module in quantized_linears
             ):
@@ -377,7 +428,7 @@ class DeepSpeedTrainer:
     def train(self) -> None:
         args = self.args
         self.engine.train()
-        data_iter = iter(self.train_loader)
+        data_iter = self._new_train_iterator(resume=True)
         measured_step_times = []
         torch.cuda.reset_peak_memory_stats(self.engine.device)
 
@@ -398,7 +449,10 @@ class DeepSpeedTrainer:
             for micro_step in range(args.gradient_accumulation_steps):
                 batch, data_iter = self._next_batch(data_iter)
                 input_ids = batch["input_ids"].to(self.engine.device, non_blocking=True)
-                labels = batch["labels"].to(self.engine.device, non_blocking=True)
+                # HuggingFace LlamaForCausalLM performs the one-token shift
+                # internally. The dataset's pre-shifted labels are for
+                # Megatron-style consumers and would otherwise be shifted twice.
+                labels = input_ids
                 outputs = self.engine(input_ids=input_ids, labels=labels)
                 if not torch.isfinite(outputs.loss).item():
                     raise RuntimeError(
@@ -472,7 +526,11 @@ class DeepSpeedTrainer:
                     peak_memory_gib,
                 )
 
-            if self.val_loader and args.eval_interval > 0 and self.global_step % args.eval_interval == 0:
+            if (
+                self.val_batches > 0
+                and args.eval_interval > 0
+                and self.global_step % args.eval_interval == 0
+            ):
                 val_loss = self.validate()
                 if self.rank == 0:
                     logger.info("step %d | val_loss %.4f", self.global_step, val_loss)
@@ -512,25 +570,36 @@ class DeepSpeedTrainer:
     def validate(self) -> float:
         self.engine.eval()
         total = torch.zeros(2, dtype=torch.float64, device=self.engine.device)
+        data_iter = iter(self.val_loader)
         with torch.no_grad():
-            for index, batch in enumerate(self.val_loader):
+            for _ in range(self.val_batches):
+                batch = next(data_iter)
                 input_ids = batch["input_ids"].to(self.engine.device, non_blocking=True)
-                labels = batch["labels"].to(self.engine.device, non_blocking=True)
-                loss = self.engine(input_ids=input_ids, labels=labels).loss
+                loss = self.engine(input_ids=input_ids, labels=input_ids).loss
                 total[0] += loss.detach().double()
                 total[1] += 1
-                if index + 1 >= self.args.eval_iters:
-                    break
         dist.all_reduce(total, op=dist.ReduceOp.SUM)
         self.engine.train()
         return (total[0] / total[1].clamp_min(1)).item()
 
     def save_checkpoint(self) -> None:
         os.makedirs(self.args.save_dir, exist_ok=True)
+        local_state = {
+            "generator_state": self._train_epoch_generator_state,
+            "batches_in_epoch": self.train_batches_in_epoch,
+            "scaling_manager": (
+                self.manager.state_dict() if self.manager is not None else None
+            ),
+        }
+        rank_states = [None] * self.world_size
+        dist.all_gather_object(rank_states, local_state)
         self.engine.save_checkpoint(
             self.args.save_dir,
             tag=f"global_step{self.global_step}",
-            client_state={"global_step": self.global_step},
+            client_state={
+                "global_step": self.global_step,
+                "rank_states": rank_states,
+            },
         )
 
 

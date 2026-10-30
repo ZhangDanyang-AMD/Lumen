@@ -28,3 +28,18 @@ def test_fused_swiglu_pair_forward_backward(shape):
     torch.testing.assert_close(actual, expected, atol=2e-2, rtol=2e-2)
     torch.testing.assert_close(gate.grad, gate_ref.grad, atol=2e-2, rtol=2e-2)
     torch.testing.assert_close(up.grad, up_ref.grad, atol=2e-2, rtol=2e-2)
+
+
+@_CUDA
+def test_fused_swiglu_pair_falls_back_above_single_program_limit():
+    from lumen.ops.fused_swiglu import fused_swiglu_pair
+
+    gate = torch.randn(1, 65537, device="cuda", requires_grad=True)
+    up = torch.randn(1, 65537, device="cuda", requires_grad=True)
+    actual = fused_swiglu_pair(gate, up)
+    expected = F.silu(gate) * up
+
+    torch.testing.assert_close(actual, expected)
+    actual.sum().backward()
+    assert torch.isfinite(gate.grad).all()
+    assert torch.isfinite(up.grad).all()

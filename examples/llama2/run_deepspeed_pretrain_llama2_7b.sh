@@ -17,13 +17,16 @@ LUMEN_DIR="${LUMEN_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 ZERO_STAGE="${ZERO_STAGE:-2}"
 PRECISION="${PRECISION:-bf16}"
-FP8_FORMAT="${FP8_FORMAT:-hybrid}"
 FP8_SCALING="${FP8_SCALING:-delayed}"
+FP8_FORMAT="${FP8_FORMAT:-}"
 FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
 FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
 FP8_FUSED_KERNELS="${FP8_FUSED_KERNELS:-}"
 FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
 BLOCKWISE_TUNING_CONFIG="${BLOCKWISE_TUNING_CONFIG:-${SCRIPT_DIR}/configs/deepspeed_llama2_7b_blockwise2d_triton_gfx950.json}"
+if [[ -z "${FP8_FORMAT}" ]]; then
+    [[ "${FP8_SCALING}" == "delayed" ]] && FP8_FORMAT=hybrid || FP8_FORMAT=fp8_e4m3
+fi
 if [[ -z "${FP8_FUSED_KERNELS}" ]]; then
     # ROCm 7.0 fused quant+amax produces an invalid delayed-history scale on
     # the second accumulation micro-batch. Dynamic/blockwise recipes are safe.
@@ -225,7 +228,7 @@ torchrun \
     --gradient-accumulation-steps "${GRAD_ACCUM}" \
     --max-steps "${TRAIN_STEPS}" \
     --zero-stage "${ZERO_STAGE}" \
-    --linear-backend aiter \
+    --linear-backend auto \
     --no-gradient-checkpointing \
     --lr 1.0e-5 \
     --min-lr 0.0 \

@@ -42,6 +42,13 @@ def build_model(args) -> nn.Module:
             vocab_size=args.vocab_size,
             max_position_embeddings=args.max_position_embeddings,
             rope_theta=args.rope_theta,
+            rope_scaling={
+                "rope_type": "llama3",
+                "factor": 8.0,
+                "low_freq_factor": 1.0,
+                "high_freq_factor": 4.0,
+                "original_max_position_embeddings": 8192,
+            },
             rms_norm_eps=1e-5,
             attention_bias=False,
             hidden_act="silu",
@@ -82,7 +89,7 @@ def get_args() -> argparse.Namespace:
     model.add_argument("--num-attention-heads", type=int, default=32)
     model.add_argument("--num-key-value-heads", type=int, default=8)
     model.add_argument("--vocab-size", type=int, default=128256)
-    model.add_argument("--max-position-embeddings", type=int, default=8192)
+    model.add_argument("--max-position-embeddings", type=int, default=131072)
     model.add_argument("--rope-theta", type=float, default=500000.0)
     model.add_argument("--seq-length", type=int, default=8192)
 

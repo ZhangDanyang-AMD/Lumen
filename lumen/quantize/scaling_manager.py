@@ -770,6 +770,9 @@ class ScalingManager:
         master weights — no explicit call needed in the training loop.
         """
 
+        if getattr(self, "_optimizer_hook_registered", False):
+            return self
+
         def _on_post_step():
             self.mark_fp8_params_stale()
             # Step boundary: drop frozen batch scales so the next step's first
@@ -793,7 +796,38 @@ class ScalingManager:
 
             optimizer.step = _wrapped_step
             logger.info("ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)")
+        self._optimizer_hook_registered = True
         return self
+
+    @property
+    def needs_optimizer_step_hook(self) -> bool:
+        """Whether per-step scales or parameter descriptors need invalidation."""
+        return self._step_batch_enabled or bool(self._fp8_param_ids)
+
+    def state_dict(self) -> dict:
+        """Return serializable delayed-scaling state for checkpoint clients."""
+        return {
+            "amax_history": {
+                tensor_id: [float(value) for value in history]
+                for tensor_id, history in self.amax_history.items()
+            },
+            "fp8_step_counter": self._fp8_step_counter,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore delayed-scaling history and invalidate derived caches."""
+        self.amax_history.clear()
+        for tensor_id, values in state.get("amax_history", {}).items():
+            history = self.amax_history[tensor_id]
+            history.extend(float(value) for value in values)
+        self._fp8_step_counter = int(state.get("fp8_step_counter", -1))
+        self._ring_rows.clear()
+        self._ring_cursor.clear()
+        self._batch_tid_to_idx.clear()
+        self._batch_ordered_deques = []
+        self._batch_amax_buf = None
+        self._batch_scales_valid = False
+        self.mark_fp8_params_stale()
 
     def enable_fp8_params(self, model: nn.Module) -> "ScalingManager":
         """Scan *model* for quantized layers and register their weights.

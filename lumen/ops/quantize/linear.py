@@ -442,6 +442,11 @@ def quantize_input(
     if scaling_type == "none":
         return None
 
+    if is_weight and manager is not None and tensor_id is not None:
+        cached = manager.get_fp8_param_cached(tensor_id, x_2d)
+        if cached is not None:
+            return cached
+
     # Fast path: per-tensor quant without manager — skip try_backends overhead
     if (_FAST_QUANT_DISPATCH and manager is None
             and scaling_type in _PER_TENSOR_SCALING):
@@ -842,21 +847,48 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
     paid for it — so grad is transposed once instead of twice.
     """
     if _probe_aiter_hipblas():
-        ensure_hipblaslt_ready()
+        try:
+            ensure_hipblaslt_ready()
+            if grad_t is None:
+                from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+
+                grad_t = fast_transpose_fp8(grad_fp8)  # (N_out, M) contiguous
+            sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device)
+            si = _scale_to_f32_1x1(scale_input, input_fp8.device)
+            N_out = grad_fp8.shape[1]
+            K_in = input_fp8.shape[1]
+            M = grad_fp8.shape[0]
+            sol = _get_tuned_solution(N_out, K_in, M)
+            from aiter.ops.gradlib import hipb_mm
+
+            return hipb_mm(
+                grad_t,
+                input_fp8,
+                sol,
+                out_dtype=torch.bfloat16,
+                scaleA=sg,
+                scaleB=si,
+            )
+        except RuntimeError as exc:
+            _logger.warning(
+                "hipBLASLt mixed FP8 WGrad rejected the operands (%s); "
+                "falling back to torch._scaled_mm",
+                exc,
+            )
+
+    if hasattr(torch, "_scaled_mm"):
         if grad_t is None:
             from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
 
-            grad_t = fast_transpose_fp8(grad_fp8)  # (N_out, M) contiguous
-        sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device)
-        si = _scale_to_f32_1x1(scale_input, input_fp8.device)
-        N_out = grad_fp8.shape[1]
-        K_in = input_fp8.shape[1]
-        M = grad_fp8.shape[0]
-        sol = _get_tuned_solution(N_out, K_in, M)
-        from aiter.ops.gradlib import hipb_mm
-
-        return hipb_mm(grad_t, input_fp8, sol, out_dtype=torch.bfloat16,
-                       scaleA=sg, scaleB=si)
+            grad_t = fast_transpose_fp8(grad_fp8)
+        input_col_major = input_fp8.t().contiguous().t()
+        return torch._scaled_mm(
+            grad_t,
+            input_col_major,
+            scale_a=_scale_to_f32_1x1(scale_grad, grad_fp8.device).reshape(1),
+            scale_b=_scale_to_f32_1x1(scale_input, input_fp8.device).reshape(1),
+            out_dtype=torch.bfloat16,
+        )
 
     from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
 

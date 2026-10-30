@@ -24,6 +24,7 @@ from lumen.models.deepspeed import (
     initialize_deepspeed,
     make_lumen_deepspeed_model_provider,
     prepare_deepspeed_model,
+    register_deepspeed_quant_hooks,
     validate_deepspeed_quant_config,
 )
 
@@ -154,6 +155,7 @@ def test_model_provider_uses_lumen_config_enable():
     assert prepared._lumen_config is config
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
 def test_deepspeed_lumen_norm_patch_preserves_parameter_identity():
     class LlamaRMSNorm(nn.Module):
         def __init__(self):
@@ -196,6 +198,8 @@ def test_hf_mlp_patch_preserves_parameters_and_matches_reference():
             )
 
     model = LlamaMLP()
+    model.down_proj._quant_enabled = True
+    model.down_proj._quant_scaling_type = "dynamic"
     inputs = torch.randn(2, 3, 4)
     expected = model(inputs)
     parameter_ids = [id(param) for param in model.parameters()]
@@ -225,6 +229,8 @@ def test_hf_mlp_patch_feeds_fused_fp8_activation_cache():
             )
 
     model = LlamaMLP()
+    model.down_proj._quant_enabled = True
+    model.down_proj._quant_scaling_type = "dynamic"
     with (
         patch.dict("os.environ", {"LUMEN_FUSED_SWIGLU_QUANT": "1"}),
         patch(
@@ -235,6 +241,48 @@ def test_hf_mlp_patch_feeds_fused_fp8_activation_cache():
         model(torch.randn(2, 3, 4))
 
     fused_quant.assert_called_once()
+
+
+def test_hf_mlp_patch_skips_dynamic_bridge_for_delayed_scaling():
+    class LlamaMLP(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gate_proj = nn.Linear(4, 8, bias=False)
+            self.up_proj = nn.Linear(4, 8, bias=False)
+            self.down_proj = nn.Linear(8, 4, bias=False)
+            self.down_proj._quant_enabled = True
+            self.down_proj._quant_scaling_type = "delayed"
+            self.act_fn = F.silu
+
+    model = LlamaMLP()
+    with (
+        patch.dict("os.environ", {"LUMEN_FUSED_SWIGLU_QUANT": "1"}),
+        patch(
+            "lumen.models._swiglu_fp8_fuse.try_fused_swiglu_fp8",
+        ) as fused_quant,
+    ):
+        LumenConfig._patch_hf_mlp(model)
+        model(torch.randn(2, 3, 4))
+
+    fused_quant.assert_not_called()
+
+
+def test_fused_mlp_is_noop_for_non_hf_model():
+    model = nn.Sequential(nn.Linear(4, 4))
+    LumenConfig._patch_hf_mlp(model)
+
+
+def test_shared_input_quant_cache_rejects_different_input():
+    from lumen.quantize import _shared_input_quant_get, _shared_input_quant_put
+
+    group = (object(), "layer.self_attn")
+    first_input = torch.randn(2, 4)
+    second_input = torch.randn(2, 4)
+    cached = (torch.empty(0), torch.empty(0))
+    _shared_input_quant_put(group, first_input, cached)
+
+    assert _shared_input_quant_get(group, second_input, consume=False) is None
+    assert _shared_input_quant_get(group, first_input, consume=True) is None
 
 
 def test_prepare_forwards_strict_aiter_backend():
@@ -296,13 +344,44 @@ def test_initialize_deepspeed_passes_external_optimizer_and_scheduler():
     assert initialize.call_args.kwargs["lr_scheduler"] is scheduler
 
 
-def test_deepspeed_parser_defaults_to_zero2_and_aiter():
+def test_registers_step_scale_hook_without_weight_cache():
+    manager = MagicMock()
+    manager.config.reduce_amax = False
+    manager.needs_optimizer_step_hook = True
+    engine = SimpleNamespace(
+        data_parallel_group=None,
+        optimizer=MagicMock(dp_process_group=None),
+        module=nn.Linear(2, 2),
+    )
+
+    register_deepspeed_quant_hooks(
+        engine,
+        manager,
+        enable_fp8_weight_cache=False,
+    )
+
+    manager.enable_fp8_params.assert_not_called()
+    manager.register_fp8_optimizer_hook.assert_called_once_with(engine.optimizer)
+
+
+def test_training_loader_exhaustion_requires_repeat_corpus():
+    from lumen.models.llama2.deepspeed.pretrain import DeepSpeedTrainer
+
+    trainer = DeepSpeedTrainer.__new__(DeepSpeedTrainer)
+    trainer.args = SimpleNamespace(repeat_corpus=False)
+    trainer.train_loader = []
+
+    with pytest.raises(RuntimeError, match="Training corpus exhausted"):
+        trainer._next_batch(iter(()))
+
+
+def test_deepspeed_parser_defaults_to_zero2_and_auto_backend():
     parser = argparse.ArgumentParser()
     add_common_deepspeed_args(parser)
     args = parser.parse_args([])
 
     assert args.zero_stage == 2
-    assert args.linear_backend == "aiter"
+    assert args.linear_backend == "auto"
     assert args.linear_fp8 is False
     assert args.gradient_checkpointing is True
 
@@ -328,7 +407,7 @@ def test_llama31_deepspeed_parser_uses_8b_defaults():
     assert args.num_key_value_heads == 8
     assert args.vocab_size == 128256
     assert args.seq_length == 8192
-    assert args.max_position_embeddings == 8192
+    assert args.max_position_embeddings == 131072
     assert args.rope_theta == 500000.0
     assert args.zero_stage == 2
     assert args.micro_batch_size == 2
@@ -340,3 +419,25 @@ def test_llama31_deepspeed_parser_uses_8b_defaults():
     assert args.hf_attn_patch is False
     assert args.lumen_fused_rope is False
     assert args.lumen_fused_mlp is False
+
+
+def test_llama31_scratch_model_uses_llama3_rope_scaling():
+    from lumen.models.llama31.deepspeed.pretrain import build_model
+
+    args = SimpleNamespace(
+        model_name_or_path=None,
+        hidden_size=32,
+        intermediate_size=64,
+        num_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        vocab_size=128,
+        max_position_embeddings=8192,
+        rope_theta=500000.0,
+        gradient_checkpointing=False,
+    )
+    model = build_model(args)
+
+    assert model.config.rope_scaling["rope_type"] == "llama3"
+    assert model.config.rope_scaling["factor"] == 8.0
+    assert model.config.rope_scaling["original_max_position_embeddings"] == 8192

@@ -72,22 +72,28 @@ logger = logging.getLogger(__name__)
 _shared_input_quant_cache = threading.local()
 
 
-def _shared_input_quant_get(group, *, consume: bool):
+def _shared_input_quant_get(group, input_tensor, *, consume: bool):
     cache = getattr(_shared_input_quant_cache, "values", None)
     if cache is None:
         return None
-    value = cache.get(group)
+    entry = cache.get(group)
+    if entry is None:
+        return None
+    source, value = entry
+    if source is not input_tensor:
+        cache.pop(group, None)
+        return None
     if consume:
         cache.pop(group, None)
     return value
 
 
-def _shared_input_quant_put(group, value) -> None:
+def _shared_input_quant_put(group, input_tensor, value) -> None:
     cache = getattr(_shared_input_quant_cache, "values", None)
     if cache is None:
         cache = {}
         _shared_input_quant_cache.values = cache
-    cache[group] = value
+    cache[group] = (input_tensor, value)
 
 
 # ---------------------------------------------------------------------------
@@ -448,15 +454,15 @@ def _patch_linear_layers(
                 and scaling_type in ("dynamic", "delayed", "blockwise2d")
             ):
                 if name.endswith("self_attn.q_proj"):
-                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "put")
+                    module._lumen_shared_quant = ((id(model), name.rsplit(".", 1)[0]), "put")
                 elif name.endswith("self_attn.k_proj"):
-                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "get")
+                    module._lumen_shared_quant = ((id(model), name.rsplit(".", 1)[0]), "get")
                 elif name.endswith("self_attn.v_proj"):
-                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "pop")
+                    module._lumen_shared_quant = ((id(model), name.rsplit(".", 1)[0]), "pop")
                 elif name.endswith("mlp.gate_proj"):
-                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "put")
+                    module._lumen_shared_quant = ((id(model), name.rsplit(".", 1)[0]), "put")
                 elif name.endswith("mlp.up_proj"):
-                    module._lumen_shared_quant = (name.rsplit(".", 1)[0], "pop")
+                    module._lumen_shared_quant = ((id(model), name.rsplit(".", 1)[0]), "pop")
                 if hasattr(module, "_lumen_shared_quant"):
                     module._lumen_shared_quant_puts = 0
                     module._lumen_shared_quant_hits = 0
@@ -770,11 +776,12 @@ def _replace_forward(
                         _act_tensor_id,
                     )
                     pre_quantized_input = (desc.data, desc.scale)
-                    _shared_input_quant_put(group, pre_quantized_input)
+                    _shared_input_quant_put(group, input_tensor, pre_quantized_input)
                     module._lumen_shared_quant_puts += 1
                 else:
                     pre_quantized_input = _shared_input_quant_get(
                         group,
+                        input_tensor,
                         consume=action == "pop",
                     )
                     if pre_quantized_input is not None:
@@ -785,7 +792,7 @@ def _replace_forward(
                 )
 
                 cached = (
-                    pop_swiglu_fp8_cache()
+                    pop_swiglu_fp8_cache(input_tensor)
                     if quantize_activation and pre_quantized_input is None
                     else None
                 )
