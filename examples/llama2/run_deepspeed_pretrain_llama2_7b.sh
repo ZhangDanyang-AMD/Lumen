@@ -23,7 +23,6 @@ FP8_AMAX_ALGO="${FP8_AMAX_ALGO:-max}"
 FP8_AMAX_HISTORY="${FP8_AMAX_HISTORY:-1024}"
 FP8_FUSED_KERNELS="${FP8_FUSED_KERNELS:-}"
 FP8_WEIGHT_CACHE="${FP8_WEIGHT_CACHE:-1}"
-BLOCKWISE_TUNING_CONFIG="${BLOCKWISE_TUNING_CONFIG:-${SCRIPT_DIR}/configs/deepspeed_llama2_7b_blockwise2d_triton_gfx950.json}"
 if [[ -z "${FP8_FORMAT}" ]]; then
     [[ "${FP8_SCALING}" == "delayed" ]] && FP8_FORMAT=hybrid || FP8_FORMAT=fp8_e4m3
 fi
@@ -114,12 +113,6 @@ if [[ "${PRECISION}" == "fp8" ]]; then
     )
     if [[ "${FP8_WEIGHT_CACHE}" == "1" ]]; then
         FP8_ARGS+=(--deepspeed-fp8-weight-cache)
-    fi
-    if [[ "${FP8_SCALING}" == "blockwise2d" ]]; then
-        FP8_ARGS+=(
-            --deepspeed-blockwise-tuning-config
-            "${BLOCKWISE_TUNING_CONFIG}"
-        )
     fi
 fi
 

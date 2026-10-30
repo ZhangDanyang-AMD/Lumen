@@ -17,8 +17,8 @@ RUN ln -sf /opt/rocm/core-7.14/bin/hipconfig /opt/venv/bin/hipconfig
 FROM ${BUILD_FLAVOR} AS final
 
 ARG AITER_SOURCE=submodule
-ARG AITER_REPOSITORY=https://github.com/ROCm/aiter.git
-ARG AITER_BRANCH=main
+ARG AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git
+ARG AITER_BRANCH=perf/gfx950-llama-blockscale-configs
 ARG TORCHAO_VERSION=0.13.0
 
 WORKDIR /workspace

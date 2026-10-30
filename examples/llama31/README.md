@@ -54,8 +54,8 @@ these are 33.5% and 29.9% step-time reductions.
 Blockwise2d measured 13.42 s/step with only quantization enabled and
 10.49 s/step with all applicable Lumen patches, a 21.8% reduction
 (1.28× throughput). The optimized path uses true 128×128 cached weight scales,
-tiled FP8 WGrad transpose, shared input quantization, and a Llama3.1-specific
-gfx950 Triton shape table. It is 23.2% slower than optimized BF16 because the
+tiled FP8 WGrad transpose, shared input quantization, and AITER's
+Llama3.1-specific gfx950 Triton configs. It is 23.2% slower than optimized BF16 because the
 remaining blockscale forward/DGrad/WGrad kernels dominate the step.
 
 The validated BF16 ZeRO-3 run uses `deepspeed.zero.Init` for partitioned model

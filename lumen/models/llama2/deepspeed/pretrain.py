@@ -88,7 +88,6 @@ class DeepSpeedTrainer:
             self.lumen_config,
             self.deepspeed_config,
             backend=args.linear_backend,
-            blockwise_tuning_config=args.deepspeed_blockwise_tuning_config,
         )
         self.manager, model = provider(args)
         self._verify_patch_installation(model)

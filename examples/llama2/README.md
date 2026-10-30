@@ -363,8 +363,9 @@ Pull the validated ROCm 7.14 / MI350X-MI355X image from Docker Hub:
 docker pull zhangdanyangamd/lumen:deepspeed-rocm714-mi355
 ```
 
-The image contains DeepSpeed 0.19.8, ROCm 7.14, PyTorch 2.12, current AITER,
-and the Lumen source used by the committed benchmark logs. To run a local
+The image contains DeepSpeed 0.19.8, ROCm 7.14, PyTorch 2.12, the AITER
+gfx950 Llama blockscale tuning branch, and the Lumen source used by the
+committed benchmark logs. To run a local
 checkout instead of the source baked into the image, mount it at
 `/workspace/Lumen`:
 
@@ -387,7 +388,8 @@ docker build --network host \
   -f examples/llama2/Dockerfile.deepspeed \
   --build-arg BUILD_FLAVOR=advanced_base \
   --build-arg AITER_SOURCE=upstream \
-  --build-arg AITER_BRANCH=main \
+  --build-arg AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git \
+  --build-arg AITER_BRANCH=perf/gfx950-llama-blockscale-configs \
   --build-arg TORCHAO_VERSION=0.18.0 \
   -t zhangdanyangamd/lumen:deepspeed-rocm714-mi355 .
 ```
@@ -396,6 +398,12 @@ Push a locally built image only after its GPU smoke tests pass:
 
 ```bash
 docker push zhangdanyangamd/lumen:deepspeed-rocm714-mi355
+```
+
+For a submodule-based local install, initialize the pinned tuning branch first:
+
+```bash
+git submodule update --init --recursive third_party/aiter
 ```
 
 Build the compatibility ROCm 7.0 environment:
@@ -407,15 +415,17 @@ docker build --network host \
 ```
 
 The same Dockerfile builds the advanced ROCm 7.14 / PyTorch 2.12 /
-Triton 3.8 image with ROCm/AITER main:
+Triton 3.8 image with the tuned AITER branch:
 
 ```bash
 docker build --network host \
   -f examples/llama2/Dockerfile.deepspeed \
   --build-arg BUILD_FLAVOR=advanced_base \
   --build-arg AITER_SOURCE=upstream \
+  --build-arg AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git \
+  --build-arg AITER_BRANCH=perf/gfx950-llama-blockscale-configs \
   --build-arg TORCHAO_VERSION=0.18.0 \
-  -t lumen-deepspeed:rocm714-aiter-main .
+  -t lumen-deepspeed:rocm714-aiter-tuned .
 ```
 
 Launch the default eight-GPU ZeRO-2 BF16 run:
