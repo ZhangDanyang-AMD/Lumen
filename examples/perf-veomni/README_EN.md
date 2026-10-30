@@ -495,5 +495,24 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | `summarize.py` | median step, spread, p, peak memory, loss deviation; `--chain` compares level by level |
 | `kernel_diff.py` / `kernel_blame.py` / `trace_report.py` / `opt_phase.py` | trace analysis |
 | `loss_equal.py` / `determinism.py` / `compare_batch_hash.py` | numerics and data identity |
+| `rl-flowgrpo-qwen-image/` | RL training reproduction (§5) |
 
 All of the code is in this directory; the Lumen library itself is not modified.
+
+---
+
+## 5. Use in RL training: Qwen-Image FlowGRPO
+
+[`rl-flowgrpo-qwen-image/`](rl-flowgrpo-qwen-image/README_EN.md) reproduces verl-omni's official full-parameter
+FlowGRPO recipe for Qwen-Image (VeOmni training engine, vLLM-Omni rollout, Qwen3-VL-8B OCR reward) on one node with
+8× MI350X, as a baseline and a Lumen version, with a comparison against the official metrics. The RL actor uses this
+example's `rmsnorm_fuse` and `local_adamw`, plus a new `mask_all_true_to_none`:
+
+| 8× MI350X, same seed | baseline | Lumen |
+|---|---:|---:|
+| actor per step | 31.1 s | 27.7 s (−11%) |
+| whole step | 129.5 s | 125.2 s (−3.3%) |
+| validation reward at step 90 | 0.901 | 0.940 |
+
+Over 300 steps the baseline's validation reward rises from 0.402 to 0.949; the official reference is 0.406 at step 0
+and 0.937 at step 120.
