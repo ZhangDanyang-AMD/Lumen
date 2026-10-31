@@ -1,7 +1,7 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ZhangDanyang-AMD/aiter.git
-	branch = lumen/triton_kernels
+	branch = perf/gfx950-llama-blockscale-configs
 [submodule "third_party/mori"]
 	path = third_party/mori
 	url = https://github.com/ZhangDanyang-AMD/mori.git

@@ -170,6 +170,47 @@ class TestRoPECorrectness:
             rtol=1e-4,
         )
 
+    def test_hf_batch_specific_frequencies_are_preserved(self):
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        B, H, S, D = 2, 4, 16, 64
+        q = torch.randn(B, H, S, D, device=DEVICE)
+        k = torch.randn(B, H, S, D, device=DEVICE)
+        cos0, sin0 = _make_cos_sin(S, D, device=DEVICE)
+        cos1, sin1 = _make_cos_sin(S, D, device=DEVICE)
+        sin1 = torch.sin(torch.acos(cos1) * 1.5)
+        cos1 = torch.cos(torch.acos(cos1) * 1.5)
+        cos_half = torch.stack((cos0, cos1))
+        sin_half = torch.stack((sin0, sin1))
+        cos = torch.cat((cos_half, cos_half), dim=-1)
+        sin = torch.cat((sin_half, sin_half), dim=-1)
+
+        q_out, k_out = apply_rotary_qk_autograd(q, k, cos, sin)
+        q_ref = torch.stack(
+            [_rope_reference_neox(q[i : i + 1], cos_half[i], sin_half[i])[0] for i in range(B)]
+        )
+        k_ref = torch.stack(
+            [_rope_reference_neox(k[i : i + 1], cos_half[i], sin_half[i])[0] for i in range(B)]
+        )
+        torch.testing.assert_close(q_out, q_ref, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(k_out, k_ref, atol=1e-4, rtol=1e-4)
+
+    def test_hf_singleton_frequency_batch_broadcasts(self):
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        B, H, S, D = 2, 4, 16, 64
+        q = torch.randn(B, H, S, D, device=DEVICE)
+        k = torch.randn(B, H, S, D, device=DEVICE)
+        cos_half, sin_half = _make_cos_sin(S, D, device=DEVICE)
+        cos = torch.cat((cos_half, cos_half), dim=-1).unsqueeze(0)
+        sin = torch.cat((sin_half, sin_half), dim=-1).unsqueeze(0)
+
+        q_out, k_out = apply_rotary_qk_autograd(q, k, cos, sin)
+        q_ref = _rope_reference_neox(q, cos_half, sin_half)
+        k_ref = _rope_reference_neox(k, cos_half, sin_half)
+        torch.testing.assert_close(q_out, q_ref, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(k_out, k_ref, atol=1e-4, rtol=1e-4)
+
     def test_identity_at_zero_angles(self):
         """cos=1, sin=0 should give identity."""
         from lumen.ops.rope import apply_rotary_pos_emb

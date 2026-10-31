@@ -6,6 +6,7 @@
 
 import logging
 import os
+import weakref
 from collections import defaultdict, deque
 from typing import Dict, Optional, Set, Tuple
 
@@ -278,6 +279,7 @@ class ScalingManager:
         self._fp8_param_cache: Dict[str, Optional[FP8Descriptor]] = {}
         self._fp8_param_stale: Set[str] = set()
         self._fp8_step_counter: int = -1
+        self._hooked_optimizers = weakref.WeakSet()
         self._sdma_allgather = None
 
         # Batch scale precomputation (delayed + MOST_RECENT only).
@@ -653,6 +655,7 @@ class ScalingManager:
                 if desc is not None:
                     desc.data = desc.data.detach()
                     desc.scale = desc.scale.detach()
+                    self._cache_blockwise2d_transpose(desc)
                 self._fp8_param_cache[tid] = desc
 
         if self._dp_group is not None:
@@ -679,8 +682,20 @@ class ScalingManager:
         if desc is not None:
             desc.data = desc.data.detach()
             desc.scale = desc.scale.detach()
+            self._cache_blockwise2d_transpose(desc)
         self._fp8_param_cache[tensor_id] = desc
         return desc
+
+    def _cache_blockwise2d_transpose(self, desc: FP8Descriptor) -> None:
+        """Cache the DGrad operand once per FP8 weight-cache generation."""
+        if self.config.scaling != ScalingType.BLOCKWISE2D:
+            return
+        if desc.data.ndim != 2 or desc.scale.ndim != 2:
+            return
+        desc.data._lumen_wt = (
+            desc.data.t().contiguous(),
+            desc.scale.t().contiguous(),
+        )
 
     def _collect_amaxes(self):
         """Gather the latest amax values from all registered FP8 params."""
@@ -757,6 +772,9 @@ class ScalingManager:
         master weights — no explicit call needed in the training loop.
         """
 
+        if optimizer in self._hooked_optimizers:
+            return self
+
         def _on_post_step():
             self.mark_fp8_params_stale()
             # Step boundary: drop frozen batch scales so the next step's first
@@ -780,7 +798,63 @@ class ScalingManager:
 
             optimizer.step = _wrapped_step
             logger.info("ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)")
+        self._hooked_optimizers.add(optimizer)
         return self
+
+    @property
+    def needs_optimizer_step_hook(self) -> bool:
+        """Whether per-step scales or parameter descriptors need invalidation."""
+        return self._step_batch_enabled or bool(self._fp8_param_ids)
+
+    def state_dict(self) -> dict:
+        """Return serializable delayed-scaling state for checkpoint clients."""
+        return {
+            "amax_history": {
+                tensor_id: [float(value) for value in history]
+                for tensor_id, history in self.amax_history.items()
+            },
+            "fp8_step_counter": self._fp8_step_counter,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        """Restore delayed-scaling history and invalidate derived caches."""
+        self.amax_history.clear()
+        for tensor_id, values in state.get("amax_history", {}).items():
+            history = self.amax_history[tensor_id]
+            history.extend(float(value) for value in values)
+        self._fp8_step_counter = int(state.get("fp8_step_counter", -1))
+        self._ring_rows.clear()
+        self._ring_cursor.clear()
+        if self._step_batch_enabled and self.amax_history:
+            parameter = next(iter(self._fp8_params.values()), None)
+            if parameter is not None and not parameter.is_meta:
+                device = parameter.device
+            elif torch.cuda.is_available():
+                device = torch.device("cuda", torch.cuda.current_device())
+            else:
+                device = torch.device("cpu")
+            for tensor_id, history in self.amax_history.items():
+                values = list(history)[-self.config.history_len :]
+                row = torch.zeros(
+                    self.config.history_len,
+                    dtype=torch.float32,
+                    device=device,
+                )
+                if values:
+                    row[: len(values)] = torch.tensor(
+                        values,
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                self._ring_rows[tensor_id] = row
+                self._ring_cursor[tensor_id] = (
+                    len(values) % self.config.history_len
+                )
+        self._batch_tid_to_idx.clear()
+        self._batch_ordered_deques = []
+        self._batch_amax_buf = None
+        self._batch_scales_valid = False
+        self.mark_fp8_params_stale()
 
     def enable_fp8_params(self, model: nn.Module) -> "ScalingManager":
         """Scan *model* for quantized layers and register their weights.
@@ -1026,6 +1100,24 @@ class ScalingManager:
             )
             return FP8Descriptor(data=fp8_tensor, scale=mx_scale, fp8_dtype=dtype)
 
+        if (
+            scale is None
+            and self.config.scaling == ScalingType.BLOCKWISE2D
+            and tensor_id in self._fp8_param_ids
+        ):
+            from lumen.ops.quantize.linear import _quant_blockwise2d_weight
+
+            fp8_tensor, fp8_scales = _quant_blockwise2d_weight(
+                tensor.contiguous(),
+                dtype,
+                self.config.block_size,
+            )
+            return FP8Descriptor(
+                data=fp8_tensor,
+                scale=fp8_scales,
+                fp8_dtype=dtype,
+            )
+
         if scale is None and self.config.scaling in (ScalingType.BLOCKWISE, ScalingType.BLOCKWISE2D):
             _, _, quant_fp8_blockwise_impl = _get_quant_ops()
             orig_shape = tensor.shape
@@ -1066,7 +1158,7 @@ class ScalingManager:
                 scale,
                 dtype,
             )
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1089,7 +1181,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1117,7 +1209,7 @@ class ScalingManager:
                     dtype,
                     clamp_max=float(fp8_max),
                 )
-                self.amax_history[tensor_id].append(float(amax.squeeze()))
+                self.update_amax_value(tensor_id, amax)
                 return FP8Descriptor(
                     data=fp8_data.view(tensor.shape),
                     scale=scale,
@@ -1161,7 +1253,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
             return self._eager_transpose(desc) if not backward else desc
 

@@ -93,6 +93,7 @@ def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) 
         _cache.scale = scale_out
         # blockwise is dynamic per-block; there is no delayed amax history to feed.
         _cache.amax = None
+        _cache.source = bf16_output
         _cache.valid = True
         return
 
@@ -108,6 +109,7 @@ def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) 
         _cache.fp8_data = qx
         _cache.scale = scale_out
         _cache.amax = amax_out
+        _cache.source = bf16_output
         _cache.valid = True
     except (ImportError, RuntimeError):
         return
@@ -119,18 +121,23 @@ def discard_swiglu_fp8_cache() -> None:
     _cache.fp8_data = None
     _cache.scale = None
     _cache.amax = None
+    _cache.source = None
 
 
-def pop_swiglu_fp8_cache():
+def pop_swiglu_fp8_cache(expected_input=None):
     """Pop cached ``(fp8_data, scale)`` if set; otherwise return ``None``.
 
     Also returns ``amax`` as the third element when available.
     """
     if getattr(_cache, "valid", False):
+        if expected_input is not None and getattr(_cache, "source", None) is not expected_input:
+            discard_swiglu_fp8_cache()
+            return None
         result = (_cache.fp8_data, _cache.scale, getattr(_cache, "amax", None))
         _cache.valid = False
         _cache.fp8_data = None
         _cache.scale = None
         _cache.amax = None
+        _cache.source = None
         return result
     return None

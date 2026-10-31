@@ -442,6 +442,11 @@ def quantize_input(
     if scaling_type == "none":
         return None
 
+    if is_weight and manager is not None and tensor_id is not None:
+        cached = manager.get_fp8_param_cached(tensor_id, x_2d)
+        if cached is not None:
+            return cached
+
     # Fast path: per-tensor quant without manager — skip try_backends overhead
     if (_FAST_QUANT_DISPATCH and manager is None
             and scaling_type in _PER_TENSOR_SCALING):
@@ -821,6 +826,39 @@ def gemm_wgrad_fp8(grad_fp8, input_fp8, scale_grad, scale_input):
     return try_backends(backends, op_name="gemm_wgrad_fp8")
 
 
+def _gemm_wgrad_mixed_fallback(
+    grad_fp8,
+    input_fp8,
+    scale_grad,
+    scale_input,
+):
+    try:
+        from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+
+        n_out = grad_fp8.shape[1]
+        k_in = input_fp8.shape[1]
+        sx = _expand_per_tensor_scale(scale_grad, n_out)
+        sw = _expand_per_tensor_scale(scale_input, k_in)
+        return gemm_a8w8_mixed(
+            grad_fp8.t(),
+            input_fp8,
+            sx,
+            sw,
+            dtype=torch.bfloat16,
+            w_transposed=True,
+        )
+    except ImportError:
+        grad_bf16 = grad_fp8.float() * _scale_to_f32_1x1(
+            scale_grad,
+            grad_fp8.device,
+        )
+        input_bf16 = input_fp8.float() * _scale_to_f32_1x1(
+            scale_input,
+            input_fp8.device,
+        )
+        return (grad_bf16.t() @ input_bf16).to(torch.bfloat16)
+
+
 def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
     """Mixed-dtype FP8 wgrad GEMM: ``dW = grad^T @ input``.
 
@@ -842,30 +880,61 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
     paid for it — so grad is transposed once instead of twice.
     """
     if _probe_aiter_hipblas():
-        ensure_hipblaslt_ready()
-        if grad_t is None:
-            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+        try:
+            ensure_hipblaslt_ready()
+            if grad_t is None:
+                from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
 
-            grad_t = fast_transpose_fp8(grad_fp8)  # (N_out, M) contiguous
-        sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device)
-        si = _scale_to_f32_1x1(scale_input, input_fp8.device)
-        N_out = grad_fp8.shape[1]
-        K_in = input_fp8.shape[1]
-        M = grad_fp8.shape[0]
-        sol = _get_tuned_solution(N_out, K_in, M)
-        from aiter.ops.gradlib import hipb_mm
+                grad_t = fast_transpose_fp8(grad_fp8)  # (N_out, M) contiguous
+            sg = _scale_to_f32_1x1(scale_grad, grad_fp8.device)
+            si = _scale_to_f32_1x1(scale_input, input_fp8.device)
+            N_out = grad_fp8.shape[1]
+            K_in = input_fp8.shape[1]
+            M = grad_fp8.shape[0]
+            sol = _get_tuned_solution(N_out, K_in, M)
+            from aiter.ops.gradlib import hipb_mm
 
-        return hipb_mm(grad_t, input_fp8, sol, out_dtype=torch.bfloat16,
-                       scaleA=sg, scaleB=si)
+            return hipb_mm(
+                grad_t,
+                input_fp8,
+                sol,
+                out_dtype=torch.bfloat16,
+                scaleA=sg,
+                scaleB=si,
+            )
+        except (AssertionError, RuntimeError) as exc:
+            _logger.warning(
+                "hipBLASLt mixed FP8 WGrad rejected the operands (%s); "
+                "falling back to torch._scaled_mm",
+                exc,
+            )
 
-    from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+    if hasattr(torch, "_scaled_mm"):
+        try:
+            if grad_t is None:
+                from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
 
-    N_out = grad_fp8.shape[1]
-    K_in = input_fp8.shape[1]
-    sx = _expand_per_tensor_scale(scale_grad, N_out)
-    sw = _expand_per_tensor_scale(scale_input, K_in)
-    return gemm_a8w8_mixed(
-        grad_fp8.t(), input_fp8, sx, sw, dtype=torch.bfloat16, w_transposed=True,
+                grad_t = fast_transpose_fp8(grad_fp8)
+            input_col_major = input_fp8.t().contiguous().t()
+            return torch._scaled_mm(
+                grad_t,
+                input_col_major,
+                scale_a=_scale_to_f32_1x1(scale_grad, grad_fp8.device).reshape(1),
+                scale_b=_scale_to_f32_1x1(scale_input, input_fp8.device).reshape(1),
+                out_dtype=torch.bfloat16,
+            )
+        except (AssertionError, RuntimeError) as exc:
+            _logger.warning(
+                "torch._scaled_mm mixed FP8 WGrad rejected the operands (%s); "
+                "falling back to AITER Triton",
+                exc,
+            )
+
+    return _gemm_wgrad_mixed_fallback(
+        grad_fp8,
+        input_fp8,
+        scale_grad,
+        scale_input,
     )
 
 
@@ -1986,8 +2055,11 @@ class QuantizedLinearFunction(torch.autograd.Function):
             )
             if scaling_manager is not None and activation_tensor_id:
                 try:
-                    from lumen.modules.parallel_linear import _pop_swiglu_amax
-                    _sw_amax = _pop_swiglu_amax()
+                    _sw_amax = None
+                    if os.environ.get("LUMEN_HF_FUSED_SWIGLU_QUANT", "0") != "1":
+                        from lumen.modules.parallel_linear import _pop_swiglu_amax
+
+                        _sw_amax = _pop_swiglu_amax()
                     if _sw_amax is not None:
                         scaling_manager.update_amax_value(activation_tensor_id, _sw_amax)
                 except ImportError:
@@ -2473,18 +2545,23 @@ class QuantizedLinearFunction(torch.autograd.Function):
             # FP8 (128×1, col-wise) using a direct FP8→FP8 Triton kernel —
             # avoids the BF16 intermediate copy (dequant→BF16→requant(axis=0)).
             def _compute_grad_weight():
+                if not ctx.fp8_wgrad:
+                    return _bf16_wgrad()
                 if g_col is None:
                     return _bf16_wgrad()
                 try:
                     from lumen.ops.quantize.ops import requant_fp8_row_to_col
+                    from lumen.ops.quantize.fast_transpose import (
+                        fast_transpose_fp8,
+                    )
                     # FP8(1×128 row) → FP8(128×1 col) without BF16 roundtrip.
                     # input_scale shape: (M, K_in//block_size) — row dequant multipliers.
                     x_col, x_col_s = requant_fp8_row_to_col(
                         input_data, input_scale, fp8_dtype, block_size,
                     )
                     return _gemm_blockscale_triton(
-                        g_col.t().contiguous(),     # (N_out, M) ∇Y^T
-                        x_col.t().contiguous(),     # (K_in,  M) X^T
+                        fast_transpose_fp8(g_col),  # (N_out, M) ∇Y^T
+                        fast_transpose_fp8(x_col),  # (K_in,  M) X^T
                         g_col_s.t().contiguous(),   # (N_out, M/128)
                         x_col_s.t().contiguous(),   # (K_in,  M/128)
                     )
@@ -2998,8 +3075,11 @@ class FP8StoredLinearFunction(torch.autograd.Function):
             input_fp8, input_scale = pre_quantized_input
             if scaling_manager is not None and activation_tensor_id:
                 try:
-                    from lumen.modules.parallel_linear import _pop_swiglu_amax
-                    _sw_amax = _pop_swiglu_amax()
+                    _sw_amax = None
+                    if os.environ.get("LUMEN_HF_FUSED_SWIGLU_QUANT", "0") != "1":
+                        from lumen.modules.parallel_linear import _pop_swiglu_amax
+
+                        _sw_amax = _pop_swiglu_amax()
                     if _sw_amax is not None:
                         scaling_manager.update_amax_value(activation_tensor_id, _sw_amax)
                 except ImportError:

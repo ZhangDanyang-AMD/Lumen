@@ -2,12 +2,14 @@
 
 """LLaMA 3.1 Pretraining — unified entry point.
 
-Supports two backends, selected via ``--backend``:
+Supports three backends, selected via ``--backend``:
 
 - **megatron** — Megatron-LM-AMD ``pretrain`` driver with TP/PP/CP/VP/SP.
   Requires ``pip install megatron-lm``.
 - **fsdp** — PyTorch FSDP + HuggingFace Transformers.
   Requires ``pip install transformers peft``.
+- **deepspeed** — DeepSpeed ZeRO-1/2 + HuggingFace Transformers.
+  Requires ``pip install deepspeed transformers``.
 
 Usage:
     # Megatron backend (default)
@@ -16,9 +18,13 @@ Usage:
     # FSDP backend
     torchrun --nproc_per_node=8 pretrain_llama31.py --backend fsdp <args>
 
+    # DeepSpeed backend
+    torchrun --nproc_per_node=8 pretrain_llama31.py --backend deepspeed <args>
+
 See run_pretrain.sh for a complete launch example.
 """
 
+import logging
 import sys
 
 from lumen.models.utils import peek_backend
@@ -68,6 +74,16 @@ def _run_fsdp():
     trainer.train()
 
 
+def _run_deepspeed():
+    from lumen.models.llama31.deepspeed import DeepSpeedTrainer, get_args
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+    DeepSpeedTrainer(get_args()).train()
+
+
 if __name__ == "__main__":
     backend = peek_backend()
 
@@ -75,6 +91,11 @@ if __name__ == "__main__":
         _run_megatron()
     elif backend == "fsdp":
         _run_fsdp()
+    elif backend == "deepspeed":
+        _run_deepspeed()
     else:
-        print(f"ERROR: Unknown backend '{backend}'. Use 'megatron' or 'fsdp'.")
+        print(
+            f"ERROR: Unknown backend '{backend}'. "
+            "Use 'megatron', 'fsdp', or 'deepspeed'."
+        )
         sys.exit(1)

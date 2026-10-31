@@ -1,0 +1,241 @@
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running "sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'" for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+[aiter] import [module_aiter_core] under /workspace/aiter/aiter/jit/module_aiter_core.so
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+RCCL version : 2.30.4-HEAD:ca887ee
+HIP version  : 7.14.60850-0000000
+ROCm version : 7.14.1.0-9999-ca887ee8
+Hostname     : ctr-smc-mi350x-rack65-6
+Librccl path : /opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib/librccl.so.1
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:39] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+/opt/venv/lib/python3.12/site-packages/apex/transformer/functional/fused_rope.py:49: UserWarning: Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0
+  warnings.warn("Aiter backend is selected for fused RoPE. This has lower precision. To disable aiter, export USE_ROCM_AITER_ROPE_BACKEND=0", UserWarning)
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:278 NCCL WARN NUMA auto balancing enabled which can lead to variability in the RCCL performance! Disable by "sudo sysctl kernel.numa_balancing=0"
+
+[2026-10-29 04:38:40] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/init.cc:303 NCCL WARN Missing "iommu=pt" from kernel command line which can lead to system instablity or hang!
+
+[2026-10-29 04:38:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:41] ctr-smc-mi350x-rack65-6:506:506 [0] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:512:512 [6] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:508:508 [2] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:507:507 [1] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:510:510 [4] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:509:509 [3] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:511:511 [5] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/ibvwrap.cc:230 NCCL WARN lib wrapper not initialized.
+
+[2026-10-29 04:38:42] ctr-smc-mi350x-rack65-6:513:513 [7] /__w/rockrel/rockrel/build/comm-libs/rccl/build/hipify/src/misc/amdsmi_wrap.cc:214 NCCL WARN RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,261 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,284 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,284 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,284 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,284 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,289 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,289 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,292 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,292 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+2026-10-29 04:38:44,299 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-10-29 04:38:44,299 | WARNING | torchao | Failed to load /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /opt/venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+[rank4]:W1029 04:38:44.428000 510 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank2]:W1029 04:38:44.431000 508 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank7]:W1029 04:38:44.440000 513 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank4]:W1029 04:38:44.447000 510 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank1]:W1029 04:38:44.447000 507 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank2]:W1029 04:38:44.451000 508 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank5]:W1029 04:38:44.451000 511 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank6]:W1029 04:38:44.457000 512 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank7]:W1029 04:38:44.459000 513 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank3]:W1029 04:38:44.460000 509 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank1]:W1029 04:38:44.466000 507 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank0]:W1029 04:38:44.467000 506 torch/utils/_pytree.py:630] <enum 'KernelPreference'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank5]:W1029 04:38:44.470000 511 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank6]:W1029 04:38:44.476000 512 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank3]:W1029 04:38:44.478000 509 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+[rank0]:W1029 04:38:44.485000 506 torch/utils/_pytree.py:630] <enum 'ScaleCalculationMode'> is an Enum subclass and is now natively supported by torch.compile as an opaque value type. Calling register_constant() on Enum subclasses is deprecated and will be an error in a future release.
+2026-10-29 04:39:19,907 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:19,907 | INFO | lumen.config | > LumenConfig enabled (format=fp8_e4m3, scaling=blockwise2d)
+2026-10-29 04:39:21,290 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:22,013 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:22,305 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:22,691 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:22,766 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:24,584 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:24,921 | INFO | lumen.quantize | Quantization enabled on 224 nn.Linear layers (backend=aiter, format=fp8_e4m3, scaling=blockwise2d, amax_algo=max, weight+activation, bf16_layers_skipped=1)
+2026-10-29 04:39:30,332 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,332 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,332 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed FP8 per-update weight cache enabled for 224 parameters
+2026-10-29 04:39:30,345 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,345 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,345 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,346 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,353 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,353 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,355 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,355 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,359 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,359 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,369 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,369 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:30,372 | INFO | lumen.quantize.scaling_manager | ScalingManager: FP8 param mode enabled (224 params)
+2026-10-29 04:39:30,372 | INFO | lumen.quantize.scaling_manager | ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)
+2026-10-29 04:39:31,588 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830683 tokens total)
+2026-10-29 04:39:31,624 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830869 tokens total)
+2026-10-29 04:39:31,625 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830895 tokens total)
+2026-10-29 04:39:31,630 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6831150 tokens total)
+2026-10-29 04:39:31,655 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6831750 tokens total)
+2026-10-29 04:39:31,660 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830423 tokens total)
+2026-10-29 04:39:31,661 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830096 tokens total)
+2026-10-29 04:39:31,666 | INFO | lumen.models.llama31.dataset | Built 1667 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (6830765 tokens total)
+2026-10-29 04:39:31,683 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23240 tokens total)
+2026-10-29 04:39:31,684 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed LLaMA2 ready | params=6738415616 | world=8 | zero=2 | micro_batch=4 | grad_accum=8 | seq=4096
+2026-10-29 04:39:31,715 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23165 tokens total)
+2026-10-29 04:39:31,717 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23124 tokens total)
+2026-10-29 04:39:31,724 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23131 tokens total)
+2026-10-29 04:39:31,747 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23199 tokens total)
+2026-10-29 04:39:31,754 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23128 tokens total)
+2026-10-29 04:39:31,757 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23120 tokens total)
+2026-10-29 04:39:31,757 | INFO | lumen.models.llama31.dataset | Built 5 pretraining samples (seq_length=4096) from /workspace/Lumen/examples/llama2/results/mock_data/deepspeed_llama2_7b_aligned_train.jsonl (23167 tokens total)
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+[aiter] import [module_quant] under /workspace/aiter/aiter/jit/module_quant.so
+2026-10-29 04:39:53,503 | INFO | lumen.models.llama2.deepspeed.pretrain | step 1/50 | loss 11.084513 | lr 5.00e-06 | step_time_ms 21767.5 | tokens_per_second 48171.7 | peak_memory_gib 127.30
+2026-10-29 04:40:06,433 | INFO | lumen.models.llama2.deepspeed.pretrain | step 2/50 | loss 11.089058 | lr 1.00e-05 | step_time_ms 12929.2 | tokens_per_second 81101.6 | peak_memory_gib 133.58
+2026-10-29 04:40:19,349 | INFO | lumen.models.llama2.deepspeed.pretrain | step 3/50 | loss 10.418490 | lr 9.99e-06 | step_time_ms 12915.4 | tokens_per_second 81187.9 | peak_memory_gib 133.58
+2026-10-29 04:40:32,296 | INFO | lumen.models.llama2.deepspeed.pretrain | step 4/50 | loss 7.963489 | lr 9.96e-06 | step_time_ms 12946.9 | tokens_per_second 80990.6 | peak_memory_gib 133.58
+2026-10-29 04:40:45,592 | INFO | lumen.models.llama2.deepspeed.pretrain | step 5/50 | loss 5.700280 | lr 9.90e-06 | step_time_ms 13296.0 | tokens_per_second 78864.2 | peak_memory_gib 133.58
+2026-10-29 04:40:58,601 | INFO | lumen.models.llama2.deepspeed.pretrain | step 6/50 | loss 6.439604 | lr 9.83e-06 | step_time_ms 13008.0 | tokens_per_second 80610.0 | peak_memory_gib 133.58
+2026-10-29 04:41:11,770 | INFO | lumen.models.llama2.deepspeed.pretrain | step 7/50 | loss 5.098218 | lr 9.73e-06 | step_time_ms 13169.0 | tokens_per_second 79624.3 | peak_memory_gib 133.58
+2026-10-29 04:41:24,744 | INFO | lumen.models.llama2.deepspeed.pretrain | step 8/50 | loss 4.911638 | lr 9.62e-06 | step_time_ms 12973.1 | tokens_per_second 80826.9 | peak_memory_gib 133.58
+2026-10-29 04:41:37,670 | INFO | lumen.models.llama2.deepspeed.pretrain | step 9/50 | loss 4.910497 | lr 9.48e-06 | step_time_ms 12926.1 | tokens_per_second 81120.9 | peak_memory_gib 133.58
+2026-10-29 04:41:50,811 | INFO | lumen.models.llama2.deepspeed.pretrain | step 10/50 | loss 4.539485 | lr 9.33e-06 | step_time_ms 13140.2 | tokens_per_second 79799.2 | peak_memory_gib 133.58
+2026-10-29 04:42:03,771 | INFO | lumen.models.llama2.deepspeed.pretrain | step 11/50 | loss 3.635654 | lr 9.16e-06 | step_time_ms 12959.5 | tokens_per_second 80911.9 | peak_memory_gib 133.58
+2026-10-29 04:42:16,761 | INFO | lumen.models.llama2.deepspeed.pretrain | step 12/50 | loss 3.857998 | lr 8.97e-06 | step_time_ms 12989.1 | tokens_per_second 80727.5 | peak_memory_gib 133.58
+2026-10-29 04:42:29,710 | INFO | lumen.models.llama2.deepspeed.pretrain | step 13/50 | loss 4.094495 | lr 8.76e-06 | step_time_ms 12948.6 | tokens_per_second 80980.1 | peak_memory_gib 133.58
+2026-10-29 04:42:42,624 | INFO | lumen.models.llama2.deepspeed.pretrain | step 14/50 | loss 2.978335 | lr 8.54e-06 | step_time_ms 12913.5 | tokens_per_second 81199.8 | peak_memory_gib 133.58
+2026-10-29 04:42:55,883 | INFO | lumen.models.llama2.deepspeed.pretrain | step 15/50 | loss 2.868402 | lr 8.30e-06 | step_time_ms 13258.6 | tokens_per_second 79086.4 | peak_memory_gib 133.58
+2026-10-29 04:43:08,827 | INFO | lumen.models.llama2.deepspeed.pretrain | step 16/50 | loss 2.789724 | lr 8.04e-06 | step_time_ms 12943.8 | tokens_per_second 81010.1 | peak_memory_gib 133.58
+2026-10-29 04:43:21,757 | INFO | lumen.models.llama2.deepspeed.pretrain | step 17/50 | loss 2.893708 | lr 7.78e-06 | step_time_ms 12930.4 | tokens_per_second 81094.1 | peak_memory_gib 133.58
+2026-10-29 04:43:34,684 | INFO | lumen.models.llama2.deepspeed.pretrain | step 18/50 | loss 2.661106 | lr 7.50e-06 | step_time_ms 12926.4 | tokens_per_second 81119.0 | peak_memory_gib 133.58
+2026-10-29 04:43:47,601 | INFO | lumen.models.llama2.deepspeed.pretrain | step 19/50 | loss 2.531708 | lr 7.21e-06 | step_time_ms 12916.2 | tokens_per_second 81183.0 | peak_memory_gib 133.58
+2026-10-29 04:44:00,599 | INFO | lumen.models.llama2.deepspeed.pretrain | step 20/50 | loss 2.436469 | lr 6.91e-06 | step_time_ms 12997.3 | tokens_per_second 80676.3 | peak_memory_gib 133.58
+2026-10-29 04:44:13,743 | INFO | lumen.models.llama2.deepspeed.pretrain | step 21/50 | loss 2.567332 | lr 6.61e-06 | step_time_ms 13143.9 | tokens_per_second 79776.8 | peak_memory_gib 133.58
+2026-10-29 04:44:26,751 | INFO | lumen.models.llama2.deepspeed.pretrain | step 22/50 | loss 2.550679 | lr 6.29e-06 | step_time_ms 13007.4 | tokens_per_second 80613.9 | peak_memory_gib 133.58
+2026-10-29 04:44:39,731 | INFO | lumen.models.llama2.deepspeed.pretrain | step 23/50 | loss 2.372845 | lr 5.98e-06 | step_time_ms 12979.5 | tokens_per_second 80787.0 | peak_memory_gib 133.58
+2026-10-29 04:44:52,633 | INFO | lumen.models.llama2.deepspeed.pretrain | step 24/50 | loss 2.405938 | lr 5.65e-06 | step_time_ms 12901.2 | tokens_per_second 81277.3 | peak_memory_gib 133.58
+2026-10-29 04:45:05,556 | INFO | lumen.models.llama2.deepspeed.pretrain | step 25/50 | loss 2.445855 | lr 5.33e-06 | step_time_ms 12923.0 | tokens_per_second 81140.2 | peak_memory_gib 133.58
+2026-10-29 04:45:18,457 | INFO | lumen.models.llama2.deepspeed.pretrain | step 26/50 | loss 2.394610 | lr 5.00e-06 | step_time_ms 12900.6 | tokens_per_second 81281.3 | peak_memory_gib 133.58
+2026-10-29 04:45:31,614 | INFO | lumen.models.llama2.deepspeed.pretrain | step 27/50 | loss 2.328385 | lr 4.67e-06 | step_time_ms 13156.3 | tokens_per_second 79701.3 | peak_memory_gib 133.58
+2026-10-29 04:45:44,501 | INFO | lumen.models.llama2.deepspeed.pretrain | step 28/50 | loss 2.355730 | lr 4.35e-06 | step_time_ms 12886.7 | tokens_per_second 81368.9 | peak_memory_gib 133.58
+2026-10-29 04:45:57,415 | INFO | lumen.models.llama2.deepspeed.pretrain | step 29/50 | loss 2.380743 | lr 4.02e-06 | step_time_ms 12913.4 | tokens_per_second 81200.5 | peak_memory_gib 133.58
+2026-10-29 04:46:10,399 | INFO | lumen.models.llama2.deepspeed.pretrain | step 30/50 | loss 2.369082 | lr 3.71e-06 | step_time_ms 12983.8 | tokens_per_second 80760.3 | peak_memory_gib 133.58
+2026-10-29 04:46:23,302 | INFO | lumen.models.llama2.deepspeed.pretrain | step 31/50 | loss 2.325924 | lr 3.39e-06 | step_time_ms 12902.5 | tokens_per_second 81269.1 | peak_memory_gib 133.58
+2026-10-29 04:46:36,222 | INFO | lumen.models.llama2.deepspeed.pretrain | step 32/50 | loss 2.305995 | lr 3.09e-06 | step_time_ms 12919.1 | tokens_per_second 81164.5 | peak_memory_gib 133.58
+2026-10-29 04:46:49,313 | INFO | lumen.models.llama2.deepspeed.pretrain | step 33/50 | loss 2.329105 | lr 2.79e-06 | step_time_ms 13090.2 | tokens_per_second 80104.2 | peak_memory_gib 133.58
+2026-10-29 04:47:02,314 | INFO | lumen.models.llama2.deepspeed.pretrain | step 34/50 | loss 2.331744 | lr 2.50e-06 | step_time_ms 13001.2 | tokens_per_second 80652.4 | peak_memory_gib 133.58
+2026-10-29 04:47:15,215 | INFO | lumen.models.llama2.deepspeed.pretrain | step 35/50 | loss 2.304092 | lr 2.22e-06 | step_time_ms 12899.9 | tokens_per_second 81285.3 | peak_memory_gib 133.58
+2026-10-29 04:47:28,100 | INFO | lumen.models.llama2.deepspeed.pretrain | step 36/50 | loss 2.294655 | lr 1.96e-06 | step_time_ms 12884.6 | tokens_per_second 81382.3 | peak_memory_gib 133.58
+2026-10-29 04:47:40,996 | INFO | lumen.models.llama2.deepspeed.pretrain | step 37/50 | loss 2.304999 | lr 1.70e-06 | step_time_ms 12895.8 | tokens_per_second 81311.3 | peak_memory_gib 133.58
+2026-10-29 04:47:53,898 | INFO | lumen.models.llama2.deepspeed.pretrain | step 38/50 | loss 2.307683 | lr 1.46e-06 | step_time_ms 12901.4 | tokens_per_second 81276.3 | peak_memory_gib 133.58
+2026-10-29 04:48:06,787 | INFO | lumen.models.llama2.deepspeed.pretrain | step 39/50 | loss 2.295331 | lr 1.24e-06 | step_time_ms 12889.0 | tokens_per_second 81354.6 | peak_memory_gib 133.58
+2026-10-29 04:48:19,691 | INFO | lumen.models.llama2.deepspeed.pretrain | step 40/50 | loss 2.289190 | lr 1.03e-06 | step_time_ms 12903.0 | tokens_per_second 81266.0 | peak_memory_gib 133.58
+2026-10-29 04:48:32,768 | INFO | lumen.models.llama2.deepspeed.pretrain | step 41/50 | loss 2.291420 | lr 8.43e-07 | step_time_ms 13076.3 | tokens_per_second 80188.9 | peak_memory_gib 133.58
+2026-10-29 04:48:45,656 | INFO | lumen.models.llama2.deepspeed.pretrain | step 42/50 | loss 2.293146 | lr 6.70e-07 | step_time_ms 12888.2 | tokens_per_second 81359.5 | peak_memory_gib 133.58
+2026-10-29 04:48:58,616 | INFO | lumen.models.llama2.deepspeed.pretrain | step 43/50 | loss 2.290482 | lr 5.16e-07 | step_time_ms 12959.3 | tokens_per_second 80913.1 | peak_memory_gib 133.58
+2026-10-29 04:49:11,588 | INFO | lumen.models.llama2.deepspeed.pretrain | step 44/50 | loss 2.288683 | lr 3.81e-07 | step_time_ms 12971.9 | tokens_per_second 80834.7 | peak_memory_gib 133.58
+2026-10-29 04:49:24,757 | INFO | lumen.models.llama2.deepspeed.pretrain | step 45/50 | loss 2.287640 | lr 2.65e-07 | step_time_ms 13167.9 | tokens_per_second 79631.2 | peak_memory_gib 133.58
+2026-10-29 04:49:37,647 | INFO | lumen.models.llama2.deepspeed.pretrain | step 46/50 | loss 2.286838 | lr 1.70e-07 | step_time_ms 12889.4 | tokens_per_second 81352.1 | peak_memory_gib 133.58
+2026-10-29 04:49:50,613 | INFO | lumen.models.llama2.deepspeed.pretrain | step 47/50 | loss 2.287053 | lr 9.61e-08 | step_time_ms 12965.4 | tokens_per_second 80875.0 | peak_memory_gib 133.58
+2026-10-29 04:50:03,564 | INFO | lumen.models.llama2.deepspeed.pretrain | step 48/50 | loss 2.287340 | lr 4.28e-08 | step_time_ms 12951.6 | tokens_per_second 80961.3 | peak_memory_gib 133.58
+2026-10-29 04:50:16,668 | INFO | lumen.models.llama2.deepspeed.pretrain | step 49/50 | loss 2.287524 | lr 1.07e-08 | step_time_ms 13102.8 | tokens_per_second 80026.9 | peak_memory_gib 133.58
+2026-10-29 04:50:29,585 | INFO | lumen.models.llama2.deepspeed.pretrain | step 50/50 | loss 2.287334 | lr 0.00e+00 | step_time_ms 12916.6 | tokens_per_second 81180.4 | peak_memory_gib 133.58
+2026-10-29 04:50:29,585 | INFO | lumen.models.llama2.deepspeed.pretrain | Verified Lumen runtime patches | sdpa_calls=0 | rope_calls=0 | mlp_calls=0 | norm_calls=0 | linear_calls=0 | fp8_linear_calls=89600 | shared_quant_hits=0
+2026-10-29 04:50:29,585 | INFO | lumen.models.llama2.deepspeed.pretrain | Steady-state performance | mean_step_time_ms 12981.9 | median_step_time_ms 12947.7 | measured_steps 48
+2026-10-29 04:50:29,585 | INFO | lumen.models.llama2.deepspeed.pretrain | DeepSpeed pretraining complete at step 50 | final_loss 2.287334

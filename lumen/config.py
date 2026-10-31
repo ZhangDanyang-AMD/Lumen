@@ -302,7 +302,15 @@ class LumenConfig:
         if self.hf_attn_patch:
             self._patch_sdpa()
 
-        # 1c. Linear GEMM patching (BF16 AITER Triton)
+        # 1c. HuggingFace RoPE patching
+        if self.fused_rope:
+            self._patch_hf_rope()
+
+        # 1d. HuggingFace fused MLP activation patching
+        if self.fused_mlp:
+            self._patch_hf_mlp(model)
+
+        # 1e. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
 
@@ -400,6 +408,8 @@ class LumenConfig:
         return model
 
     def _patch_norms(self, model) -> None:
+        import types
+
         import torch
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
@@ -414,6 +424,23 @@ class LumenConfig:
                     "Qwen2RMSNorm",
                     "Qwen3RMSNorm",
                 ):
+                    if getattr(self, "_preserve_parameter_identity", False):
+                        from lumen.ops.normalization.rmsnorm import rmsnorm
+
+                        def _rms_forward(mod, hidden_states):
+                            mod._lumen_norm_calls += 1
+                            eps = getattr(
+                                mod,
+                                "eps",
+                                getattr(mod, "variance_epsilon", 1e-6),
+                            )
+                            return rmsnorm(hidden_states, mod.weight, eps)
+
+                        child._lumen_norm_original_forward = child.forward
+                        child._lumen_norm_calls = 0
+                        child.forward = types.MethodType(_rms_forward, child)
+                        count += 1
+                        continue
                     hidden = child.weight.shape[0]
                     eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
                     target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
@@ -426,6 +453,23 @@ class LumenConfig:
                     setattr(module, attr_name, repl)
                     count += 1
                 elif cls_name in ("LayerNorm",):
+                    if getattr(self, "_preserve_parameter_identity", False):
+                        from lumen.ops.normalization.layernorm import layernorm
+
+                        def _layer_forward(mod, hidden_states):
+                            mod._lumen_norm_calls += 1
+                            return layernorm(
+                                hidden_states,
+                                mod.weight,
+                                mod.bias,
+                                mod.eps,
+                            )
+
+                        child._lumen_norm_original_forward = child.forward
+                        child._lumen_norm_calls = 0
+                        child.forward = types.MethodType(_layer_forward, child)
+                        count += 1
+                        continue
                     hidden = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
                     eps = getattr(child, "eps", 1e-5)
                     repl = LumenLayerNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
@@ -449,6 +493,34 @@ class LumenConfig:
         from lumen.ops.attention.hf_patch import patch_sdpa
 
         patch_sdpa()
+
+    @staticmethod
+    def _patch_hf_rope() -> None:
+        """Patch HuggingFace LLaMA RoPE with the AITER autograd implementation."""
+        try:
+            import transformers.models.llama.modeling_llama as modeling_llama
+        except ImportError as exc:
+            raise RuntimeError(
+                "fused_rope currently supports HuggingFace LLaMA models only"
+            ) from exc
+
+        if hasattr(modeling_llama, "_lumen_rope_original"):
+            return
+
+        from lumen.ops.rope import apply_rotary_qk_autograd
+
+        original = modeling_llama.apply_rotary_pos_emb
+
+        def _lumen_rope(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+            if unsqueeze_dim != 1 or q.dim() != 4 or k.dim() != 4:
+                return original(q, k, cos, sin, position_ids, unsqueeze_dim)
+            modeling_llama._lumen_rope_calls += 1
+            return apply_rotary_qk_autograd(q, k, cos, sin)
+
+        modeling_llama._lumen_rope_original = original
+        modeling_llama._lumen_rope_calls = 0
+        modeling_llama.apply_rotary_pos_emb = _lumen_rope
+        _rank0_print("> Fused RoPE: HF LLaMA apply_rotary_pos_emb -> AITER autograd RoPE")
 
     @staticmethod
     def _auto_tune_bf16_gemm(model) -> None:
@@ -493,20 +565,87 @@ class LumenConfig:
                 return grad_input, grad_weight, grad_bias
 
         count = 0
-        for _name, module in model.named_modules():
+        for name, module in model.named_modules():
             if isinstance(module, nn.Linear):
+                if not self.quantize_output_layer and name.rsplit(".", 1)[-1] == "lm_head":
+                    continue
 
                 def _make_aiter_forward(mod):
                     def _aiter_forward(input):
+                        mod._lumen_linear_calls += 1
                         return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
 
                     return _aiter_forward
 
+                module._lumen_linear_patched = True
+                module._lumen_linear_calls = 0
                 module.forward = _make_aiter_forward(module)
                 count += 1
 
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+
+    @staticmethod
+    def _patch_hf_mlp(model) -> None:
+        """Fuse HuggingFace LLaMA's separate SiLU and multiply kernels."""
+        from lumen.ops.fused_swiglu import fused_swiglu_pair
+
+        count = 0
+        for module in model.modules():
+            if type(module).__name__ != "LlamaMLP":
+                continue
+            if not all(hasattr(module, name) for name in ("gate_proj", "up_proj", "down_proj")):
+                continue
+            activation_name = (
+                getattr(module.act_fn, "__name__", "")
+                or type(module.act_fn).__name__
+            ).lower()
+            if "silu" not in activation_name:
+                continue
+
+            original_forward = module.forward
+
+            def _make_fused_forward(mod):
+                def _fused_forward(hidden_states):
+                    mod._lumen_fused_mlp_calls += 1
+                    gate = mod.gate_proj(hidden_states)
+                    up = mod.up_proj(hidden_states)
+                    activated = fused_swiglu_pair(gate, up)
+                    down_is_fp8 = getattr(mod.down_proj, "_quant_enabled", False)
+                    down_scaling = getattr(
+                        mod.down_proj,
+                        "_quant_scaling_type",
+                        None,
+                    )
+                    if (
+                        os.environ.get("LUMEN_FUSED_SWIGLU_QUANT", "0") == "1"
+                        and down_is_fp8
+                        and down_scaling != "delayed"
+                    ):
+                        from lumen.models._swiglu_fp8_fuse import (
+                            try_fused_swiglu_fp8,
+                        )
+
+                        try_fused_swiglu_fp8(gate, activated)
+                    try:
+                        return mod.down_proj(activated)
+                    finally:
+                        from lumen.models._swiglu_fp8_fuse import (
+                            discard_swiglu_fp8_cache,
+                        )
+
+                        discard_swiglu_fp8_cache()
+
+                return _fused_forward
+
+            module._lumen_fused_mlp_original_forward = original_forward
+            module._lumen_fused_mlp_patched = True
+            module._lumen_fused_mlp_calls = 0
+            module.forward = _make_fused_forward(module)
+            count += 1
+
+        if count:
+            _rank0_print(f"> Patched {count} HuggingFace LlamaMLP modules with fused SwiGLU")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.

@@ -13,9 +13,54 @@ BACKEND=megatron bash examples/llama31/run_pretrain.sh
 
 # 2. Or: FSDP backend (no Megatron dependency)
 BACKEND=fsdp bash examples/llama31/run_pretrain.sh
+
+# 2. Or: DeepSpeed backend (ZERO_STAGE=1, 2, or 3)
+BACKEND=deepspeed bash examples/llama31/run_pretrain.sh
+
+# Self-contained DeepSpeed BF16 smoke/performance run
+bash examples/llama31/run_deepspeed_pretrain_llama31_8b.sh
+
+# DeepSpeed FP8 dynamic run
+PRECISION=fp8 bash examples/llama31/run_deepspeed_pretrain_llama31_8b.sh
 ```
 
-The entry point (`pretrain_llama31.py`) selects the backend via `--backend megatron|fsdp`.
+The entry point (`pretrain_llama31.py`) selects the backend via
+`--backend megatron|fsdp|deepspeed`. The DeepSpeed path supports ZeRO-1/2/3 and
+uses `LumenConfig.enable()` for operator injection. ZeRO-3 is currently
+validated for BF16; FP8 remains limited to ZeRO-1/2.
+
+The DeepSpeed BF16 launcher defaults are aligned with
+`results/llama31_8b_pretrain_bf16.log` for direct speed comparisons:
+8 GPUs, MBS 2, GBS 128, sequence/max-position length 8192, 50 steps,
+LR 1e-5 with two warmup steps and cosine decay. Its BF16
+`LumenConfig.enable()` contract is exactly `format=fp8_e4m3, scaling=none`;
+optional attention, RoPE, MLP, and Linear patches are disabled. They can be
+enabled explicitly with `HF_ATTN_PATCH=1`, `FUSED_ROPE=1`, `FUSED_MLP=1`, and
+`LUMEN_LINEAR=1`; use `LUMEN_NORM=1` for the in-place RMSNorm patch.
+
+On 8×MI350X, the aligned native DeepSpeed BF16 baseline measured
+11.41 s/step. Enabling attention, RoPE, MLP, Linear, and in-place RMSNorm
+patches measured 8.52 s/step, a 25.4% step-time reduction (1.34× throughput).
+The corresponding logs are
+`results/llama31_8b_deepspeed_pretrain_bf16_mi350x.log` and
+`results/llama31_8b_deepspeed_pretrain_bf16_lumen_patched_mi350x.log`.
+
+FP8 runs automatically enable fused SwiGLU activation quantization, fused
+amax/cast-transpose, the per-update weight cache, and shared QKV/gate-up input
+quantization. With all Lumen patches, DeepSpeed measured 7.59 s/step for
+hybrid delayed and 8.00 s/step for dynamic scaling. Relative to native BF16,
+these are 33.5% and 29.9% step-time reductions.
+
+Blockwise2d measured 13.42 s/step with only quantization enabled and
+10.49 s/step with all applicable Lumen patches, a 21.8% reduction
+(1.28× throughput). The optimized path uses true 128×128 cached weight scales,
+tiled FP8 WGrad transpose, shared input quantization, and AITER's
+Llama3.1-specific gfx950 Triton configs. It is 23.2% slower than optimized BF16 because the
+remaining blockscale forward/DGrad/WGrad kernels dominate the step.
+
+The validated BF16 ZeRO-3 run uses `deepspeed.zero.Init` for partitioned model
+construction. Its aligned 50-step MI350X result is 13.21 s/step with a
+143.91 GiB peak per rank.
 
 ## CLI Flags
 

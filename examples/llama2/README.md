@@ -341,3 +341,219 @@ peak allocated memory:
 | FP8 delayed | TransformerEngine | ~8.14 s | 111.6 GB |
 | FP8 delayed | Lumen | ~8.19 s | 113.5 GB |
 | FP8 delayed | Δ | +0.5% | +1.7% |
+
+## DeepSpeed Pretraining (Llama2-7B)
+
+The DeepSpeed integration supports ZeRO-1/2/3 with BF16 master weights
+and either BF16 compute or Lumen AITER FP8 Linear compute. Model patching still
+goes through `LumenConfig.enable()` before `deepspeed.initialize()`.
+
+Install a ROCm-compatible DeepSpeed build and the example dependencies:
+
+```bash
+pip install -e ".[aiter,deepspeed]"
+pip install -r examples/llama2/requirements.txt
+```
+
+### Docker image
+
+Pull the validated ROCm 7.14 / MI350X-MI355X image from Docker Hub:
+
+```bash
+docker pull zhangdanyangamd/lumen:deepspeed-rocm714-mi355
+```
+
+The image contains DeepSpeed 0.19.8, ROCm 7.14, PyTorch 2.12, the AITER
+gfx950 Llama blockscale tuning branch, and the Lumen source used by the
+committed benchmark logs. To run a local
+checkout instead of the source baked into the image, mount it at
+`/workspace/Lumen`:
+
+```bash
+docker run --rm --ipc=host --network=host \
+  --device=/dev/kfd --device=/dev/dri \
+  --group-add video --group-add render \
+  -v "$PWD:/workspace/Lumen" \
+  -w /workspace/Lumen \
+  zhangdanyangamd/lumen:deepspeed-rocm714-mi355 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+Alternatively, build the same advanced image from the repository root. The
+single `Dockerfile.deepspeed` starts from its declared ROCm/PyTorch base images;
+no separate blockwise image is required:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  --build-arg BUILD_FLAVOR=advanced_base \
+  --build-arg AITER_SOURCE=upstream \
+  --build-arg AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git \
+  --build-arg AITER_BRANCH=perf/gfx950-llama-blockscale-configs \
+  --build-arg TORCHAO_VERSION=0.18.0 \
+  -t zhangdanyangamd/lumen:deepspeed-rocm714-mi355 .
+```
+
+Push a locally built image only after its GPU smoke tests pass:
+
+```bash
+docker push zhangdanyangamd/lumen:deepspeed-rocm714-mi355
+```
+
+For a submodule-based local install, initialize the pinned tuning branch first:
+
+```bash
+git submodule update --init --recursive third_party/aiter
+```
+
+Build the compatibility ROCm 7.0 environment:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  -t lumen-deepspeed:rocm70 .
+```
+
+The same Dockerfile builds the advanced ROCm 7.14 / PyTorch 2.12 /
+Triton 3.8 image with the tuned AITER branch:
+
+```bash
+docker build --network host \
+  -f examples/llama2/Dockerfile.deepspeed \
+  --build-arg BUILD_FLAVOR=advanced_base \
+  --build-arg AITER_SOURCE=upstream \
+  --build-arg AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git \
+  --build-arg AITER_BRANCH=perf/gfx950-llama-blockscale-configs \
+  --build-arg TORCHAO_VERSION=0.18.0 \
+  -t lumen-deepspeed:rocm714-aiter-tuned .
+```
+
+Launch the default eight-GPU ZeRO-2 BF16 run:
+
+```bash
+bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+Useful variants:
+
+```bash
+# FP8 dynamic scaling (enable after validating BF16)
+PRECISION=fp8 bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# FP8 blockwise2d
+PRECISION=fp8 FP8_SCALING=blockwise2d \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# ZeRO-1 or a smaller smoke test
+ZERO_STAGE=1 NPROC_PER_NODE=2 GBS=8 SEQ_LEN=512 TRAIN_STEPS=5 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+
+# ZeRO-3 BF16 with partitioned model construction
+ZERO_STAGE=3 PRECISION=bf16 \
+  bash examples/llama2/run_deepspeed_pretrain_llama2_7b.sh
+```
+
+The launcher generates mock JSONL data when `TRAIN_DATA_PATH` does not exist.
+Set `TRAIN_DATA_PATH` to use an existing text/JSONL corpus.
+
+Current safety restrictions:
+
+- ZeRO-3 is currently validated for BF16; FP8 remains limited to ZeRO-1/2.
+- FP8 parameter storage, communication quantization, MXFP4, LoRA, and
+  CPU/NVMe offload are rejected.
+- FP8 supports E4M3 `dynamic`/`blockwise2d` and hybrid
+  E4M3-forward/E5M2-backward `delayed` scaling.
+- On the ROCm 7.0 image, delayed scaling disables fused quant+amax because its
+  history output is invalid on the second accumulation micro-batch. Other
+  quantization fusions remain enabled.
+- Hybrid WGrad uses a DeepSpeed-local `torch._scaled_mm` hipBLASLt path; the
+  shared FSDP/Megatron Linear implementation and API are not modified.
+- Attention, normalization, embeddings, and `lm_head` remain BF16 precision;
+  attention and normalization can still use Lumen kernels.
+- `LUMEN_WEIGHT_QUANT_ONCE=1` is rejected because its cache has not yet been
+  wired to the DeepSpeed optimizer update boundary.
+
+### Validated BF16 result
+
+Validated on 8×MI350X with DeepSpeed 0.19.8, ZeRO-2, MBS=4, GBS=256,
+sequence length 4096, and 50 steps. The full log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_mi350x.log).
+
+- Final training loss: `2.285984` (acceptance target: at most `3.3`).
+- Steady-state mean/median: `6657.2 / 6627.9 ms/step` after excluding two
+  warmup steps (acceptance limit: `18000 ms`).
+- Global throughput: approximately `158.2K tokens/s`.
+- Peak allocated memory: `95.10 GiB/GPU`.
+- Runtime patch verification: `12800` Lumen/AITER SDPA calls, `12800`
+  AITER autograd RoPE calls, `12800` fused SwiGLU calls, `26000` Lumen norm
+  calls, and `89600` BF16 Lumen Linear calls.
+- AITER loaded gfx950 FMHA v3 BF16 forward and backward kernels.
+
+The no-patch BF16 baseline measured `9784.7 ms/step` and `122.10 GiB/GPU`;
+the full patch set reduces step time by `32.0%` (1.47× throughput). Its log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_baseline_mi350x.log).
+
+The aligned BF16 ZeRO-3 run completed the same 50 steps with final loss
+`2.307275`, steady-state mean/median `8514.8 / 8448.0 ms/step`, and
+`103.21 GiB/GPU` peak allocation. Its full log is
+[`results/llama2_7b_deepspeed_pretrain_bf16_zero3_mi350x.log`](results/llama2_7b_deepspeed_pretrain_bf16_zero3_mi350x.log).
+
+The launcher enforces the loss and steady-state step-time limits and fails the
+run if any enabled attention, RoPE, fused MLP, or BF16 Linear patch receives
+zero runtime calls. `FUSED_MLP=0` and `LUMEN_LINEAR=0` can independently
+disable the two Linear/MLP optimizations for A/B testing.
+
+### Validated FP8 result
+
+The default hybrid delayed recipe was validated on the same 8×MI350X, ZeRO-2,
+MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_delayed_mi350x.log).
+
+- Final training loss: `2.286547`.
+- Steady-state mean/median: `6059.2 / 5990.9 ms/step`.
+- Global throughput: approximately `175.0K tokens/s`.
+- Peak allocated memory: `93.76 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, `38400` shared-input quant
+  cache hits, `26000` Lumen norm calls, plus `12800` calls each for AITER
+  SDPA, AITER RoPE, and fused SwiGLU.
+- All 50 steps completed without a non-finite loss.
+
+The delayed-only baseline measured `9579.5 ms/step`; the full patch set reduces
+its step time by `36.7%`. Against the no-patch BF16 baseline, optimized delayed
+FP8 reduces step time by `38.1%` (1.61× throughput). Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_delayed_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_delayed_baseline_mi350x.log).
+
+The alternative E4M3 dynamic recipe was also validated on the same
+MBS=4, GBS=256, sequence-length-4096, 50-step setup. The full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_dynamic_mi350x.log).
+
+- Final training loss: `2.286683`.
+- Steady-state mean/median: `6392.7 / 6306.1 ms/step`.
+- Global throughput: approximately `166.4K tokens/s`.
+- Peak allocated memory: `99.86 GiB/GPU`.
+- Runtime verification: `89600` FP8 Linear calls, `38400` shared-input quant
+  cache hits, `26000` Lumen norm calls, plus `12800` calls each for AITER
+  SDPA, AITER RoPE, and fused SwiGLU.
+- All 50 steps completed without a non-finite loss.
+
+The dynamic-only baseline measured `9499.7 ms/step`; full patches reduce its
+step time by `32.7%`; against no-patch BF16 it is a `34.7%` reduction
+(1.53× throughput). Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_dynamic_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_dynamic_baseline_mi350x.log).
+
+The E4M3 blockwise2d recipe also completed the full 50-step convergence run.
+Its full log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_mi350x.log).
+
+- Final training loss: `2.286625`.
+- Steady-state mean/median: `9990.0 / 9925.1 ms/step`.
+- Global throughput: approximately `105.8K tokens/s`.
+- Peak allocated memory: `106.63 GiB/GPU`.
+
+Blockwise2d is numerically supported but is not the recommended performance
+recipe on this DeepSpeed/HuggingFace path; its activation and WGrad kernels are
+substantially slower than hybrid delayed at these Llama2-7B shapes. The
+blockwise-only baseline measured `12981.9 ms/step`; shape tuning plus the full
+patch set reduces it by `23.0%` (1.30× throughput), but remains slightly slower
+than the no-patch BF16 baseline. Its baseline log is
+[`results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_baseline_mi350x.log`](results/llama2_7b_deepspeed_pretrain_fp8_blockwise2d_baseline_mi350x.log).

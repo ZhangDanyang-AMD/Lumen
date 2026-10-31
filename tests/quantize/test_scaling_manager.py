@@ -21,6 +21,7 @@ Covers:
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -136,6 +137,65 @@ class TestAmaxHistory:
             mgr.update_amax("t", t)
         scale = mgr.get_scale("t", torch.ones(4, device="cuda"))
         assert isinstance(scale, torch.Tensor)
+
+    def test_state_dict_round_trip_restores_amax_history(self):
+        source = ScalingManager(recipe="delayed", history_len=4)
+        source.amax_history["layer"].extend([1.0, 2.0, 3.0])
+
+        restored = ScalingManager(recipe="delayed", history_len=4)
+        restored.load_state_dict(source.state_dict())
+
+        assert list(restored.amax_history["layer"]) == [1.0, 2.0, 3.0]
+        assert restored._batch_scales_valid is False
+
+    def test_step_batch_state_round_trip_rebuilds_ring(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_STEP_BATCH_SCALES", "1")
+        source = ScalingManager(recipe="delayed", history_len=4)
+        source.update_amax_value("layer", torch.tensor(3.0))
+        source.update_amax_value("layer", torch.tensor(5.0))
+
+        restored = ScalingManager(recipe="delayed", history_len=4)
+        restored.load_state_dict(source.state_dict())
+
+        assert restored._ring_cursor["layer"] == 2
+        torch.testing.assert_close(
+            restored._ring_rows["layer"],
+            torch.tensor([3.0, 5.0, 0.0, 0.0], device=restored._ring_rows["layer"].device),
+        )
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
+    def test_fused_cast_transpose_updates_step_batch_ring(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_STEP_BATCH_SCALES", "1")
+        mgr = ScalingManager(recipe="delayed", history_len=4)
+        tensor = torch.randn(8, 16, device="cuda", dtype=torch.bfloat16)
+        fp8 = torch.empty_like(tensor, dtype=mgr.fp8_dtype_bwd)
+        fp8_t = torch.empty(
+            (16, 8),
+            device="cuda",
+            dtype=mgr.fp8_dtype_bwd,
+        )
+        with (
+            patch(
+                "lumen.quantize.scaling_manager._FUSED_QUANT_TRANSPOSE_CPP",
+                True,
+            ),
+            patch(
+                "lumen.quantize.scaling_manager._PREFER_HIPBLASLT",
+                False,
+            ),
+            patch(
+                "lumen.quantize.scaling_manager._probe_hip_cast_transpose",
+                return_value=True,
+            ),
+            patch(
+                "lumen.ops.quantize.cast_transpose_hip.cast_transpose_amax_fp8_hip",
+                return_value=(fp8, fp8_t, torch.tensor([2.0], device="cuda")),
+            ),
+        ):
+            mgr._quantize_core("grad", tensor, backward=True)
+
+        assert "grad" in mgr._ring_rows
+        assert mgr._ring_rows["grad"][0].item() == 2.0
 
     def test_most_recent_algo(self):
         cfg = QuantConfig(scaling=ScalingType.DELAYED, amax_algo=AmaxAlgo.MOST_RECENT)
@@ -272,6 +332,78 @@ class TestFP8ParamLifecycle:
         mgr._fp8_param_stale.clear()
         mgr.check_and_mark_fp8_stale(0)
         assert "layer.weight" not in mgr._fp8_param_stale
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
+    def test_blockwise2d_param_cache_stores_transposed_dgrad_operand(self):
+        cfg = QuantConfig(
+            format=QuantFormat.FP8_E4M3,
+            scaling=ScalingType.BLOCKWISE2D,
+            block_size=128,
+        )
+        mgr = ScalingManager(cfg)
+        param = torch.nn.Parameter(
+            torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        )
+        mgr.register_fp8_param("layer.weight", param)
+        mgr.quantize_fp8_params()
+
+        desc = mgr.get_fp8_param_cached("layer.weight", param)
+        data_t, scale_t = desc.data._lumen_wt
+        assert data_t.shape == (128, 256)
+        assert scale_t.shape == (1, 2)
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU required")
+    @pytest.mark.parametrize(
+        "scaling",
+        [ScalingType.DYNAMIC, ScalingType.BLOCKWISE2D],
+    )
+    def test_weight_quantization_reads_registered_cache(self, scaling):
+        from lumen.ops.quantize.linear import quantize_input
+
+        cfg = QuantConfig(
+            format=QuantFormat.FP8_E4M3,
+            scaling=scaling,
+            block_size=128,
+        )
+        mgr = ScalingManager(cfg)
+        param = torch.nn.Parameter(
+            torch.randn(256, 128, device="cuda", dtype=torch.bfloat16)
+        )
+        mgr.register_fp8_param("layer.weight", param)
+        mgr.quantize_fp8_params()
+
+        first = quantize_input(
+            param,
+            cfg.recipe,
+            mgr.fp8_dtype,
+            cfg.block_size,
+            mgr,
+            "layer.weight",
+            is_weight=True,
+        )
+        second = quantize_input(
+            param,
+            cfg.recipe,
+            mgr.fp8_dtype,
+            cfg.block_size,
+            mgr,
+            "layer.weight",
+            is_weight=True,
+        )
+        assert first is second
+
+    def test_optimizer_hooks_are_idempotent_per_optimizer(self, monkeypatch):
+        monkeypatch.setenv("LUMEN_STEP_BATCH_SCALES", "1")
+        mgr = ScalingManager(recipe="delayed")
+        parameter = torch.nn.Parameter(torch.tensor(1.0))
+        first = torch.optim.SGD([parameter], lr=0.1)
+        second = torch.optim.SGD([parameter], lr=0.1)
+
+        mgr.register_fp8_optimizer_hook(first)
+        mgr.register_fp8_optimizer_hook(first)
+        mgr.register_fp8_optimizer_hook(second)
+
+        assert len(mgr._hooked_optimizers) == 2
 
     def test_mxfp4_is_refused(self):
         """The param cache is an FP8 mechanism; no MXFP4 path reads it back.
@@ -472,10 +604,7 @@ class TestQuantizeBwdDelayed:
 
         assert len(mgr.amax_history["grad_a"]) == 1
         assert len(mgr.amax_history["grad_b"]) == 1
-        assert not torch.equal(
-            mgr.amax_history["grad_a"][-1],
-            mgr.amax_history["grad_b"][-1],
-        )
+        assert mgr.amax_history["grad_a"][-1] != mgr.amax_history["grad_b"][-1]
 
     def test_zero_tensor_no_nan(self):
         """Zero input should not produce NaN/Inf in scale or output."""

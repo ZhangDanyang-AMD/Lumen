@@ -1,0 +1,58 @@
+ARG COMPAT_BASE=rocm/7.0:rocm7.0_ubuntu22.04_py3.10_pytorch_release_2.8.0_rc1
+ARG ADVANCED_BASE=rocm/pytorch:rocm7.14.1_ubuntu24.04_py3.12_pytorch_release_2.12.0
+ARG BUILD_FLAVOR=compat_base
+
+FROM rocm/dev-ubuntu-24.04:7.14.1-full AS rocm714_sdk
+
+FROM ${COMPAT_BASE} AS compat_base
+
+FROM ${ADVANCED_BASE} AS advanced_base
+COPY --from=rocm714_sdk /opt/rocm/core-7.14 /opt/rocm/core-7.14
+ENV ROCM_HOME=/opt/rocm/core-7.14 \
+    ROCM_PATH=/opt/rocm/core-7.14 \
+    PATH="/opt/rocm/core-7.14/bin:${PATH}" \
+    LD_LIBRARY_PATH="/opt/rocm/core-7.14/lib:${LD_LIBRARY_PATH:-}"
+RUN ln -sf /opt/rocm/core-7.14/bin/hipconfig /opt/venv/bin/hipconfig
+
+FROM ${BUILD_FLAVOR} AS final
+
+ARG AITER_SOURCE=submodule
+ARG AITER_REPOSITORY=https://github.com/ZhangDanyang-AMD/aiter.git
+ARG AITER_BRANCH=perf/gfx950-llama-blockscale-configs
+ARG TORCHAO_VERSION=0.13.0
+
+WORKDIR /workspace
+COPY . /workspace/Lumen
+
+ENV GPU_ARCHS=gfx950 \
+    AITER_USE_SYSTEM_TRITON=1 \
+    DS_BUILD_OPS=0 \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONUNBUFFERED=1
+
+RUN groupadd -f video && groupadd -f render
+RUN pip install --no-cache-dir "deepspeed==0.19.8"
+
+# Compatibility flavor uses Lumen's pinned AITER submodule. Advanced flavor
+# clones ROCm/AITER main to consume the newest gfx950 Triton/FlyDSL/Opus kernels.
+RUN if [ "${AITER_SOURCE}" = "upstream" ]; then \
+        git clone --recursive --branch "${AITER_BRANCH}" \
+            "${AITER_REPOSITORY}" /workspace/aiter-active; \
+    else \
+        ln -s /workspace/Lumen/third_party/aiter /workspace/aiter-active; \
+    fi && \
+    cd /workspace/aiter-active && PREBUILD_KERNELS=1 pip install -e .
+
+RUN cd /workspace/Lumen && pip install -e . --no-deps && \
+    pip install "torchao==${TORCHAO_VERSION}" && \
+    pip install -r requirements.txt && \
+    pip install -r examples/llama2/requirements.txt
+
+ENV PYTHONPATH="/workspace/aiter-active:/workspace/Lumen:${PYTHONPATH:-}" \
+    HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+    USE_HIPBLASLT=1 \
+    TORCH_BLAS_PREFER_HIPBLASLT=1 \
+    CUDA_DEVICE_MAX_CONNECTIONS=8 \
+    OMP_NUM_THREADS=1
+
+WORKDIR /workspace/Lumen/examples/llama2
