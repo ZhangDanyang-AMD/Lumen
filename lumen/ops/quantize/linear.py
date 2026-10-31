@@ -826,6 +826,39 @@ def gemm_wgrad_fp8(grad_fp8, input_fp8, scale_grad, scale_input):
     return try_backends(backends, op_name="gemm_wgrad_fp8")
 
 
+def _gemm_wgrad_mixed_fallback(
+    grad_fp8,
+    input_fp8,
+    scale_grad,
+    scale_input,
+):
+    try:
+        from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
+
+        n_out = grad_fp8.shape[1]
+        k_in = input_fp8.shape[1]
+        sx = _expand_per_tensor_scale(scale_grad, n_out)
+        sw = _expand_per_tensor_scale(scale_input, k_in)
+        return gemm_a8w8_mixed(
+            grad_fp8.t(),
+            input_fp8,
+            sx,
+            sw,
+            dtype=torch.bfloat16,
+            w_transposed=True,
+        )
+    except ImportError:
+        grad_bf16 = grad_fp8.float() * _scale_to_f32_1x1(
+            scale_grad,
+            grad_fp8.device,
+        )
+        input_bf16 = input_fp8.float() * _scale_to_f32_1x1(
+            scale_input,
+            input_fp8.device,
+        )
+        return (grad_bf16.t() @ input_bf16).to(torch.bfloat16)
+
+
 def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
     """Mixed-dtype FP8 wgrad GEMM: ``dW = grad^T @ input``.
 
@@ -869,7 +902,7 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
                 scaleA=sg,
                 scaleB=si,
             )
-        except RuntimeError as exc:
+        except (AssertionError, RuntimeError) as exc:
             _logger.warning(
                 "hipBLASLt mixed FP8 WGrad rejected the operands (%s); "
                 "falling back to torch._scaled_mm",
@@ -877,27 +910,31 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
             )
 
     if hasattr(torch, "_scaled_mm"):
-        if grad_t is None:
-            from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
+        try:
+            if grad_t is None:
+                from lumen.ops.quantize.fast_transpose import fast_transpose_fp8
 
-            grad_t = fast_transpose_fp8(grad_fp8)
-        input_col_major = input_fp8.t().contiguous().t()
-        return torch._scaled_mm(
-            grad_t,
-            input_col_major,
-            scale_a=_scale_to_f32_1x1(scale_grad, grad_fp8.device).reshape(1),
-            scale_b=_scale_to_f32_1x1(scale_input, input_fp8.device).reshape(1),
-            out_dtype=torch.bfloat16,
-        )
+                grad_t = fast_transpose_fp8(grad_fp8)
+            input_col_major = input_fp8.t().contiguous().t()
+            return torch._scaled_mm(
+                grad_t,
+                input_col_major,
+                scale_a=_scale_to_f32_1x1(scale_grad, grad_fp8.device).reshape(1),
+                scale_b=_scale_to_f32_1x1(scale_input, input_fp8.device).reshape(1),
+                out_dtype=torch.bfloat16,
+            )
+        except (AssertionError, RuntimeError) as exc:
+            _logger.warning(
+                "torch._scaled_mm mixed FP8 WGrad rejected the operands (%s); "
+                "falling back to AITER Triton",
+                exc,
+            )
 
-    from aiter.ops.triton.gemm.basic.gemm_a8w8_mixed import gemm_a8w8_mixed
-
-    N_out = grad_fp8.shape[1]
-    K_in = input_fp8.shape[1]
-    sx = _expand_per_tensor_scale(scale_grad, N_out)
-    sw = _expand_per_tensor_scale(scale_input, K_in)
-    return gemm_a8w8_mixed(
-        grad_fp8.t(), input_fp8, sx, sw, dtype=torch.bfloat16, w_transposed=True,
+    return _gemm_wgrad_mixed_fallback(
+        grad_fp8,
+        input_fp8,
+        scale_grad,
+        scale_input,
     )
 
 

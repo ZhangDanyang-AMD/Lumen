@@ -17,6 +17,8 @@ SNR thresholds (empirical):
   - Hybrid backward: >=  6 dB (e5m2 has wider range but less precision)
 """
 
+from unittest.mock import patch
+
 import pytest
 import torch
 from conftest import LinearConfig, compute_snr
@@ -95,6 +97,37 @@ class TestHybridFP8Forward:
         out = quantized_linear(x, w, scaling_type="delayed", scaling_manager=mgr)
         snr = compute_snr(ref, out)
         assert snr > 12, f"Hybrid FP8 forward SNR too low: {snr:.1f} dB"
+
+
+@_CUDA
+@_AITER
+def test_mixed_wgrad_falls_through_when_scaled_mm_rejects_operands():
+    from lumen.ops.quantize.linear import gemm_wgrad_mixed
+
+    grad = torch.empty((8, 4), device="cuda", dtype=torch.float8_e5m2)
+    inputs = torch.empty((8, 6), device="cuda", dtype=torch.float8_e4m3fn)
+    grad_t = grad.t().contiguous()
+    scale = torch.ones(1, device="cuda")
+    expected = torch.empty((4, 6), device="cuda", dtype=torch.bfloat16)
+
+    with (
+        patch("lumen.ops.quantize.linear._probe_aiter_hipblas", return_value=False),
+        patch.object(torch, "_scaled_mm", side_effect=RuntimeError("unsupported")),
+        patch(
+            "lumen.ops.quantize.linear._gemm_wgrad_mixed_fallback",
+            return_value=expected,
+        ) as fallback,
+    ):
+        actual = gemm_wgrad_mixed(
+            grad,
+            inputs,
+            scale,
+            scale,
+            grad_t=grad_t,
+        )
+
+    assert actual is expected
+    fallback.assert_called_once()
 
 
 @_CUDA

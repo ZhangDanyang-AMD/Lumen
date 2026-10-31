@@ -237,15 +237,15 @@ def apply_rotary_qk_autograd(q, k, cos, sin):
         (q_rot, k_rot), same shapes as q, k, with gradients.
     """
     if cos.dim() == 3:
-        if cos.shape[0] != q.shape[0] or sin.shape[0] != q.shape[0]:
-            raise ValueError(
-                "Batch-specific RoPE frequencies must match the Q/K batch size"
-            )
-        if q.shape[0] == 1:
+        if cos.shape[0] == 1 and sin.shape[0] == 1:
             cos4 = cos[0].unsqueeze(1).unsqueeze(1)
             sin4 = sin[0].unsqueeze(1).unsqueeze(1)
             return _RoPEAutograd.apply(q, cos4, sin4), _RoPEAutograd.apply(
                 k, cos4, sin4
+            )
+        if cos.shape[0] != q.shape[0] or sin.shape[0] != q.shape[0]:
+            raise ValueError(
+                "Batch-specific RoPE frequencies must match the Q/K batch size"
             )
         q_parts = []
         k_parts = []

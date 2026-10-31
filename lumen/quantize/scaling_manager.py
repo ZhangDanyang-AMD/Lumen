@@ -6,6 +6,7 @@
 
 import logging
 import os
+import weakref
 from collections import defaultdict, deque
 from typing import Dict, Optional, Set, Tuple
 
@@ -278,6 +279,7 @@ class ScalingManager:
         self._fp8_param_cache: Dict[str, Optional[FP8Descriptor]] = {}
         self._fp8_param_stale: Set[str] = set()
         self._fp8_step_counter: int = -1
+        self._hooked_optimizers = weakref.WeakSet()
         self._sdma_allgather = None
 
         # Batch scale precomputation (delayed + MOST_RECENT only).
@@ -770,7 +772,7 @@ class ScalingManager:
         master weights — no explicit call needed in the training loop.
         """
 
-        if getattr(self, "_optimizer_hook_registered", False):
+        if optimizer in self._hooked_optimizers:
             return self
 
         def _on_post_step():
@@ -796,7 +798,7 @@ class ScalingManager:
 
             optimizer.step = _wrapped_step
             logger.info("ScalingManager: wrapped optimizer.step() for FP8 staleness (no register_step_post_hook)")
-        self._optimizer_hook_registered = True
+        self._hooked_optimizers.add(optimizer)
         return self
 
     @property
@@ -823,6 +825,31 @@ class ScalingManager:
         self._fp8_step_counter = int(state.get("fp8_step_counter", -1))
         self._ring_rows.clear()
         self._ring_cursor.clear()
+        if self._step_batch_enabled and self.amax_history:
+            parameter = next(iter(self._fp8_params.values()), None)
+            if parameter is not None and not parameter.is_meta:
+                device = parameter.device
+            elif torch.cuda.is_available():
+                device = torch.device("cuda", torch.cuda.current_device())
+            else:
+                device = torch.device("cpu")
+            for tensor_id, history in self.amax_history.items():
+                values = list(history)[-self.config.history_len :]
+                row = torch.zeros(
+                    self.config.history_len,
+                    dtype=torch.float32,
+                    device=device,
+                )
+                if values:
+                    row[: len(values)] = torch.tensor(
+                        values,
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                self._ring_rows[tensor_id] = row
+                self._ring_cursor[tensor_id] = (
+                    len(values) % self.config.history_len
+                )
         self._batch_tid_to_idx.clear()
         self._batch_ordered_deques = []
         self._batch_amax_buf = None
@@ -1131,7 +1158,7 @@ class ScalingManager:
                 scale,
                 dtype,
             )
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1154,7 +1181,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_data, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             return FP8Descriptor(
                 data=fp8_data.view(tensor.shape),
                 scale=scale,
@@ -1182,7 +1209,7 @@ class ScalingManager:
                     dtype,
                     clamp_max=float(fp8_max),
                 )
-                self.amax_history[tensor_id].append(float(amax.squeeze()))
+                self.update_amax_value(tensor_id, amax)
                 return FP8Descriptor(
                     data=fp8_data.view(tensor.shape),
                     scale=scale,
@@ -1226,7 +1253,7 @@ class ScalingManager:
             if backward and _REUSE_QUANT_BUFFER:
                 _out_buf = self._get_fp8_scratch(tensor.device, tensor_2d.shape, dtype)
             fp8_2d, amax = static_quant_with_amax(tensor_2d, scale, dtype, out=_out_buf)
-            self.amax_history[tensor_id].append(float(amax.squeeze()))
+            self.update_amax_value(tensor_id, amax)
             desc = FP8Descriptor(data=fp8_2d.view(tensor.shape), scale=scale, fp8_dtype=dtype)
             return self._eager_transpose(desc) if not backward else desc
 

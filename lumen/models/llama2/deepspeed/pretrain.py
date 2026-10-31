@@ -29,9 +29,26 @@ from lumen.models.deepspeed import (
 from lumen.models.fsdp import build_cosine_warmup_scheduler
 from lumen.models.llama31.dataset import PretrainTextDataset, check_sample_budget
 
-__all__ = ["DeepSpeedTrainer", "build_model", "get_args"]
+__all__ = [
+    "DeepSpeedTrainer",
+    "build_model",
+    "get_args",
+    "validate_deepspeed_training_args",
+]
 
 logger = logging.getLogger(__name__)
+
+
+def validate_deepspeed_training_args(args, lumen_config: LumenConfig) -> None:
+    if (
+        args.gradient_checkpointing
+        and args.linear_fp8
+        and lumen_config.scaling == "delayed"
+    ):
+        raise ValueError(
+            "DeepSpeed delayed FP8 does not support HuggingFace gradient "
+            "checkpointing because recomputation would mutate amax history"
+        )
 
 
 def build_model(args) -> nn.Module:
@@ -83,6 +100,7 @@ class DeepSpeedTrainer:
             world_size=self.world_size,
         )
         self.lumen_config = LumenConfig.from_args(args)
+        validate_deepspeed_training_args(args, self.lumen_config)
         provider = make_lumen_deepspeed_model_provider(
             model_builder,
             self.lumen_config,
@@ -162,6 +180,7 @@ class DeepSpeedTrainer:
                     )
                     if self.manager is not None and rank_state.get("scaling_manager"):
                         self.manager.load_state_dict(rank_state["scaling_manager"])
+        self._validate_train_batch_budget()
         if self.rank == 0:
             parameter_count = sum(
                 int(getattr(param, "ds_numel", param.numel()))
@@ -247,6 +266,29 @@ class DeepSpeedTrainer:
                 ) from exc
         self.train_batches_in_epoch = skip_batches
         return data_iter
+
+    def _validate_train_batch_budget(self) -> None:
+        local_batches = torch.tensor(
+            len(self.train_loader),
+            dtype=torch.int64,
+            device=self.engine.device,
+        )
+        dist.all_reduce(local_batches, op=dist.ReduceOp.MIN)
+        common_batches = int(local_batches.item())
+        if common_batches == 0:
+            raise ValueError("At least one data-parallel rank has no training batches")
+        if self.args.repeat_corpus:
+            return
+        required = (
+            (self.args.max_steps - self.global_step)
+            * self.args.gradient_accumulation_steps
+        )
+        if common_batches < required:
+            raise ValueError(
+                "Training corpus is too short on at least one data-parallel rank: "
+                f"{common_batches} common batches available, {required} required. "
+                "Provide more data or pass --repeat-corpus."
+            )
 
     def _next_batch(self, data_iter):
         try:

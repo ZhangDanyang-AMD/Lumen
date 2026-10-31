@@ -285,6 +285,33 @@ def test_shared_input_quant_cache_rejects_different_input():
     assert _shared_input_quant_get(group, first_input, consume=True) is None
 
 
+def test_shared_input_quant_is_disabled_for_delayed_scaling():
+    import lumen.quantize as quant
+    from lumen.quantize import QuantConfig, ScalingManager
+
+    class Attention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.q_proj = nn.Linear(4, 4)
+            self.k_proj = nn.Linear(4, 4)
+            self.v_proj = nn.Linear(4, 4)
+
+    class Block(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.self_attn = Attention()
+
+    model = Block()
+    config = QuantConfig.from_str(format="hybrid", scaling="delayed")
+    manager = ScalingManager(config)
+    with patch.dict("os.environ", {"LUMEN_SHARED_INPUT_QUANT": "1"}):
+        quant._patch_linear_layers(model, manager, "auto", config)
+
+    assert not hasattr(model.self_attn.q_proj, "_lumen_shared_quant")
+    assert not hasattr(model.self_attn.k_proj, "_lumen_shared_quant")
+    assert not hasattr(model.self_attn.v_proj, "_lumen_shared_quant")
+
+
 def test_prepare_forwards_strict_aiter_backend():
     model = nn.Linear(4, 4)
     config = LumenConfig(scaling="none")
@@ -373,6 +400,41 @@ def test_training_loader_exhaustion_requires_repeat_corpus():
 
     with pytest.raises(RuntimeError, match="Training corpus exhausted"):
         trainer._next_batch(iter(()))
+
+
+def test_rejects_delayed_fp8_with_hf_gradient_checkpointing():
+    from lumen.models.llama2.deepspeed.pretrain import (
+        validate_deepspeed_training_args,
+    )
+
+    args = SimpleNamespace(
+        gradient_checkpointing=True,
+        linear_fp8=True,
+    )
+    with pytest.raises(ValueError, match="delayed FP8.*gradient checkpointing"):
+        validate_deepspeed_training_args(
+            args,
+            LumenConfig(format="hybrid", scaling="delayed"),
+        )
+
+
+def test_train_budget_uses_common_rank_minimum():
+    from lumen.models.llama2.deepspeed.pretrain import DeepSpeedTrainer
+
+    trainer = DeepSpeedTrainer.__new__(DeepSpeedTrainer)
+    trainer.train_loader = [object()] * 3
+    trainer.engine = SimpleNamespace(device=torch.device("cuda"))
+    trainer.args = SimpleNamespace(
+        repeat_corpus=False,
+        max_steps=2,
+        gradient_accumulation_steps=2,
+    )
+    trainer.global_step = 0
+    with (
+        patch("lumen.models.llama2.deepspeed.pretrain.dist.all_reduce"),
+        pytest.raises(ValueError, match="3 common batches available, 4 required"),
+    ):
+        trainer._validate_train_batch_budget()
 
 
 def test_deepspeed_parser_defaults_to_zero2_and_auto_backend():
