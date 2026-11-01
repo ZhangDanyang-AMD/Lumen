@@ -5,13 +5,14 @@ registers an import hook; the patches are installed when a process builds VeOmni
 (``VeOmniDiffusionEngine._build_model_optimizer``), i.e. in the actor workers. The vLLM-Omni rollout and the
 judge run in their own processes and are not touched.
 
-``LUMEN_PATCH`` (``:`` or ``,`` separated):
+``LUMEN_PATCH`` (``:`` or ``,`` separated; run_flowgrpo.sh defaults to ``rmsnorm_fuse:local_adamw``):
 
     rmsnorm_fuse, local_adamw  -- ../veomni_patches, unchanged
     mask_all_true_to_none      -- a boolean SDPA mask that is all True is passed as None. Exact (an all-True mask
                                   masks nothing). diffusers' Qwen-Image always passes the text-padding mask; a
                                   training micro-batch holds the samples of one prompt, so its mask is all True and
-                                  attention can use the flash kernel instead of the masked one.
+                                  attention can use the flash kernel instead of the masked one. Off by default:
+                                  with it, training reward lagged the baseline over steps 30-150.
 
 Rank 0 prints ``[lumen-rl]`` lines with per-patch call counts as evidence that the patches ran.
 """

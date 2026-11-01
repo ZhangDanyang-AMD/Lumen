@@ -8,36 +8,38 @@ on one node with 8× AMD Instinct MI350X: full-parameter FlowGRPO on Qwen-Image 
 engine, vLLM-Omni rollout, Qwen3-VL-8B as the OCR reward, 300 steps.
 
 - **Baseline**: the official recipe with only paths, GPU count and ROCm attention backends changed (§4).
-- **Lumen**: the baseline plus three Lumen patches on the actor (the VeOmni training engine) (§5); nothing else changes.
+- **Lumen**: the baseline plus two Lumen patches on the actor (the VeOmni training engine) (§5); nothing else changes.
 
 ## 1. Results
 
-8× MI350X, same seed. Validation reward (OCR test split, 1018 prompts):
+8× MI350X, same seed, 300 steps each. Validation reward (OCR test split, 1018 prompts):
 
 | step | official | baseline | Lumen |
 |---:|---:|---:|---:|
 | 0 | 0.406 | 0.402 | 0.403 |
-| 30 | | 0.644 | 0.619 |
-| 60 | | 0.815 | 0.864 |
-| 90 | | 0.901 | 0.940 |
-| 120 | 0.937 | 0.928 | |
-| 300 | | 0.949 | |
+| 30 | | 0.644 | 0.618 |
+| 60 | | 0.815 | 0.822 |
+| 120 | 0.937 | 0.928 | 0.937 |
+| 180 | | 0.934 | 0.964 |
+| 240 | | 0.939 | 0.968 |
+| 300 | | 0.949 | **0.978** |
 
-Performance (median of steps 2–90, validation and checkpoint steps excluded):
+Performance (median of steps 2–300, validation and checkpoint steps excluded):
 
 | | baseline | Lumen |
 |---|---:|---:|
-| actor (`old_log_prob` + `update_actor`) | 31.1 s | 27.7 s (−11%) |
-| whole step | 129.5 s | 125.2 s (−3.3%) |
-| throughput (images/GPU/s) | 0.494 | 0.511 |
+| actor (`old_log_prob` + `update_actor`) | 31.5 s | 29.1 s (−8%) |
+| whole step | 129.1 s | 122.4 s (−5%) |
+| throughput (images/GPU/s) | 0.496 | 0.523 |
+| 300 steps end to end (startup, validation and checkpoints included) | about 12.5 h | about 12.0 h |
 
 - The official reference is verl-omni's [`docs/algo/performance.md`](https://github.com/verl-project/verl-omni/blob/9ab544d81f93cbf49754aabacfa67f6fcf01b505/docs/algo/performance.md):
   the validation curve of the VeOmni engine on 64× H100, and 0.510 images/GPU/s on 4× H200.
-- The 300-step baseline takes about 12.5 h end to end (with validation and checkpoints); the Lumen run is 90 steps.
-- Lumen speeds up only the actor, about 24% of a step; generation (~53 s) and OCR scoring (~39 s) are unchanged,
-  so the whole step gains about 3%.
-- Learning: the Lumen run follows the baseline (train reward over steps 61–90: 0.776 vs 0.770). Separate runs of one
-  configuration already vary noticeably, so compare on the same machine with the same seed.
+- Lumen speeds up only the actor, about 24% of a step. Of the 6.7 s saved per step, 2.4 s come from the actor; the
+  rest come from the weight sync and generation, which the patches do not touch, and differ between the two runs.
+- Learning: the Lumen run is never below the baseline (train reward within 0.01–0.03 over steps 31–90, level or
+  higher after). Separate runs of one configuration already vary noticeably, so compare on the same machine with the
+  same seed.
 
 ## 2. Requirements
 
@@ -66,12 +68,11 @@ docker exec -d qwen-image-rl bash -c "RUN_NAME=lumen LUMEN=1 bash $EX/run_flowgr
 docker exec qwen-image-rl python3 $EX/compare.py $WORK/runs/base $WORK/runs/lumen      # vs official and each other
 ```
 
-- Quick comparison: append `trainer.total_training_steps=90` (validation at steps 30/60/90), about 3.5 h per run
-  (the Lumen column above uses this setting).
+- Quick comparison: append `trainer.total_training_steps=90` (validation at steps 30/60/90), about 3.5 h per run.
 - W&B: add `-e WANDB_API_KEY=<key> -e WANDB_PROJECT=<project>` to `docker exec` for online logging; without a key
   the run logs offline into its directory.
 - Check that Lumen is active: `docker exec qwen-image-rl bash -c 'grep -h lumen-rl /tmp/ray/session_latest/logs/worker-*.out | head'`
-  shows `installed ... ['mask_all_true_to_none', 'rmsnorm_fuse', 'local_adamw']` and non-zero call counts.
+  shows `installed ... ['rmsnorm_fuse', 'local_adamw']` and non-zero `fused` counts.
 - Stop a run: `docker exec qwen-image-rl bash -c 'ray stop --force; pkill -9 -f VLLM'`, then check `rocm-smi --showpids`.
 
 ## 4. Differences from the official recipe
@@ -96,9 +97,13 @@ own processes and are not touched.
 
 | `LUMEN_PATCH` | what | numerics |
 |---|---|---|
-| `mask_all_true_to_none` | a training micro-batch holds the samples of one prompt, so its text mask is all True; dropping it lets attention use the flash kernel | mathematically exact; the flash path is deterministic |
 | `rmsnorm_fuse` | diffusers RMSNorm forward fused by `torch.compile` ([`../veomni_patches/rmsnorm.py`](../veomni_patches/rmsnorm.py)) | 55.6 dB vs FP32, the original 52.6 dB |
 | `local_adamw` | fused AdamW on the FSDP2 local shards ([`../veomni_patches/local_adamw.py`](../veomni_patches/local_adamw.py)) | bit-identical |
+
+`lumen_rl_patch.py` also provides `mask_all_true_to_none`, off by default. It drops the all-True text mask of a
+training micro-batch so attention takes the flash kernel, about 3% more off the actor; but in our runs it made the
+train reward lag the baseline clearly over steps 30–150 (step 300 unaffected), for reasons not yet understood. Enable
+it with `LUMEN_PATCH=mask_all_true_to_none:rmsnorm_fuse:local_adamw`.
 
 The other perf-veomni optimizations are not used here: the actor does not run the VAE; turning off gradient
 checkpointing or reshard takes memory the rollout needs; the aiter fused backward behind `sdpa_efficient` /

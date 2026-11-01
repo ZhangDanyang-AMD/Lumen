@@ -467,12 +467,12 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 
 [`rl-flowgrpo-qwen-image/`](rl-flowgrpo-qwen-image/README.md) 在单节点 8× MI350X 上复现 verl-omni 官方的
 Qwen-Image 全参数 FlowGRPO 配方（VeOmni 训练引擎、vLLM-Omni rollout、Qwen3-VL-8B OCR reward），提供基础版和 Lumen 版，
-并可与官方指标对比。在 RL 的 actor 上使用本示例的 `rmsnorm_fuse`、`local_adamw`，以及新增的 `mask_all_true_to_none`：
+并可与官方指标对比。Lumen 版在 RL 的 actor 上使用本示例的 `rmsnorm_fuse` 和 `local_adamw`：
 
-| 8× MI350X，同一 seed | 基础版 | Lumen 版 |
+| 8× MI350X，同一 seed，300 步 | 基础版 | Lumen 版 |
 |---|---:|---:|
-| actor 每步 | 31.1 s | 27.7 s（−11%） |
-| 整步 | 129.5 s | 125.2 s（−3.3%） |
-| 第 90 步验证 reward | 0.901 | 0.940 |
+| actor 每步 | 31.5 s | 29.1 s（−8%） |
+| 整步 | 129.1 s | 122.4 s（−5%） |
+| 第 300 步验证 reward | 0.949 | 0.978 |
 
-基础版 300 步的验证 reward 从 0.402 升到 0.949；官方参考在第 0 步和第 120 步分别为 0.406 和 0.937。
+官方参考的验证 reward 在第 0 步和第 120 步分别为 0.406 和 0.937；两个版本在第 120 步分别为 0.928 和 0.937。

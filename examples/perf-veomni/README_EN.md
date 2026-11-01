@@ -505,14 +505,14 @@ All of the code is in this directory; the Lumen library itself is not modified.
 
 [`rl-flowgrpo-qwen-image/`](rl-flowgrpo-qwen-image/README_EN.md) reproduces verl-omni's official full-parameter
 FlowGRPO recipe for Qwen-Image (VeOmni training engine, vLLM-Omni rollout, Qwen3-VL-8B OCR reward) on one node with
-8× MI350X, as a baseline and a Lumen version, with a comparison against the official metrics. The RL actor uses this
-example's `rmsnorm_fuse` and `local_adamw`, plus a new `mask_all_true_to_none`:
+8× MI350X, as a baseline and a Lumen version, with a comparison against the official metrics. The Lumen version uses
+this example's `rmsnorm_fuse` and `local_adamw` on the RL actor:
 
-| 8× MI350X, same seed | baseline | Lumen |
+| 8× MI350X, same seed, 300 steps | baseline | Lumen |
 |---|---:|---:|
-| actor per step | 31.1 s | 27.7 s (−11%) |
-| whole step | 129.5 s | 125.2 s (−3.3%) |
-| validation reward at step 90 | 0.901 | 0.940 |
+| actor per step | 31.5 s | 29.1 s (−8%) |
+| whole step | 129.1 s | 122.4 s (−5%) |
+| validation reward at step 300 | 0.949 | 0.978 |
 
-Over 300 steps the baseline's validation reward rises from 0.402 to 0.949; the official reference is 0.406 at step 0
-and 0.937 at step 120.
+The official reference validation reward is 0.406 at step 0 and 0.937 at step 120; the two versions reach 0.928 and
+0.937 at step 120.
