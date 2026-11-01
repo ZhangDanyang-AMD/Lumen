@@ -1,0 +1,72 @@
+{
+  "_comment": "gfx950 Qwen3-30B-A3B SonicMoE tiles from AITER 79c1a41 _QWEN3_FWD_CONFIGS / _QWEN3_DW_CONFIGS. AITER only loads configs inside its package and falls back to the gfx942 table, so Lumen overlays these specialized entries. Forward BLOCK_K=128 matches the OCP FP8 scale block; wgrad BLOCK_T=128 with 8 warps is the pre-routed expert tile.",
+  "_grouped_gemm_kernel": {
+    "_specialized": {
+      "N=1536,K=2048,E=16,gather=1": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 64,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 2
+      },
+      "N=1536,K=2048,E=16,gather=0": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 128,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 2
+      },
+      "N=2048,K=768,E=16,gather=0": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 128,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 2
+      },
+      "N=768,K=2048,E=16,gather=0": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 128,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 2
+      },
+      "N=2048,K=1536,E=16,gather=0": {
+        "BLOCK_M": 128,
+        "BLOCK_N": 128,
+        "BLOCK_K": 128,
+        "GROUP_SIZE_M": 8,
+        "num_warps": 4,
+        "num_stages": 2
+      }
+    }
+  },
+  "_grouped_gemm_dw_kernel": {
+    "_specialized": {
+      "N=1536,K=2048,E=16,gather=1": {
+        "BLOCK_K": 128,
+        "BLOCK_N": 128,
+        "BLOCK_T": 64,
+        "num_warps": 4,
+        "num_stages": 2
+      },
+      "N=1536,K=2048,E=16,gather=0": {
+        "BLOCK_K": 128,
+        "BLOCK_N": 128,
+        "BLOCK_T": 128,
+        "num_warps": 8,
+        "num_stages": 2
+      },
+      "N=2048,K=768,E=16,gather=0": {
+        "BLOCK_K": 128,
+        "BLOCK_N": 128,
+        "BLOCK_T": 128,
+        "num_warps": 8,
+        "num_stages": 2
+      }
+    }
+  }
+}

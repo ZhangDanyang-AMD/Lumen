@@ -1316,11 +1316,18 @@ def install_flydsl_grouped_gemm_backend() -> None:
             "(kernels.moe). Mount FLYDSL_ROOT and add it to PYTHONPATH."
         ) from exc
 
-    import aiter.ops.triton._triton_kernels.moe.sonicmoe as sonicmoe
-    import aiter.ops.triton._triton_kernels.moe.sonicmoe.backward as sonic_bwd
-    import aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton as ggt
+    try:
+        import aiter.ops.triton.moe.sonicmoe as sonicmoe
 
-    original = ggt.grouped_gemm
+        patch_targets = (sonicmoe,)
+    except ImportError:
+        import aiter.ops.triton._triton_kernels.moe.sonicmoe as sonicmoe
+        import aiter.ops.triton._triton_kernels.moe.sonicmoe.backward as sonic_bwd
+        import aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton as ggt
+
+        patch_targets = (ggt, sonicmoe, sonic_bwd)
+
+    original = patch_targets[0].grouped_gemm
 
     def _grouped_gemm(
         A,
@@ -1371,7 +1378,6 @@ def install_flydsl_grouped_gemm_backend() -> None:
             out_dtype=out_dtype,
         )
 
-    ggt.grouped_gemm = _grouped_gemm
-    sonicmoe.grouped_gemm = _grouped_gemm
-    sonic_bwd.grouped_gemm = _grouped_gemm
+    for module in patch_targets:
+        module.grouped_gemm = _grouped_gemm
     _INSTALLED = True

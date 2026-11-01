@@ -16,23 +16,40 @@ This module re-exports a single ``parallel_cross_entropy`` autograd
 function for vocab-parallel cross-entropy computation.
 """
 
-from functools import reduce
-from operator import mul
+import os
 from typing import Union
 
 import torch
 import torch.distributed as dist
-import triton
-from aiter.ops.triton._triton_kernels.cross_entropy import (
-    cross_entropy_kernel,
-    online_softmax_kernel,
-)
-from aiter.ops.triton.cross_entropy import (
-    MAX_FUSED_SIZE,
-    NUM_WARPS,
-    cross_entropy_backward,
-)
+
+try:
+    from aiter.ops.triton._triton_kernels.cross_entropy import (
+        _ce_fused_loss_grad_kernel,
+        _ce_local_softmax_stats_kernel,
+    )
+    from aiter.ops.triton.cross_entropy import _block_size_and_warps
+
+    _HAVE_SDMA_CE_KERNELS = True
+except ImportError:
+    _ce_fused_loss_grad_kernel = None
+    _ce_local_softmax_stats_kernel = None
+    _block_size_and_warps = None
+    _HAVE_SDMA_CE_KERNELS = False
+from aiter.ops.triton.cross_entropy import cross_entropy_backward
 from aiter.ops.triton.cross_entropy import cross_entropy_forward as _aiter_ce_forward
+
+# The target-range check is a host sync. Keep it for the first few calls, then
+# stay on device. ``LUMEN_CE_VALIDATE_STEPS=0`` disables it immediately.
+_CE_VALIDATE_STEPS = int(os.environ.get("LUMEN_CE_VALIDATE_STEPS", "2"))
+_CE_CALLS = 0
+_CE_WAVES_PER_EU = 2
+_CE_NUM_STAGES = 2
+
+
+def _consume_ce_validation() -> bool:
+    global _CE_CALLS
+    _CE_CALLS += 1
+    return _CE_CALLS <= _CE_VALIDATE_STEPS
 
 
 def _aiter_ce_forward_chunked(*args, **kwargs):
@@ -45,6 +62,19 @@ def _aiter_ce_forward_chunked(*args, **kwargs):
 __all__ = ["parallel_cross_entropy"]
 
 
+def _validate_ce_targets(target, ignore_idx, vocab_size, enabled: bool) -> None:
+    if not enabled:
+        return
+    valid_target = (target == ignore_idx) | (
+        (target >= 0) & (target < vocab_size)
+    )
+    if not valid_target.all():
+        raise ValueError(
+            f"target out of range: expected in [0, {vocab_size}) or == "
+            f"ignore_idx ({ignore_idx})"
+        )
+
+
 def _cross_entropy_forward_sdma(
     _input: torch.Tensor,
     target: torch.Tensor,
@@ -53,6 +83,7 @@ def _cross_entropy_forward_sdma(
     dist_group: Union[dist.ProcessGroup, None],
     ignore_idx: int,
     chunk_rows: int = 0,
+    validate_targets: bool = False,
 ):
     """SDMA-accelerated cross-entropy forward.
 
@@ -65,71 +96,94 @@ def _cross_entropy_forward_sdma(
     """
     from lumen.modules.sdma_comm import SdmaTpComm
 
-    B, SQ, V = _input.shape
-    n_rows = B * SQ
-    assert reduce(mul, list(target.size())) == n_rows
-    BLOCK_SIZE = min(MAX_FUSED_SIZE, triton.next_power_of_2(V))
-
-    if _input.stride(-1) != 1:
+    if not _input.is_contiguous():
         _input = _input.contiguous()
-    if target.stride(-1) != 1:
+    if not target.is_contiguous():
         target = target.contiguous()
 
+    B, SQ, V = _input.shape
+    n_rows = B * SQ
+    if target.numel() != n_rows:
+        raise ValueError(f"target.numel() ({target.numel()}) != B*SQ ({n_rows})")
+    block_size, num_warps = _block_size_and_warps(_input.element_size(), V)
     rank = 0 if dist_group is None else dist.get_rank(dist_group)
     world_size = 1 if dist_group is None else dist.get_world_size(dist_group)
+    if label_smoothing > 0 and world_size > 1:
+        raise ValueError(
+            "label_smoothing > 0 is not supported with world_size > 1"
+        )
+    _validate_ce_targets(target, ignore_idx, V * world_size, validate_targets)
+    if reduce_loss:
+        n_valid = (target != ignore_idx).sum().clamp_min(1)
+    else:
+        n_valid = torch.ones((), dtype=torch.int64, device=_input.device)
 
     if chunk_rows > 0:
         return _cross_entropy_forward_sdma_chunked(
             _input, target, label_smoothing, reduce_loss,
             dist_group, ignore_idx, chunk_rows,
-            B, SQ, V, n_rows, BLOCK_SIZE, rank, world_size,
+            B, SQ, V, n_rows, block_size, num_warps, rank, world_size, n_valid,
         )
 
-    loss_1d = torch.empty(n_rows, dtype=torch.float32, device=_input.device)
+    loss_1d = torch.zeros(n_rows, dtype=torch.float32, device=_input.device)
     m_d_Xy = torch.empty(n_rows * 3, dtype=torch.float32, device=_input.device)
-
-    online_softmax_kernel[(n_rows,)](
-        _input,
-        _input.stride(-2),
-        target,
-        target.stride(-1),
-        m_d_Xy,
-        m_d_Xy.stride(-1),
-        rank,
-        V,
-        BLOCK_SIZE=BLOCK_SIZE,
-        num_warps=NUM_WARPS,
+    _launch_ce_chunk(
+        _input, target, loss_1d, m_d_Xy, n_valid,
+        rank, world_size, ignore_idx, V, n_rows, reduce_loss, label_smoothing,
+        block_size, num_warps, dist_group,
     )
+    loss = loss_1d.reshape(B, SQ) if not reduce_loss else (loss_1d.sum() / n_valid)
+    return loss, _input
 
+
+def _launch_ce_chunk(
+    chunk_x, chunk_y, chunk_loss, stats, n_valid,
+    rank, world_size, ignore_idx, vocab, n_rows, reduce_loss, label_smoothing,
+    block_size, num_warps, dist_group,
+):
+    from lumen.modules.sdma_comm import SdmaTpComm
+
+    rows = chunk_y.shape[0]
+    _ce_local_softmax_stats_kernel[(rows,)](
+        chunk_x,
+        chunk_x.stride(-2) if chunk_x.dim() == 3 else chunk_x.stride(0),
+        chunk_y,
+        chunk_y.stride(-1),
+        stats,
+        1,
+        rank,
+        vocab,
+        BLOCK_SIZE=block_size,
+        num_warps=num_warps,
+        waves_per_eu=_CE_WAVES_PER_EU,
+        num_stages=_CE_NUM_STAGES,
+    )
     if world_size > 1:
-        comm = SdmaTpComm.get(dist_group)
-        ag_result = comm._ag(m_d_Xy)  # (npes, n_rows * 3)
-        gathered = ag_result.reshape(-1)  # (world_size * n_rows * 3,)
+        gathered = SdmaTpComm.get(dist_group)._ag(stats).reshape(-1)
     else:
-        gathered = m_d_Xy
-
-    cross_entropy_kernel[(n_rows,)](
-        _input,
-        _input.stride(-2),
-        target,
-        target.stride(-1),
-        loss_1d,
-        loss_1d.stride(-1),
+        gathered = stats
+    _ce_fused_loss_grad_kernel[(rows,)](
+        chunk_x,
+        chunk_x.stride(-2) if chunk_x.dim() == 3 else chunk_x.stride(0),
+        chunk_y,
+        chunk_y.stride(-1),
+        chunk_loss,
+        chunk_loss.stride(-1) if chunk_loss.dim() == 1 else chunk_loss.stride(0),
         gathered,
-        gathered.stride(-1),
+        1,
         rank,
         world_size,
         ignore_idx,
-        V,
+        vocab,
         n_rows,
+        n_valid,
         reduce_loss=reduce_loss,
         label_smoothing=label_smoothing,
-        BLOCK_SIZE=BLOCK_SIZE,
-        num_warps=NUM_WARPS,
+        BLOCK_SIZE=block_size,
+        num_warps=num_warps,
+        waves_per_eu=_CE_WAVES_PER_EU,
+        num_stages=_CE_NUM_STAGES,
     )
-
-    loss = loss_1d.reshape(B, SQ) if not reduce_loss else (loss_1d.sum() / n_rows)
-    return loss, _input
 
 
 def _cross_entropy_forward_sdma_chunked(
@@ -144,70 +198,41 @@ def _cross_entropy_forward_sdma_chunked(
     SQ: int,
     V: int,
     n_rows: int,
-    BLOCK_SIZE: int,
+    block_size: int,
+    num_warps: int,
     rank: int,
     world_size: int,
+    n_valid: torch.Tensor,
 ):
-    """SDMA chunked cross-entropy: row-wise chunks to cap peak buffer size.
-
-    Each chunk allgathers only ``chunk_rows * 3`` floats via SDMA instead of
-    the full ``n_rows * 3``.  The gradient is written in-place into ``_input``
-    chunk by chunk.
-
-    ``_TpSdmaAllgather._ensure`` grows the handle buffer on demand and reuses
-    it across chunks — so the first chunk (or the largest, when the last chunk
-    is smaller) pays the realloc cost; subsequent same-size chunks are free.
-    """
-    from lumen.modules.sdma_comm import SdmaTpComm
-
-    input_2d = _input.reshape(n_rows, V)   # view
-    target_1d = target.reshape(n_rows)     # view
-    loss_1d = torch.empty(n_rows, dtype=torch.float32, device=_input.device)
-
-    # Pre-allocate at full chunk size; last chunk may be smaller but the
-    # SDMA handle will reuse capacity (no realloc for smaller slices).
-    m_d_Xy = torch.empty(chunk_rows * 3, dtype=torch.float32, device=_input.device)
-
-    comm = SdmaTpComm.get(dist_group) if world_size > 1 else None
+    """SDMA chunked cross-entropy: row-wise chunks to cap peak buffer size."""
+    input_2d = _input.view(n_rows, V)
+    target_1d = target.view(n_rows)
+    loss_1d = torch.zeros(n_rows, dtype=torch.float32, device=_input.device)
+    stats = torch.empty(chunk_rows * 3, dtype=torch.float32, device=_input.device)
 
     row = 0
     while row < n_rows:
         rows_this = min(chunk_rows, n_rows - row)
-        chunk_x = input_2d[row : row + rows_this]      # view [rows_this, V]
-        chunk_y = target_1d[row : row + rows_this]     # view [rows_this]
-        chunk_loss = loss_1d[row : row + rows_this]    # view [rows_this]
-        m_d_Xy_chunk = m_d_Xy[: rows_this * 3]
-
-        online_softmax_kernel[(rows_this,)](
-            chunk_x, chunk_x.stride(0),
-            chunk_y, chunk_y.stride(0),
-            m_d_Xy_chunk, 1,
-            rank, V,
-            BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS,
+        _launch_ce_chunk(
+            input_2d[row : row + rows_this],
+            target_1d[row : row + rows_this],
+            loss_1d[row : row + rows_this],
+            stats[: rows_this * 3],
+            n_valid,
+            rank,
+            world_size,
+            ignore_idx,
+            V,
+            rows_this,
+            reduce_loss,
+            label_smoothing,
+            block_size,
+            num_warps,
+            dist_group,
         )
-
-        if world_size > 1:
-            # SDMA allgather: transfers rows_this*3 floats.
-            # _ag._ensure grows on first call; subsequent same-size chunks reuse.
-            ag_result = comm._ag(m_d_Xy_chunk)        # (npes, rows_this*3)
-            gathered = ag_result.reshape(-1)           # (world_size*rows_this*3,)
-        else:
-            gathered = m_d_Xy_chunk
-
-        cross_entropy_kernel[(rows_this,)](
-            chunk_x, chunk_x.stride(0),
-            chunk_y, chunk_y.stride(0),
-            chunk_loss, chunk_loss.stride(0),
-            gathered, 1,
-            rank, world_size, ignore_idx, V, rows_this,
-            reduce_loss=False,  # accumulate manually after the loop
-            label_smoothing=label_smoothing,
-            BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS,
-        )
-
         row += rows_this
 
-    loss = loss_1d.reshape(B, SQ) if not reduce_loss else (loss_1d.sum() / n_rows)
+    loss = loss_1d.reshape(B, SQ) if not reduce_loss else (loss_1d.sum() / n_valid)
     return loss, _input
 
 
@@ -231,8 +256,9 @@ class _ParallelCrossEntropy(torch.autograd.Function):
         # causes out-of-bounds GPU memory reads.  Ensure full contiguity here.
         if not _input.is_contiguous():
             _input = _input.contiguous()
+        validate_targets = _consume_ce_validation()
 
-        if use_sdma and dist_process_group is not None:
+        if use_sdma and dist_process_group is not None and _HAVE_SDMA_CE_KERNELS:
             loss, grad_input = _cross_entropy_forward_sdma(
                 _input,
                 target,
@@ -241,6 +267,7 @@ class _ParallelCrossEntropy(torch.autograd.Function):
                 dist_process_group,
                 ignore_idx,
                 chunk_rows,
+                validate_targets,
             )
         elif chunk_rows > 0:
             loss, grad_input = _aiter_ce_forward_chunked(
@@ -251,6 +278,7 @@ class _ParallelCrossEntropy(torch.autograd.Function):
                 dist_process_group,
                 ignore_idx,
                 chunk_rows,
+                validate_targets=validate_targets,
             )
         else:
             loss, grad_input = _aiter_ce_forward(
@@ -260,6 +288,7 @@ class _ParallelCrossEntropy(torch.autograd.Function):
                 reduce_loss,
                 dist_process_group,
                 ignore_idx,
+                validate_targets=validate_targets,
             )
         ctx.save_for_backward(grad_input.detach())
         ctx.is_cg_capturable = is_cg_capturable

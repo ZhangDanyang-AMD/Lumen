@@ -32,11 +32,14 @@ parallel_rank_layout = MODULE._parallel_rank_layout
 
 def _sonic_blockwise_fp8_supported() -> bool:
     try:
-        from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
-            grouped_gemm as sonic_grouped_gemm,
-        )
+        from aiter.ops.triton.moe.sonicmoe import grouped_gemm as sonic_grouped_gemm
     except ImportError:
-        return False
+        try:
+            from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
+                grouped_gemm as sonic_grouped_gemm,
+            )
+        except ImportError:
+            return False
     return "A_scale" in inspect.signature(sonic_grouped_gemm).parameters
 
 
@@ -209,7 +212,7 @@ def test_sonic_multistream_ep1_matches_huggingface_layout(
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a ROCm GPU")
 def test_sonic_triton_forward_and_gradients(monkeypatch):
-    pytest.importorskip("aiter.ops.triton.sonicmoe")
+    pytest.importorskip("aiter.ops.triton.moe.sonicmoe")
     monkeypatch.setenv("SONIC_MOE_GEMM_BACKEND", "triton")
     torch.manual_seed(17)
     device = torch.device("cuda")
@@ -259,7 +262,7 @@ def test_sonic_triton_forward_and_gradients(monkeypatch):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a ROCm GPU")
 def test_sonic_fp8_forward_and_gradients():
-    pytest.importorskip("aiter.ops.triton.sonicmoe")
+    pytest.importorskip("aiter.ops.triton.moe.sonicmoe")
     if not _sonic_blockwise_fp8_supported():
         pytest.skip("AITER Sonic grouped GEMM has no in-kernel blockwise FP8 scales")
     from lumen.quantize.config import _get_float8_e4m3
@@ -315,7 +318,7 @@ def test_sonic_fp8_forward_and_gradients():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a ROCm GPU")
 def test_sonic_fp8_zero_expert_counts():
-    pytest.importorskip("aiter.ops.triton.sonicmoe")
+    pytest.importorskip("aiter.ops.triton.moe.sonicmoe")
     if not _sonic_blockwise_fp8_supported():
         pytest.skip("AITER Sonic grouped GEMM has no in-kernel blockwise FP8 scales")
     from lumen.quantize.config import _get_float8_e4m3

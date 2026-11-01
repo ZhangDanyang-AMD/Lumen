@@ -55,6 +55,31 @@ def _default_fp8_dtype() -> torch.dtype:
     return _get_float8_e4m3()
 
 
+def _sonic_grouped_gemm_fn():
+    """AITER Sonic grouped GEMM, with the gfx950 Qwen3 tile overlay installed."""
+    from lumen.ops.moe.sonicmoe_config import install_sonicmoe_gfx950_config
+
+    install_sonicmoe_gfx950_config()
+    try:
+        from aiter.ops.sonicmoe import grouped_gemm
+    except ImportError:
+        from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
+            grouped_gemm,
+        )
+    return grouped_gemm
+
+
+def _sonic_activation_fns():
+    try:
+        from aiter.ops.triton.moe.sonicmoe import activation_bwd, activation_fwd
+    except ImportError:
+        from aiter.ops.triton._triton_kernels.moe.sonicmoe.activation_kernels import (
+            activation_bwd,
+            activation_fwd,
+        )
+    return activation_fwd, activation_bwd
+
+
 def _build_routing_data_from_group_sizes(group_sizes, total_tokens):
     """Build aiter RoutingData from Lumen's simple group_sizes tensor.
 
@@ -295,9 +320,7 @@ def grouped_gemm(
                 )
                 rhs_fp8, rhs_scales = _quant_blockwise_2d(rhs, fp8_dtype, block_size)
 
-            from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
-                grouped_gemm as sonic_grouped_gemm,
-            )
+            sonic_grouped_gemm = _sonic_grouped_gemm_fn()
 
             return sonic_grouped_gemm(
                 lhs_fp8,
@@ -539,9 +562,7 @@ def _sonic_grouped_linear_backward(
     wgrad quantizes each expert's token segment independently (no scale
     crossover). Other scaling types stay BF16 grouped GEMM.
     """
-    from aiter.ops.triton._triton_kernels.moe.sonicmoe.grouped_gemm_triton import (
-        grouped_gemm as sonic_grouped_gemm,
-    )
+    sonic_grouped_gemm = _sonic_grouped_gemm_fn()
 
     if cu_seqlens is None:
         cu_seqlens = _cu_seqlens_from_group_sizes(group_sizes)
@@ -581,17 +602,31 @@ def _sonic_grouped_linear_backward(
                 block_size,
             )
         )
-        grad_weight = sonic_grouped_gemm(
+        from lumen.ops.gemm.sonicmoe_wgrad import (
+            grouped_wgrad,
+            grouped_wgrad_accumulate,
+        )
+
+        if accumulate_into is not None:
+            grouped_wgrad_accumulate(
+                inp_col,
+                grad_col,
+                cu_seqlens,
+                accumulate_into,
+                inp_col_scale,
+                grad_col_scale,
+                block_size,
+            )
+            return grad_input, accumulate_into
+        # Padded scale rows stay on device. Stock AITER recounts them with
+        # .item() before it will launch, which splits quant from the GEMM.
+        grad_weight = grouped_wgrad(
             inp_col,
             grad_col,
             cu_seqlens,
-            out=accumulate_into,
-            A_is_transposed=True,
-            A_scale=inp_col_scale,
-            B_scale=grad_col_scale,
-            block_size=block_size,
-            out_dtype=torch.bfloat16,
-            accumulate=accumulate_into is not None,
+            inp_col_scale,
+            grad_col_scale,
+            block_size,
         )
         return grad_input, grad_weight
 
@@ -841,9 +876,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
         block_size: int,
         concat_layout: bool,
     ):
-        from aiter.ops.triton._triton_kernels.moe.sonicmoe.activation_kernels import (
-            activation_fwd,
-        )
+        activation_fwd, _ = _sonic_activation_fns()
 
         group_sizes = group_sizes.to(device=hidden.device, dtype=torch.int32)
         fc1 = grouped_gemm(
@@ -881,9 +914,7 @@ class _GroupedFp8ExpertMlp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
-        from aiter.ops.triton._triton_kernels.moe.sonicmoe.activation_kernels import (
-            activation_bwd,
-        )
+        _, activation_bwd = _sonic_activation_fns()
 
         hidden, w1, w2, fc1, hidden_act, group_sizes = ctx.saved_tensors
         grad_output = grad_output.contiguous()

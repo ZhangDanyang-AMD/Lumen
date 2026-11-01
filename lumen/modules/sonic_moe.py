@@ -412,10 +412,19 @@ class SonicMoEExperts(nn.Module):
         # .cpu() a GPU tensor here — that D2H is the per-layer host wait.
         counts = torch.as_tensor(counts_source, dtype=torch.int32)
 
-        from aiter.ops.triton.sonicmoe import (
-            SonicMoEActivationType,
-            moe_pre_routed_inputs,
-        )
+        from lumen.ops.moe.sonicmoe_config import install_sonicmoe_gfx950_config
+
+        install_sonicmoe_gfx950_config()
+        try:
+            from aiter.ops.triton.moe.sonicmoe import (
+                SonicMoEActivationType,
+                moe_pre_routed_inputs,
+            )
+        except ImportError:
+            from aiter.ops.triton.sonicmoe import (
+                SonicMoEActivationType,
+                moe_pre_routed_inputs,
+            )
 
         def _run(hidden):
             output, _expert_frequency = moe_pre_routed_inputs(

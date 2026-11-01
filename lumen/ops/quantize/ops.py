@@ -19,12 +19,22 @@ import torch
 import triton
 import triton.language as tl
 from aiter.ops.quant import static_per_tensor_quant
-from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
-    compute_scale_and_quant,
-    quant_fp8_blockwise_for_act_grad_kernel,
-    quant_fp8_blockwise_kernel,
-    quant_fp8_blockwise_segment_m_kernel,
-)
+try:
+    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+        compute_scale_and_quant,
+        quant_fp8_blockwise_for_act_grad_kernel,
+        quant_fp8_blockwise_kernel,
+        quant_fp8_blockwise_segment_m_kernel,
+    )
+    _AITER_QUANT_KERNEL_HAS_DUAL_OUTPUT = False
+except ImportError:
+    from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
+        _compute_scale_and_quant as compute_scale_and_quant,
+        quant_fp8_blockwise_kernel,
+        quant_fp8_blockwise_segment_m_kernel,
+    )
+    quant_fp8_blockwise_for_act_grad_kernel = None
+    _AITER_QUANT_KERNEL_HAS_DUAL_OUTPUT = True
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         quant_fp8_blockwise_for_weight_kernel,
@@ -96,16 +106,15 @@ def quant_fp8_blockwise_impl(
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    wrap_triton(quant_fp8_blockwise_kernel)[grid](
-        x,
-        x_fp8,
-        x_scales,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-        axis,
-    )
+    if _AITER_QUANT_KERNEL_HAS_DUAL_OUTPUT:
+        wrap_triton(quant_fp8_blockwise_kernel)[grid](
+            x, x_fp8, x_scales, x_fp8, x_scales, M, N, block_size,
+            torch.finfo(dtype).max, axis, False,
+        )
+    else:
+        wrap_triton(quant_fp8_blockwise_kernel)[grid](
+            x, x_fp8, x_scales, M, N, block_size, torch.finfo(dtype).max, axis,
+        )
     return x_fp8, x_scales
 
 
@@ -210,17 +219,16 @@ def quant_fp8_blockwise_dual_axis_impl(
     x_scales_col = torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    wrap_triton(quant_fp8_blockwise_for_act_grad_kernel)[grid](
-        x,
-        x_fp8_row,
-        x_scales_row,
-        x_fp8_col,
-        x_scales_col,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-    )
+    if _AITER_QUANT_KERNEL_HAS_DUAL_OUTPUT:
+        wrap_triton(quant_fp8_blockwise_kernel)[grid](
+            x, x_fp8_row, x_scales_row, x_fp8_col, x_scales_col, M, N,
+            block_size, torch.finfo(dtype).max, 1, True,
+        )
+    else:
+        wrap_triton(quant_fp8_blockwise_for_act_grad_kernel)[grid](
+            x, x_fp8_row, x_scales_row, x_fp8_col, x_scales_col, M, N,
+            block_size, torch.finfo(dtype).max,
+        )
     return x_fp8_row, x_scales_row, x_fp8_col, x_scales_col
 
 

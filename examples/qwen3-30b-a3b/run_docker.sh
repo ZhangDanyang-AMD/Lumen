@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME=${IMAGE_NAME:-zhangdanyangamd/lumen:qwen3-30b-a3b-350x-pretrain260829-multistream}
 COMMAND=${COMMAND:-"bash run_qwen3_30b_a3b_megatron.sh"}
-HOST_ASSET_ROOT=${HOST_ASSET_ROOT:-/dev/shm/qwen3-30b-a3b}
-FLYDSL_ROOT=${FLYDSL_ROOT:-/home/leiwu/FlyDSL}
+HOST_ASSET_ROOT=${HOST_ASSET_ROOT:-"${REPO_ROOT}/../qwen3-30b-a3b"}
+FLYDSL_ROOT=${FLYDSL_ROOT:-"${REPO_ROOT}/../FlyDSL"}
 
 NCCL_ENV_ARGS=()
 for _v in \
@@ -45,34 +45,7 @@ docker run --rm --init \
     --security-opt=seccomp=unconfined \
     --cap-add=SYS_PTRACE \
     --shm-size=64G \
-    --volume "${REPO_ROOT}/lumen/models/megatron.py:/workspace/Lumen/lumen/models/megatron.py" \
-    --volume "${REPO_ROOT}/lumen/models/megatron_patches.py:/workspace/Lumen/lumen/models/megatron_patches.py" \
-    --volume "${REPO_ROOT}/lumen/models/spec_provider.py:/workspace/Lumen/lumen/models/spec_provider.py" \
-    --volume "${REPO_ROOT}/lumen/models/fsdp.py:/workspace/Lumen/lumen/models/fsdp.py" \
-    --volume "${REPO_ROOT}/lumen/models/llama31:/workspace/Lumen/lumen/models/llama31" \
-    --volume "${REPO_ROOT}/lumen/models/qwen3_30b_a3b/fsdp:/workspace/Lumen/lumen/models/qwen3_30b_a3b/fsdp" \
-    --volume "${REPO_ROOT}/lumen/models/expert_remap.py:/workspace/Lumen/lumen/models/expert_remap.py" \
-    --volume "${REPO_ROOT}/lumen/config.py:/workspace/Lumen/lumen/config.py" \
-    --volume "${REPO_ROOT}/lumen/modules/sonic_moe.py:/workspace/Lumen/lumen/modules/sonic_moe.py" \
-    --volume "${REPO_ROOT}/lumen/modules/attention.py:/workspace/Lumen/lumen/modules/attention.py" \
-    --volume "${REPO_ROOT}/lumen/modules/attention_megatron.py:/workspace/Lumen/lumen/modules/attention_megatron.py" \
-    --volume "${REPO_ROOT}/lumen/modules/attention_mla.py:/workspace/Lumen/lumen/modules/attention_mla.py" \
-    --volume "${REPO_ROOT}/lumen/ops/attention/attention.py:/workspace/Lumen/lumen/ops/attention/attention.py" \
-    --volume "${REPO_ROOT}/lumen/ops/attention/hf_patch.py:/workspace/Lumen/lumen/ops/attention/hf_patch.py" \
-    --volume "${REPO_ROOT}/lumen/modules/parallel_linear.py:/workspace/Lumen/lumen/modules/parallel_linear.py" \
-    --volume "${REPO_ROOT}/lumen/modules/layernorm_linear.py:/workspace/Lumen/lumen/modules/layernorm_linear.py" \
-    --volume "${REPO_ROOT}/lumen/ops/fused_residual_norm.py:/workspace/Lumen/lumen/ops/fused_residual_norm.py" \
-    --volume "${REPO_ROOT}/lumen/quantize:/workspace/Lumen/lumen/quantize" \
-    --volume "${REPO_ROOT}/lumen/kernels:/workspace/Lumen/lumen/kernels" \
-    --volume "${REPO_ROOT}/lumen/ops/quantize:/workspace/Lumen/lumen/ops/quantize" \
-    --volume "${REPO_ROOT}/lumen/ops/gemm/grouped_gemm.py:/workspace/Lumen/lumen/ops/gemm/grouped_gemm.py" \
-    --volume "${REPO_ROOT}/lumen/ops/gemm/__init__.py:/workspace/Lumen/lumen/ops/gemm/__init__.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/__init__.py:/workspace/Lumen/lumen/ops/moe/__init__.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/flydsl_grouped.py:/workspace/Lumen/lumen/ops/moe/flydsl_grouped.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_layout.py:/workspace/Lumen/lumen/ops/moe/dispatch_layout.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/dispatch_overlap.py:/workspace/Lumen/lumen/ops/moe/dispatch_overlap.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/fused_router.py:/workspace/Lumen/lumen/ops/moe/fused_router.py" \
-    --volume "${REPO_ROOT}/lumen/ops/moe/fused_routing.py:/workspace/Lumen/lumen/ops/moe/fused_routing.py" \
+    --volume "${REPO_ROOT}/lumen:/workspace/Lumen/lumen" \
     --volume "${REPO_ROOT}/tests:/workspace/Lumen/tests" \
     --volume "${REPO_ROOT}/third_party/aiter:/workspace/Lumen/third_party/aiter" \
     --volume "${REPO_ROOT}/examples:/workspace/Lumen/examples" \

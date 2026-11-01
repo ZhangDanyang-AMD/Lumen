@@ -468,41 +468,18 @@ class _SonicLocalExperts(nn.Module):
                 fp8_dtype=self.fp8_dtype,
                 block_size=self.block_size,
                 # w1 stores per-column gate/up pairs, matching the BF16
-                # moe_pre_routed_inputs call below.
+                # pre-routed SwiGLU path below.
                 concat_layout=False,
             )
 
-        from aiter.ops.triton import sonicmoe
+        from lumen.ops.moe.pre_routed_sonicmoe import pre_routed_swiglu_experts
 
-        common = (
-            w1,
-            None,
-            w2,
-            None,
-        )
-        if not hasattr(sonicmoe, "moe_pre_routed_inputs"):
-            raise RuntimeError(
-                "This SonicMoE build lacks moe_pre_routed_inputs, which is required "
-                "for the grouped GEMM backend"
-            )
-
-        kernel_weights = torch.ones(
-            hidden_states.shape[0],
-            dtype=torch.float32,
-            device=hidden_states.device,
-        )
-        output, _expert_frequency = sonicmoe.moe_pre_routed_inputs(
+        return pre_routed_swiglu_experts(
             hidden_states,
-            kernel_weights,
-            counts.to(dtype=torch.int32),
-            *common,
-            torch.cuda.current_stream().cuda_stream,
-            sonicmoe.SonicMoEActivationType.SWIGLU,
-            False,
-            False,
-            scores_are_one=True,
+            w1,
+            w2,
+            counts.to(device=hidden_states.device, dtype=torch.int32),
         )
-        return output
 
     def forward_all(
         self,

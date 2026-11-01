@@ -288,7 +288,7 @@ def test_flydsl_sonic_pre_routed_matches_torch(monkeypatch):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
 def test_sonic_pre_routed_matches_general_routing():
-    from aiter.ops.triton.sonicmoe import (
+    from aiter.ops.triton.moe.sonicmoe import (
         SonicMoEActivationType,
         moe_general_routing_inputs,
         moe_pre_routed_inputs,
@@ -382,7 +382,7 @@ def test_sonic_pre_routed_matches_general_routing():
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires a GPU")
 def test_sonic_pre_routed_matches_torch_reference():
-    from aiter.ops.triton.sonicmoe import (
+    from aiter.ops.triton.moe.sonicmoe import (
         SonicMoEActivationType,
         moe_pre_routed_inputs,
     )
