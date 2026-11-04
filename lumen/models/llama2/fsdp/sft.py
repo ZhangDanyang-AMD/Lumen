@@ -29,6 +29,8 @@ Example::
     trainer.train()
 """
 
+from lumen.config import linear_quant_requested
+
 import argparse
 import logging
 import os
@@ -197,7 +199,7 @@ class FSDPTrainer:
             mixed_precision = MixedPrecision(
                 param_dtype=torch.bfloat16,
                 reduce_dtype=torch.float32
-                if (args.linear_fp8 or getattr(args, "linear_fp4", False))
+                if (linear_quant_requested(args))
                 else torch.bfloat16,
                 buffer_dtype=torch.bfloat16,
             )
@@ -369,7 +371,7 @@ class FSDPTrainer:
             for _ in range(args.warmup_steps):
                 self._synthetic_warmup_step()
             # MXFP4 counts here too, matching the Megatron and TRL warmups.
-            if args.linear_fp8 or getattr(args, "linear_fp4", False):
+            if linear_quant_requested(args):
                 reset_fp8_state(self.model)
             if dist.is_initialized():
                 dist.barrier()

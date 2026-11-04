@@ -1638,6 +1638,7 @@ _MXFP4_BACKEND_KIND = {
 
 def gemm_mxfp4_dispatch(a_fp4, w_fp4, scale_a, scale_w):
     """MXFP4 GEMM: Y = X @ W^T with E8M0 block scales. AITER first, dequant+BF16 fallback."""
+    mxfp4_autotune.mark_started()
     # A quantizer only stores the B operand pre-shuffled for a consumer that reads
     # that order, so the row-major kernels are not a legal fallback here -- they
     # would read the permuted bytes as if they were in place.

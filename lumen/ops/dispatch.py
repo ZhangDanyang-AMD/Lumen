@@ -68,7 +68,7 @@ def _probe_aiter_triton_norm():
         from aiter.ops.triton.normalization.norm import layer_norm as _  # noqa: F401
 
         return True
-    except (ImportError, OSError):
+    except Exception:  # missing, partial, or import-time failure all mean "no API"
         return False
 
 
@@ -243,6 +243,27 @@ def _probe_aiter_triton_gemm_mxfp4_preshuffle():
         from aiter.ops.triton.utils.shuffle import (  # noqa: F401
             shuffle_scale_gemm as _s,
             shuffle_weight as _w,
+        )
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_mxfp4_tuning():
+    """Whether the installed AITER exposes the whole named MXFP4 tuning API.
+
+    Every entry point the dispatcher calls must exist; a partially updated
+    install would otherwise pass the probe and fail in the middle of a step.
+    """
+    try:
+        from aiter.utility.mxfp4_tuning import (  # noqa: F401
+            configure_mxfp4_tuning,
+            get_mxfp4_config_file,
+            mxfp4_tuning_fingerprint,
+            mxfp4_tuning_sources,
+            resolve_mxfp4_tuning_sources,
         )
 
         return True

@@ -541,7 +541,7 @@ class ScalingManager:
                     )
             scale = self._compute_scale(current_amax, fp8_max)
             return (scale, current_amax) if return_amax else scale
-        elif recipe in ("blockwise", "blockwise2d", "mxfp8", "per_token"):
+        elif recipe in ("blockwise", "blockwise2d", "mxfp8", "mxfp4", "per_token"):
             return (None, None) if return_amax else None
 
     def update_amax(self, tensor_id: str, tensor: torch.Tensor):

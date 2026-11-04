@@ -8,6 +8,7 @@
 
 import torch
 
+from lumen.config import linear_quant_requested
 from lumen.models.fsdp import reset_fp8_state
 
 __all__ = ["maybe_run_synthetic_warmup"]
@@ -37,6 +38,6 @@ def maybe_run_synthetic_warmup(model, args, *, device):
         outputs.loss.backward()
         optimizer.step()
 
-    if getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
+    if linear_quant_requested(args):
         reset_fp8_state(model)
     return warmup_steps

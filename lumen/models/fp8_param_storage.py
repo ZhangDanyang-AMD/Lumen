@@ -203,14 +203,31 @@ def patch_float16_module() -> None:
     Float16Module.__init__ = _fp8_safe_init
 
 
-def get_fp8_store_scaling() -> str:
-    """FP8 scaling type for param storage (from Megatron args; default per-tensor)."""
+def get_fp8_store_recipe() -> tuple:
+    """Storage recipe ``(scaling, block_size)`` from the resolved linear config.
+
+    Reading the raw legacy ``linear_fp8_scaling`` attribute would ignore a
+    generic ``--linear-quant-*`` recipe and quantize stored weights with a
+    different granularity than the GEMMs that consume them.
+
+    Only a missing Megatron stack falls back to the legacy default. A config
+    error must propagate: silently storing delayed/128 weights while the GEMMs
+    run blockwise is the scale-layout mismatch this resolution prevents.
+    """
     try:
         from megatron.training import get_args
+    except ImportError:
+        return "delayed", 128
 
-        return getattr(get_args(), "linear_fp8_scaling", "delayed") or "delayed"
-    except Exception:
-        return "delayed"
+    from lumen.config import LumenConfig
+
+    qcfg = LumenConfig.from_args(get_args()).quant_config
+    return qcfg.recipe, qcfg.block_size
+
+
+def get_fp8_store_scaling() -> str:
+    """FP8 scaling type for param storage (from Megatron args; default per-tensor)."""
+    return get_fp8_store_recipe()[0]
 
 
 def fp8_store_quantize_weight(weight_bf16, fp8_dtype, scaling_type, block_size: int = 128):
@@ -348,9 +365,9 @@ def patch_load_checkpoint_for_fp8() -> None:
                     continue
                 if w.dtype == torch.bfloat16:
                     old_bytes = w.numel() * w.element_size()
-                    _scaling = get_fp8_store_scaling()
+                    _scaling, _block = get_fp8_store_recipe()
                     fp8_data, scale, fp8_data_t = fp8_store_quantize_weight(
-                        w.data, fp8_dtype, _scaling
+                        w.data, fp8_dtype, _scaling, block_size=_block
                     )
                     w.data = fp8_data
                     w._fp8_scale = scale.to(w.device)
@@ -431,9 +448,9 @@ def wrap_load_from_state_dict(module, fp8_dtype):
                 incoming = state_dict[weight_key]
                 if isinstance(incoming, torch.Tensor):
                     device = w.device if str(w.device) != "meta" else torch.device("cuda")
-                    _scaling = get_fp8_store_scaling()
+                    _scaling, _block = get_fp8_store_recipe()
                     fp8_w, scale, fp8_w_t = fp8_store_quantize_weight(
-                        incoming.to(device), fp8_dtype, _scaling
+                        incoming.to(device), fp8_dtype, _scaling, block_size=_block
                     )
                     w.data = fp8_w
                     w._fp8_scale = scale.to(device)
@@ -556,11 +573,16 @@ def prepare_hipblaslt_for_fp8_storage(train_args) -> None:
     """Pre-allocate hipBLASLt workspace when hybrid FP8 / env requests it."""
     from megatron.training import print_rank_0
 
-    fmt = (
-        getattr(train_args, "lumen_fp8_format", "")
-        or getattr(train_args, "fp8", "")
-        or getattr(train_args, "linear_fp8_format", "")
-    )
+    try:
+        from lumen.config import LumenConfig
+
+        fmt = LumenConfig.from_args(train_args).format
+    except Exception:
+        fmt = (
+            getattr(train_args, "lumen_fp8_format", "")
+            or getattr(train_args, "fp8", "")
+            or getattr(train_args, "linear_fp8_format", "")
+        )
     want_hipblaslt = fmt == "hybrid" or os.environ.get("LUMEN_PREFER_HIPBLASLT", "0") == "1"
     if not want_hipblaslt:
         return

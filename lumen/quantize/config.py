@@ -167,6 +167,14 @@ class QuantConfig:
         # From strings (handy for YAML / env-var configs)
         cfg = QuantConfig.from_str("fp8_e4m3", "delayed",
                                    amax_algo="most_recent")
+
+        # MXFP4 uses the same interface, with fixed 32-element blocks
+        cfg = QuantConfig.from_str("mxfp4")
+
+    MXFP4 shares layer selection and gradient-quantization settings with FP8,
+    but requires activation quantization and FP4 WGrad. The FP8-only frozen
+    cache and preshuffle options do not select MXFP4's own cache or layouts.
+    Backend tuning tables and process-level tuning caches are not model fields.
     """
 
     format: QuantFormat = QuantFormat.FP8_E4M3
@@ -246,6 +254,14 @@ class QuantConfig:
     fp8_mha: bool = False
 
     def __post_init__(self):
+        if self.format == QuantFormat.MXFP4:
+            if self.scaling == ScalingType.DELAYED:
+                self.scaling = ScalingType.BLOCKWISE
+            if self.scaling not in (ScalingType.BLOCKWISE, ScalingType.NONE):
+                raise ValueError(
+                    "MXFP4 supports only its fixed blockwise recipe or scaling='none'; "
+                    f"got scaling={self.scaling.value!r}."
+                )
         # MXFP4's block size is not a tuning knob: the E8M0 scale layout, the
         # AITER kernels and the swizzle tilings are all defined at 32. A config
         # carrying the FP8 default of 128 computed scales over 128 elements
@@ -257,6 +273,25 @@ class QuantConfig:
                 f"block_size={self.block_size}. The scale layout and every AITER "
                 "MXFP4 kernel assume 32."
             )
+
+        if self.format == QuantFormat.MXFP4 and self.scaling != ScalingType.NONE:
+            # The packed-FP4 training recipe needs both operands quantized and
+            # computes its own FP4 WGrad; the FP8 alternatives cannot read it.
+            if not self.quantize_activation:
+                raise ValueError(
+                    "MXFP4 requires quantize_activation=True; "
+                    "weight-only MXFP4 is not supported."
+                )
+            if not self.fp8_wgrad:
+                raise ValueError(
+                    "MXFP4 requires fp8_wgrad=True; its fixed recipe uses FP4 WGrad, "
+                    "not the FP8 BF16-WGrad option."
+                )
+            if self.cache_frozen_weight or self.bpreshuffle_gemm:
+                raise ValueError(
+                    "cache_frozen_weight and bpreshuffle_gemm are FP8-only options; "
+                    "MXFP4 manages its own weight cache and GEMM layout."
+                )
 
     @classmethod
     def from_str(cls, format: str = "fp8_e4m3", scaling: str = "delayed", **kwargs) -> "QuantConfig":

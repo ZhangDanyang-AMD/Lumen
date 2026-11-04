@@ -44,7 +44,7 @@ def install_mxfp4_weight_cache_hook() -> None:
     import megatron.training.training as _mt_training
     from megatron.training import get_args, print_rank_0
 
-    from lumen.models.megatron import resolve_quant_format
+    from lumen.config import mxfp4_enabled
 
     current_setup = _mt_training.setup_model_and_optimizer
     if getattr(current_setup, "_lumen_mxfp4_weight_cache_hook", False):
@@ -55,8 +55,7 @@ def install_mxfp4_weight_cache_hook() -> None:
         train_args = get_args()
 
         if (
-            getattr(train_args, "linear_fp4", False)
-            and resolve_quant_format(train_args) == "mxfp4"
+            mxfp4_enabled(train_args)
             and os.environ.get("LUMEN_MXFP4_DISABLE_WEIGHT_CACHE") != "1"
             and model
         ):

@@ -40,6 +40,9 @@ _logger = _logging.getLogger(__name__)
 AUTOTUNE_ENABLED = os.environ.get("LUMEN_MXFP4_AUTOTUNE", "1") == "1"
 _CACHE_PATH = os.environ.get("LUMEN_MXFP4_AUTOTUNE_CACHE", "")
 _SHAPE_LOG_PATH = os.environ.get("LUMEN_MXFP4_GEMM_SHAPE_LOG", "")
+_started = False
+_loaded_fingerprint = None
+_execution_fingerprint = None
 
 # AITER reads this when it first looks up a tuned A4W4 config, and colon-joins
 # multiple paths into one merged table.
@@ -60,7 +63,7 @@ _SWITCH_MARGIN = 1.05
 ShapeKey = Tuple[int, int, int]
 Candidate = Tuple[str, Callable[[], torch.Tensor]]
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _choice: Dict[ShapeKey, str] = {}
 _shape_log: Dict[ShapeKey, Dict[str, object]] = {}
 _cache_loaded = False
@@ -93,9 +96,18 @@ def _tuned_table_paths() -> List[str]:
     two cases are not additive -- ``configure`` merges the default in by hand
     precisely because setting the variable replaces it.
     """
+    from lumen.ops.dispatch import _probe_aiter_mxfp4_tuning
+
+    if _probe_aiter_mxfp4_tuning():
+        try:
+            from aiter.utility.mxfp4_tuning import mxfp4_tuning_sources
+
+            return list(mxfp4_tuning_sources())
+        except Exception as exc:  # a broken install must not abort the GEMM
+            _logger.warning("MXFP4 tuned sources unavailable (%s); using the env table", exc)
     env = os.environ.get(AITER_TUNED_CONFIG_ENV, "")
     if env:
-        return [p for p in env.split(":") if p]
+        return [p for p in env.split(os.pathsep) if p]
     default = _aiter_default_tuned_config()
     return [default] if default else []
 
@@ -113,9 +125,22 @@ def _tuned_table_fingerprint() -> str:
     with a new timestamp on every container rebuild and bind mount, and
     invalidating on that would throw away good measurements constantly.
     """
+    from lumen.ops.dispatch import _probe_aiter_mxfp4_tuning
+
+    if _probe_aiter_mxfp4_tuning():
+        try:
+            from aiter.utility.mxfp4_tuning import mxfp4_tuning_fingerprint
+
+            return mxfp4_tuning_fingerprint()[:16]
+        except Exception as exc:  # fall back to hashing the tables ourselves
+            _logger.warning("MXFP4 tuning fingerprint unavailable (%s); hashing sources", exc)
+    return _hash_paths(_tuned_table_paths())
+
+
+def _hash_paths(paths) -> str:
+    """Content identity of an ordered table list; basenames survive bind mounts."""
     h = hashlib.sha256()
-    for p in _tuned_table_paths():
-        # Basename, not the full path, for the same bind-mount reason.
+    for p in paths:
         h.update(os.path.basename(p).encode())
         try:
             with open(p, "rb") as f:
@@ -127,8 +152,9 @@ def _tuned_table_fingerprint() -> str:
 
 def _load_cache() -> None:
     """Read previously measured decisions, if they still apply to this process."""
-    global _cache_loaded
+    global _cache_loaded, _loaded_fingerprint
     _cache_loaded = True
+    _loaded_fingerprint = None
     if not _CACHE_PATH or not os.path.exists(_CACHE_PATH):
         return
     try:
@@ -155,6 +181,7 @@ def _load_cache() -> None:
             _CACHE_PATH, blob.get("tuned_tables"), live_tables,
         )
         return
+    _loaded_fingerprint = live_tables
     for k, name in blob.get("choices", {}).items():
         try:
             m, n, kk = (int(x) for x in k.split(","))
@@ -171,7 +198,7 @@ def _save_cache() -> None:
         return
     blob = {
         "arch": _arch(),
-        "tuned_tables": _tuned_table_fingerprint(),
+        "tuned_tables": _execution_fingerprint if _started else _tuned_table_fingerprint(),
         "choices": {_cache_key(k): v for k, v in sorted(_choice.items())},
     }
     # Every rank runs this atexit, and the path is usually a shared results
@@ -331,6 +358,7 @@ def pick_backend(
     the answer. ``fallback`` is the static policy's pick, used when autotune is
     off or cannot run.
     """
+    mark_started()
     _register_hooks()
     global _cache_dirty
 
@@ -376,72 +404,148 @@ def _aiter_config_already_resolved() -> bool:
         return False
 
 
+def _apply_legacy_tuning_env(profile, tuned_config, merge_default, old_tables) -> None:
+    """Wire explicit tables through AITER_CONFIG_GEMM_A4W4 without the public API.
+
+    Restores the pre-change behaviour, including its warnings, and keeps the
+    "consumed tables cannot change" guarantee by rejecting a late update.
+    """
+    if profile is not None:
+        _logger.warning(
+            "AITER is missing the public mxfp4_tuning API; ignoring MXFP4 profile %r. "
+            "Upgrade AITER to select case profiles; otherwise its default table is used and "
+            "shapes without a tuned row fall back to Triton. Numerics are unaffected.",
+            profile,
+        )
+    if tuned_config is None or os.environ.get(AITER_TUNED_CONFIG_ENV):
+        return
+    requested = [tuned_config] if isinstance(tuned_config, str) else list(tuned_config)
+    paths = []
+    for path in requested:
+        if os.path.exists(path):
+            paths.append(os.path.abspath(path))
+        else:
+            _logger.warning("MXFP4 tuned config %s does not exist, ignoring", path)
+    if not paths:
+        return
+    default = _aiter_default_tuned_config() if merge_default else None
+    if default and os.path.exists(default):
+        paths.append(default)
+    if _started and (paths != old_tables or _hash_paths(paths) != _execution_fingerprint):
+        raise RuntimeError("MXFP4 tuning is in use; configure before the first GEMM")
+    os.environ[AITER_TUNED_CONFIG_ENV] = os.pathsep.join(paths)
+    if _aiter_config_already_resolved():
+        _logger.warning(
+            "%s set after AITER already resolved its tuned config; the new rows will be "
+            "ignored in this process", AITER_TUNED_CONFIG_ENV,
+        )
+
+
+def mark_started() -> None:
+    """Freeze process settings before any MXFP4 GEMM or backend decision.
+
+    Tuning initialization must never abort the GEMM: a broken or partially
+    installed AITER API falls back to the env/default table and the dispatcher's
+    dequant+BF16 path stays reachable.
+    """
+    global _started, _execution_fingerprint, _cache_loaded
+    if _started:
+        return
+    with _lock:
+        if not _started:
+            from lumen.ops.dispatch import _probe_aiter_mxfp4_tuning
+
+            if _probe_aiter_mxfp4_tuning():
+                try:
+                    from aiter.utility.mxfp4_tuning import get_mxfp4_config_file
+
+                    get_mxfp4_config_file()
+                except Exception as exc:
+                    _logger.warning(
+                        "MXFP4 tuning initialization failed (%s); continuing with the "
+                        "current table and the GEMM fallback path", exc,
+                    )
+            _execution_fingerprint = _tuned_table_fingerprint()
+            if _loaded_fingerprint is not None and _loaded_fingerprint != _execution_fingerprint:
+                _choice.clear()
+                _cache_loaded = False
+            _started = True
+
+
 def configure(
     tuned_config: Optional[Union[str, Sequence[str]]] = None,
     autotune_cache: Optional[str] = None,
     merge_aiter_default: bool = True,
+    *,
+    profile: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Point AITER at extra tuned A4W4 rows, and persist autotune decisions.
+    """Select AITER tables before the first GEMM and bind choices to those tables.
 
-    ``tuned_config`` takes one path or several, highest priority first; a model's
-    own table has to come ahead of the generic one, since AITER keeps the first
-    row it finds for a shape.
+    Explicit AITER environment paths override profile defaults. Autotune, ASM,
+    preshuffle and shape logging retain their existing environment-only controls.
 
-    Call once at process start. It does not have to precede ``import aiter`` --
-    AITER reads the variable when it first looks up a config, not at import --
-    but it must precede the first MXFP4 GEMM, after which both AITER's lookup and
-    Lumen's backend decisions are cached.
-
-    A tuned table only widens which shapes can reach the ASM kernels; it cannot
-    change results, since every backend is bit-for-bit identical.
-
-    Environment variables already set win, so a job can override without edits.
-    Returns what ended up in effect, for logging.
+    AITER versions without the public ``mxfp4_tuning`` API keep working: the
+    profile is skipped with a warning and explicit ``tuned_config`` paths fall
+    back to the legacy environment variable. Tuned tables only affect which
+    shapes reach a pre-tuned kernel, never the numerics.
     """
-    global _CACHE_PATH
+    global _CACHE_PATH, _cache_loaded, _cache_dirty
+    with _lock:
+        next_cache = _CACHE_PATH
+        if autotune_cache and not next_cache:
+            next_cache = os.path.abspath(autotune_cache)
+        if _started and next_cache != _CACHE_PATH:
+            raise RuntimeError("MXFP4 cache configuration is in use; configure before the first GEMM")
+        old_tables = _tuned_table_paths()
+        if profile is not None or tuned_config is not None:
+            from lumen.ops.dispatch import _probe_aiter_mxfp4_tuning
 
-    if tuned_config and not os.environ.get(AITER_TUNED_CONFIG_ENV):
-        requested = [tuned_config] if isinstance(tuned_config, str) else list(tuned_config)
-        paths = []
-        for path in requested:
-            if not os.path.exists(path):
-                _logger.warning("MXFP4 tuned config %s does not exist, ignoring", path)
+            resolved = None
+            if _probe_aiter_mxfp4_tuning():
+                try:
+                    from aiter.utility.mxfp4_tuning import configure_mxfp4_tuning, resolve_mxfp4_tuning_sources
+
+                    resolved = list(resolve_mxfp4_tuning_sources(profile, tuned_config, merge_aiter_default))
+                except Exception as exc:  # a newer but broken install must not abort startup
+                    if tuned_config is not None:
+                        # Explicit paths are user input: their errors must surface.
+                        raise
+                    _logger.warning(
+                        "AITER rejected the MXFP4 tuning request (%s: %s); falling back to "
+                        "AITER_CONFIG_GEMM_A4W4. Numerics are unaffected.",
+                        type(exc).__name__, exc,
+                    )
+            if resolved is not None:
+                if _started and (resolved != old_tables or _tuned_table_fingerprint() != _execution_fingerprint):
+                    raise RuntimeError("MXFP4 tuning is in use; configure before the first GEMM")
+                try:
+                    configure_mxfp4_tuning(profile, tuned_config, merge_aiter_default)
+                except Exception as exc:
+                    _logger.warning(
+                        "AITER failed to configure MXFP4 tuning (%s: %s); it keeps its "
+                        "default table. Numerics are unaffected.",
+                        type(exc).__name__, exc,
+                    )
             else:
-                paths.append(os.path.abspath(path))
-        if paths:
-            # Keep AITER's own table; the tables cover different shapes.
-            default = _aiter_default_tuned_config() if merge_aiter_default else None
-            if default and os.path.exists(default):
-                paths.append(default)
-            os.environ[AITER_TUNED_CONFIG_ENV] = ":".join(paths)
-            if _aiter_config_already_resolved():
-                _logger.warning(
-                    "%s set after AITER already resolved its tuned config; the new "
-                    "rows will be ignored in this process",
-                    AITER_TUNED_CONFIG_ENV,
-                )
-
-    if autotune_cache and not _CACHE_PATH:
-        _CACHE_PATH = os.path.abspath(autotune_cache)
-        _register_hooks()
-    if _CACHE_PATH and not _cache_loaded:
-        # Load now rather than on the first GEMM, so the decisions are visible
-        # (and logged) at startup instead of appearing mid-step.
-        with _lock:
-            if not _cache_loaded:
-                _load_cache()
-
-    return {
-        "tuned_config": os.environ.get(AITER_TUNED_CONFIG_ENV, ""),
-        "autotune_cache": _CACHE_PATH,
-    }
-
+                _apply_legacy_tuning_env(profile, tuned_config, merge_aiter_default, old_tables)
+        if not _started and (next_cache != _CACHE_PATH or old_tables != _tuned_table_paths()):
+            _choice.clear()
+            _cache_loaded = False
+            _cache_dirty = False
+        _CACHE_PATH = next_cache
+        if _CACHE_PATH or _SHAPE_LOG_PATH:
+            _register_hooks()
+        if _CACHE_PATH and not _cache_loaded:
+            _load_cache()
+        return {"tuned_config": os.pathsep.join(_tuned_table_paths()), "autotune_cache": _CACHE_PATH}
 
 def cached(key: ShapeKey) -> Optional[str]:
     """The decision for this shape if one is already in memory, else None.
 
     Lets the dispatcher skip building the candidate list on the hot path.
     """
+    if _choice and not _started:
+        mark_started()
     return _choice.get(key)
 
 
@@ -460,8 +564,12 @@ def forget(key: ShapeKey) -> None:
 
 def clear() -> None:
     """Drop measured decisions. For tests."""
-    global _cache_loaded
+    global _cache_loaded, _started, _cache_dirty, _loaded_fingerprint, _execution_fingerprint
     with _lock:
+        _loaded_fingerprint = None
+        _execution_fingerprint = None
+        _started = False
+        _cache_dirty = False
         _choice.clear()
         _shape_log.clear()
         _cache_loaded = False
