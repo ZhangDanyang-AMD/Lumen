@@ -63,17 +63,28 @@ class TrlLumenArgs:
     lora_rank: int = 0
     lora_alpha: float = 32.0
     lora_dropout: float = 0.1
+    # None distinguishes unspecified recipe values from explicit legacy inputs.
+    linear_quant_format: str | None = None
+    linear_quant_scaling: str | None = None
+    linear_quant_block_size: int | None = None
+    linear_quant_amax_algo: str | None = None
+    linear_quant_margin: int | None = None
+    linear_quant_reduce_amax: bool | None = None
+    linear_quant_amax_history: int | None = None
+    linear_quant_activation: bool | None = None
+    linear_quant_wgrad: bool | None = None
+    linear_quant_output_layer: bool | None = None
     linear_fp8: bool = False
     linear_fp4: bool = False
-    linear_fp8_format: str = "fp8_e4m3"
-    linear_fp8_scaling: str = "delayed"
-    linear_fp8_block_size: int = 128
-    linear_fp8_amax_algo: str = "max"
-    linear_fp8_reduce_amax: bool = False
-    linear_fp8_amax_history: int = 16
-    linear_fp8_margin: int = 0
-    linear_fp8_activation: bool = True
-    linear_fp8_wgrad: bool = True
+    linear_fp8_format: str | None = None
+    linear_fp8_scaling: str | None = None
+    linear_fp8_block_size: int | None = None
+    linear_fp8_amax_algo: str | None = None
+    linear_fp8_reduce_amax: bool | None = None
+    linear_fp8_amax_history: int | None = None
+    linear_fp8_margin: int | None = None
+    linear_fp8_activation: bool | None = None
+    linear_fp8_wgrad: bool | None = None
     grad_quant_type: str | None = None
     first_last_layers_bf16: bool = False
     num_layers_at_start_in_bf16: int = 1
@@ -99,6 +110,9 @@ class TrlLumenArgs:
         from lumen.config import check_linear_quant_exclusive
 
         check_linear_quant_exclusive(self.linear_fp8, self.linear_fp4)
+        from lumen.config import LumenConfig
+
+        LumenConfig.from_args(self)
         if self.algorithm != "grpo":
             raise ValueError(f"Unsupported algorithm {self.algorithm!r}; v1 only supports 'grpo'.")
         if self.backend != "fsdp":

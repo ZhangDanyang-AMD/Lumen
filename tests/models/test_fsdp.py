@@ -163,7 +163,10 @@ class TestAddCommonFsdpArgs:
         args = self._parse(["--linear-fp4"])
         cfg = LumenConfig.from_args(args)
         assert cfg.format == "mxfp4"
-        assert cfg.block_size == 32
+        # The gate leaves the block-size sentinel unset; the fixed 32-element
+        # recipe is materialized by quant_config.
+        assert cfg.block_size is None
+        assert cfg.quant_config.block_size == 32
         assert cfg.quant_config.is_quantized
 
     def test_fsdp_mxfp4_comm_flag(self):

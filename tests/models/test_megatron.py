@@ -1289,12 +1289,20 @@ class TestModelProviderParallelLinearRecipe:
             )
         )
         captured = {}
+
+        def record_legacy(model, **kwargs):
+            captured.update(kwargs)
+
+        def record_native(model, config, **kwargs):
+            # MXFP4 native enable now runs inside LumenConfig.enable().
+            captured.update(kwargs, scaling_type=config.recipe, block_size=config.block_size)
+
         with mock.patch("lumen.models.megatron.get_args", return_value=self._args(fmt)), mock.patch(
             "lumen.models.megatron.enable_fp8_for_parallel_linear",
-            side_effect=lambda model, **kw: captured.update(kw),
+            side_effect=record_legacy,
         ), mock.patch(
-            "lumen.models.megatron.enable_fp4_for_parallel_linear",
-            side_effect=lambda model, **kw: captured.update(kw),
+            "lumen.quantize.native.enable_mxfp4_native_linears",
+            side_effect=record_native,
         ):
             provider()
         return captured

@@ -16,6 +16,10 @@ Usage::
                       fp8_attn="dpa", lumen_norm=True, fused_mlp=True)
     cfg.enable(model)
 
+    # MXFP4 uses the same format/scaling interface as FP8.
+    cfg = LumenConfig(format="mxfp4", scaling="blockwise")
+    manager, model = cfg.enable(model)
+
     # From CLI argparse namespace
     cfg = LumenConfig.from_args(args)
     cfg.enable(model, dp_group=dp_group)
@@ -27,6 +31,8 @@ import logging
 import os
 from dataclasses import dataclass, field, fields, replace
 from typing import Optional
+
+from lumen.cli import LINEAR_QUANT_ARG_MAP, explicit_arg_values, normalize_scaling
 
 logger = logging.getLogger(__name__)
 
@@ -47,19 +53,10 @@ def _rank0_print(msg: str) -> None:
 # ---------------------------------------------------------------------------
 
 _ARG_MAP: dict[str, tuple[str, ...]] = {
-    "format": ("linear_fp8_format", "lumen_fp8_format"),
-    "scaling": ("linear_fp8_scaling",),
-    "block_size": ("linear_fp8_block_size",),
-    "amax_algo": ("linear_fp8_amax_algo",),
-    "margin": ("linear_fp8_margin",),
-    "reduce_amax": ("linear_fp8_reduce_amax",),
-    "history_len": ("linear_fp8_amax_history",),
-    "quantize_activation": ("linear_fp8_activation",),
-    "fp8_wgrad": ("linear_fp8_wgrad",),
+    **LINEAR_QUANT_ARG_MAP,
     "cache_frozen_weight": ("linear_fp8_cache_frozen_weight",),
     "bpreshuffle_gemm": ("linear_fp8_bpreshuffle",),
     "quantize_grad": ("grad_quant_type",),
-    "quantize_output_layer": ("linear_fp8_quantize_output_layer", "quantize_output_layer"),
     "first_last_layers_bf16": ("first_last_layers_bf16",),
     "num_layers_at_start_in_bf16": ("num_layers_at_start_in_bf16",),
     "num_layers_at_end_in_bf16": ("num_layers_at_end_in_bf16",),
@@ -116,6 +113,14 @@ class LumenConfig:
       (FP8ParamManager before LoRA) so adapter weights stay BF16.
     * **Tier 1 — Linear quantization:** ``format``, ``scaling``, ``block_size``, etc.
       These are forwarded to :class:`~lumen.quantize.QuantConfig`.
+      ``format="mxfp4"`` selects the fixed 32-element MXFP4 recipe; the default
+      delayed scaling resolves to blockwise in ``QuantConfig.from_str``.
+      Explicit ``scaling="none"`` disables quantization. ``--linear-fp4`` is a
+      CLI alias for this same configuration, not a second model-level switch.
+      ``_ARG_MAP`` only adapts CLI names; direct construction needs no mapping.
+      Active MXFP4 rejects FP8 activation/weight storage, FP8 param-gather and
+      Megatron ``--fp8-param-storage``: it already stores packed FP4
+      activations and caches FP4 weights.
     * **Tier 2 — Attention FP8 & norms:** ``fp8_attn``, ``attn_backend``,
       ``attn_quant_type``, ``lumen_norm``.
     * **Tier 3 — Execution / fusion:** ``fused_mlp``, ``cpu_offload``,
@@ -277,13 +282,38 @@ class LumenConfig:
         """
         import torch
 
-        if self.fp8_param_manager and self.format == "mxfp4":
+        qcfg = self.quant_config
+        if self.fp8_param_manager and self.format == "mxfp4" and qcfg.is_quantized:
             raise ValueError(
                 "fp8_param_manager cannot be combined with MXFP4: it replaces "
                 "nn.Linear weights with FP8 storage before MXFP4 quantization, "
                 "which requires BF16/FP32 masters. Disable fp8_param_manager; "
                 "MXFP4 already caches packed FP4 weights per master-weight version."
             )
+
+        # Validate the recipe before any optional patch mutates the model.
+        if self.format == "mxfp4" and qcfg.is_quantized:
+            from lumen.quantize import assert_mxfp4_arch_supported
+
+            assert_mxfp4_arch_supported()
+            # MXFP4 saves packed FP4 activations and owns its weight layout/cache;
+            # FP8 storage flags either do nothing or fail after patching otherwise.
+            incompatible = [
+                name
+                for name in (
+                    "fp8_activation_store", "fp8_weight_cache", "fp8_param_gather"
+                )
+                if getattr(self, name)
+            ]
+            from lumen.ops.quantize.linear import _WEIGHT_QUANT_ONCE
+
+            if _WEIGHT_QUANT_ONCE or os.environ.get("LUMEN_WEIGHT_QUANT_ONCE", "0") == "1":
+                incompatible.append("LUMEN_WEIGHT_QUANT_ONCE=1 (environment or imported state)")
+            if incompatible:
+                raise ValueError(
+                    f"{', '.join(incompatible)} does not apply to MXFP4: "
+                    "it uses packed FP4 activation storage and its own weight cache."
+                )
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
@@ -310,7 +340,6 @@ class LumenConfig:
         self._apply_pre_quant(model)
 
         # 3. Linear quantization
-        qcfg = self.quant_config
         manager = None
         if qcfg.is_quantized:
             import torch.distributed as dist
@@ -325,6 +354,15 @@ class LumenConfig:
                 backend=backend,
                 dp_group=dp_group if qcfg.reduce_amax else None,
             )
+
+            if self.format == "mxfp4":
+                from lumen.quantize.native import enable_mxfp4_native_linears
+
+                enable_mxfp4_native_linears(
+                    model, qcfg,
+                    gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                    delay_wgrad=self.delay_wgrad, fp8_mha=qcfg.fp8_mha,
+                )
 
         # 4. Post-quant features
         self._apply_post_quant(model, manager)
@@ -687,38 +725,83 @@ class LumenConfig:
 
     @classmethod
     def from_args(cls, args) -> LumenConfig:
-        """Build from an argparse ``Namespace`` (replaces manual ``getattr`` blocks).
+        """Resolve generic CLI values and compatibility aliases without order precedence.
 
-        Iterates :data:`_ARG_MAP` to find matching attributes on *args*.
-        Unknown / missing attributes are silently skipped (defaults apply).
-
-        ``linear_fp8`` and ``linear_fp4`` are independent, mutually exclusive
-        public gates. ``linear_fp4`` selects the fixed MXFP4 recipe; MXFP4 is
-        deliberately not accepted through the FP8 format selector.
+        Shared parsers record explicit inputs separately from parser defaults.
+        For hand-built namespaces, non-None attributes are explicit inputs,
+        except that the legacy ``linear_fp4`` gate still normalizes the three
+        recipe names it used to overwrite. Megatron's translated
+        ``lumen_fp8_format`` is a fallback, not a selector.
         """
-        linear_fp8_enabled = getattr(args, "linear_fp8", None)
-        linear_fp4_enabled = getattr(args, "linear_fp4", False)
-
-        check_linear_quant_exclusive(linear_fp8_enabled, linear_fp4_enabled)
+        fp8 = getattr(args, "linear_fp8", None)
+        fp4 = getattr(args, "linear_fp4", False)
+        check_linear_quant_exclusive(fp8, fp4)
+        # Without registered provenance nothing separates a caller's explicit
+        # value from an FP8 placeholder, so the legacy fp4 gate keeps its old
+        # normalization there (see the recipe fields below).
+        hand_built = not getattr(args, "_lumen_quant_registered", ())
 
         kwargs: dict = {}
         for field_name, arg_names in _ARG_MAP.items():
-            for arg_name in arg_names:
-                val = getattr(args, arg_name, None)
-                if val is not None:
-                    kwargs[field_name] = val
+            values = list(explicit_arg_values(args, arg_names))
+            if field_name == "format":
+                values = [(name, value) for name, value in values if name != "lumen_fp8_format"]
+                if any(name == "linear_fp8_format" and value == "mxfp4" for name, value in values):
+                    raise ValueError("MXFP4 must be enabled with --linear-fp4 or --linear-quant-format mxfp4, not --linear-fp8-format")
+                if fp4:
+                    values.append(("linear_fp4", "mxfp4"))
+            if fp4 and hand_built and field_name in ("format", "scaling", "block_size"):
+                # --linear-fp4 used to overwrite exactly these three fields, so a
+                # hand-built Namespace's FP8 names are placeholders, not inputs.
+                # Generic --linear-quant-* values stay explicit and validated.
+                values = [
+                    (name, value) for name, value in values
+                    if not name.startswith(("linear_fp8_", "lumen_fp8_"))
+                ]
+            if field_name == "scaling":
+                values = [(name, normalize_scaling(value)) for name, value in values]
+            if values:
+                if any(value != values[0][1] for _, value in values[1:]):
+                    supplied = ", ".join(f"{name}={value!r}" for name, value in values)
+                    raise ValueError(f"Conflicting linear quantization {field_name}: {supplied}")
+                kwargs[field_name] = values[0][1]
+
+        selected_format = kwargs.get("format", getattr(args, "linear_quant_format", None))
+        if selected_format is not None:
+            kwargs["format"] = selected_format
+        if fp8 and selected_format == "mxfp4":
+            raise ValueError("--linear-fp8 conflicts with --linear-quant-format mxfp4")
+        if selected_format is None:
+            fallback = getattr(args, "lumen_fp8_format", None)
+            if fallback is not None:
+                kwargs["format"] = fallback
+            elif fp8:
+                # Preserve an embedding parser's chosen FP8 format default.
+                default_format = getattr(args, "linear_fp8_format", None)
+                if default_format is not None:
+                    kwargs["format"] = default_format
+
+        # Embedding parsers may customize defaults. Generic defaults apply to
+        # either format; legacy recipe defaults only apply to FP8, never MXFP4.
+        defaults = cls()
+        for field_name, names in LINEAR_QUANT_ARG_MAP.items():
+            if field_name == "format" or field_name in kwargs:
+                continue
+            candidates = names[:1] if kwargs.get("format") == "mxfp4" else names
+            for name in candidates:
+                value = getattr(args, name, None)
+                if value is not None:
+                    baseline = getattr(defaults, field_name)
+                    if field_name == "block_size":
+                        baseline = 32 if kwargs.get("format") == "mxfp4" else 128
+                    if value != baseline:
+                        kwargs[field_name] = value
                     break
 
-        if linear_fp4_enabled:
-            kwargs["format"] = "mxfp4"
-            kwargs["scaling"] = "blockwise"
-            kwargs["block_size"] = 32
-        elif linear_fp8_enabled:
-            if kwargs.get("format") == "mxfp4":
-                raise ValueError("MXFP4 must be enabled with --linear-fp4, not --linear-fp8-format")
-        elif linear_fp8_enabled is False:
+        # Shared parsers disable unselected recipes. Preserve the legacy direct
+        # Namespace default when no explicit linear_fp8 gate is present.
+        if not (getattr(args, "linear_quant_format", None) is not None or fp8 or fp4) and fp8 is False:
             kwargs["scaling"] = "none"
-
         return cls(**kwargs)
 
     @classmethod
@@ -727,3 +810,26 @@ class LumenConfig:
         known = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
+
+
+def linear_quant_enabled(args) -> bool:
+    """Whether a training namespace selected an active linear recipe."""
+    selected = (getattr(args, "linear_quant_format", None) is not None
+                or getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False))
+    return bool(selected) and LumenConfig.from_args(args).quant_config.is_quantized
+
+
+def mxfp4_enabled(args) -> bool:
+    """Whether the effective training recipe is active MXFP4."""
+    return linear_quant_enabled(args) and LumenConfig.from_args(args).format == "mxfp4"
+
+
+def linear_quant_requested(args) -> bool:
+    """Extend legacy training-policy gates without changing their NONE behavior.
+
+    Existing FP8 flags still select FP32 reduction and warmup reset even when
+    scaling is none. A new generic selector uses its effective quantization state.
+    """
+    return bool(getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False)
+                or (getattr(args, "linear_quant_format", None) is not None
+                    and linear_quant_enabled(args)))

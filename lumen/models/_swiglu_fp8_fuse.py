@@ -19,6 +19,7 @@ fusing amax computation and quantization in a single pass.
 from __future__ import annotations
 
 import threading
+import logging
 
 import torch
 
@@ -28,6 +29,9 @@ _cache = threading.local()
 # enable_fp8_for_parallel_linear so the cached SwiGLU scale layout matches the
 # consuming fc2 GEMM (per-tensor → 1D scalar scale; blockwise → 2D 1×block scale).
 _fused_scaling = {"type": "dynamic", "block_size": 128}
+_fused_scaling_configured = False
+_fused_scaling_conflict = False
+_scaling_lock = threading.Lock()
 
 
 def set_fused_swiglu_scaling(scaling_type, block_size: int = 128) -> None:
@@ -39,8 +43,21 @@ def set_fused_swiglu_scaling(scaling_type, block_size: int = 128) -> None:
     layout matches what the fc2 GEMM consumes (avoids feeding a per-tensor 1D
     scale into a blockwise GEMM, which expects a 2D ``(M, K/block)`` scale).
     """
-    _fused_scaling["type"] = getattr(scaling_type, "value", scaling_type)
-    _fused_scaling["block_size"] = block_size or 128
+    global _fused_scaling, _fused_scaling_configured, _fused_scaling_conflict
+    requested = {"type": getattr(scaling_type, "value", scaling_type), "block_size": block_size or 128}
+    with _scaling_lock:
+        if _fused_scaling_conflict:
+            return
+        if _fused_scaling_configured and requested != _fused_scaling:
+            _fused_scaling_conflict = True
+            discard_swiglu_fp8_cache()
+            logging.getLogger(__name__).warning(
+                "Different model quantization recipes share the SwiGLU bridge; "
+                "disabling fused FP8 quantization and using each linear's own recipe."
+            )
+            return
+        _fused_scaling = requested
+        _fused_scaling_configured = True
 
 
 def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) -> None:
@@ -51,7 +68,7 @@ def try_fused_swiglu_fp8(swiglu_input: torch.Tensor, bf16_output: torch.Tensor) 
     in one pass.  The amax is passed through to the scaling manager so it
     can skip its own ``fused_amax_abs`` call.
     """
-    if not swiglu_input.is_cuda:
+    if _fused_scaling_conflict or not swiglu_input.is_cuda:
         return
 
     from lumen.quantize.config import _get_float8_e4m3
@@ -126,6 +143,9 @@ def pop_swiglu_fp8_cache():
 
     Also returns ``amax`` as the third element when available.
     """
+    if _fused_scaling_conflict:
+        discard_swiglu_fp8_cache()
+        return None
     if getattr(_cache, "valid", False):
         result = (_cache.fp8_data, _cache.scale, getattr(_cache, "amax", None))
         _cache.valid = False

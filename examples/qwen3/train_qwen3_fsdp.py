@@ -13,7 +13,6 @@ import logging
 import math
 import os
 import time
-from argparse import Namespace
 from collections import Counter, defaultdict
 from contextlib import nullcontext
 from functools import partial
@@ -28,6 +27,7 @@ from torch.utils.data import DataLoader, DistributedSampler, Dataset
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
 
+from lumen.cli import add_linear_quant_args, explicit_arg_values
 from lumen.config import LumenConfig
 # Reuse the FSDP trainer's rank0 logger so startup/quant/LoRA lines share the
 # `INFO:lumen.models.fsdp:` / `INFO:lumen.quantize:` style of the llama2 runs.
@@ -224,15 +224,13 @@ class AlpacaDataset(Dataset):
         return {"input_ids": torch.LongTensor(ids), "loss_mask": torch.LongTensor(mask)}
 
 
-_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs")
-
-
 def _configure_mxfp4_dispatch():
     """Hand Lumen the Qwen3 tuned A4W4 tables before the first MXFP4 GEMM.
 
     Widens which shapes can reach the prebuilt ASM kernels. Every MXFP4 backend
-    is bit-identical, so this affects speed only. Skipped if the environment
-    variable is already set.
+    is bit-identical, so this affects speed only. An explicit
+    ``AITER_CONFIG_GEMM_A4W4`` still wins, but that precedence lives inside
+    AITER's resolver, not here.
 
     The per-model table was tuned for Megatron's fused QKV and gate_up, so it
     misses this path's unfused projections -- but three of its rows are shapes
@@ -243,10 +241,7 @@ def _configure_mxfp4_dispatch():
     from lumen.ops.quantize import mxfp4_autotune
 
     applied = mxfp4_autotune.configure(
-        tuned_config=[
-            os.path.join(_CONFIG_DIR, "qwen3_8b_a4w4_blockscale_tuned_gemm.csv"),
-            os.path.join(_CONFIG_DIR, "a4w4_blockscale_tuned_gemm.csv"),
-        ],
+        profile="qwen3_fsdp",
         autotune_cache=os.environ.get("LUMEN_MXFP4_AUTOTUNE_CACHE") or None,
     )
     rank0(f"> MXFP4 tuned config: {applied['tuned_config'] or '(aiter default)'}")
@@ -262,7 +257,8 @@ def build_parser():
         action="store_true",
         help="Build random weights from --model-name-or-path's config (pretrain only).",
     )
-    p.add_argument("--mode", choices=["bf16", "fp8_blockwise2d", "mxfp4"], default="fp8_blockwise2d")
+    p.add_argument("--mode", choices=["bf16", "fp8_blockwise2d", "mxfp4"], default=None)
+    add_linear_quant_args(p, fsdp_aliases=True)
     p.add_argument("--train-data-path", required=True)
     p.add_argument("--val-data-path", default=None)
     p.add_argument("--seq-length", type=int, default=2048)
@@ -288,8 +284,6 @@ def build_parser():
                    help="use the ~2.5x-faster B-preshuffle blockscale GEMM (needs --cache-frozen-weight)")
     p.add_argument("--sharding", choices=["full_shard", "shard_grad_op"], default="full_shard",
                    help="FSDP sharding: shard_grad_op (ZeRO-2) avoids per-step param all-gather")
-    p.add_argument("--fp8-scaling", choices=["blockwise2d", "delayed", "dynamic"], default="blockwise2d",
-                   help="FP8 linear scaling: blockwise2d (128x128, accurate) vs delayed/dynamic (per-tensor, faster GEMM)")
     p.add_argument("--aiter-attn", action="store_true",
                    help="route SDPA attention through AITER (CK FMHA) instead of PyTorch AOTriton (hf_attn_patch)")
     p.add_argument("--lumen-norm", action="store_true",
@@ -352,10 +346,50 @@ def parse_args(argv=None):
         raise ValueError("--train-samples must be >= 0")
     if args.eval_batches < 1:
         raise ValueError("--eval-batches must be >= 1")
+    # --mode is a compatibility preset, not a second configuration path.
+    selector = bool(args.linear_quant_format or args.linear_fp8 or args.linear_fp4)
+    explicit_format = list(explicit_arg_values(args, ("linear_fp8_format",)))
+    selected = selector or bool(explicit_format)
+    if args.mode in ("bf16", "mxfp4"):
+        # Launchers forward --fp8-scaling unconditionally; drop that FP8-only
+        # placeholder before resolution so it cannot conflict with the preset
+        # or with a generic --linear-quant-scaling value.
+        args.linear_fp8_scaling = "blockwise" if args.mode == "mxfp4" else "none"
+    initial = LumenConfig.from_args(args)
+    mode = args.mode
+    if mode is None:
+        mode = ("mxfp4" if initial.format == "mxfp4" else "fp8_blockwise2d") if selected else "fp8_blockwise2d"
+    expected_format = "mxfp4" if mode == "mxfp4" else "fp8_e4m3"
+    if args.mode is not None and selected:
+        if (mode == "mxfp4") != (initial.format == "mxfp4") or mode == "bf16":
+            raise ValueError("--mode conflicts with the explicit linear quantization selector")
+    if not selector:
+        args.linear_quant_format = initial.format if explicit_format else expected_format
+    generic_scaling = list(explicit_arg_values(args, ("linear_quant_scaling",)))
+    legacy_scaling = list(explicit_arg_values(args, ("linear_fp8_scaling",)))
+    if mode == "bf16" and any(value != "none" for _, value in generic_scaling):
+        raise ValueError("--mode bf16 conflicts with explicit quantization scaling")
+    explicit_scaling = generic_scaling + legacy_scaling
+    if mode != "fp8_blockwise2d" and not generic_scaling:
+        # --fp8-scaling is an FP8-only knob; launchers forward it unconditionally,
+        # and the other presets must not mistake that placeholder for a recipe.
+        args.linear_fp8_scaling = "blockwise" if mode == "mxfp4" else "none"
+        explicit_scaling = []
+    if not explicit_scaling:
+        args.linear_quant_scaling = {"bf16": "none", "mxfp4": "blockwise", "fp8_blockwise2d": "blockwise2d"}[mode]
+    args.linear_fp8_cache_frozen_weight = args.cache_frozen_weight
+    args.linear_fp8_bpreshuffle = args.bpreshuffle
+    args.hf_attn_patch = args.aiter_attn
+    args.sharding_strategy = args.sharding
+    resolved = LumenConfig.from_args(args)
+    qcfg = resolved.quant_config
+    args.linear_quant_format = resolved.format
+    args.linear_fp4 = qcfg.is_quantized and resolved.format == "mxfp4"
+    args.linear_fp8 = qcfg.is_quantized and resolved.format != "mxfp4"
+    args.fp8_scaling = resolved.scaling  # legacy logging/launcher attribute
+    args.mode = mode if qcfg.is_quantized else "bf16"
     if args.first_last_layers_bf16 is None:
-        args.first_last_layers_bf16 = args.task == "pretrain" and args.mode == "mxfp4"
-    args.linear_fp8 = args.mode == "fp8_blockwise2d"
-    args.linear_fp4 = args.mode == "mxfp4"
+        args.first_last_layers_bf16 = args.task == "pretrain" and args.linear_fp4
     validate_fsdp_quant_args(args)
     return args
 
@@ -442,24 +476,8 @@ def main():
     # ---- Lumen full-parameter/LoRA training (+ optional quantised linears) ----
     if args.mode == "mxfp4":
         _configure_mxfp4_dispatch()
-    fmt, scaling, blk = "fp8_e4m3", args.fp8_scaling, 128
-    use_fp8, use_fp4 = args.linear_fp8, args.linear_fp4
-    cfg = LumenConfig.from_args(Namespace(
-        linear_fp8=use_fp8, linear_fp4=use_fp4,
-        linear_fp8_format=fmt, linear_fp8_scaling=scaling,
-        linear_fp8_block_size=blk, linear_fp8_amax_algo="max", linear_fp8_amax_history=16,
-        linear_fp8_reduce_amax=False, linear_fp8_activation=True, linear_fp8_wgrad=True,
-        linear_fp8_cache_frozen_weight=args.cache_frozen_weight,
-        linear_fp8_bpreshuffle=args.bpreshuffle,
-        grad_quant_type=None,
-        first_last_layers_bf16=args.first_last_layers_bf16,
-        num_layers_at_start_in_bf16=args.num_layers_at_start_in_bf16,
-        num_layers_at_end_in_bf16=args.num_layers_at_end_in_bf16,
-        num_layers=model.config.num_hidden_layers,
-        lumen_norm=args.lumen_norm,
-        hf_attn_patch=args.aiter_attn,   # route SDPA -> AITER CK FMHA when set
-        lora_rank=args.lora_rank, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
-    ))
+    cfg = LumenConfig.from_args(args)
+    cfg.num_layers = model.config.num_hidden_layers
     _manager, model = cfg.enable(model)  # logs INFO:lumen.quantize + INFO:lumen.config (LoRA + trainable)
     # FSDP1 flatten needs uniform dtype: cast PEFT LoRA adapters (fp32) to bf16.
     for nme, prm in model.named_parameters():
@@ -476,14 +494,7 @@ def main():
         # all-gathered as FP8 (no per-step re-quant). --fsdp-mxfp4-comm wraps
         # MXFP4 linears so param all-gather ships packed FP4.
         from lumen.models.fsdp import apply_fsdp2
-        apply_fsdp2(model, Namespace(
-            linear_fp8=use_fp8,
-            linear_fp4=use_fp4,
-            fsdp_version=2,
-            sharding_strategy=args.sharding,
-            fsdp_fp8_param_storage=args.fsdp_fp8_param_storage,
-            fsdp_mxfp4_comm=args.fsdp_mxfp4_comm,
-        ))
+        apply_fsdp2(model, args)
         rank0(f"> FSDP2 model ready (sharding={args.sharding}, "
               f"fp8_param_storage={args.fsdp_fp8_param_storage}, "
               f"mxfp4_comm={args.fsdp_mxfp4_comm}, grad_ckpt={args.grad_checkpointing}, "

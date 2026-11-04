@@ -276,7 +276,7 @@ QUANT_ARGS=()
 case "${PRECISION}" in
     mxfp4)
         QUANT_ARGS=(
-            --linear-fp4
+            --linear-quant-format mxfp4
             --lumen-linear
             --first-last-layers-bf16
             --num-layers-at-start-in-bf16 0
@@ -321,35 +321,35 @@ case "${PRECISION}" in
         ;;
 esac
 
-# AITER can only reach its prebuilt A4W4 asm kernels for shapes listed in the
-# tuned table, and Qwen3-8B's fused qkv/gate_up shapes at this token count are
-# absent from the stock one: 8 of the 11 MXFP4 GEMMs fell back to Triton, worth
-# ~132 ms/step (docs/mxfp4_training_report.md §5.5). The extra rows were produced
-# by scripts/mxfp4_tune_shapes.py and each is bit-exact against Triton. They key
-# on the exact M/N/K, so they only fire at MBS x SEQ_LEN = 16384 with TP=1.
-# Setting the variable turns off AITER's own config discovery, hence relisting
-# the stock tables it would otherwise have merged.
-#
-# A model with no tuned table of its own still trains: every shape falls back to
-# Triton, which is correct but slower, so the log says which case it is rather
-# than leaving the step time unexplained.
+# AITER owns case tuning and its default-table merge. The public CLI emits the
+# resolved CSV path last; explicit environment overrides remain untouched.
+# Older AITER installs without that API keep their default table instead of
+# aborting: the case profile only widens kernel selection.
 if [ "${PRECISION}" = "mxfp4" ] && [ -z "${AITER_CONFIG_GEMM_A4W4:-}" ]; then
-    AITER_CFG_DIR="$(python -c 'import aiter, os; print(os.path.join(os.path.dirname(aiter.__file__), "configs"))')"
-    MODEL_A4W4_CSV="${LUMEN_ROOT}/examples/${MODEL_DIR}/configs/${MODEL}_a4w4_blockscale_tuned_gemm.csv"
-    A4W4_PATHS="${AITER_CFG_DIR}/a4w4_blockscale_tuned_gemm.csv"
-    if [ -f "${MODEL_A4W4_CSV}" ]; then
-        A4W4_PATHS="${MODEL_A4W4_CSV}:${A4W4_PATHS}"
-    else
-        echo "[setup] WARNING: no tuned A4W4 table for ${MODEL} at ${MODEL_A4W4_CSV}"
-        echo "[setup] every MXFP4 GEMM shape this model issues falls back to Triton;"
-        echo "[setup] the step time is correct but not the best this path can do."
-        echo "[setup] Produce one with scripts/mxfp4_tune_shapes.py."
-    fi
-    for f in "${AITER_CFG_DIR}"/model_configs/*a4w4_blockscale_tuned_gemm.csv; do
-        if [ -e "$f" ]; then A4W4_PATHS="${A4W4_PATHS}:${f}"; fi
-    done
-    export AITER_CONFIG_GEMM_A4W4="${A4W4_PATHS}"
-    echo "[setup] AITER_CONFIG_GEMM_A4W4=${AITER_CONFIG_GEMM_A4W4}"
+    case "${MODEL}" in
+        llama2_7b|llama31_8b|qwen3_8b)
+            A4W4_OUT=""
+            if A4W4_OUT="$(python -m aiter.utility.mxfp4_tuning --profile "${MODEL}" 2>&1)"; then
+                A4W4_CONFIG="$(printf '%s\n' "${A4W4_OUT}" | tail -n 1)"
+                if [ -f "${A4W4_CONFIG}" ]; then
+                    export AITER_CONFIG_GEMM_A4W4="${A4W4_CONFIG}"
+                    echo "[setup] AITER MXFP4 profile=${MODEL}: ${A4W4_CONFIG}"
+                else
+                    echo "[setup] WARNING: the AITER profile CLI returned no usable CSV;" >&2
+                    echo "[setup] keeping its default table (kernel selection only, numerics unaffected)." >&2
+                    printf '%s\n' "${A4W4_OUT}" | tail -n 3 >&2
+                fi
+            else
+                echo "[setup] WARNING: the AITER MXFP4 profile CLI failed:" >&2
+                printf '%s\n' "${A4W4_OUT}" | tail -n 5 >&2
+                echo "[setup] keeping AITER's default table; MXFP4 shapes may fall back to Triton." >&2
+                echo "[setup] Numerics are unaffected; only kernel selection is." >&2
+            fi
+            ;;
+        *)
+            echo "[setup] No bundled MXFP4 case profile for ${MODEL}; keeping AITER defaults"
+            ;;
+    esac
 fi
 
 source "${ARGS_FILE}"

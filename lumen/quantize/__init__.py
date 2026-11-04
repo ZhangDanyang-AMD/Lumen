@@ -416,6 +416,16 @@ def _patch_linear_layers(
                 skipped += 1
                 continue
 
+            weight = getattr(module, "weight", None)
+            if config.format == QuantFormat.MXFP4 and (
+                weight is None or weight.dim() != 2 or weight.shape[0] % config.block_size
+            ):
+                logger.warning(
+                    "%s: MXFP4 output width must be a multiple of 32; keeping BF16", name or "linear"
+                )
+                skipped += 1
+                continue
+
             tensor_id = f"{name}.weight" if name else "weight"
             module._quant_manager = manager
             module._quant_backend = backend
@@ -1107,3 +1117,9 @@ def disable(model: nn.Module) -> None:
             module.forward = module._original_forward
             del module._original_forward
             module._quant_enabled = False
+
+        # Match the new public MXFP4-native enable path without altering FP8 teardown.
+        if getattr(module, "_lumen_mxfp4_native", False):
+            module.scaling_type = "none"
+            module._quant_enabled = False
+            del module._lumen_mxfp4_native

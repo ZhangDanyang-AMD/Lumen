@@ -151,15 +151,19 @@ class TestMegatronTrainingPatches:
         return training_mod
 
     def _stub_mxfp4_hook_deps(self, monkeypatch, register):
-        """Avoid importing real lumen.quantize / megatron.py (AITER, ROCm)."""
+        """Avoid importing real lumen.config / quantize / megatron.py (AITER, ROCm)."""
         megatron_compat = types.ModuleType("lumen.models.megatron")
         megatron_compat.resolve_quant_format = lambda args: (
             "mxfp4" if getattr(args, "linear_fp4", False) else getattr(args, "linear_fp8_format", None)
         )
         quant = types.ModuleType("lumen.quantize")
         quant.register_mxfp4_weight_optimizer_hooks = register
+        config = types.ModuleType("lumen.config")
+        # The hook decides on the active recipe; the legacy gate stands in for it here.
+        config.mxfp4_enabled = lambda args: bool(getattr(args, "linear_fp4", False))
         monkeypatch.setitem(sys.modules, "lumen.models.megatron", megatron_compat)
         monkeypatch.setitem(sys.modules, "lumen.quantize", quant)
+        monkeypatch.setitem(sys.modules, "lumen.config", config)
 
     def test_mxfp4_weight_cache_hook_registers_on_mxfp4_run(self, monkeypatch):
         model, optimizer = object(), object()
