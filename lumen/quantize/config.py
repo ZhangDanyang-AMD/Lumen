@@ -11,9 +11,10 @@ multiple scaling strategies.
 """
 
 import functools
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 
@@ -143,6 +144,66 @@ def _format_to_dtype_bwd():
 
 
 @dataclass
+class MXFP4QuantWeightSelectionConfig:
+    """Select MXFP4 Linear weights by fully-qualified parameter name."""
+
+    mode: Literal["all_linear", "explicit"] = "all_linear"
+    include_quant_weight: tuple[str, ...] = field(default_factory=tuple)
+    exclude_quant_weight: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        # tuple() would split a bare string into one-character patterns, and a
+        # lone "*" among them matches every weight.
+        for name in ("include_quant_weight", "exclude_quant_weight"):
+            if isinstance(getattr(self, name), str):
+                raise TypeError(
+                    f"mxfp4_quant_weight_selection.{name} must be a list of "
+                    "patterns, not a single string"
+                )
+        self.include_quant_weight = tuple(self.include_quant_weight)
+        self.exclude_quant_weight = tuple(self.exclude_quant_weight)
+        if self.mode not in ("all_linear", "explicit"):
+            raise ValueError(
+                "mxfp4_quant_weight_selection.mode must be 'all_linear' or "
+                f"'explicit', got {self.mode!r}"
+            )
+        if self.mode == "explicit" and not self.include_quant_weight:
+            raise ValueError(
+                "mxfp4_quant_weight_selection.include_quant_weight must be "
+                "non-empty when mode='explicit'"
+            )
+        if self.mode == "all_linear" and self.include_quant_weight:
+            raise ValueError(
+                "mxfp4_quant_weight_selection.include_quant_weight is only valid "
+                "when mode='explicit'"
+            )
+        patterns = self.include_quant_weight + self.exclude_quant_weight
+        if any(not isinstance(pattern, str) or not pattern for pattern in patterns):
+            raise ValueError("MXFP4 quant weight patterns must be non-empty strings")
+
+    @property
+    def is_default(self) -> bool:
+        return (
+            self.mode == "all_linear"
+            and not self.include_quant_weight
+            and not self.exclude_quant_weight
+        )
+
+
+def coerce_mxfp4_quant_weight_selection(
+    value,
+) -> MXFP4QuantWeightSelectionConfig:
+    if isinstance(value, Mapping):
+        return MXFP4QuantWeightSelectionConfig(**dict(value))
+    if isinstance(value, MXFP4QuantWeightSelectionConfig):
+        return value
+    raise TypeError(
+        "mxfp4_quant_weight_selection must be an "
+        "MXFP4QuantWeightSelectionConfig or mapping"
+    )
+
+
+@dataclass
 class QuantConfig:
     """Unified quantization configuration.
 
@@ -230,6 +291,12 @@ class QuantConfig:
     # auto-detect from the model structure.
     num_layers: int = 0
 
+    # MXFP4-only selection of Linear weights by parameter FQN. The default
+    # keeps the historical behavior of quantizing every eligible Linear.
+    mxfp4_quant_weight_selection: MXFP4QuantWeightSelectionConfig = field(
+        default_factory=MXFP4QuantWeightSelectionConfig
+    )
+
     # Gradient quantization type for the backward pass.  When set, gradients
     # are rounded to the specified low-precision format (quant → dequant)
     # before being returned from autograd backward.  This reduces gradient
@@ -246,6 +313,21 @@ class QuantConfig:
     fp8_mha: bool = False
 
     def __post_init__(self):
+        self.mxfp4_quant_weight_selection = (
+            coerce_mxfp4_quant_weight_selection(
+                self.mxfp4_quant_weight_selection
+            )
+        )
+
+        if (
+            self.format != QuantFormat.MXFP4
+            and not self.mxfp4_quant_weight_selection.is_default
+        ):
+            raise ValueError(
+                "mxfp4_quant_weight_selection can only be configured when "
+                "format=QuantFormat.MXFP4"
+            )
+
         # MXFP4's block size is not a tuning knob: the E8M0 scale layout, the
         # AITER kernels and the swizzle tilings are all defined at 32. A config
         # carrying the FP8 default of 128 computed scales over 128 elements

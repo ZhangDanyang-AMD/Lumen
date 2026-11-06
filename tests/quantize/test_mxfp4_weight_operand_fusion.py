@@ -149,6 +149,26 @@ def test_weight_cache_rebuilds_when_the_operand_layout_changes():
         mxfp4_autotune.clear()
 
 
+def test_weight_cache_uses_padded_rows_only_for_dgrad(monkeypatch):
+    from lumen.ops.quantize import linear as linear_mod
+    from lumen.quantize import _mxfp4_cached_weight
+
+    monkeypatch.setattr(linear_mod, "_MXFP4_WGRAD_POWER2_BUCKET", True)
+    keys = []
+
+    def _record_key(key, _rows, _packed_cols):
+        keys.append(key)
+        return False
+
+    monkeypatch.setattr(linear_mod, "_mxfp4_can_fuse_b_shuffle", _record_key)
+    weight = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16)
+    _mxfp4_cached_weight(
+        nn.Module(), weight, None, None, "mxfp4", None, BLOCK, gemm_rows=542,
+    )
+
+    assert keys == [(542, 64, 64), (1024, 64, 64)]
+
+
 def test_mxfp4_refuses_a_weight_whose_output_width_is_ragged():
     """The quantizer pads those rows and nothing carries the count forward.
 

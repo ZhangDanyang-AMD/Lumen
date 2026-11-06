@@ -33,6 +33,7 @@ import logging
 import os as _os
 import re
 import threading
+from fnmatch import fnmatchcase
 from typing import Optional, Set
 
 import torch
@@ -51,6 +52,7 @@ from lumen.ops.quantize import (
 from lumen.quantize.comm_tensor import Blockwise2DFP8Gathered, FP8CommTensor
 from lumen.quantize.config import (
     AmaxAlgo,
+    MXFP4QuantWeightSelectionConfig,
     QuantConfig,
     QuantFormat,
     ScalingType,
@@ -400,64 +402,126 @@ def _patch_linear_layers(
 
     bf16_prefixes = _build_bf16_skip_prefixes(model, config)
 
-    count = 0
-    skipped = 0
+    mxfp4_excluded = 0
+    bf16_layers_skipped = 0
+    other_linears_skipped = 0
+    selected: list[tuple[str, nn.Module]] = []
+    selection = config.mxfp4_quant_weight_selection
+    include_hits = {pattern: 0 for pattern in selection.include_quant_weight}
+    exclude_hits = {pattern: 0 for pattern in selection.exclude_quant_weight}
+
     for name, module in model.named_modules():
-        if isinstance(module, quantizable_types):
-            if bf16_prefixes and is_under_bf16_prefix(name, bf16_prefixes):
-                skipped += 1
+        if not isinstance(module, quantizable_types):
+            continue
+
+        weight_fqn = f"{name}.weight" if name else "weight"
+        matched_include: tuple[str, ...] = ()
+        if config.format == QuantFormat.MXFP4:
+            matched_exclude = tuple(
+                pattern
+                for pattern in selection.exclude_quant_weight
+                if fnmatchcase(weight_fqn, pattern)
+            )
+            for pattern in matched_exclude:
+                exclude_hits[pattern] += 1
+            if matched_exclude:
+                mxfp4_excluded += 1
                 continue
 
-            if not config.quantize_output_layer and _is_output_layer(name):
-                skipped += 1
-                continue
+            if selection.mode == "explicit":
+                matched_include = tuple(
+                    pattern
+                    for pattern in selection.include_quant_weight
+                    if fnmatchcase(weight_fqn, pattern)
+                )
+                if not matched_include:
+                    continue
 
-            if "lora_" in name:
-                skipped += 1
-                continue
+        if bf16_prefixes and is_under_bf16_prefix(name, bf16_prefixes):
+            bf16_layers_skipped += 1
+            continue
 
-            tensor_id = f"{name}.weight" if name else "weight"
-            module._quant_manager = manager
-            module._quant_backend = backend
-            module._quant_enabled = True
-            module._quant_tensor_id = tensor_id
-            module._quant_scaling_type = scaling_type
-            # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
-            # already frozen the base weight, so requires_grad is reliable here.
-            # Under FSDP the gathered view can falsely report requires_grad=True.
-            _w = getattr(module, "weight", None)
-            # Patch-time frozen fact (PEFT froze base, pre-FSDP → reliable). Used to
-            # skip the frozen weight's (discarded) WGrad even without the FP8 cache
-            # (e.g. 70B FSDP), gated at runtime by LUMEN_SKIP_FROZEN_WGRAD.
-            module._lumen_frozen = (_w is not None and not _w.requires_grad)
-            module._lumen_cache_frozen = (
-                getattr(config, "cache_frozen_weight", False) and module._lumen_frozen
-            )
-            # bpreshuffle GEMM only makes sense with the frozen-weight cache (the
-            # shuffle is amortized once).
-            module._lumen_bpreshuffle = (
-                getattr(config, "bpreshuffle_gemm", False) and module._lumen_cache_frozen
+        if not config.quantize_output_layer and _is_output_layer(name):
+            other_linears_skipped += 1
+            continue
+
+        if "lora_" in name:
+            other_linears_skipped += 1
+            continue
+
+        selected.append((weight_fqn, module))
+        for pattern in matched_include:
+            include_hits[pattern] += 1
+
+    if config.format == QuantFormat.MXFP4:
+        unmatched_exclude = [
+            pattern for pattern, hits in exclude_hits.items() if hits == 0
+        ]
+        if unmatched_exclude:
+            logger.warning(
+                "MXFP4 exclude_quant_weight patterns matched no Linear weight: %s",
+                unmatched_exclude,
             )
 
-            is_megatron = megatron_types and isinstance(module, megatron_types)
-            _replace_forward(
-                module,
-                manager,
-                backend,
-                fp8_dtype,
-                block_size,
-                tensor_id,
-                quant_act,
-                fp8_wgrad,
-                is_megatron,
-                scaling_type,
+    if config.format == QuantFormat.MXFP4 and selection.mode == "explicit":
+        unmatched = [pattern for pattern, hits in include_hits.items() if hits == 0]
+        if unmatched:
+            raise ValueError(
+                "MXFP4 include_quant_weight patterns matched no eligible Linear "
+                "weight after output/BF16-layer/LoRA/exclude skips: "
+                f"{unmatched}"
             )
-            count += 1
+
+    for tensor_id, module in selected:
+        module._quant_manager = manager
+        module._quant_backend = backend
+        module._quant_enabled = True
+        module._quant_tensor_id = tensor_id
+        module._quant_scaling_type = scaling_type
+        # Decide frozen-weight caching NOW (before any FSDP wrap): PEFT has
+        # already frozen the base weight, so requires_grad is reliable here.
+        # Under FSDP the gathered view can falsely report requires_grad=True.
+        _w = getattr(module, "weight", None)
+        # Patch-time frozen fact (PEFT froze base, pre-FSDP → reliable). Used to
+        # skip the frozen weight's (discarded) WGrad even without the FP8 cache
+        # (e.g. 70B FSDP), gated at runtime by LUMEN_SKIP_FROZEN_WGRAD.
+        module._lumen_frozen = (_w is not None and not _w.requires_grad)
+        module._lumen_cache_frozen = (
+            getattr(config, "cache_frozen_weight", False) and module._lumen_frozen
+        )
+        # bpreshuffle GEMM only makes sense with the frozen-weight cache (the
+        # shuffle is amortized once).
+        module._lumen_bpreshuffle = (
+            getattr(config, "bpreshuffle_gemm", False) and module._lumen_cache_frozen
+        )
+
+        is_megatron = megatron_types and isinstance(module, megatron_types)
+        _replace_forward(
+            module,
+            manager,
+            backend,
+            fp8_dtype,
+            block_size,
+            tensor_id,
+            quant_act,
+            fp8_wgrad,
+            is_megatron,
+            scaling_type,
+        )
+
+    count = len(selected)
 
     act_str = "weight+activation" if quant_act else "weight-only"
     grad_quant_type = config.quantize_grad
     grad_str = f"+grad({grad_quant_type})" if grad_quant_type else ""
-    bf16_str = f", bf16_layers_skipped={skipped}" if skipped else ""
+    skip_parts = []
+    if bf16_layers_skipped:
+        skip_parts.append(f"bf16_layers_skipped={bf16_layers_skipped}")
+    if mxfp4_excluded:
+        skip_parts.append(f"mxfp4_excluded={mxfp4_excluded}")
+    if other_linears_skipped:
+        skip_parts.append(f"other_linears_skipped={other_linears_skipped}")
+    skipped_str = f", {', '.join(skip_parts)}" if skip_parts else ""
     logger.info(
         "Quantization enabled on %d nn.Linear layers " "(backend=%s, format=%s, scaling=%s, amax_algo=%s, %s%s%s)",
         count,
@@ -467,8 +531,23 @@ def _patch_linear_layers(
         config.amax_algo.value,
         act_str,
         grad_str,
-        bf16_str,
+        skipped_str,
     )
+    if config.format == QuantFormat.MXFP4:
+        selected_names = [weight_fqn for weight_fqn, _ in selected]
+        if selection.mode == "explicit":
+            logger.info(
+                "MXFP4 selected weights (%d): %s",
+                count,
+                ", ".join(selected_names),
+            )
+        else:
+            logger.info(
+                "MXFP4 selected %d all-linear weights (first 10: %s)",
+                count,
+                ", ".join(selected_names[:10]),
+            )
+            logger.debug("MXFP4 all selected weights: %s", selected_names)
 
 
 
@@ -571,6 +650,7 @@ def _mxfp4_cached_weight(
         _mark_mxfp4_scale_swizzled,
         _mxfp4_can_fuse_b_shuffle,
         _mxfp4_can_fuse_scale_swizzle,
+        _mxfp4_wgrad_target_rows,
         quantize_input,
     )
     from lumen.ops.quantize.ops import (
@@ -590,8 +670,11 @@ def _mxfp4_cached_weight(
     fuse_fwd_shuffle = unpadded and gemm_rows is not None and _mxfp4_can_fuse_b_shuffle(
         (gemm_rows, n_out, k_in), n_out, k_in // 2,
     )
+    dgrad_rows = (
+        _mxfp4_wgrad_target_rows(gemm_rows) if gemm_rows is not None else None
+    )
     fuse_dgrad_shuffle = unpadded and gemm_rows is not None and _mxfp4_can_fuse_b_shuffle(
-        (gemm_rows, k_in, n_out), k_in, n_out // 2,
+        (dgrad_rows, k_in, n_out), k_in, n_out // 2,
     )
 
     # The two fusions are what the layout depends on, and they are decided from
@@ -605,11 +688,12 @@ def _mxfp4_cached_weight(
     # fusions share the entry, so nothing is rebuilt that need not be.
     layout = (fuse_fwd_shuffle, fuse_dgrad_shuffle)
     cached = getattr(module, "_mxfp4_w_cache", None)
-    # Optimizers update Parameters in-place and increment ``_version``. Keying
-    # the cache on that generation makes the generic ``quant.enable(nn.Linear)``
-    # path correct even when its training loop cannot register Lumen's optional
-    # post-step hook. The hook remains useful for eagerly releasing old buffers,
-    # but correctness must not depend on framework-specific optimizer wiring.
+    # An optimizer that updates the Parameter in place increments ``_version``,
+    # so keying the cache on it keeps the generic ``quant.enable(nn.Linear)``
+    # path correct without Lumen's post-step hook. Writes through ``.data`` --
+    # mixed-precision optimizers copying master weights back with
+    # ``p.data.copy_`` -- leave ``_version`` unchanged, so those setups still
+    # need the hook or ``invalidate_mxfp4_weight_caches``.
     weight_version = weight._version
     if (
         cached is not None
@@ -1031,6 +1115,41 @@ def register_fp8_weight_optimizer_hooks(
     optimizer.register_step_post_hook(_post_step)
 
 
+def invalidate_mxfp4_weight_caches(model) -> int:
+    """Clear all module- and Parameter-local MXFP4 weight caches.
+
+    Args:
+        model: A module, or a list/tuple of model chunks.
+
+    Returns:
+        Number of cache entries removed. Calling this function repeatedly is
+        safe; a second call returns zero.
+    """
+    chunks = list(model) if isinstance(model, (list, tuple)) else [model]
+    removed = 0
+
+    def _clear_cache(owner) -> int:
+        had_cache = hasattr(owner, "_mxfp4_w_cache")
+        if had_cache:
+            del owner._mxfp4_w_cache
+        if hasattr(owner, "_mxfp4_w_cache_version"):
+            del owner._mxfp4_w_cache_version
+        return int(had_cache)
+
+    for chunk in chunks:
+        for module in chunk.modules():
+            removed += _clear_cache(module)
+            # Native Lumen parallel linears cache on their Parameter because
+            # they call the shared _do_gemm helper rather than the patched
+            # module forward. Sweep every owned parameter: grouped MoE modules
+            # expose expert weights as weight0..weightN instead of ``.weight``.
+            for parameter in module._parameters.values():
+                if parameter is not None:
+                    removed += _clear_cache(parameter)
+
+    return removed
+
+
 def register_mxfp4_weight_optimizer_hooks(
     model,
     optimizer,
@@ -1053,30 +1172,8 @@ def register_mxfp4_weight_optimizer_hooks(
         optimizer: Any optimizer. Megatron's wrappers are not
             ``torch.optim.Optimizer`` subclasses and are handled too.
     """
-    chunks = list(model) if isinstance(model, (list, tuple)) else [model]
-
     def _invalidate():
-        for chunk in chunks:
-            for m in chunk.modules():
-                if hasattr(m, "_mxfp4_w_cache"):
-                    del m._mxfp4_w_cache
-                    if hasattr(m, "_mxfp4_w_cache_version"):
-                        del m._mxfp4_w_cache_version
-                # Native Lumen parallel linears cache on their Parameter because
-                # they call the shared _do_gemm helper rather than the patched
-                # module forward above. Every parameter the module owns has to be
-                # swept, not just ``.weight``: a grouped MoE layer holds its
-                # experts as weight0..weightN and hands them to the linear's
-                # forward one at a time, so the cache lands on a Parameter that
-                # is not reachable under that name. Those entries were never
-                # cleared, leaving the experts quantized from the step-0 master
-                # weights for the whole run while the dense layers updated -- and
-                # nothing raises, the loss just stops moving.
-                for param in m._parameters.values():
-                    if param is not None and hasattr(param, "_mxfp4_w_cache"):
-                        del param._mxfp4_w_cache
-                        if hasattr(param, "_mxfp4_w_cache_version"):
-                            del param._mxfp4_w_cache_version
+        invalidate_mxfp4_weight_caches(model)
 
     # Megatron's ChainedOptimizer / DistributedOptimizer are not
     # torch.optim.Optimizer subclasses and lack register_step_post_hook, so

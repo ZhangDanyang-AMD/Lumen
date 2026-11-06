@@ -21,8 +21,9 @@ layout, not arithmetic.
 
 Environment:
     ``LUMEN_MXFP4_AUTOTUNE=0``       fall back to the static byte thresholds
-    ``LUMEN_MXFP4_AUTOTUNE_CACHE``   JSON file to persist and reuse decisions
-    ``LUMEN_MXFP4_GEMM_SHAPE_LOG``   CSV to record every shape the model issues
+    ``LUMEN_MXFP4_AUTOTUNE_CACHE``   persist/reuse decisions when autotune is on
+    ``LUMEN_MXFP4_GEMM_SHAPE_LOG``   CSV to record every shape the model issues;
+                                     with several ranks, only rank 0's shapes
 """
 
 import atexit
@@ -62,6 +63,7 @@ Candidate = Tuple[str, Callable[[], torch.Tensor]]
 
 _lock = threading.Lock()
 _choice: Dict[ShapeKey, str] = {}
+_static_choice: Dict[ShapeKey, str] = {}
 _shape_log: Dict[ShapeKey, Dict[str, object]] = {}
 _cache_loaded = False
 _cache_dirty = False
@@ -199,6 +201,11 @@ def _save_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+def shape_log_enabled() -> bool:
+    """Whether ``LUMEN_MXFP4_GEMM_SHAPE_LOG`` is collecting shapes."""
+    return bool(_SHAPE_LOG_PATH)
+
+
 def record_shape(key: ShapeKey, tuned: bool, backend: str) -> None:
     """Note that the model issued this GEMM. Off unless the env var is set.
 
@@ -210,6 +217,9 @@ def record_shape(key: ShapeKey, tuned: bool, backend: str) -> None:
     """
     if not _SHAPE_LOG_PATH:
         return
+    # Static hits never reach pick_backend(), so an autotune-off run may record
+    # every shape without registering the hook that writes them at exit.
+    _register_hooks()
     with _lock:
         entry = _shape_log.get(key)
         if entry is None:
@@ -223,17 +233,31 @@ def _save_shape_log() -> None:
     if not _SHAPE_LOG_PATH or not _shape_log:
         return
     try:
+        rank = int(os.environ.get("RANK", "0"))
+    except ValueError:
+        rank = 0
+    if rank != 0:
+        return
+    tmp = "{}.{}.tmp".format(_SHAPE_LOG_PATH, os.getpid())
+    try:
         os.makedirs(os.path.dirname(_SHAPE_LOG_PATH) or ".", exist_ok=True)
-        with open(_SHAPE_LOG_PATH, "w") as f:
+        with open(tmp, "w") as f:
             f.write("M,N,K,tuned,backend,calls\n")
             for (m, n, k), e in sorted(_shape_log.items()):
                 f.write(f"{m},{n},{k},{int(bool(e['tuned']))},{e['backend']},{e['calls']}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, _SHAPE_LOG_PATH)
         _logger.info(
             "MXFP4 shape log: wrote %d distinct shapes to %s",
             len(_shape_log), _SHAPE_LOG_PATH,
         )
     except OSError as e:
         _logger.warning("could not write MXFP4 shape log %s: %s", _SHAPE_LOG_PATH, e)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def _register_hooks() -> None:
@@ -243,6 +267,14 @@ def _register_hooks() -> None:
     _hooks_registered = True
     atexit.register(_save_cache)
     atexit.register(_save_shape_log)
+
+
+def _ensure_cache_loaded() -> None:
+    if not AUTOTUNE_ENABLED or _cache_loaded:
+        return
+    with _lock:
+        if not _cache_loaded:
+            _load_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -334,21 +366,25 @@ def pick_backend(
     _register_hooks()
     global _cache_dirty
 
-    if not _cache_loaded:
-        with _lock:
-            if not _cache_loaded:
-                _load_cache()
+    _ensure_cache_loaded()
 
-    name = _choice.get(key)
+    name = cached(key)
     if name is not None:
         return name
 
     if not candidates:
         return fallback or ""
     if len(candidates) == 1:
-        return candidates[0][0]
-    if not AUTOTUNE_ENABLED or _capturing():
+        name = candidates[0][0]
+        if not _capturing():
+            remember_static(key, name)
+        return name
+    if _capturing():
         return fallback or candidates[0][0]
+    if not AUTOTUNE_ENABLED:
+        name = fallback or candidates[0][0]
+        remember_static(key, name)
+        return name
 
     name = _measure(key, candidates)
     with _lock:
@@ -413,6 +449,14 @@ def configure(
             default = _aiter_default_tuned_config() if merge_aiter_default else None
             if default and os.path.exists(default):
                 paths.append(default)
+            with _lock:
+                decisions_exist = bool(_choice or _static_choice)
+            if decisions_exist:
+                raise RuntimeError(
+                    "MXFP4 tuned config must be set before the first backend "
+                    "decision; start a new process instead of changing policy "
+                    "after dispatch has begun"
+                )
             os.environ[AITER_TUNED_CONFIG_ENV] = ":".join(paths)
             if _aiter_config_already_resolved():
                 _logger.warning(
@@ -424,7 +468,7 @@ def configure(
     if autotune_cache and not _CACHE_PATH:
         _CACHE_PATH = os.path.abspath(autotune_cache)
         _register_hooks()
-    if _CACHE_PATH and not _cache_loaded:
+    if AUTOTUNE_ENABLED and _CACHE_PATH and not _cache_loaded:
         # Load now rather than on the first GEMM, so the decisions are visible
         # (and logged) at startup instead of appearing mid-step.
         with _lock:
@@ -441,8 +485,40 @@ def cached(key: ShapeKey) -> Optional[str]:
     """The decision for this shape if one is already in memory, else None.
 
     Lets the dispatcher skip building the candidate list on the hot path.
+    Measured decisions are deliberately invisible when autotune is disabled;
+    ``LUMEN_MXFP4_AUTOTUNE=0`` must mean static policy even when a cache file
+    or a stale in-process measured choice exists.
     """
-    return _choice.get(key)
+    measured = _choice.get(key) if AUTOTUNE_ENABLED else None
+    return measured or _static_choice.get(key)
+
+
+def cached_static(key: ShapeKey) -> Optional[str]:
+    """Current-process policy decision, excluding persisted measurements."""
+    return _static_choice.get(key)
+
+
+def is_capturing() -> bool:
+    """Whether backend policy must remain read-only for CUDA graph capture."""
+    return _capturing()
+
+
+def remember_static(key: ShapeKey, name: str) -> str:
+    """Memoize an unmeasured policy decision for this process only.
+
+    Static choices are deliberately separate from measured choices: environment
+    thresholds are cheap to recompute and are not covered by the persisted
+    cache fingerprint. Keeping them in memory still lets producers select the
+    final operand layout before the first GEMM without polluting the disk cache.
+    """
+    measured = _choice.get(key) if AUTOTUNE_ENABLED else None
+    if _capturing():
+        return measured or _static_choice.get(key) or name
+    with _lock:
+        if not AUTOTUNE_ENABLED or key not in _choice:
+            _static_choice.setdefault(key, name)
+        measured = _choice.get(key) if AUTOTUNE_ENABLED else None
+        return measured or _static_choice[key]
 
 
 def forget(key: ShapeKey) -> None:
@@ -454,14 +530,18 @@ def forget(key: ShapeKey) -> None:
     """
     global _cache_dirty
     with _lock:
-        if _choice.pop(key, None) is not None:
+        removed_measured = _choice.pop(key, None) is not None
+        _static_choice.pop(key, None)
+        if removed_measured:
             _cache_dirty = True
 
 
 def clear() -> None:
     """Drop measured decisions. For tests."""
-    global _cache_loaded
+    global _cache_dirty, _cache_loaded
     with _lock:
         _choice.clear()
+        _static_choice.clear()
         _shape_log.clear()
+        _cache_dirty = False
         _cache_loaded = False

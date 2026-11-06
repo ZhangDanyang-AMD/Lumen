@@ -1251,6 +1251,42 @@ class TestEnableFP8ForParallelLinear:
         assert mock_linear.enable_fp8.call_args.kwargs["scaling_type"] == "mxfp4"
         assert mock_linear.enable_fp8.call_args.kwargs["block_size"] == 32
 
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            {"mode": "explicit", "include_quant_weight": ["decoder.*.linear_fc1.weight"]},
+            {"exclude_quant_weight": ["output_layer.weight"]},
+        ],
+        ids=["explicit_include", "all_linear_exclude"],
+    )
+    @mock.patch("lumen.models.megatron.print_rank_0")
+    def test_fp4_enable_rejects_selection_before_patching(self, mock_print, selection):
+        from lumen.modules.parallel_linear import LumenColumnParallelLinear
+        from lumen.quantize.config import QuantConfig, QuantFormat, ScalingType
+
+        class _MockLumenCol(LumenColumnParallelLinear):
+            def __init__(self):
+                nn.Module.__init__(self)
+                self.enable_fp8 = mock.MagicMock()
+
+        mock_linear = _MockLumenCol()
+        config = QuantConfig(
+            format=QuantFormat.MXFP4,
+            scaling=ScalingType.BLOCKWISE,
+            mxfp4_quant_weight_selection=selection,
+        )
+
+        with mock.patch(
+            "lumen.models._swiglu_fp8_fuse.set_fused_swiglu_scaling"
+        ) as mock_swiglu:
+            with pytest.raises(ValueError, match="not supported on Lumen's native"):
+                enable_fp4_for_parallel_linear(
+                    nn.Sequential(mock_linear), quant_config=config,
+                )
+
+        mock_swiglu.assert_not_called()
+        mock_linear.enable_fp8.assert_not_called()
+
 
 # ===================================================================
 # model_provider -> parallel linear recipe
