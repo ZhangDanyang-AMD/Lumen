@@ -1023,6 +1023,18 @@ def hadamard_quant_mxfp4(
     return fp4_packed.view(out_shape), scales_e8m0.view(scale_shape)
 
 
+def _resolve_target_rows(M: int, target_rows: Optional[int], block_size: int, g: int) -> int:
+    target_rows = M if target_rows is None else int(target_rows)
+    assert target_rows >= M, f"target_rows={target_rows} is smaller than M={M}"
+    assert target_rows % block_size == 0, (
+        f"target_rows={target_rows} not divisible by block_size={block_size}"
+    )
+    assert target_rows % g == 0, (
+        f"target_rows={target_rows} not divisible by g={g}"
+    )
+    return target_rows
+
+
 def dual_layout_quant_mxfp4(
     x: torch.Tensor,
     sign_vector: torch.Tensor,
@@ -1072,15 +1084,8 @@ def dual_layout_quant_mxfp4(
     assert x.is_contiguous(), "x must be contiguous; the point is to avoid a strided read"
     assert x.dtype in (torch.float32, torch.bfloat16)
     M, N = x.shape
-    target_rows = M if target_rows is None else int(target_rows)
     assert N % block_size == 0, f"N={N} not divisible by block_size={block_size}"
-    assert target_rows >= M, f"target_rows={target_rows} is smaller than M={M}"
-    assert target_rows % block_size == 0, (
-        f"target_rows={target_rows} not divisible by block_size={block_size}"
-    )
-    assert target_rows % g == 0, (
-        f"target_rows={target_rows} not divisible by g={g}"
-    )
+    target_rows = _resolve_target_rows(M, target_rows, block_size, g)
 
     # The counter only reaches the kernel through the SR path; an all-RTN call
     # that drew from Python's RNG anyway would also shift the stream every SR
@@ -1124,10 +1129,12 @@ def dual_layout_quant_mxfp4(
 
     # Keep the structural tile independent of the ragged token count. The
     # kernel masks the final partial tile, so a new M reuses the same compiled
-    # module instead of selecting an exact-M BLOCK_M.
+    # module instead of selecting an exact-M BLOCK_M; a grid that tiles x
+    # exactly gets the unmasked variant.
     BLOCK_M = 256
     BLOCK_N = 32
     grid = (triton.cdiv(target_rows, BLOCK_M), triton.cdiv(N, BLOCK_N))
+    even_tiles = M == target_rows and M % BLOCK_M == 0 and N % BLOCK_N == 0
 
     from lumen.kernels.mxfp4 import _dual_layout_quant_mxfp4_kernel
 
@@ -1153,6 +1160,7 @@ def dual_layout_quant_mxfp4(
         USE_ASM=is_cdna4(),
         SWIZZLE_SCALE=swizzle_scale,
         SHUFFLE_B=shuffle_col,
+        EVEN_TILES=even_tiles,
     )
 
     return row_fp4, row_scales, col_fp4, col_scales
@@ -1196,19 +1204,10 @@ def dequant_hadamard_quant_mxfp4(
     assert data_fp4.dim() == 2, f"expected 2D, got {tuple(data_fp4.shape)}"
     M, K_packed = data_fp4.shape
     K = K_packed * 2
-    target_rows = M if target_rows is None else int(target_rows)
     assert K % block_size == 0, (
         f"K={K} not divisible by block_size={block_size}"
     )
-    assert target_rows >= M, (
-        f"target_rows={target_rows} is smaller than M={M}"
-    )
-    assert target_rows % block_size == 0, (
-        f"target_rows={target_rows} not divisible by block_size={block_size}"
-    )
-    assert target_rows % g == 0, (
-        f"target_rows={target_rows} not divisible by g={g}"
-    )
+    target_rows = _resolve_target_rows(M, target_rows, block_size, g)
     assert g == 16, f"kernel is hardcoded for g=16, got {g}"
 
     # Activations take this path with RTN, where the kernel never reads the
@@ -1254,6 +1253,7 @@ def dequant_hadamard_quant_mxfp4(
     BLOCK_M = 128
     BLOCK_K = 64
     grid = (triton.cdiv(target_rows, BLOCK_M), triton.cdiv(K, BLOCK_K))
+    even_tiles = M == target_rows and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
     _dequant_hadamard_quant_mxfp4_kernel[grid](
         data_fp4, scales,
@@ -1273,6 +1273,7 @@ def dequant_hadamard_quant_mxfp4(
         SWIZZLE_SCALE=swizzle_scale,
         SHUFFLE_DATA=shuffle_data,
         IN_SCALE_SWIZZLED=in_scale_swizzled,
+        EVEN_TILES=even_tiles,
     )
     return out, out_scales
 

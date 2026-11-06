@@ -135,6 +135,29 @@ class LumenRowParallelLinear(nn.Module):
 
 **Backward dispatch:** dgrad uses same GEMM as forward; wgrad forced BF16 (except MXFP8).
 
+#### MXFP4 Linear
+
+Forward, DGrad and WGrad all run as MXFP4 GEMMs. Two settings matter when the token count changes from one micro-batch to the next, as it does in variable-length or draft-model training:
+
+- **Static backend policy.** `LUMEN_MXFP4_AUTOTUNE=0` picks each new shape's backend from fixed size thresholds. The default (`1`) benchmarks every shape on first use.
+- **Token-axis bucketing.** WGrad reduces over the token axis, and AITER's FP4 GEMM compiles that length into the kernel, so each distinct token count compiles a new WGrad GEMM. Forward and DGrad take the token count as a runtime `M` and compile at most once per AITER config bucket. `LUMEN_MXFP4_WGRAD_POWER2_BUCKET=1` pads the token axis of DGrad and WGrad to the next power of two (at least 256): one compile per bucket, at up to 2x the DGrad/WGrad work. The default (`0`) pads only to the 32-row scale block. The quantizers write the padding rows themselves, so no padded copy of the gradient or activation is made.
+
+Fixed-shape runs compile once and should leave the bucketing off. The Kimi-K3 DSpark draft-model run uses `LUMEN_MXFP4_AUTOTUNE=0` and `LUMEN_MXFP4_WGRAD_POWER2_BUCKET=1`.
+
+**Weight selection.** `mxfp4_quant_weight_selection` (on `LumenConfig` or `QuantConfig`, MXFP4 only) chooses which Linear weights `quant.enable()` quantizes. Patterns are case-sensitive shell globs matched against the weight's name relative to the model passed in, such as `layers.3.mlp.gate_proj.weight`; `*` also matches across dots. The default `mode="all_linear"` quantizes every eligible Linear except those matching `exclude_quant_weight`. `mode="explicit"` quantizes only the weights matching `include_quant_weight`, and an exclude match wins over an include match. The usual skips still apply: the BF16 first/last layers, the output layer unless `quantize_output_layer` is set, and LoRA adapters. An include pattern that selects no weight raises at enable time; an exclude pattern that matches nothing logs a warning. `lumen_linear` and `enable_fp4_for_parallel_linear()` patch Lumen's parallel linears as whole modules, so they reject a non-default selection.
+
+```python
+LumenConfig(
+    format="mxfp4",
+    scaling="blockwise",
+    mxfp4_quant_weight_selection={
+        "mode": "explicit",
+        "include_quant_weight": ["layers.*.mlp.*_proj.weight"],
+        "exclude_quant_weight": ["layers.0.*"],
+    },
+)
+```
+
 #### Fused Norm + Quantize
 
 ```python

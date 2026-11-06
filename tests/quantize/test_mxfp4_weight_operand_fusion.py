@@ -153,7 +153,6 @@ def test_weight_cache_uses_padded_rows_only_for_dgrad(monkeypatch):
     from lumen.ops.quantize import linear as linear_mod
     from lumen.quantize import _mxfp4_cached_weight
 
-    monkeypatch.setattr(linear_mod, "_MXFP4_WGRAD_TILE_PAD", True)
     monkeypatch.setattr(linear_mod, "_MXFP4_WGRAD_POWER2_BUCKET", True)
     keys = []
 

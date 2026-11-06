@@ -707,27 +707,23 @@ def _fused_hadamard_quant_mxfp4_kernel(
 # ---------------------------------------------------------------------------
 
 
+# Only the arguments whose specialization class moves with the token count go
+# unspecialized, so a new M reuses the compiled kernel: the logical M, the
+# column-scale count and stride (target/32, which is 1 for a 32-row target), and
+# the Philox counters, which are drawn per call. TARGET_M and everything derived
+# from target/2 are multiples of 16 for every target the wrapper accepts, so they
+# keep Triton's divisibility hint for free; without it the column store does not
+# vectorize (up to 1.4x slower with SHUFFLE_B). EVEN_TILES drops the masks when
+# the grid tiles x exactly, as it does for a token count that needs no padding
+# and is a multiple of BLOCK_M; the masks alone cost up to 5% there.
 @triton.jit(
     do_not_specialize=[
         "M",
-        "TARGET_M",
-        "N",
-        "NUM_SCALE_COLS_A",
-        "NUM_SCALE_COLS_B",
-        "NUM_PACKED_COLS_B",
-    ],
-    do_not_specialize_on_alignment=[
-        "M",
-        "TARGET_M",
-        "N",
-        "NUM_SCALE_COLS_A",
-        "NUM_SCALE_COLS_B",
-        "NUM_PACKED_COLS_B",
-        "stride_xm",
-        "stride_am",
-        "stride_asm",
-        "stride_bm",
         "stride_bsm",
+        "NUM_SCALE_COLS_B",
+        "philox_seed",
+        "philox_offset_a",
+        "philox_offset_b",
     ],
 )
 def _dual_layout_quant_mxfp4_kernel(
@@ -753,6 +749,7 @@ def _dual_layout_quant_mxfp4_kernel(
     USE_ASM: tl.constexpr,
     SWIZZLE_SCALE: tl.constexpr,
     SHUFFLE_B: tl.constexpr = False,
+    EVEN_TILES: tl.constexpr = False,
 ):
     """One tile read of x → MXFP4 along n *and* Hadamard-rotated MXFP4 along m.
 
@@ -782,8 +779,8 @@ def _dual_layout_quant_mxfp4_kernel(
 
     x_in = tl.load(
         x_ptr + offs_m[:, None] * stride_xm + offs_n[None, :] * stride_xn,
-        mask=mask_xm[:, None] & mask_n[None, :],
-        other=0.0,
+        mask=None if EVEN_TILES else mask_xm[:, None] & mask_n[None, :],
+        other=None if EVEN_TILES else 0.0,
     )
     x = x_in.to(tl.float32)
 
@@ -813,11 +810,11 @@ def _dual_layout_quant_mxfp4_kernel(
     tl.store(
         a_ptr + offs_m[:, None] * stride_am + offs_an[None, :] * stride_an,
         a,
-        mask=mask_m[:, None] & mask_an[None, :],
+        mask=None if EVEN_TILES else mask_m[:, None] & mask_an[None, :],
     )
     offs_asn = pid_n * SCALE_BLOCK_N + tl.arange(0, SCALE_BLOCK_N)
     mask_asn = offs_asn < NUM_SCALE_COLS_A
-    mask_as = mask_m[:, None] & mask_asn[None, :]
+    mask_as = None if EVEN_TILES else mask_m[:, None] & mask_asn[None, :]
     if SWIZZLE_SCALE:
         tl.store(
             as_ptr + _swizzled_scale_offsets(
@@ -865,7 +862,7 @@ def _dual_layout_quant_mxfp4_kernel(
     SCALE_BLOCK_M: tl.constexpr = BLOCK_M // QUANT_BLOCK_SIZE
     offs_bn = pid_m * HALF_BLOCK_M + tl.arange(0, HALF_BLOCK_M)
     mask_bn = offs_bn < NUM_PACKED_COLS_B
-    mask_b = mask_n[:, None] & mask_bn[None, :]
+    mask_b = None if EVEN_TILES else mask_n[:, None] & mask_bn[None, :]
     if SHUFFLE_B:
         tl.store(
             b_ptr + _shuffled_fp4_offsets(
@@ -883,7 +880,7 @@ def _dual_layout_quant_mxfp4_kernel(
         )
     offs_bsn = pid_m * SCALE_BLOCK_M + tl.arange(0, SCALE_BLOCK_M)
     mask_bsn = offs_bsn < NUM_SCALE_COLS_B
-    mask_bs = mask_n[:, None] & mask_bsn[None, :]
+    mask_bs = None if EVEN_TILES else mask_n[:, None] & mask_bsn[None, :]
     if SWIZZLE_SCALE:
         tl.store(
             bs_ptr + _swizzled_scale_offsets(
@@ -922,24 +919,16 @@ def _fp4_e2m1_decode(code):
     return tl.where(sign > 0.5, -val, val)
 
 
+# Same split as the dual-layout kernel: only the logical M, the output scale
+# count and stride, and the per-call Philox counters go unspecialized, and
+# EVEN_TILES drops the masks when the grid tiles the input exactly.
 @triton.jit(
     do_not_specialize=[
         "M",
-        "K",
-        "NUM_SCALE_COLS",
-        "NUM_PACKED_COLS",
-        "NUM_IN_SCALE_COLS",
-    ],
-    do_not_specialize_on_alignment=[
-        "M",
-        "K",
-        "NUM_SCALE_COLS",
-        "NUM_PACKED_COLS",
-        "NUM_IN_SCALE_COLS",
-        "stride_fm",
-        "stride_ism",
-        "stride_om",
         "stride_osm",
+        "NUM_SCALE_COLS",
+        "philox_seed",
+        "philox_offset",
     ],
 )
 def _dequant_hadamard_quant_mxfp4_kernel(
@@ -963,6 +952,7 @@ def _dequant_hadamard_quant_mxfp4_kernel(
     SWIZZLE_SCALE: tl.constexpr,
     SHUFFLE_DATA: tl.constexpr,
     IN_SCALE_SWIZZLED: tl.constexpr = False,
+    EVEN_TILES: tl.constexpr = False,
 ):
     """Packed FP4 (M, K/2) → Hadamard-rotated, transposed packed FP4 (K, M/2).
 
@@ -993,8 +983,8 @@ def _dequant_hadamard_quant_mxfp4_kernel(
 
     packed = tl.load(
         fp4_ptr + offs_m[:, None] * stride_fm + offs_fk[None, :] * stride_fk,
-        mask=mask_fm[:, None] & mask_fk[None, :],
-        other=0,
+        mask=None if EVEN_TILES else mask_fm[:, None] & mask_fk[None, :],
+        other=None if EVEN_TILES else 0,
     ).to(tl.uint8)
     vals = tl.reshape(
         tl.join(_fp4_e2m1_decode(packed & 0x0F), _fp4_e2m1_decode((packed >> 4) & 0x0F)),
@@ -1003,7 +993,7 @@ def _dequant_hadamard_quant_mxfp4_kernel(
 
     offs_sk = pid_k * SCALE_BLOCK_K + tl.arange(0, SCALE_BLOCK_K)
     mask_sk = offs_sk < NUM_IN_SCALE_COLS
-    mask_in_scale = mask_fm[:, None] & mask_sk[None, :]
+    mask_in_scale = None if EVEN_TILES else mask_fm[:, None] & mask_sk[None, :]
     if IN_SCALE_SWIZZLED:
         # The forward's quantizer wrote these straight into the GEMM's order, so
         # reading them here is a gather through the same index map rather than a
@@ -1017,7 +1007,7 @@ def _dequant_hadamard_quant_mxfp4_kernel(
     scale_raw = tl.load(
         in_scale_ptr + in_scale_offs,
         mask=mask_in_scale,
-        other=127,
+        other=None if EVEN_TILES else 127,
     ).to(tl.int32)
     # E8M0 stores the exponent biased by 127, i.e. the float is 2^(raw-127),
     # which is the raw byte shifted into an fp32's exponent field.
@@ -1061,7 +1051,7 @@ def _dequant_hadamard_quant_mxfp4_kernel(
     offs_on = pid_m * HALF_BLOCK_M + tl.arange(0, HALF_BLOCK_M)
     mask_k = offs_k < K
     mask_on = offs_on < NUM_PACKED_COLS
-    mask_out = mask_k[:, None] & mask_on[None, :]
+    mask_out = None if EVEN_TILES else mask_k[:, None] & mask_on[None, :]
     if SHUFFLE_DATA:
         tl.store(
             out_ptr + _shuffled_fp4_offsets(
@@ -1079,7 +1069,7 @@ def _dequant_hadamard_quant_mxfp4_kernel(
         )
     offs_osn = pid_m * SCALE_BLOCK_M + tl.arange(0, SCALE_BLOCK_M)
     mask_osn = offs_osn < NUM_SCALE_COLS
-    mask_out_scale = mask_k[:, None] & mask_osn[None, :]
+    mask_out_scale = None if EVEN_TILES else mask_k[:, None] & mask_osn[None, :]
     if SWIZZLE_SCALE:
         tl.store(
             out_scale_ptr + _swizzled_scale_offsets(

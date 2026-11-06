@@ -2314,6 +2314,47 @@ def test_mxfp4_dispatch_fallback_lock_is_scoped_to_shape(monkeypatch):
         dispatch_mod._backend_cache.clear()
 
 
+@pytest.mark.parametrize("plain_rejected", [False, True], ids=["plain", "dequant_bf16"])
+def test_mxfp4_dispatch_recovers_rejected_shuffled_b(monkeypatch, plain_rejected):
+    """A shuffled B whose shuffled-order kernels fail must give the row-major result."""
+    _require_mxfp4_dtype()
+    from lumen.ops import dispatch as dispatch_mod
+    from lumen.ops.quantize import linear as linear_mod
+    from lumen.ops.quantize.ops import mxfp4_data_shuffle_supported
+
+    torch.manual_seed(31)
+    M, N, K = 64, 256, 512
+    assert mxfp4_data_shuffle_supported(N, K // 2)
+    a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+    w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16)
+    a_fp4, a_scale = convert_to_mxfp4(a, block_size=MXFP4_BLOCK_SIZE, use_sr=False)
+    w_fp4, w_scale = convert_to_mxfp4(w, block_size=MXFP4_BLOCK_SIZE, use_sr=False)
+    w_shuffled = transpose_packed_fp4(transpose_packed_fp4(w_fp4), shuffle_data=True)
+    linear_mod._mark_mxfp4_data_shuffled(w_shuffled)
+    if plain_rejected:
+        ref = linear_mod._gemm_mxfp4_fallback(a_fp4, w_fp4, a_scale, w_scale)
+    else:
+        assert linear_mod._mxfp4_probe_backends()
+        ref = linear_mod._MXFP4_BACKENDS["plain"](a_fp4, w_fp4, a_scale, w_scale)
+
+    def _rejected(*_args):
+        raise RuntimeError("backend rejected these operands in this test")
+
+    dispatch_mod._backend_cache.clear()
+    monkeypatch.setattr(linear_mod, "_FAST_QUANT_DISPATCH", False)
+    monkeypatch.setattr(linear_mod, "_mxfp4_choose_backend", lambda *_args: "asm")
+    monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "asm", _rejected)
+    monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "shuffled", _rejected)
+    if plain_rejected:
+        monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, "plain", _rejected)
+    try:
+        got = linear_mod.gemm_mxfp4_dispatch(a_fp4, w_shuffled, a_scale, w_scale)
+    finally:
+        dispatch_mod._backend_cache.clear()
+
+    torch.testing.assert_close(got, ref, atol=0, rtol=0)
+
+
 def test_mxfp4_configure_wires_tuned_table_and_cache(tmp_path):
     """configure() sets both env knobs, defers to ones already set, and merges."""
     cache = tmp_path / "autotune.json"
@@ -2391,17 +2432,20 @@ def test_mxfp4_configure_keeps_table_order_and_skips_missing(tmp_path):
         mxfp4_autotune.clear()
 
 
-def test_mxfp4_shape_log_records_all_three_gemms(tmp_path):
+@pytest.mark.parametrize("autotune", [True, False], ids=["autotune", "static"])
+def test_mxfp4_shape_log_records_all_three_gemms(tmp_path, monkeypatch, autotune):
     """The collector must see fprop, dgrad and wgrad from a single linear.
 
     This is what makes tuning generalise: the backward shapes permute the dims
     (a wgrad's M is the output width, its K is the token count) and are easy to
-    derive wrongly by hand.
+    derive wrongly by hand. With autotune off, operand producers memoize the
+    backward shapes' static choices before those GEMMs dispatch.
     """
     _require_mxfp4_dtype()
     from lumen.ops.quantize.linear import quantized_linear
 
     log = tmp_path / "shapes.csv"
+    monkeypatch.setattr(mxfp4_autotune, "AUTOTUNE_ENABLED", autotune)
     mxfp4_autotune.clear()
     original = mxfp4_autotune._SHAPE_LOG_PATH
     mxfp4_autotune._SHAPE_LOG_PATH = str(log)

@@ -22,7 +22,8 @@ layout, not arithmetic.
 Environment:
     ``LUMEN_MXFP4_AUTOTUNE=0``       fall back to the static byte thresholds
     ``LUMEN_MXFP4_AUTOTUNE_CACHE``   persist/reuse decisions when autotune is on
-    ``LUMEN_MXFP4_GEMM_SHAPE_LOG``   CSV to record every shape the model issues
+    ``LUMEN_MXFP4_GEMM_SHAPE_LOG``   CSV to record every shape the model issues;
+                                     with several ranks, only rank 0's shapes
 """
 
 import atexit
@@ -200,6 +201,11 @@ def _save_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
+def shape_log_enabled() -> bool:
+    """Whether ``LUMEN_MXFP4_GEMM_SHAPE_LOG`` is collecting shapes."""
+    return bool(_SHAPE_LOG_PATH)
+
+
 def record_shape(key: ShapeKey, tuned: bool, backend: str) -> None:
     """Note that the model issued this GEMM. Off unless the env var is set.
 
@@ -325,7 +331,7 @@ def _measure(key: ShapeKey, candidates: Sequence[Candidate]) -> str:
     if baseline is not None and timings[best] * _SWITCH_MARGIN > baseline:
         best = baseline_name
 
-    _logger.debug(
+    _logger.info(
         "MXFP4 autotune %dx%dx%d: %s -> %s",
         *key,
         ", ".join(f"{n}={timings[n]:.3f}ms" for n in sorted(timings, key=timings.get)),

@@ -437,6 +437,19 @@ def _enable_quantization_for_parallel_linear(
     When *quant_config* is provided, per-module ScalingManagers are created
     with this config (ensuring correct amax_algo, history_len, etc.).
     """
+    # LumenConfig rejects this pairing, but this is also a public entry point.
+    # Refuse before any global or module state changes.
+    if (
+        quant_config is not None
+        and not quant_config.mxfp4_quant_weight_selection.is_default
+    ):
+        raise ValueError(
+            "mxfp4_quant_weight_selection is not supported on Lumen's native "
+            "parallel linears, which are patched as indivisible modules; keep "
+            "the default selection, or disable lumen_linear so nn.Linear "
+            "layers are selected by weight name"
+        )
+
     from lumen.modules.attention_megatron import LumenDotProductAttention
     from lumen.modules.attention_mla import LumenDotProductAttentionMLA
     from lumen.modules.grouped_linear import LumenGroupedLinear
