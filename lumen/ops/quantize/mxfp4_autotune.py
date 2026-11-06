@@ -217,6 +217,9 @@ def record_shape(key: ShapeKey, tuned: bool, backend: str) -> None:
     """
     if not _SHAPE_LOG_PATH:
         return
+    # Static hits never reach pick_backend(), so an autotune-off run may record
+    # every shape without registering the hook that writes them at exit.
+    _register_hooks()
     with _lock:
         entry = _shape_log.get(key)
         if entry is None:

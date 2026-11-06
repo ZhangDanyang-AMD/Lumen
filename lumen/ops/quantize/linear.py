@@ -1824,8 +1824,17 @@ def gemm_mxfp4_dispatch(a_fp4, w_fp4, scale_a, scale_w):
     backends = []
     if probed:
         # Same choice, but keep the other kernels behind it so a backend that
-        # rejects these operands at runtime degrades instead of raising.
-        legal = ("asm", "shuffled") if shuffled_b else ("asm", "shuffled", "plain")
+        # rejects these operands at runtime degrades instead of raising. Only
+        # kernels legal for the shape qualify: the shuffled one asserts on a K
+        # it cannot tile and reads past the A scales on an M it cannot.
+        asm_ok, shuf_ok = _mxfp4_backend_legality(
+            (a_fp4.shape[0], w_fp4.shape[0], a_fp4.shape[1] * 2), a_fp4, w_fp4,
+        )
+        legal = [
+            label
+            for label, ok in (("asm", asm_ok), ("shuffled", shuf_ok), ("plain", not shuffled_b))
+            if ok
+        ]
         order = [name] + [n for n in legal if n != name]
         backends = [
             (
@@ -2026,17 +2035,18 @@ def _mxfp4_operands_fit_int32(input: torch.Tensor, weight: torch.Tensor) -> bool
     error surfaces from whatever happens to synchronize next rather than from
     the kernel that caused it. The shape simply must not be dispatched.
 
-    Checks all three products because the operands differ per pass: forward
+    Checks every operand's size because the operands differ per pass: forward
     reads M*K, dgrad reads M*N, wgrad reads both, and the weight is N*K.
     Backward runs over the token axis padded to target rows: the quantizers
-    read the M*N gradient only at its logical rows, but DGrad writes its M*K
-    output over every padded row.
+    read the M*N gradient only at its logical rows, but write its packed FP4
+    copies (two values per byte) over every padded row, and DGrad writes its
+    M*K output over every padded row.
     """
     k = input.shape[-1]
     rows = input.numel() // k if k else 0
     padded_rows = _mxfp4_wgrad_target_rows(rows)
     n = weight.shape[0]
-    return max(padded_rows * k, rows * n, n * k) < _MXFP4_MAX_OPERAND_ELEMS
+    return max(padded_rows * k, rows * n, padded_rows * n // 2, n * k) < _MXFP4_MAX_OPERAND_ELEMS
 
 
 class QuantizedLinearFunction(torch.autograd.Function):

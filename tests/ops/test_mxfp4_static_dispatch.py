@@ -146,6 +146,38 @@ def test_shuffled_b_recovers_through_rowmajor_kernels(
     assert len(restores) == 1, "restored B more than once in one call"
 
 
+@pytest.mark.parametrize(
+    "legality,tried_expected",
+    [((False, False), ["plain"]), ((False, True), ["plain", "shuffled"])],
+    ids=["no_other_legal_kernel", "shuffled_legal"],
+)
+def test_fallback_chain_skips_illegal_backends(monkeypatch, legality, tried_expected):
+    a_fp4, w_fp4 = _operands()
+    tried = []
+
+    def _rejected(label):
+        def run(*_args):
+            tried.append(label)
+            raise RuntimeError("backend rejected these operands in this test")
+
+        return run
+
+    dispatch_mod._backend_cache.clear()
+    monkeypatch.setattr(dispatch_mod, "_SKIP_BACKEND_SYNC", True)
+    monkeypatch.setattr(linear_mod, "_FAST_QUANT_DISPATCH", False)
+    monkeypatch.setattr(linear_mod, "_mxfp4_probe_backends", lambda: True)
+    monkeypatch.setattr(linear_mod, "_mxfp4_choose_backend", lambda *_args: "plain")
+    monkeypatch.setattr(linear_mod, "_mxfp4_backend_legality", lambda *_args: legality)
+    for label in ("asm", "shuffled", "plain"):
+        monkeypatch.setitem(linear_mod._MXFP4_BACKENDS, label, _rejected(label))
+    monkeypatch.setattr(linear_mod, "_gemm_mxfp4_fallback", lambda *_args: "dequant_bf16")
+    try:
+        assert linear_mod.gemm_mxfp4_dispatch(a_fp4, w_fp4, None, None) == "dequant_bf16"
+    finally:
+        dispatch_mod._backend_cache.clear()
+    assert tried == tried_expected
+
+
 def test_static_dispatch_hit_skips_runtime_probes(monkeypatch):
     a_fp4, w_fp4 = _operands()
     monkeypatch.setattr(mxfp4_autotune, "_capturing", lambda: False)
@@ -164,8 +196,11 @@ def test_producer_memoized_shape_reaches_shape_log(
 ):
     a_fp4, w_fp4 = _operands()
     log = tmp_path / "shapes.csv"
+    exit_hooks = []
     monkeypatch.setenv("RANK", "0")
     monkeypatch.setattr(mxfp4_autotune, "_SHAPE_LOG_PATH", str(log))
+    monkeypatch.setattr(mxfp4_autotune, "_hooks_registered", False)
+    monkeypatch.setattr(mxfp4_autotune.atexit, "register", exit_hooks.append)
     monkeypatch.setattr(
         linear_mod, "_mxfp4_static_backend_for_shape", lambda shape: "plain"
     )
@@ -187,6 +222,7 @@ def test_producer_memoized_shape_reaches_shape_log(
     assert mxfp4_autotune.cached_static(KEY) == "plain"
     for _ in range(2):
         assert linear_mod._mxfp4_choose_backend(a_fp4, w_fp4, None, None) == "plain"
+    assert mxfp4_autotune._save_shape_log in exit_hooks, "nothing writes the shape log at exit"
     mxfp4_autotune._save_shape_log()
 
     assert list(csv.DictReader(log.open())) == [
@@ -264,11 +300,13 @@ def test_wgrad_target_rows(monkeypatch):
         (9000, 4096, 151936, True),
         (15000, 4096, 151936, False),
         (98304, 18432, 7168, False),
+        (1, 32, 16_777_248, False),
     ],
     ids=[
         "gradient_read_at_logical_rows",
         "logical_gradient_past_int32",
         "dgrad_output_padded_past_int32",
+        "packed_gradient_padded_past_int32",
     ],
 )
 def test_int32_guard_counts_padded_rows(monkeypatch, rows, k, n, fits):
