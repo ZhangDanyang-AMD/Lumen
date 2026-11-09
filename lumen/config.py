@@ -67,6 +67,7 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "lumen_norm": ("lumen_norm",),
     "hf_attn_patch": ("hf_attn_patch",),
     "lumen_linear": ("lumen_linear",),
+    "aiter_conv": ("lumen_aiter_conv", "aiter_conv"),
     "fused_mlp": ("lumen_fused_mlp",),
     "fp8_activation_store": ("lumen_fp8_activation_store",),
     "cpu_offload": ("lumen_cpu_offload",),
@@ -134,6 +135,9 @@ class LumenConfig:
 
     # -- Tier 2: Linear GEMM patching (BF16) --
     lumen_linear: bool = False
+
+    # -- Tier 2: Conv2d patching (BF16/FP16 AITER Triton forward) --
+    aiter_conv: bool = False
 
     # -- Tier 3: Execution / fusion --
     fused_mlp: bool = False
@@ -203,6 +207,7 @@ class LumenConfig:
             or self.lumen_norm
             or self.hf_attn_patch
             or self.lumen_linear
+            or self.aiter_conv
             or self.fp8_param_manager
             or self.lora_rank > 0
             or self.fused_mlp
@@ -259,6 +264,10 @@ class LumenConfig:
         # 1c. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
+
+        # 1d. Conv2d patching (BF16/FP16 AITER Triton)
+        if self.aiter_conv:
+            self._patch_conv(model)
 
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
@@ -461,6 +470,14 @@ class LumenConfig:
         if count:
             _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
 
+    def _patch_conv(self, model) -> None:
+        """Replace supported ``nn.Conv2d`` forward with AITER Triton conv2d (autograd-safe)."""
+        from lumen.ops.conv import patch_conv2d
+
+        count = patch_conv2d(model)
+        if count:
+            _rank0_print(f"> Replaced {count} nn.Conv2d forward with AITER Triton conv2d")
+
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
 
@@ -603,6 +620,8 @@ class LumenConfig:
             parts.append("hf_attn_patch")
         if self.lumen_linear:
             parts.append("lumen_linear")
+        if self.aiter_conv:
+            parts.append("aiter_conv")
         if self.use_8bit_adam:
             parts.append("use_8bit_adam")
         tier3 = [
