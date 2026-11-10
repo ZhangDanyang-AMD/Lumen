@@ -155,6 +155,19 @@ def test_unsharded_dit_forward_runs_bf16_over_fp32_weights():
     assert not torch.is_autocast_enabled("cpu")
 
 
+def test_miopen_gemm_conv_off_only_on_listed_arch():
+    import train_dit_lumen
+
+    env = {}
+    assert not train_dit_lumen._disable_miopen_gemm_conv("gfx950", env)
+    assert env == {}
+    assert train_dit_lumen._disable_miopen_gemm_conv("gfx1250:sramecc+:xnack-", env)
+    assert env == {"MIOPEN_DEBUG_CONV_GEMM": "0"}
+    explicit = {"MIOPEN_DEBUG_CONV_GEMM": "1"}
+    assert not train_dit_lumen._disable_miopen_gemm_conv("gfx1250", explicit)
+    assert explicit == {"MIOPEN_DEBUG_CONV_GEMM": "1"}
+
+
 # --- rmsnorm -----------------------------------------------------------------------
 
 

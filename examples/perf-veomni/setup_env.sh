@@ -25,8 +25,10 @@ echo "=== 2/3  aiter overlay ==="
 # Two sets of files aiter does not ship: the triton modules `import lumen` needs
 # from Lumen's aiter fork, and the FlyDSL convolution of ROCm/aiter#5370 with
 # its tuned tables (plus Lumen's rows for conv_pad_in_kernel). Only files that
-# do not already exist are written -- nothing aiter ships is modified.
-python3 "$EXAMPLE_DIR/overlay_aiter.py" --apply
+# do not already exist are written -- nothing aiter ships is modified. With
+# AITER_DIR set, that checkout (and the sidecar flydsl it needs) is the aiter
+# the run imports, so it is the one overlaid.
+PYTHONPATH="${AITER_DIR:+$FLYDSL_SIDECAR:$AITER_DIR:}${PYTHONPATH:-}" python3 "$EXAMPLE_DIR/overlay_aiter.py" --apply
 
 echo
 echo "=== 3/3  VeOmni editable install ==="
@@ -62,7 +64,8 @@ if refused:
     sys.exit(0)
 rows = len(sys.modules['aiter.ops.flydsl.conv_kernels']._load_tuned_table()) if fn else 0
 print('aiter flydsl_conv_implicit:', 'available' if fn else 'MISSING', '(must be available)')
-print('aiter conv3d tuned rows   :', rows, '(86 = 76 from aiter + 10 for conv_pad_in_kernel)')
+print('aiter conv3d tuned rows   :', rows, '(image aiter + overlay: 86 = 76 from aiter + 10 for conv_pad_in_kernel)')
+print('aiter                     :', sys.modules['aiter'].__file__)
 assert fn is not None and rows > 0
 "
 echo

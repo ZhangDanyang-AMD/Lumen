@@ -478,10 +478,14 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 
 ### 3.11 Single MI450 GPU
 
-Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450 (gfx1250). Validated on one
-gfx1250 engineering sample: about 4.6 s/step over steps 2–5, and about 45.5 GB of whole-card memory in `amd-smi`
-(21.3 GB after the model loads; the figure includes the caching allocator). Neither compares with the 8-GPU table
-in §2.1.
+Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450 (gfx1250). **No run has reached
+10 steps yet.** On one gfx1250 engineering sample, with out-of-tree shims equivalent to the two behaviours below (BF16
+autocast on the DiT forward, wide-head SDPA on MATH), 5 of 10 steps completed: 7.4 s for step 1, about 4.6 s/step over
+steps 2–5, finite loss, and about 45.5 GB of whole-card memory in `amd-smi` (21.3 GB after the model loads; the figure
+includes the caching allocator). Step 6 hit a GPU page fault and the process hung (see the open questions at the end
+of this section). A component-level reproduction on another gfx1250 followed, one short process per piece: T5, the
+FP32 VAE (81 frames), and the DiT forward / backward / AdamW step each run clean; the BF16 VAE faults the same way on
+MIOpen, for the reason in the MIOpen item below. None of these figures compares with the 8-GPU table in §2.1.
 
 **Image.** The `amdagi/veomni:rocm7.14_torch2.12_py3.12` image of §3.1 has no gfx1250 kernels (gfx1250 is missing from
 `torch.cuda.get_arch_list()`), and the first GPU kernel fails with `hipErrorInvalidImage`. Use
@@ -517,8 +521,8 @@ the CUDA build and needs `libnvrtc.so.13`.
 ```bash
 dx 'apt-get update && apt-get install -y ffmpeg'
 dx 'pip install transformers==5.12.1 tokenizers==0.22.2 huggingface_hub==1.22.0 diffusers==0.37.0 \
-      datasets==3.6.0 wandb==0.27.2 blobfile av pyarrow ftfy imageio'
-dx 'pip install --no-deps timm torchdata accelerate liger-kernel==0.8.0 peft==0.18.1'
+      datasets==3.6.0 wandb==0.27.2 blobfile==3.2.0 av==16.0.1 pyarrow==21.0.0 ftfy==6.3.1 imageio'
+dx 'pip install --no-deps timm==1.0.27 torchdata==0.11.0 accelerate==1.9.0 liger-kernel==0.8.0 peft==0.18.1'
 dx 'pip install --no-deps --index-url https://download.pytorch.org/whl/cpu torchcodec==0.17.0+cpu'
 ```
 
@@ -526,10 +530,28 @@ dx 'pip install --no-deps --index-url https://download.pytorch.org/whl/cpu torch
 without it the run exits 5 s after starting.
 
 **Code, environment and data.** Follow §3.2, and from §3.3 only the Wan lines (model, Tom-and-Jerry download, subset,
-parquet conversion). On a card other than gfx950, the check at the end of `setup_env.sh` prints
-`aiter flydsl_conv_implicit: not for this GPU -- ...` and finishes normally: aiter's FlyDSL convolution supports
-gfx950 only (`SUPPORTED_GFX`; its MMA is a CDNA4 MFMA). aiter's `module_aiter_core` JIT fails on gfx1250 and aiter then
-reports "CK and HIP ops are disabled"; this path does not need them.
+parquet conversion). With the image's aiter, the check at the end of `setup_env.sh` prints
+`aiter flydsl_conv_implicit: not for this GPU -- ...` and finishes normally: that aiter's FlyDSL convolution supports
+gfx950 only (`SUPPORTED_GFX`; its MMA is a CDNA4 MFMA). To run the VAE convolutions on FlyDSL on gfx1250, see "VAE on
+aiter main's gfx1250 convolution" below.
+
+**VAE on aiter main's gfx1250 convolution (optional, for the `flydsl` mode).** aiter main's `flydsl_conv_implicit`
+supports gfx1250 (`SUPPORTED_GFX = ("gfx950", "gfx1250")`, a TDM + WMMA backend in `conv3d_gfx1250.py`) and ships a
+Wan2.1 tuned table at 368×544, `wan21_vae_gfx1250_bf16_tuned_conv3d.csv`. It needs flydsl 0.5.0. `AITER_DIR` puts
+that aiter ahead of the image's, and `FLYDSL_VERSION` makes the sidecar 0.5.0; the image itself is left alone:
+
+```bash
+dx 'git clone https://github.com/ROCm/aiter.git /work/aiter && git -C /work/aiter checkout fb372c9c0898b0ff57be62dd57492cb3117b2d34'
+G1250='export FLYDSL_VERSION=0.5.0 AITER_DIR=/work/aiter ENABLE_CK=0'
+dx "$G1250 && . $EX/env.sh && bash \$EXAMPLE_DIR/setup_env.sh"
+```
+
+Expected: `aiter flydsl_conv_implicit: available` and `aiter : /work/aiter/aiter/__init__.py`. The first `import aiter`
+JIT-builds `module_aiter_core` on the CPU (the validation used `ENABLE_CK=0`; about 13 s). Prefix the launch command
+with `$G1250` as well and use the `flydsl` mode (`vae_bf16,vae_conv_video`). Component-level validation (same image,
+same aiter, gfx1250): in an 81-frame 368×544 VAE encode, all 545 BF16 conv3d calls run on FlyDSL and hit the gfx1250
+table, and the latent's SNR against the FP32 encode is 48.8 dB (L1+L2 on gfx950: 50.7 dB), with no GPU error under
+serialised and asynchronous execution, for samples 0 and 5.
 
 **Launch:**
 
@@ -548,7 +570,7 @@ yaml and before your own arguments, so the same flag given at the end of the com
 | `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | one process does not enable FSDP in VeOmni (it needs `fsdp_size > 1`), and `fsdp2` requires `init_device=meta` |
 | `--train.init_device cuda` | `meta` | the non-FSDP path refuses `meta`; `cuda` is VeOmni's literal value and means the GPU on ROCm too |
 
-`train_dit_lumen.py` also does two things that do not depend on `LUMEN_PATCH`, so `baseline` gets them too:
+`train_dit_lumen.py` also does three things that do not depend on `LUMEN_PATCH`, so `baseline` gets them too:
 
 - **BF16 autocast on the DiT forward.** With mixed precision on, VeOmni builds the DiT in FP32 and leaves the BF16
   cast to FSDP2's `MixedPrecisionPolicy`. One GPU has no FSDP2, and Wan's text encoder loads in BF16, so step 1 fails
@@ -560,18 +582,29 @@ yaml and before your own arguments, so the same flag given at the end of the com
   single-head mid-block attention) fails on the mem-efficient backend with `hipErrorProfilerNotInitialized`, in FP32
   and BF16 alike; MATH runs it, and head_dim 128 runs on efficient and flash. Only calls with head_dim > 256 on
   gfx1250 go to MATH (`install_wide_head_math` in `veomni_patches/sdpa.py`).
+- **No MIOpen GEMM convolution solvers on gfx1250.** On the first call of a BF16 3×3×3 conv3d (the Wan VAE's
+  `1x96x6x370x546 → 96`, and the same at half the height), MIOpen's Find benchmarks `GemmFwdRest`, whose `Im3d2Col`
+  kernel reads out of bounds on gfx1250 (a TCP read permission fault) and hangs the GPU, although the solver it would
+  select is `ConvHipImplicitGemm3DGroupFwdXdlops`. FP32 Find does not try that solver. One conv3d reproduces it; with
+  `MIOPEN_DEBUG_CONV_GEMM=0` the single conv3d and the 81-frame BF16 VAE both run clean (the first call spends 10-odd
+  more seconds in Find). So gfx1250 gets `MIOPEN_DEBUG_CONV_GEMM=0` by default (`_disable_miopen_gemm_conv`); a value
+  already in the environment is left as is.
 
 Expected: `$LOG_DIR/wan-baseline.meta.txt` shows `nproc: 1   arch: gfx1250` and
 `1-proc args  : --train.global_batch_size 1 ...`; the log shows
-`[lumen] gfx1250: SDPA with head_dim > 256 runs on the MATH backend ...` and
+`[lumen] gfx1250: SDPA with head_dim > 256 runs on the MATH backend ...`,
+`[lumen] gfx1250: MIOPEN_DEBUG_CONV_GEMM=0 ...` and
 `[lumen] DiT is not under FSDP2: forward runs under torch.autocast(cuda, torch.bfloat16) over FP32 weights`, and the
 loss is finite.
 
 Notes:
 
-- Use `baseline`. The `flydsl` mode and `ladder.sh wan` from L2 on add `vae_conv_video`. On gfx1250 that no longer
-  fails; it logs `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...` and runs
-  every convolution on torch, so it measures no FlyDSL gain. The same applies to `verify_aiter_conv.py` in §3.4.
+- With the image's aiter, use `baseline`. The `flydsl` mode and `ladder.sh wan` from L2 on add `vae_conv_video`; that
+  no longer fails, it logs `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...`
+  and runs every convolution on torch, so it measures no FlyDSL gain. With aiter main as above, the `flydsl` mode's
+  convolutions run on the gfx1250 FlyDSL kernel.
+- Lumen's own rows for `conv_pad_in_kernel` (L3), `wan21_vae_padk_*`, are gfx950 only; on gfx1250 those shapes take
+  the heuristic tile.
 - One GPU is not sharded: the FP32 1.3B DiT with its gradients and AdamW state, about 21 GB, sits on one card. The
   21.2 GB in the §2.1 table is the sharded per-rank peak on 8 GPUs, not a single-GPU peak. MI450's 432 GiB holds it.
 - Keep gradient checkpointing on (do not add B2's `--train.gradient_checkpointing.enable false`): on 8 GPUs that
@@ -579,12 +612,18 @@ Notes:
 
 Open questions:
 
+- The GPU page fault at step 6. Kernel log: `[gfxhub0] no-retry page fault`, `Faulty UTCL2 client ID: TCP`,
+  `PERMISSION_FAULTS: 0x3` (read), then `MES ... failed to respond to msg=REMOVE_QUEUE`. The same fault on a BF16
+  conv3d is traced to MIOpen's `GemmFwdRest` (above), but that baseline run's VAE was FP32 and the FP32 VAE runs clean
+  alone, so whether the baseline fault had the same cause is not confirmed. On a host whose amdgpu is loaded with
+  `gpu_recovery=0 halt_if_hws_hang=1` the card stays hung: the process is stuck in the kernel, `amd-smi` hangs too,
+  and only a host reboot recovers it; with `gpu_recovery=1` the driver resets and recovers. Make sure you may reboot
+  the host before running.
 - `zhangdanyangamd/lumen:dev-gfx1250` is a development image and the dependencies above are added by hand; there is
   no gfx1250 image yet that ships them.
-- The wide-head SDPA failure belongs to this torch / ROCm; once a later version fixes it, `WIDE_HEAD_MATH_GFX` should
-  shrink.
-- The tuned tables only have `gfx950,256` rows. That does not affect this path, but any work to enable the FlyDSL
-  convolution on gfx1250 needs a new kernel and new tables.
+- The wide-head SDPA failure and MIOpen's `GemmFwdRest` fault belong to this torch / ROCm; once a later version fixes
+  them, `WIDE_HEAD_MATH_GFX` and `MIOPEN_GEMM_OFF_GFX` should shrink.
+- Step time and memory of aiter main's gfx1250 convolution in full training are not measured yet.
 
 ---
 

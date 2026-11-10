@@ -66,9 +66,9 @@ anything (see that package for what each one does and how it was measured):
 
 vae_conv* run aiter's FlyDSL convolution (ROCm/aiter#5370) with its tuned
 tables (veomni_patches/aiter_conv.py); the run refuses to start if it is
-unavailable, except on a card the kernel does not support (it is gfx950-only),
-where every convolution falls back to torch with a warning. Only `linear`
-imports the Lumen library.
+unavailable, except on a card the installed kernel does not support (gfx950
+only, unless aiter is new enough for gfx1250 as well), where every convolution
+falls back to torch with a warning. Only `linear` imports the Lumen library.
 
 The DiT is constructed under init_device=meta. The linear patch only rebinds
 `forward` and never touches weights, so it is safe there. vae_conv reads
@@ -92,8 +92,9 @@ Two things apply whatever LUMEN_PATCH says, baseline included, because without
 them the run does not start rather than runs slower. A DiT that FSDP2 does not
 wrap (one process, or fsdp_mode=ddp) runs its forward under BF16 autocast over
 FP32 weights; see _autocast_unsharded_dit. On gfx1250, SDPA calls wider than
-head_dim 256 go to the MATH backend; see veomni_patches.sdpa.install_wide_head_math.
-On 8 GPUs with FSDP2 on gfx950 neither does anything.
+head_dim 256 go to the MATH backend (veomni_patches.sdpa.install_wide_head_math)
+and MIOpen's GEMM convolution solvers are disabled (_disable_miopen_gemm_conv).
+On 8 GPUs with FSDP2 on gfx950 none of these does anything.
 
 Use run_10steps.sh or run_wan_10steps.sh rather than invoking this directly;
 they set every variable the comparison needs to hold fixed.
@@ -351,6 +352,25 @@ def _report_backends():
         _rank0(f"rmsnorm_fuse calls: {rmsnorm.stats()}")
 
 
+MIOPEN_GEMM_OFF_GFX = ("gfx1250",)
+
+
+def _disable_miopen_gemm_conv(gfx, environ=os.environ):
+    """Keep MIOpen off its GEMM convolution solvers on an arch in ``MIOPEN_GEMM_OFF_GFX``.
+
+    On gfx1250 with ROCm 10.2, MIOpen's Find benchmarks GemmFwdRest for a BF16
+    3x3x3 conv3d (the Wan VAE's 1x96x6x370x546 -> 96, and the same at half the
+    height) and its Im3d2Col kernel faults the GPU (TCP read permission fault,
+    then a GPU hang), even though ConvHipImplicitGemm3DGroupFwdXdlops would be
+    selected. FP32 Find does not try it. Must be set before the first MIOpen
+    call; an explicit MIOPEN_DEBUG_CONV_GEMM is left as given.
+    """
+    if gfx.split(":", 1)[0] not in MIOPEN_GEMM_OFF_GFX or "MIOPEN_DEBUG_CONV_GEMM" in environ:
+        return False
+    environ["MIOPEN_DEBUG_CONV_GEMM"] = "0"
+    return True
+
+
 def _install_arch_workarounds():
     """Workarounds a device needs whatever LUMEN_PATCH says, so the baseline gets them too."""
     import torch
@@ -363,6 +383,8 @@ def _install_arch_workarounds():
 
     if install_wide_head_math(gfx):
         _rank0(f"{gfx}: SDPA with head_dim > 256 runs on the MATH backend (mem-efficient fails there)")
+    if _disable_miopen_gemm_conv(gfx):
+        _rank0(f"{gfx}: MIOPEN_DEBUG_CONV_GEMM=0 (MIOpen's BF16 GemmFwdRest conv3d faults the GPU there)")
 
 
 class _AutocastForward:
