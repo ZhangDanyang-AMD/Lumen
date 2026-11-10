@@ -478,24 +478,28 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 
 ### 3.11 Single MI450 GPU
 
-Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450. The arch name is gfx1250,
-as `experiments/flydsl-agent` in this repository labels it. **This path has not been validated on MI450 hardware**;
-the open questions are listed at the end of this section.
+Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450 (gfx1250). Validated on one
+gfx1250 engineering sample: about 4.6 s/step over steps 2–5, and about 45.5 GB of whole-card memory in `amd-smi`
+(21.3 GB after the model loads; the figure includes the caching allocator). Neither compares with the 8-GPU table
+in §2.1.
 
-Container (only the visible devices and the arch differ from §3.1):
+**Image.** The `amdagi/veomni:rocm7.14_torch2.12_py3.12` image of §3.1 has no gfx1250 kernels (gfx1250 is missing from
+`torch.cuda.get_arch_list()`), and the first GPU kernel fails with `hipErrorInvalidImage`. Use
+`zhangdanyangamd/lumen:dev-gfx1250` instead (torch `2.14.0+rocm10.2.0`, `arch_list=['gfx1250']`). Its `/etc/group` has
+no `render` group, so pass the host's numeric GID:
 
 ```bash
 export ROOT=/path/to/fast-storage/perf-veomni
 mkdir -p "$ROOT"
-docker pull amdagi/veomni:rocm7.14_torch2.12_py3.12
+docker pull zhangdanyangamd/lumen:dev-gfx1250
 docker run -d --name perf-veomni \
-  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+  --device /dev/kfd --device /dev/dri --group-add video --group-add "$(getent group render | cut -d: -f3)" \
   --ipc host --shm-size 32g --cap-add SYS_PTRACE \
   --security-opt seccomp=unconfined --security-opt label=disable --ulimit memlock=-1:-1 \
   -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES=0 \
   -e PYTORCH_ROCM_ARCH=gfx1250 \
   -v "$ROOT":/work -w /work \
-  amdagi/veomni:rocm7.14_torch2.12_py3.12 sleep infinity
+  zhangdanyangamd/lumen:dev-gfx1250 sleep infinity
 
 dx() { docker exec -w /work perf-veomni bash -lc "$*"; }
 export EX=/work/Lumen/examples/perf-veomni
@@ -504,12 +508,30 @@ export EX=/work/Lumen/examples/perf-veomni
 To expose only one card at the docker level, replace `--device /dev/dri` with that card's
 `--device /dev/dri/renderD<N>`; inside the container it is still device 0.
 
-Code, environment and data: follow §3.2, and from §3.3 only the Wan lines (model, Tom-and-Jerry download, subset,
-parquet conversion). On a card other than gfx950, the check at the end of `setup_env.sh` prints
-`aiter flydsl_conv_implicit: not for this GPU -- ...` and finishes normally instead of requiring the convolution:
-aiter's FlyDSL convolution supports gfx950 only (`SUPPORTED_GFX`; its MMA is a CDNA4 MFMA).
+**Extra dependencies.** The image lacks VeOmni's and diffusers' dependencies, and its transformers is 4.57.1 (VeOmni
+needs 5.x). The versions below are the ones the validation used. Leave torch, torchvision and triton as the image
+ships them: install everything that depends on torch with `--no-deps` (the image's torch metadata asks for triton
+3.8.0 while 3.9.0 is installed, so normal resolution fails), and take torchcodec's CPU build, because the PyPI one is
+the CUDA build and needs `libnvrtc.so.13`.
 
-Launch:
+```bash
+dx 'apt-get update && apt-get install -y ffmpeg'
+dx 'pip install transformers==5.12.1 tokenizers==0.22.2 huggingface_hub==1.22.0 diffusers==0.37.0 \
+      datasets==3.6.0 wandb==0.27.2 blobfile av pyarrow ftfy imageio'
+dx 'pip install --no-deps timm torchdata accelerate liger-kernel==0.8.0 peft==0.18.1'
+dx 'pip install --no-deps --index-url https://download.pytorch.org/whl/cpu torchcodec==0.17.0+cpu'
+```
+
+`liger-kernel` is needed by VeOmni's default cross-entropy implementation (`cross_entropy_loss_implementation=liger_kernel`);
+without it the run exits 5 s after starting.
+
+**Code, environment and data.** Follow §3.2, and from §3.3 only the Wan lines (model, Tom-and-Jerry download, subset,
+parquet conversion). On a card other than gfx950, the check at the end of `setup_env.sh` prints
+`aiter flydsl_conv_implicit: not for this GPU -- ...` and finishes normally: aiter's FlyDSL convolution supports
+gfx950 only (`SUPPORTED_GFX`; its MMA is a CDNA4 MFMA). aiter's `module_aiter_core` JIT fails on gfx1250 and aiter then
+reports "CK and HIP ops are disabled"; this path does not need them.
+
+**Launch:**
 
 ```bash
 dx ". $EX/env.sh && NPROC_PER_NODE=1 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx1250 \
@@ -526,26 +548,41 @@ yaml and before your own arguments, so the same flag given at the end of the com
 | `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | one process does not enable FSDP in VeOmni (it needs `fsdp_size > 1`), and `fsdp2` requires `init_device=meta` |
 | `--train.init_device cuda` | `meta` | the non-FSDP path refuses `meta`; `cuda` is VeOmni's literal value and means the GPU on ROCm too |
 
-Expected: `$LOG_DIR/wan-baseline.meta.txt` shows `nproc: 1   arch: gfx1250`, `1-proc args  : --train.global_batch_size 1 ...`
-and `EXIT_CODE    : 0`, and the log reaches step 10.
+`train_dit_lumen.py` also does two things that do not depend on `LUMEN_PATCH`, so `baseline` gets them too:
+
+- **BF16 autocast on the DiT forward.** With mixed precision on, VeOmni builds the DiT in FP32 and leaves the BF16
+  cast to FSDP2's `MixedPrecisionPolicy`. One GPU has no FSDP2, and Wan's text encoder loads in BF16, so step 1 fails
+  in `condition_embedder.time_proj` with `mat1 and mat2 must have the same dtype`; turning mixed precision off hits
+  FP32 latents against a BF16 bias instead (see `wan_video.yaml`). So when the DiT is not under FSDP2 (one GPU, or
+  `fsdp_mode=ddp`), its forward runs under `torch.autocast(bfloat16)`: parameters, gradients and AdamW state in FP32,
+  matmuls in BF16, the same split as on 8 GPUs. The condition model runs outside that context.
+- **Wide-head SDPA on MATH on gfx1250.** With this torch (2.14 / ROCm 10.2) on gfx1250, head_dim 384 (the Wan VAE's
+  single-head mid-block attention) fails on the mem-efficient backend with `hipErrorProfilerNotInitialized`, in FP32
+  and BF16 alike; MATH runs it, and head_dim 128 runs on efficient and flash. Only calls with head_dim > 256 on
+  gfx1250 go to MATH (`install_wide_head_math` in `veomni_patches/sdpa.py`).
+
+Expected: `$LOG_DIR/wan-baseline.meta.txt` shows `nproc: 1   arch: gfx1250` and
+`1-proc args  : --train.global_batch_size 1 ...`; the log shows
+`[lumen] gfx1250: SDPA with head_dim > 256 runs on the MATH backend ...` and
+`[lumen] DiT is not under FSDP2: forward runs under torch.autocast(cuda, torch.bfloat16) over FP32 weights`, and the
+loss is finite.
 
 Notes:
 
 - Use `baseline`. The `flydsl` mode and `ladder.sh wan` from L2 on add `vae_conv_video`. On gfx1250 that no longer
   fails; it logs `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...` and runs
   every convolution on torch, so it measures no FlyDSL gain. The same applies to `verify_aiter_conv.py` in §3.4.
-- One GPU has no FSDP2 `MixedPrecisionPolicy` and VeOmni adds no autocast, so the DiT computes in FP32 (8 GPUs
-  compute in BF16 with FP32 master weights). Neither step time nor memory compares with the 8-GPU table in §2.1; its
-  21.2 GB is the sharded per-rank peak, not a single-GPU peak.
+- One GPU is not sharded: the FP32 1.3B DiT with its gradients and AdamW state, about 21 GB, sits on one card. The
+  21.2 GB in the §2.1 table is the sharded per-rank peak on 8 GPUs, not a single-GPU peak. MI450's 432 GiB holds it.
 - Keep gradient checkpointing on (do not add B2's `--train.gradient_checkpointing.enable false`): on 8 GPUs that
   raises the peak from 21.2 GB to 70.9 GB.
 
-Open questions (to confirm on MI450):
+Open questions:
 
-- Whether the image `amdagi/veomni:rocm7.14_torch2.12_py3.12` supports gfx1250.
-- Whether the flydsl 0.3.2 sidecar installs and imports on gfx1250; if not, `setup_env.sh` fails at step 1.
-- Whether MI450's memory holds the FP32 1.3B DiT (weights, gradients and AdamW state, about 21 GB) plus 81-frame
-  activations, the VAE and the text encoder.
+- `zhangdanyangamd/lumen:dev-gfx1250` is a development image and the dependencies above are added by hand; there is
+  no gfx1250 image yet that ships them.
+- The wide-head SDPA failure belongs to this torch / ROCm; once a later version fixes it, `WIDE_HEAD_MATH_GFX` should
+  shrink.
 - The tuned tables only have `gfx950,256` rows. That does not affect this path, but any work to enable the FlyDSL
   convolution on gfx1250 needs a new kernel and new tables.
 

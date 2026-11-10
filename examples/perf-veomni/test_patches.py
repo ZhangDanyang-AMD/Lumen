@@ -99,6 +99,62 @@ def test_triton_forward_routes_dit_attention_only():
         sdpa.uninstall_triton_forward()
 
 
+def test_wide_head_math_only_on_listed_arch():
+    from veomni_patches import sdpa
+
+    stock = F.scaled_dot_product_attention
+    assert not sdpa.install_wide_head_math("gfx950")
+    assert F.scaled_dot_product_attention is stock
+    assert sdpa.install_wide_head_math("gfx1250:sramecc+:xnack-")
+    try:
+        torch.manual_seed(0)
+        wide = [torch.randn(1, 1, 64, 384) for _ in range(3)]
+        narrow = [torch.randn(1, 4, 64, 128) for _ in range(3)]
+        calls = sdpa.wide_head_math_calls()
+        assert torch.allclose(F.scaled_dot_product_attention(*wide), stock(*wide), atol=1e-5)
+        assert sdpa.wide_head_math_calls() == calls + 1
+        assert torch.equal(F.scaled_dot_product_attention(*narrow), stock(*narrow))
+        assert sdpa.wide_head_math_calls() == calls + 1
+    finally:
+        sdpa.uninstall_wide_head_math()
+    assert F.scaled_dot_product_attention is stock
+
+
+# --- train_dit_lumen: unsharded DiT autocast (CPU) ------------------------------------
+
+
+def test_unsharded_dit_forward_runs_bf16_over_fp32_weights():
+    import contextlib
+
+    import train_dit_lumen
+
+    model = torch.nn.Linear(16, 16)
+    mp = types.SimpleNamespace(enable=True, param_dtype="bfloat16")
+    accelerator = types.SimpleNamespace(fsdp_config=types.SimpleNamespace(mixed_precision=mp))
+    args = types.SimpleNamespace(train=types.SimpleNamespace(accelerator=accelerator))
+
+    def trainer():
+        base = types.SimpleNamespace(args=args, model=model, model_fwd_context=contextlib.nullcontext())
+        return types.SimpleNamespace(base=base)
+
+    text = torch.randn(2, 16, dtype=torch.bfloat16)
+    with pytest.raises(RuntimeError, match="dtype"):
+        model(text)
+
+    sharded = trainer()
+    assert not train_dit_lumen._autocast_unsharded_dit(sharded, fsdp2=True)
+    assert isinstance(sharded.base.model_fwd_context, contextlib.nullcontext)
+
+    single = trainer()
+    assert train_dit_lumen._autocast_unsharded_dit(single, fsdp2=False)
+    for _ in range(2):  # entered once per step
+        with single.base.model_fwd_context:
+            out = model(text)
+        assert out.dtype is torch.bfloat16
+    assert model.weight.dtype is torch.float32
+    assert not torch.is_autocast_enabled("cpu")
+
+
 # --- rmsnorm -----------------------------------------------------------------------
 
 

@@ -88,6 +88,13 @@ data-loading configurations can be shown to feed identical bytes in identical
 order (compare_batch_hash.py) -- the only way to show it on Wan, whose loss does
 not reproduce run to run. It copies every sample to the host; never time it.
 
+Two things apply whatever LUMEN_PATCH says, baseline included, because without
+them the run does not start rather than runs slower. A DiT that FSDP2 does not
+wrap (one process, or fsdp_mode=ddp) runs its forward under BF16 autocast over
+FP32 weights; see _autocast_unsharded_dit. On gfx1250, SDPA calls wider than
+head_dim 256 go to the MATH backend; see veomni_patches.sdpa.install_wide_head_math.
+On 8 GPUs with FSDP2 on gfx950 neither does anything.
+
 Use run_10steps.sh or run_wan_10steps.sh rather than invoking this directly;
 they set every variable the comparison needs to hold fixed.
 """
@@ -344,7 +351,68 @@ def _report_backends():
         _rank0(f"rmsnorm_fuse calls: {rmsnorm.stats()}")
 
 
+def _install_arch_workarounds():
+    """Workarounds a device needs whatever LUMEN_PATCH says, so the baseline gets them too."""
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+    props = torch.cuda.get_device_properties(int(os.environ.get("LOCAL_RANK", "0")))
+    gfx = getattr(props, "gcnArchName", "")
+    from veomni_patches.sdpa import install_wide_head_math
+
+    if install_wide_head_math(gfx):
+        _rank0(f"{gfx}: SDPA with head_dim > 256 runs on the MATH backend (mem-efficient fails there)")
+
+
+class _AutocastForward:
+    """``inner`` (the trainer's forward context, entered every step) inside a fresh autocast."""
+
+    def __init__(self, inner, device_type, dtype):
+        self.inner, self.device_type, self.dtype = inner, device_type, dtype
+
+    def __enter__(self):
+        import contextlib
+
+        import torch
+
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(torch.autocast(self.device_type, dtype=self.dtype))
+        return self._stack.enter_context(self.inner)
+
+    def __exit__(self, *exc):
+        return self._stack.__exit__(*exc)
+
+
+def _autocast_unsharded_dit(trainer, fsdp2):
+    """BF16 compute over FP32 master weights for a DiT that FSDP2 does not wrap.
+
+    With mixed precision on, VeOmni builds the DiT in FP32 and leaves the cast
+    to FSDP2's MixedPrecisionPolicy. One process does not enable FSDP, and DDP
+    has no such policy, so the DiT would stay FP32 while the condition model's
+    text embeddings are BF16 (the Wan text encoder loads in BF16), and the first
+    forward fails in condition_embedder.time_proj with "mat1 and mat2 must have
+    the same dtype". Turning mixed precision off does not help: the DiT is then
+    BF16 and meets the FP32 latents instead (see wan_video.yaml). Autocast
+    around the DiT forward -- the condition model runs outside this context --
+    gives the same split as FSDP2: FP32 parameters, gradients and optimizer
+    state, BF16 matmuls in param_dtype.
+    """
+    import torch
+
+    mp = trainer.base.args.train.accelerator.fsdp_config.mixed_precision
+    model = getattr(trainer.base, "model", None)
+    if fsdp2 or not mp.enable or model is None or not hasattr(trainer.base, "model_fwd_context"):
+        return False
+    dtype = getattr(torch, mp.param_dtype)
+    device_type = next(model.parameters()).device.type
+    trainer.base.model_fwd_context = _AutocastForward(trainer.base.model_fwd_context, device_type, dtype)
+    _rank0(f"DiT is not under FSDP2: forward runs under torch.autocast({device_type}, {dtype}) over FP32 weights")
+    return True
+
+
 def _install_hook():
+    _install_arch_workarounds()
     time_vae = os.environ.get("LUMEN_TIME_VAE", "") not in ("", "0")
     if os.environ.get("LUMEN_BATCH_HASH", "") not in ("", "0"):
         _install_batch_hash()
@@ -412,10 +480,13 @@ if __name__ == "__main__":
     _install_hook()
 
     from veomni.arguments import parse_args
+    from veomni.distributed.parallel_state import get_parallel_state
     from veomni.trainer.dit_trainer import DiTTrainer, VeOmniDiTArguments
 
     args = parse_args(VeOmniDiTArguments)
     trainer = DiTTrainer(args)
+    ps = get_parallel_state()
+    _autocast_unsharded_dit(trainer, fsdp2=ps.fsdp_enabled and ps.dp_mode == "fsdp2")
     _t0 = time.time()
     trainer.train()
     _report_vae_time(time.time() - _t0)
