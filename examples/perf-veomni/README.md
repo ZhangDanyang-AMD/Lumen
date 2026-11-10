@@ -438,6 +438,71 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | Qwen `offline_training` 首步 `'NoneType' ... 'config'` | VeOmni 缺陷 | 在 `LUMEN_PATCH` 中加 `qwen_offline_fix` |
 | Wan 首次运行长时间停在第 1 步 | 22 个卷积形状的 FlyDSL JIT | 等待编译完成；磁盘缓存会被后续运行复用 |
 
+### 3.11 MI450 单卡运行
+
+在 1 张 AMD Instinct MI450 上跑 Wan2.1-T2V-1.3B 在线训练（`WAN_TASK=online_training`）。架构名按同仓库
+`experiments/flydsl-agent` 的标注取 gfx1250。**这条路径尚未在 MI450 硬件上验证**，未知项见本节末尾。
+
+容器（与 §3.1 相比只改了可见设备和架构）：
+
+```bash
+export ROOT=/path/to/fast-storage/perf-veomni
+mkdir -p "$ROOT"
+docker pull amdagi/veomni:rocm7.14_torch2.12_py3.12
+docker run -d --name perf-veomni \
+  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+  --ipc host --shm-size 32g --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --security-opt label=disable --ulimit memlock=-1:-1 \
+  -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES=0 \
+  -e PYTORCH_ROCM_ARCH=gfx1250 \
+  -v "$ROOT":/work -w /work \
+  amdagi/veomni:rocm7.14_torch2.12_py3.12 sleep infinity
+
+dx() { docker exec -w /work perf-veomni bash -lc "$*"; }
+export EX=/work/Lumen/examples/perf-veomni
+```
+
+若要在 docker 层面只暴露一张卡，把 `--device /dev/dri` 换成该卡的 `--device /dev/dri/renderD<N>`，容器内它仍是 0 号。
+
+代码、环境与数据：按 §3.2 执行；§3.3 只需要 Wan 那几行（模型、Tom-and-Jerry 下载、子集、parquet 转换）。
+在非 gfx950 的卡上，`setup_env.sh` 的检查会打印 `aiter flydsl_conv_implicit: not for this GPU -- ...` 并正常结束，
+而不是要求卷积可用：aiter 的 FlyDSL 卷积只支持 gfx950（`SUPPORTED_GFX`，MMA 为 CDNA4 的 MFMA）。
+
+启动：
+
+```bash
+dx ". $EX/env.sh && NPROC_PER_NODE=1 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx1250 \
+      WAN_TASK=online_training bash \$EXAMPLE_DIR/run_wan_10steps.sh baseline"
+```
+
+`NPROC_PER_NODE`、两个可见性变量和 `PYTORCH_ROCM_ARCH` 都从环境读取，默认仍是 8 卡 gfx950。`NPROC_PER_NODE=1`
+时 `run_wan_10steps.sh` 自动在 yaml 之后、用户参数之前追加三项覆盖（在命令末尾再写同名参数仍以用户的为准）：
+
+| 覆盖 | yaml 原值 | 原因 |
+|---|---|---|
+| `--train.global_batch_size 1` | 8 | 每步每卡 1 行，与脚本的行数检查 `STEPS × NPROC` 一致；留 8 会变成 8 次梯度累积 |
+| `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | 1 个进程时 VeOmni 不启用 FSDP（`fsdp_size > 1` 才启用），而 `fsdp2` 强制 `init_device=meta` |
+| `--train.init_device cuda` | `meta` | 非 FSDP 路径拒绝 `meta`；`cuda` 是 VeOmni 的字面值，ROCm 上同样指 GPU |
+
+期望：`$LOG_DIR/wan-baseline.meta.txt` 里有 `nproc: 1   arch: gfx1250`、`1-proc args  : --train.global_batch_size 1 ...`
+和 `EXIT_CODE    : 0`，日志跑满 10 步。
+
+注意：
+
+- 用 `baseline`。`flydsl` 模式和 `ladder.sh wan` 的 L2 起会加 `vae_conv_video`；在 gfx1250 上它不再报错，而是打印
+  `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...` 后全部回退到 torch，
+  因此测不到任何 FlyDSL 收益。§3.4 的 `verify_aiter_conv.py` 同理不适用。
+- 单卡没有 FSDP2 的 `MixedPrecisionPolicy`，VeOmni 也不加 autocast，所以 DiT 以 FP32 计算（8 卡是 BF16 计算、FP32
+  主权重）。步时与显存都不能和 §2.1 的 8 卡表比较；表中 21.2 GB 是分片后的单 rank 峰值，不是单卡峰值。
+- 不要关梯度检查点（B2 的 `--train.gradient_checkpointing.enable false`）：8 卡上它把峰值从 21.2 GB 推到 70.9 GB。
+
+未知项（待在 MI450 上确认）：
+
+- 镜像 `amdagi/veomni:rocm7.14_torch2.12_py3.12` 是否支持 gfx1250。
+- flydsl 0.3.2 sidecar 能否在 gfx1250 上安装和 import；不能的话 `setup_env.sh` 在第 1 步失败。
+- MI450 的显存能否放下 FP32 的 1.3B DiT（权重、梯度、AdamW 状态约 21 GB）加 81 帧激活、VAE 和文本编码器。
+- 调优表只有 `gfx950,256` 的行，与本路径无关，但任何在 gfx1250 上启用 FlyDSL 卷积的工作都需要新的 kernel 和表。
+
 ---
 
 ## 4. 文件索引
@@ -445,7 +510,7 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | 文件 | 作用 |
 |---|---|
 | `ladder.sh` | 三级阶梯的全部级定义与按轮次交替的重复 |
-| `run_10steps.sh` / `run_wan_10steps.sh` | 单次 8 卡 10 步运行；`custom` 模式读取 `LUMEN_PATCH`，其余参数透传给 VeOmni |
+| `run_10steps.sh` / `run_wan_10steps.sh` | 单次 8 卡 10 步运行；`custom` 模式读取 `LUMEN_PATCH`，其余参数透传给 VeOmni；卡数、可见设备、架构可由环境覆盖（单卡见 §3.11） |
 | `profile.sh` | 用 VeOmni 自带的 profiler 采任一级的 trace |
 | `train_dit_lumen.py` | VeOmni 训练入口的包装：按 `LUMEN_PATCH` 装配补丁，并报告卷积实现、查表与路由计数 |
 | `lumen_vae_conv.py` | VAE 卷积改写：T=1 精确转 conv2d、T>1 替换底层 kernel、padding 交给 kernel |

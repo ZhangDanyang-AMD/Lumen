@@ -476,6 +476,79 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | Qwen `offline_training` fails on step 1 with `'NoneType' ... 'config'` | VeOmni defect | add `qwen_offline_fix` to `LUMEN_PATCH` |
 | Wan's first run sits on step 1 for a long time | FlyDSL JIT of 22 convolution shapes | wait; the disk cache is reused by later runs |
 
+### 3.11 Single MI450 GPU
+
+Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450. The arch name is gfx1250,
+as `experiments/flydsl-agent` in this repository labels it. **This path has not been validated on MI450 hardware**;
+the open questions are listed at the end of this section.
+
+Container (only the visible devices and the arch differ from §3.1):
+
+```bash
+export ROOT=/path/to/fast-storage/perf-veomni
+mkdir -p "$ROOT"
+docker pull amdagi/veomni:rocm7.14_torch2.12_py3.12
+docker run -d --name perf-veomni \
+  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+  --ipc host --shm-size 32g --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --security-opt label=disable --ulimit memlock=-1:-1 \
+  -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES=0 \
+  -e PYTORCH_ROCM_ARCH=gfx1250 \
+  -v "$ROOT":/work -w /work \
+  amdagi/veomni:rocm7.14_torch2.12_py3.12 sleep infinity
+
+dx() { docker exec -w /work perf-veomni bash -lc "$*"; }
+export EX=/work/Lumen/examples/perf-veomni
+```
+
+To expose only one card at the docker level, replace `--device /dev/dri` with that card's
+`--device /dev/dri/renderD<N>`; inside the container it is still device 0.
+
+Code, environment and data: follow §3.2, and from §3.3 only the Wan lines (model, Tom-and-Jerry download, subset,
+parquet conversion). On a card other than gfx950, the check at the end of `setup_env.sh` prints
+`aiter flydsl_conv_implicit: not for this GPU -- ...` and finishes normally instead of requiring the convolution:
+aiter's FlyDSL convolution supports gfx950 only (`SUPPORTED_GFX`; its MMA is a CDNA4 MFMA).
+
+Launch:
+
+```bash
+dx ". $EX/env.sh && NPROC_PER_NODE=1 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx1250 \
+      WAN_TASK=online_training bash \$EXAMPLE_DIR/run_wan_10steps.sh baseline"
+```
+
+`NPROC_PER_NODE`, the two visibility variables and `PYTORCH_ROCM_ARCH` are all read from the environment; the
+defaults are still 8 GPUs on gfx950. With `NPROC_PER_NODE=1`, `run_wan_10steps.sh` adds three overrides after the
+yaml and before your own arguments, so the same flag given at the end of the command still wins:
+
+| Override | yaml value | Why |
+|---|---|---|
+| `--train.global_batch_size 1` | 8 | one row per rank per step, which is what the runner's `STEPS × NPROC` row check counts; 8 would mean eight accumulation steps |
+| `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | one process does not enable FSDP in VeOmni (it needs `fsdp_size > 1`), and `fsdp2` requires `init_device=meta` |
+| `--train.init_device cuda` | `meta` | the non-FSDP path refuses `meta`; `cuda` is VeOmni's literal value and means the GPU on ROCm too |
+
+Expected: `$LOG_DIR/wan-baseline.meta.txt` shows `nproc: 1   arch: gfx1250`, `1-proc args  : --train.global_batch_size 1 ...`
+and `EXIT_CODE    : 0`, and the log reaches step 10.
+
+Notes:
+
+- Use `baseline`. The `flydsl` mode and `ladder.sh wan` from L2 on add `vae_conv_video`. On gfx1250 that no longer
+  fails; it logs `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...` and runs
+  every convolution on torch, so it measures no FlyDSL gain. The same applies to `verify_aiter_conv.py` in §3.4.
+- One GPU has no FSDP2 `MixedPrecisionPolicy` and VeOmni adds no autocast, so the DiT computes in FP32 (8 GPUs
+  compute in BF16 with FP32 master weights). Neither step time nor memory compares with the 8-GPU table in §2.1; its
+  21.2 GB is the sharded per-rank peak, not a single-GPU peak.
+- Keep gradient checkpointing on (do not add B2's `--train.gradient_checkpointing.enable false`): on 8 GPUs that
+  raises the peak from 21.2 GB to 70.9 GB.
+
+Open questions (to confirm on MI450):
+
+- Whether the image `amdagi/veomni:rocm7.14_torch2.12_py3.12` supports gfx1250.
+- Whether the flydsl 0.3.2 sidecar installs and imports on gfx1250; if not, `setup_env.sh` fails at step 1.
+- Whether MI450's memory holds the FP32 1.3B DiT (weights, gradients and AdamW state, about 21 GB) plus 81-frame
+  activations, the VAE and the text encoder.
+- The tuned tables only have `gfx950,256` rows. That does not affect this path, but any work to enable the FlyDSL
+  convolution on gfx1250 needs a new kernel and new tables.
+
 ---
 
 ## 4. Files
@@ -483,7 +556,7 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | File | Purpose |
 |---|---|
 | `ladder.sh` | every ladder level, and repeats run round by round |
-| `run_10steps.sh` / `run_wan_10steps.sh` | one 8-GPU 10-step run; `custom` mode reads `LUMEN_PATCH` and passes the rest through to VeOmni |
+| `run_10steps.sh` / `run_wan_10steps.sh` | one 8-GPU 10-step run; `custom` mode reads `LUMEN_PATCH` and passes the rest through to VeOmni; GPU count, visible devices and arch can be overridden from the environment (one GPU: §3.11) |
 | `profile.sh` | a trace of any level with VeOmni's built-in profiler |
 | `train_dit_lumen.py` | wrapper around VeOmni's training entry: applies the patches from `LUMEN_PATCH`, and reports the convolution implementation, table lookups and routing counts |
 | `lumen_vae_conv.py` | VAE convolution rewrites: exact T=1 → conv2d, kernel swap under T>1, padding in the kernel |

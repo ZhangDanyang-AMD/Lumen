@@ -66,7 +66,9 @@ anything (see that package for what each one does and how it was measured):
 
 vae_conv* run aiter's FlyDSL convolution (ROCm/aiter#5370) with its tuned
 tables (veomni_patches/aiter_conv.py); the run refuses to start if it is
-unavailable. Only `linear` imports the Lumen library.
+unavailable, except on a card the kernel does not support (it is gfx950-only),
+where every convolution falls back to torch with a warning. Only `linear`
+imports the Lumen library.
 
 The DiT is constructed under init_device=meta. The linear patch only rebinds
 `forward` and never touches weights, so it is safe there. vae_conv reads
@@ -186,6 +188,12 @@ def _patch_vae_conv(trainer, video):
 
     from veomni_patches import aiter_conv
 
+    # The kernel is written for one MFMA, so on any other card there is no
+    # FlyDSL path to measure; the run still trains, on torch convolutions.
+    refused = aiter_conv.unsupported_arch()
+    if refused:
+        _rank0(f"{who} WARNING: {refused} Every convolution falls back to torch; this run measures no FlyDSL kernel.")
+        return
     if aiter_conv.load() is None:
         raise SystemExit(
             f"[lumen] {who}: aiter's flydsl_conv_implicit is unavailable, so every call would run on torch. "

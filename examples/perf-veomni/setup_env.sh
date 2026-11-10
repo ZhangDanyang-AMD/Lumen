@@ -53,6 +53,13 @@ PYTHONPATH="$EXAMPLE_DIR:$LUMEN_PYTHONPATH" python3 -c "
 import sys
 from veomni_patches import aiter_conv
 fn = aiter_conv.load()
+refused = aiter_conv.unsupported_arch()
+if refused:
+    # Not a setup failure: baseline and bf16-only never call the kernel, and the
+    # vae_conv* patches fall back to torch on this card.
+    print('aiter flydsl_conv_implicit: not for this GPU --', refused)
+    print('                            vae_conv* patches will run on torch; use run_wan_10steps.sh baseline')
+    sys.exit(0)
 rows = len(sys.modules['aiter.ops.flydsl.conv_kernels']._load_tuned_table()) if fn else 0
 print('aiter flydsl_conv_implicit:', 'available' if fn else 'MISSING', '(must be available)')
 print('aiter conv3d tuned rows   :', rows, '(86 = 76 from aiter + 10 for conv_pad_in_kernel)')

@@ -1,4 +1,4 @@
-"""Essential checks for veomni_patches/ (one GPU for all but the last).
+"""Essential checks for veomni_patches/ (one GPU for all but the CPU ones).
 
     HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 python -m pytest -q test_patches.py
 """
@@ -42,6 +42,30 @@ def test_conv_uses_flydsl_for_bf16_and_torch_otherwise():
     assert sum(aiter_conv.tuned_lookup_stats()["calls"].values()) == lookups + 1
     assert torch.equal(fp32, F.conv3d(x, w, None, 1, 1, 1))
     assert _snr(fp32, bf16) > 30
+
+
+def test_conv_falls_back_to_torch_on_unsupported_arch(monkeypatch):
+    from veomni_patches import aiter_conv
+
+    def refuse():
+        raise RuntimeError("flydsl_conv_implicit requires one of ['gfx950'], got gfx1250.")
+
+    def kernel(*args, **kwargs):
+        raise AssertionError("the kernel must not run on an unsupported arch")
+
+    mod = types.SimpleNamespace(flydsl_conv_implicit=kernel, _check_supported_arch=refuse)
+    monkeypatch.setattr(aiter_conv, "_install_config_property", lambda: False)
+    monkeypatch.setattr(aiter_conv, "import_flydsl_module", lambda name: mod)
+    monkeypatch.setitem(aiter_conv._arch, "refused", None)
+    aiter_conv.load.cache_clear()
+    try:
+        assert aiter_conv.load() is None
+        assert "gfx1250" in aiter_conv.unsupported_arch()
+        x = torch.randn(1, 8, 3, 6, 6, dtype=torch.bfloat16)
+        w = torch.randn(8, 8, 3, 3, 3, dtype=torch.bfloat16)
+        assert torch.equal(aiter_conv.conv(x, w, None, 1, 1, 1), F.conv3d(x, w, None, 1, 1, 1))
+    finally:
+        aiter_conv.load.cache_clear()
 
 
 # --- sdpa --------------------------------------------------------------------------
