@@ -1,0 +1,73 @@
+# Lumen upstream AITER integration
+
+Base: Lumen main 7b5931d. AITER pin: 537314057fc0537144ef572eb28322d18a5d4b9e.
+The implementation follows the pending integration plan in Lumen dae77b240,
+updated for the final upstream module names and both H16 fusion PRs.
+
+| AITER PR | Public implementation | Lumen consumer |
+| --- | --- | --- |
+| #5531 | quant.quant.dynamic_mxfp4_quant, use_sr | convert_to_mxfp4 |
+| #5538 | quant.fast_transpose.transpose_packed_fp4 | transpose_packed_fp4 |
+| #5542 | fusions.silu_and_mul_backward.silu_and_mul_backward | fused_swiglu_backward and Megatron chunked out buffers |
+| #5548 | quant.quant.dynamic_mxfp4_quant_blockscale | convert_to_mxfp4_2d, 32x32 RTN |
+| #6458 | quant.fused_quant_transpose_hadamard_mxfp4 | dual_layout_quant_mxfp4 |
+| #6476 | quant.dequant_hadamard_quant_mxfp4 | dequant_hadamard_quant_mxfp4 |
+
+Each MXFP4 API is independently probed. Upstream is attempted first and legacy
+fallbacks are logged. Fallback-cache keys distinguish shapes, dtype, device and
+layout/SR options, but exclude random seeds and offsets to avoid unbounded
+per-launch cache growth. Callers still own packed-data/scale layout markers and
+weight-cache invalidation; those lifecycles are unchanged.
+
+## Numerical contract
+
+H16 group size, signs, activation RTN and gradient SR decisions remain unchanged.
+Explicit Philox seed/offset values reach the upstream API. Upstream H16 wrappers
+reserve disjoint SR streams using their own allocation contract; their random
+mapping is not bit-identical to the legacy seven-round Philox implementation.
+Upstream row quantization is forced to Triton to avoid automatic backend drift.
+Upstream handles E8M0 endpoints according to its public contract; old loss and
+byte baselines must not be presented as equivalent without paired measurement.
+
+## Remaining legacy capabilities
+
+- Non-32 block sizes and 2D stochastic rounding: upstream blockscale is 32x32 RTN.
+- Transpose with an already shuffled input: upstream transpose reads row-major.
+- Standalone fused Hadamard quantization and dequant-transpose.
+- Coalesced scale swizzle and expanded tile-scale swizzle.
+
+For row-major transpose or 2D RTN with shuffled output, the adapter invokes
+upstream then performs the existing public AITER weight shuffle. These calls
+trade an extra layout pass for upstream ownership; performance requires measurement.
+
+## SwiGLU and packaging
+
+Forward calls fusions.activation.fused_silu_mul; backward calls the public
+silu_and_mul_backward with optional out. Megatron uses out slices only after
+the fused installer is active. Hugging Face FSDP retains its separate gate/up
+activation path, so it does not gain #5542 kernel coverage.
+
+The vendor activation files are removed. Both affected image paths reinstall
+the complete AITER pin with PREBUILD_KERNELS=1 instead of mixing new Python with
+old compiled extensions. Rebuild images after initializing the upstream submodule.
+
+## Validation
+
+CPU forwarding tests cover the new public names, out identity and H16 layout/SR
+argument forwarding. GPU tests in tests/ops/test_mxfp4_aiter_integration.py forbid
+legacy fallback and compare outputs with public wrappers, check reconstruction
+SNR, packed transpose round trips and SwiGLU gradients against PyTorch autograd.
+The six CPU forwarding/probe/config regression tests passed on alola3. Changed
+Python files passed Ruff E4/E7/E9/F/I checks, formatting checks and diff whitespace
+checks; train_pretrain.sh passed bash syntax checking.
+
+Independent Bugbot review found one P1 in the MXFP8 compatibility adaptation:
+32-value scales were paired with the tuned GEMM default K tile of 128. The
+adapter now requests a public tuning config and sets BLOCK_SIZE_K to 32. A CPU
+regression reproduces the old assertion and verifies the fix without mutating
+the tuning cache; a GPU matmul regression is included.
+
+GPU numerical validation is pending: Slurm job 68343968 was PENDING (Priority)
+at handoff. It runs the new integration suite and existing MXFP4 suite from
+/scratch/users/xdai/Lumen-aiter-integration-20261110 with the exact AITER pin.
+No GPU pass, performance result, Docker build or full training result is claimed.

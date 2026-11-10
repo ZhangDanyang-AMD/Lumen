@@ -4,16 +4,12 @@
 # Licensed under the Apache License, Version 2.0
 ###############################################################################
 
-"""Lumen-owned MXFP4 Triton kernels.
+"""Legacy MXFP4 kernels retained for capability gaps and numerical regression.
 
-Contains only kernels that AITER does not provide:
-  - ASM-accelerated MXFP4 quantization (RTN + SR) via gfx950 VOP3 instructions
-  - Software fallback MXFP4 quantization (RTN + SR)
-  - Packed FP4 transpose
-  - Blockwise Hadamard transform (RHT)
-
-For kernels that AITER provides (RTN quant via dynamic_mxfp4_quant, GEMM,
-dequant), see ``lumen/ops/quantize/ops.py`` which wraps AITER directly.
+Production quantization, transpose and H16 layout adapters prefer AITER public
+APIs in ``lumen/ops/quantize/mxfp4.py``. Existing fused input-shuffle, 2-D SR,
+Hadamard-only and scale-swizzle variants remain here where upstream has no
+matching public contract.
 
 gfx950 ISA instructions used:
   - ``v_cvt_scalef32_pk_fp4_f32``    : 2×FP32 → packed FP4 byte (RTN)

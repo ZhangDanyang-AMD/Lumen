@@ -95,7 +95,9 @@ def _probe_aiter_triton_gemm():
 @functools.lru_cache(maxsize=1)
 def _probe_aiter_triton_gemm_bf16():
     try:
-        from aiter.ops.triton.gemm.basic.gemm_a16w16 import gemm_a16w16 as _  # noqa: F401
+        from aiter.ops.triton.gemm.basic.gemm_a16w16 import (
+            gemm_a16w16 as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -172,7 +174,9 @@ def _probe_hipblas_fp8_output() -> bool:
 @functools.lru_cache(maxsize=1)
 def _probe_aiter_fused_quant():
     try:
-        from aiter.ops.triton.quant.fused_fp8_quant import fused_rms_fp8_per_tensor_static_quant as _  # noqa: F401
+        from aiter.ops.triton.quant.fused_fp8_quant import (
+            fused_rms_fp8_per_tensor_static_quant as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -183,7 +187,9 @@ def _probe_aiter_fused_quant():
 def _probe_aiter_fused_silu_mul_fp8():
     """True if AITER fused SwiGLU + per-tensor FP8 quant kernel is importable."""
     try:
-        from aiter.ops.triton.quant.fused_fp8_quant import fused_silu_mul_fp8_per_tensor_static_quant as _  # noqa: F401
+        from aiter.ops.triton.quant.fused_fp8_quant import (
+            fused_silu_mul_fp8_per_tensor_static_quant as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -231,7 +237,9 @@ def _probe_aiter_triton_gemm_mxfp8():
 def _probe_aiter_triton_gemm_mxfp4():
     """Check if AITER Triton MXFP4 GEMM (gemm_afp4wfp4) is available."""
     try:
-        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import gemm_afp4wfp4 as _  # noqa: F401
+        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import (
+            gemm_afp4wfp4 as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -245,10 +253,14 @@ def _probe_aiter_triton_gemm_mxfp4_preshuffle():
     Needs both the kernel and the shuffle helpers that build its layout.
     """
     try:
-        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import gemm_afp4wfp4_preshuffle as _  # noqa: F401
+        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import (
+            gemm_afp4wfp4_preshuffle as _,  # noqa: F401
+        )
         from aiter.ops.triton.utils.shuffle import (  # noqa: F401
             shuffle_scale_gemm as _s,
-            shuffle_weight as _w,
+        )
+        from aiter.ops.triton.utils.shuffle import (
+            shuffle_weight as _w,  # noqa: F401
         )
 
         return True
@@ -267,7 +279,9 @@ def _probe_aiter_gemm_mxfp4_asm():
         from aiter import gemm_a4w4 as _  # noqa: F401
         from aiter.ops.gemm_op_a4w4 import get_GEMM_config as _c  # noqa: F401
         from aiter.ops.shuffle import shuffle_weight as _w  # noqa: F401
-        from aiter.ops.triton.utils.shuffle import shuffle_scale_gemm as _s  # noqa: F401
+        from aiter.ops.triton.utils.shuffle import (
+            shuffle_scale_gemm as _s,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -289,7 +303,9 @@ def _probe_aiter_triton_rope_cached():
 def _probe_aiter_triton_rope_cached_2c():
     """Check if AITER Triton cached RoPE 2-component (THD Q+K) is available."""
     try:
-        from aiter.ops.triton.rope.rope import rope_cached_thd_positions_2c_fwd as _  # noqa: F401
+        from aiter.ops.triton.rope.rope import (
+            rope_cached_thd_positions_2c_fwd as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -344,8 +360,12 @@ def _probe_aiter_softmax_topk():
 def _probe_aiter_triton_moe_aux_loss():
     """Check if AITER Triton moe_aux_loss kernels are available."""
     try:
-        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_bwd as _bwd  # noqa: F401
-        from aiter.ops.triton.moe.moe_aux_loss import moe_aux_loss_fwd as _fwd  # noqa: F401
+        from aiter.ops.triton.moe.moe_aux_loss import (
+            moe_aux_loss_bwd as _bwd,  # noqa: F401
+        )
+        from aiter.ops.triton.moe.moe_aux_loss import (
+            moe_aux_loss_fwd as _fwd,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -378,7 +398,9 @@ def _probe_aiter_moe_sum():
 def _probe_aiter_moe_gemm_per_token():
     """Check if AITER fused per-token MOE GEMM is available."""
     try:
-        from aiter.ops.triton.moe.moe_gemm_per_token import moe_gemm_per_token as _  # noqa: F401
+        from aiter.ops.triton.moe.moe_gemm_per_token import (
+            moe_gemm_per_token as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -389,7 +411,9 @@ def _probe_aiter_moe_gemm_per_token():
 def _probe_aiter_moe_gemm_mxfp8():
     """Check if AITER fused MXFP8 MOE GEMM is available."""
     try:
-        from aiter.ops.triton.moe.moe_gemm_mxfp8 import moe_gemm_mxfp8 as _  # noqa: F401
+        from aiter.ops.triton.moe.moe_gemm_mxfp8 import (
+            moe_gemm_mxfp8 as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -400,7 +424,9 @@ def _probe_aiter_moe_gemm_mxfp8():
 def _probe_aiter_triton_moe_align():
     """Check if AITER Triton MoE block alignment kernel is available."""
     try:
-        from aiter.ops.triton.moe.moe_align_block_size import moe_align_block_size_triton as _  # noqa: F401
+        from aiter.ops.triton.moe.moe_align_block_size import (
+            moe_align_block_size_triton as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -422,7 +448,9 @@ def _probe_aiter_triton_fused_moe():
 def _probe_aiter_fused_gated():
     """Check if AITER Triton fused gated feed-forward is available."""
     try:
-        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_gated as _  # noqa: F401
+        from aiter.ops.triton.gemm.feed_forward import (
+            ff_a16w16_fused_gated as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -433,7 +461,9 @@ def _probe_aiter_fused_gated():
 def _probe_aiter_fused_ungated():
     """Check if AITER Triton fused ungated feed-forward is available."""
     try:
-        from aiter.ops.triton.gemm.feed_forward import ff_a16w16_fused_ungated as _  # noqa: F401
+        from aiter.ops.triton.gemm.feed_forward import (
+            ff_a16w16_fused_ungated as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -444,9 +474,33 @@ def _probe_aiter_fused_ungated():
 def _probe_aiter_swiglu():
     """Check if AITER Triton fused SwiGLU fwd/bwd kernels are available."""
     try:
-        from aiter.ops.triton.activation import swiglu_fwd as _  # noqa: F401
+        from aiter.ops.triton.fusions.activation import (
+            fused_silu_mul as _forward,  # noqa: F401
+        )
+        from aiter.ops.triton.fusions.silu_and_mul_backward import (
+            silu_and_mul_backward as _backward,  # noqa: F401
+        )
 
         return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=None)
+def _probe_aiter_mxfp4_api(name):
+    """Probe the public MXFP4 wrappers independently of GEMM availability."""
+    import importlib
+
+    modules = {
+        "dynamic_mxfp4_quant": "quant.quant",
+        "dynamic_mxfp4_quant_blockscale": "quant.quant",
+        "transpose_packed_fp4": "quant.fast_transpose",
+        "fused_quant_transpose_hadamard_mxfp4": "quant.fused_quant_transpose_hadamard_mxfp4",
+        "dequant_hadamard_quant_mxfp4": "quant.dequant_hadamard_quant_mxfp4",
+    }
+    try:
+        module = importlib.import_module("aiter.ops.triton." + modules[name])
+        return callable(getattr(module, name, None))
     except (ImportError, OSError):
         return False
 
@@ -455,7 +509,9 @@ def _probe_aiter_swiglu():
 def _probe_aiter_fast_transpose():
     """Check if AITER Triton fast 2D transpose kernel is available."""
     try:
-        from aiter.ops.triton.quant.fast_transpose import fast_transpose_2d as _  # noqa: F401
+        from aiter.ops.triton.quant.fast_transpose import (
+            fast_transpose_2d as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):
@@ -466,7 +522,9 @@ def _probe_aiter_fast_transpose():
 def _probe_aiter_fused_add_rmsnorm_pad():
     """Check if AITER Triton fused add+RMSNorm+pad kernel is available."""
     try:
-        from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import fused_add_rmsnorm_pad as _  # noqa: F401
+        from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import (
+            fused_add_rmsnorm_pad as _,  # noqa: F401
+        )
 
         return True
     except (ImportError, OSError):

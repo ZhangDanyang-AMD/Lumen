@@ -18,26 +18,10 @@ WORKDIR /workspace/Lumen
 # an in-image `git submodule update` has no metadata to work from.
 COPY . /workspace/Lumen
 
-# aiter is not editable against this tree, so a moved submodule pin needs to be
-# carried over explicitly. The compiled extensions stay: only Python is
-# refreshed, and reinstalling would cost the PREBUILD_KERNELS .so.
-RUN cp -a /workspace/Lumen/third_party/aiter/aiter/. /opt/aiter/aiter/
-
-# Lumen's swiglu Triton kernels, which aiter does not carry at the pinned
-# submodule commit. lumen/ops/fused_swiglu.py imports swiglu_fwd/swiglu_bwd from
-# aiter.ops.triton.activation and probes for them, so without this overlay the
-# probe fails, the fused-swiglu patch is skipped and LUMEN_FUSED_SWIGLU=1 becomes
-# a no-op. Both files are supersets of the submodule's, appending only the two
-# kernels and their wrappers, so they have to be refreshed when aiter moves.
-#
-# These land on /opt/aiter, which is where the base image installed aiter and
-# which no launcher's bind mount covers. Overlaid into the submodule under
-# /workspace/Lumen they were masked by the mount of the host checkout, so the
-# image carried the kernels and the container could not see them.
-COPY third_party/aiter_vendor/aiter/ops/triton/activation.py \
-     /opt/aiter/aiter/ops/triton/activation.py
-COPY third_party/aiter_vendor/aiter/ops/triton/_triton_kernels/activation.py \
-     /opt/aiter/aiter/ops/triton/_triton_kernels/activation.py
+# Reinstall the complete pin so Python and prebuilt extensions agree.
+RUN pip uninstall -y aiter && rm -rf /opt/aiter && \
+    cp -a /workspace/Lumen/third_party/aiter /opt/aiter && \
+    cd /opt/aiter && PREBUILD_KERNELS=1 pip install -e .
 
 # Tokenizer and dataset deps; the base only installs the top-level requirements.
 RUN pip install -r /workspace/Lumen/examples/qwen3/requirements.txt -q
