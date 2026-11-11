@@ -163,7 +163,7 @@ class LumenConfig:
     # -- Tier 2: Linear GEMM patching (BF16) --
     lumen_linear: bool = False
 
-    # -- Tier 2: Conv2d patching (BF16/FP16 AITER Triton forward) --
+    # -- Tier 2: Conv2d and Conv3d (BF16/FP16 AITER forward, torch backward) --
     aiter_conv: bool = False
 
     # -- Tier 3: Execution / fusion --
@@ -307,11 +307,11 @@ class LumenConfig:
         if self.hf_attn_patch:
             self._patch_sdpa()
 
-        # 1c. Linear GEMM patching (BF16 AITER Triton)
+        # 1c. nn.Linear GEMM. Functional Y = X @ W.T uses lumen.ops.bf16_gemm.linear.
         if self.lumen_linear:
             self._patch_linear(model)
 
-        # 1d. Conv2d patching (BF16/FP16 AITER Triton)
+        # 1d. Conv2d and Conv3d. Subclass forward (causal pad) is not replaced.
         if self.aiter_conv:
             self._patch_conv(model)
 
@@ -459,71 +459,21 @@ class LumenConfig:
 
         patch_sdpa()
 
-    @staticmethod
-    def _auto_tune_bf16_gemm(model) -> None:
-        """Placeholder — BF16 GEMM uses torch.mm fallback (safe on MI350).
-
-        hipBLASLt and ASM JIT both SIGABRT on MI350 gfx950, so we skip
-        tuned GEMM injection and let ``tuned_gemm.gemm_a16w16`` fall back
-        to ``torch.mm`` (which internally uses hipBLASLt via PyTorch).
-        """
-        pass
-
     def _patch_linear(self, model) -> None:
-        """Replace ``nn.Linear`` forward with AITER GEMM (BF16, autograd-safe).
+        """Route every ``nn.Linear`` through AITER bf16 GEMM."""
+        from lumen.ops.bf16_gemm import patch_gemm
 
-        Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
-        configs exist, then patches forward with ``dispatch_gemm``.
-        """
-        import torch
-        import torch.nn as nn
-
-        self._auto_tune_bf16_gemm(model)
-
-        from lumen.ops.quantize.linear import dispatch_gemm
-
-        class _GemmA16W16Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, input, weight, bias):
-                ctx.save_for_backward(input, weight)
-                ctx.has_bias = bias is not None
-                output = dispatch_gemm(input, weight, scaling_type="none", bias=bias)
-                return output
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                input, weight = ctx.saved_tensors
-                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-                input_flat = input.reshape(-1, input.shape[-1])
-                grad_input = grad_flat @ weight
-                grad_input = grad_input.reshape(input.shape)
-                grad_weight = grad_flat.t() @ input_flat
-                grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
-                return grad_input, grad_weight, grad_bias
-
-        count = 0
-        for _name, module in model.named_modules():
-            if isinstance(module, nn.Linear):
-
-                def _make_aiter_forward(mod):
-                    def _aiter_forward(input):
-                        return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
-
-                    return _aiter_forward
-
-                module.forward = _make_aiter_forward(module)
-                count += 1
-
+        count = patch_gemm(model)
         if count:
-            _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+            _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM")
 
     def _patch_conv(self, model) -> None:
-        """Replace supported ``nn.Conv2d`` forward with AITER Triton conv2d (autograd-safe)."""
-        from lumen.ops.conv import patch_conv2d
+        """Route supported ``nn.Conv2d`` and ``nn.Conv3d`` through AITER."""
+        from lumen.ops.conv import patch_conv
 
-        count = patch_conv2d(model)
-        if count:
-            _rank0_print(f"> Replaced {count} nn.Conv2d forward with AITER Triton conv2d")
+        n2, n3 = patch_conv(model)
+        if n2 or n3:
+            _rank0_print(f"> Replaced {n2} nn.Conv2d and {n3} nn.Conv3d with AITER conv")
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
