@@ -329,6 +329,7 @@ class LumenLayerNormLinear(nn.Module):
         config,
         init_method: Callable,
         gather_output: bool = False,
+        stride: int = 1,
         bias: bool = True,
         skip_bias_add: bool = False,
         is_expert: bool = False,
@@ -406,7 +407,7 @@ class LumenLayerNormLinear(nn.Module):
                     self.output_size_per_partition,
                     0,
                     condition_init_method(config, init_method),
-                    stride=1,
+                    stride=stride,
                     return_master_weight=False,
                     rank=tp_rank,
                     world_size=self.tp_size,
@@ -426,7 +427,7 @@ class LumenLayerNormLinear(nn.Module):
                     self.weight,
                     init_method,
                     partition_dim=0,
-                    stride=1,
+                    stride=stride,
                 )
         setattr(self.weight, "allreduce", True)
 

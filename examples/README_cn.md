@@ -1,5 +1,7 @@
 # Lumen Examples Runbook
 
+> MXFP4 第 12/13 项请按[固定版本复现指南](qwen3/MXFP4_REPRODUCIBILITY.md)运行。下表为历史 MI350X 数据，并非当前 AITER 集成的验证结果。第 12 项验证使用训练 mock 语料；当前第 13 项 20 step 内不进行验证。其余 11 项未在本次集成中重测。
+
 用来检查新功能的小模型、单机训练。一行一个命令，每条都跑 20 step。先按模型排，再按精度排：BF16、FP8 delayed、FP8 blockwise、MXFP4。
 
 > English: [README.md](README.md)
@@ -19,7 +21,7 @@ MXFP4 跑在 gfx950（MI350 / MI355）。`run_qwen3_fsdp.sh` 遇到 `MODE=mxfp4`
 | 1 | Llama2-7B，BF16，Megatron | `PRECISION=bf16 TRAIN_STEPS=20 bash examples/llama2/run_pretrain_llama2_7b.sh` |
 | 6 | Llama3.1-8B，FP8 delayed，Megatron | `TRAIN_STEPS=20 bash examples/llama31/run_pretrain_llama31_8b.sh` |
 | 10 | Qwen3-8B，FP8 blockwise，Megatron | `MODEL=qwen3 TRAIN_STEPS=20 bash examples/run_fp8_blockwise_pretrain.sh` |
-| 12 | Qwen3-8B，MXFP4，Megatron | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
+| 12 | Qwen3-8B，MXFP4，Megatron | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | Qwen3-8B，MXFP4，FSDP2 LoRA | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
 ---
@@ -57,7 +59,7 @@ MXFP4 跑在 gfx950（MI350 / MI355）。`run_qwen3_fsdp.sh` 遇到 `MODE=mxfp4`
 | 9 | 按需 | FP8 delayed | Megatron | 预训练，mock 数据 | 8× MI350X | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b.sh` |
 | 10 | 每次必跑 | FP8 blockwise | Megatron | 20 step smoke，mock 数据 | 8× MI350X | `MODEL=qwen3 TRAIN_STEPS=20 bash examples/run_fp8_blockwise_pretrain.sh` |
 | 11 | 按需 | FP8 blockwise | FSDP / FSDP2 | LoRA SFT，e4m3 blockwise2d | 8× MI350X | `HOST_MODEL=/path/to/Qwen3-8B HOST_DATA=/path/to/alpaca MAX_STEPS=20 bash examples/qwen3/run_qwen3_fsdp.sh` |
-| 12 | 每次必跑 | MXFP4 | Megatron | 预训练，mock 数据 | 8× MI350X | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
+| 12 | 每次必跑 | MXFP4 | Megatron | 预训练，mock 数据 | 8× MI350X | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | 每次必跑 | MXFP4 | FSDP2 | LoRA SFT | 8× MI350X | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
 第 8 行同时是第 9 行和第 12 行的 BF16 基线。第 9 行是 hybrid FP8、delayed scaling。Megatron 的 MXFP4 配方最后 5 层保持 BF16。

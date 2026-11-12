@@ -13,6 +13,7 @@ Model-specific code (batch construction, dataset providers, model-specific CLI
 arguments) remains in the per-model subpackages.
 """
 
+import inspect
 import logging
 import os
 import warnings
@@ -42,6 +43,16 @@ from lumen.modules.attention_megatron import (
 from lumen.modules.attention_mla import LumenDotProductAttentionMLA
 
 stimer = StragglerDetector()
+
+
+def _legacy_moe_spec_kwargs(factory, enabled):
+    """Pass the legacy option only to spec factories that implement it."""
+    if "moe_use_legacy_grouped_gemm" in inspect.signature(factory).parameters:
+        return {"moe_use_legacy_grouped_gemm": enabled}
+    if enabled:
+        raise NotImplementedError("this Megatron spec does not support legacy grouped GEMM")
+    # An inactive option has no effect on older spec factories.
+    return {}
 
 
 # Backward-compatible re-exports (implementations live in patch registry).
@@ -208,12 +219,17 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     # keyword. The registry's lumen_gpt_config patch carries the assignments.
     apply_config_build(config, args, tags={"lumen", "builder"})
 
+    import megatron.core.models.gpt.gpt_layer_specs as _gls
+
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
         args.moe_grouped_gemm,
         args.qk_layernorm,
         args.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
+        **_legacy_moe_spec_kwargs(
+            getattr(_gls, "get_gpt_layer_local_submodules", get_gpt_layer_local_spec),
+            getattr(args, "moe_use_legacy_grouped_gemm", False),
+        ),
         normalization=args.normalization,
         use_kitchen=config.use_kitchen,
     )
@@ -290,7 +306,11 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
             moe_grouped_gemm=getattr(args, "moe_grouped_gemm", False),
             qk_layernorm=getattr(args, "qk_layernorm", False),
             multi_latent_attention=getattr(args, "multi_latent_attention", False),
-            moe_use_legacy_grouped_gemm=getattr(args, "moe_use_legacy_grouped_gemm", False),
+            **_legacy_moe_spec_kwargs(
+                getattr(_gls, "get_gpt_layer_with_transformer_engine_submodules",
+                        get_gpt_layer_with_transformer_engine_spec),
+                getattr(args, "moe_use_legacy_grouped_gemm", False),
+            ),
             use_kitchen=getattr(config, "use_kitchen", False),
         )
     finally:

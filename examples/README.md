@@ -1,5 +1,7 @@
 # Lumen Examples Runbook
 
+> MXFP4 rows 12/13: use the fixed-runtime [reproduction guide](qwen3/MXFP4_REPRODUCIBILITY.md). The table below is historical MI350X evidence, not validation of the current AITER integration. Row 12 validation uses its training mock corpus; row 13 has no evaluation within the current 20-step smoke run. Other 11 rows have not been rerun in this integration.
+
 Small, single-node training recipes used to check a new feature. Each row is one
 command, and every command runs 20 steps. Rows are ordered by model, then by
 precision: BF16, FP8 delayed, FP8 blockwise, MXFP4.
@@ -28,7 +30,7 @@ changes.
 | 1 | Llama2-7B, BF16, Megatron | `PRECISION=bf16 TRAIN_STEPS=20 bash examples/llama2/run_pretrain_llama2_7b.sh` |
 | 6 | Llama3.1-8B, FP8 delayed, Megatron | `TRAIN_STEPS=20 bash examples/llama31/run_pretrain_llama31_8b.sh` |
 | 10 | Qwen3-8B, FP8 blockwise, Megatron | `MODEL=qwen3 TRAIN_STEPS=20 bash examples/run_fp8_blockwise_pretrain.sh` |
-| 12 | Qwen3-8B, MXFP4, Megatron | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
+| 12 | Qwen3-8B, MXFP4, Megatron | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | Qwen3-8B, MXFP4, FSDP2 LoRA | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
 ---
@@ -69,7 +71,7 @@ Row 6 is hybrid FP8 with delayed scaling.
 | 9 | if changed | FP8 delayed | Megatron | Pretrain, mock data | 8× MI350X | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b.sh` |
 | 10 | required | FP8 blockwise | Megatron | 20-step smoke, mock data | 8× MI350X | `MODEL=qwen3 TRAIN_STEPS=20 bash examples/run_fp8_blockwise_pretrain.sh` |
 | 11 | if changed | FP8 blockwise | FSDP / FSDP2 | LoRA SFT, e4m3 blockwise2d | 8× MI350X | `HOST_MODEL=/path/to/Qwen3-8B HOST_DATA=/path/to/alpaca MAX_STEPS=20 bash examples/qwen3/run_qwen3_fsdp.sh` |
-| 12 | required | MXFP4 | Megatron | Pretrain, mock data | 8× MI350X | `TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
+| 12 | required | MXFP4 | Megatron | Pretrain, mock data | 8× MI350X | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | required | MXFP4 | FSDP2 | LoRA SFT | 8× MI350X | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
 Row 8 is the BF16 baseline for both row 9 and row 12. Row 9 is hybrid FP8 with

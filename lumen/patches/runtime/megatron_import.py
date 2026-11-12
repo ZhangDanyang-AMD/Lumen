@@ -720,6 +720,11 @@ def install_fused_residual_norm():
     _orig_init = _OrigTL.__init__
     _orig_fwd_attn = _OrigTL._forward_attention
     _orig_fwd_mlp = _OrigTL._forward_mlp
+    import inspect
+
+    _orig_mlp_accepts_padding_mask = (
+        "padding_mask" in inspect.signature(_orig_fwd_mlp).parameters
+    )
 
     def _patched_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
@@ -782,7 +787,13 @@ def install_fused_residual_norm():
         return self.pre_mlp_layernorm(hidden_states)
 
     def _patched_fwd_attn(self, hidden_states, *args, **kwargs):
-        _sa_kwargs = {k: v for k, v in kwargs.items() if k not in ('context', 'context_mask')}
+        if kwargs.get("padding_mask") is not None:
+            # Routing masks belong to the MLP; keep the original layer path.
+            return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
+        _sa_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in ('context', 'context_mask', 'padding_mask')
+        }
 
         if self._lumen_can_fuse_bda_norm and not self.recompute_pre_mlp_layernorm:
             from megatron.core.utils import nvtx_range_pop, nvtx_range_push
@@ -875,7 +886,14 @@ def install_fused_residual_norm():
         self._lumen_deferred_bda = None
         return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
 
-    def _patched_fwd_mlp(self, hidden_states, inference_context=None):
+    def _patched_fwd_mlp(self, hidden_states, inference_context=None, padding_mask=None):
+        if padding_mask is not None:
+            if not _orig_mlp_accepts_padding_mask:
+                raise NotImplementedError("this Megatron MLP does not support padding masks")
+            return _orig_fwd_mlp(
+                self, hidden_states, inference_context=inference_context,
+                padding_mask=padding_mask,
+            )
         from megatron.core.utils import (
             make_viewless_tensor,
             nvtx_range_pop,
