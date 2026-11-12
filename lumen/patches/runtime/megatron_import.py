@@ -13,6 +13,7 @@ Registered under :class:`~lumen.patches.PatchPhase`.IMPORT. Loaded via
 
 import math
 import os
+
 import torch
 from torch.autograd.function import once_differentiable
 
@@ -210,7 +211,12 @@ def install_swiglu_fp8():
                 e = min(s + chunk_sz, M)
                 inp_chunk = input_saved[s:e].to(dtype)
                 grad_chunk = grad_output[s:e]
-                result[s:e] = _swiglu_mod.swiglu_back(grad_chunk, inp_chunk)
+                out_chunk = result[s:e]
+                if getattr(_swiglu_mod, "_lumen_triton_swiglu_patched", False):
+                    _swiglu_mod.swiglu_back(grad_chunk, inp_chunk, out=out_chunk)
+                else:
+                    # Megatron's original backward has no output-buffer argument.
+                    out_chunk.copy_(_swiglu_mod.swiglu_back(grad_chunk, inp_chunk))
                 del inp_chunk
             return result, None, None
 
@@ -299,8 +305,10 @@ def install_mlp_fp8_store():
     _MLP = _mlp_mod.MLP
     _orig_forward = _MLP.forward
 
+    from torch.nn.functional import sigmoid as _F_sigmoid
+    from torch.nn.functional import silu as _F_silu
+
     from lumen.ops.quantize.linear import _fp8_store_activation
-    from torch.nn.functional import silu as _F_silu, sigmoid as _F_sigmoid
 
     class _SwiGLU_FP8Store(torch.autograd.Function):
         @staticmethod
@@ -544,8 +552,10 @@ def install_fused_rope():
     if _FUSED_ROPE_INSTALLED:
         return
     try:
-        from apex.transformer.functional.fused_rope import fused_apply_rotary_pos_emb as _apex_rope
         import megatron.core.models.common.embeddings.rope_utils as rope_utils
+        from apex.transformer.functional.fused_rope import (
+            fused_apply_rotary_pos_emb as _apex_rope,
+        )
 
         def _compat_fused_rope(t, freqs, **kwargs):
             return _apex_rope(t, freqs)
@@ -710,6 +720,11 @@ def install_fused_residual_norm():
     _orig_init = _OrigTL.__init__
     _orig_fwd_attn = _OrigTL._forward_attention
     _orig_fwd_mlp = _OrigTL._forward_mlp
+    import inspect
+
+    _orig_mlp_accepts_padding_mask = (
+        "padding_mask" in inspect.signature(_orig_fwd_mlp).parameters
+    )
 
     def _patched_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
@@ -772,10 +787,16 @@ def install_fused_residual_norm():
         return self.pre_mlp_layernorm(hidden_states)
 
     def _patched_fwd_attn(self, hidden_states, *args, **kwargs):
-        _sa_kwargs = {k: v for k, v in kwargs.items() if k not in ('context', 'context_mask')}
+        if kwargs.get("padding_mask") is not None:
+            # Routing masks belong to the MLP; keep the original layer path.
+            return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
+        _sa_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in ('context', 'context_mask', 'padding_mask')
+        }
 
         if self._lumen_can_fuse_bda_norm and not self.recompute_pre_mlp_layernorm:
-            from megatron.core.utils import nvtx_range_push, nvtx_range_pop
+            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
 
             residual = hidden_states
             input_layernorm_output = _do_input_layernorm(self, hidden_states)
@@ -815,7 +836,7 @@ def install_fused_residual_norm():
             return hidden_states, context
 
         if self._lumen_can_defer_bda_to_lnlinear:
-            from megatron.core.utils import nvtx_range_push, nvtx_range_pop
+            from megatron.core.utils import nvtx_range_pop, nvtx_range_push
 
             residual = hidden_states
             input_layernorm_output = _do_input_layernorm(self, hidden_states)
@@ -865,8 +886,19 @@ def install_fused_residual_norm():
         self._lumen_deferred_bda = None
         return _orig_fwd_attn(self, hidden_states, *args, **kwargs)
 
-    def _patched_fwd_mlp(self, hidden_states, inference_context=None):
-        from megatron.core.utils import make_viewless_tensor, nvtx_range_push, nvtx_range_pop
+    def _patched_fwd_mlp(self, hidden_states, inference_context=None, padding_mask=None):
+        if padding_mask is not None:
+            if not _orig_mlp_accepts_padding_mask:
+                raise NotImplementedError("this Megatron MLP does not support padding masks")
+            return _orig_fwd_mlp(
+                self, hidden_states, inference_context=inference_context,
+                padding_mask=padding_mask,
+            )
+        from megatron.core.utils import (
+            make_viewless_tensor,
+            nvtx_range_pop,
+            nvtx_range_push,
+        )
 
         _deferred = self._lumen_deferred_bda
         _fused_ok = False
@@ -883,7 +915,10 @@ def install_fused_residual_norm():
                 _set_pending_residual(_orig_residual)
                 _defer_to_lnlinear = True
             else:
-                from lumen.ops.fused_residual_norm import deferred_bda_add, rmsnorm_from_module
+                from lumen.ops.fused_residual_norm import (
+                    deferred_bda_add,
+                    rmsnorm_from_module,
+                )
                 _x_with_bias, _orig_residual = _deferred
                 hidden_states = deferred_bda_add(_x_with_bias, _orig_residual)
                 residual = hidden_states
@@ -901,8 +936,8 @@ def install_fused_residual_norm():
             residual = _pop_residual_out()
         elif self.recompute_mlp:
             if self.config.fp8:
-                from megatron.core.extensions.transformer_engine import te_checkpoint
                 from megatron.core import tensor_parallel
+                from megatron.core.extensions.transformer_engine import te_checkpoint
                 mlp_output_with_bias = te_checkpoint(
                     self.mlp, False,
                     tensor_parallel.random.get_cuda_rng_tracker,
@@ -1199,7 +1234,7 @@ def install_cross_entropy(**_kwargs) -> None:
 
 # ── Patch registry (Phase 1) ────────────────────────────────────────────────
 
-from lumen.patches.registry import PatchPhase, register_patch
+from lumen.patches.registry import PatchPhase, register_patch  # noqa: E402
 
 
 def _env_flag(name: str, default: str = "0"):

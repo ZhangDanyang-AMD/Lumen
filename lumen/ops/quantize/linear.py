@@ -41,15 +41,15 @@ from torch.autograd.function import once_differentiable
 
 from lumen.ops.dispatch import (
     Backend,
+    _probe_aiter_gemm_mxfp4_asm,
     _probe_aiter_hipblas,
     _probe_aiter_quant,
     _probe_aiter_triton_gemm,
+    _probe_aiter_triton_gemm_mxfp4,
+    _probe_aiter_triton_gemm_mxfp4_preshuffle,
     _probe_aiter_triton_gemm_mxfp8,
     _probe_aiter_triton_quant,
     _probe_aiter_tuned_gemm_bf16,
-    _probe_aiter_triton_gemm_mxfp4,
-    _probe_aiter_triton_gemm_mxfp4_preshuffle,
-    _probe_aiter_gemm_mxfp4_asm,
     try_backends,
 )
 from lumen.ops.quantize import mxfp4_autotune
@@ -122,7 +122,9 @@ def _load_tuned_gemms():
 
 def _validate_tuned_solutions(candidates):
     """Validate tuned solutions in a subprocess (SIGABRT-safe)."""
-    import subprocess, sys, json as _json
+    import json as _json
+    import subprocess
+    import sys
     if not torch.cuda.is_available():
         return
     script = '''
@@ -902,7 +904,9 @@ def gemm_wgrad_mixed(grad_fp8, input_fp8, scale_grad, scale_input, grad_t=None):
 
 
 def _gemm_per_token_triton(a_fp8, w_fp8, scale_a, scale_w):
-    from aiter.ops.triton.gemm.basic.gemm_a8w8_per_token_scale import gemm_a8w8_per_token_scale
+    from aiter.ops.triton.gemm.basic.gemm_a8w8_per_token_scale import (
+        gemm_a8w8_per_token_scale,
+    )
 
     return gemm_a8w8_per_token_scale(a_fp8, w_fp8, scale_a, scale_w)
 
@@ -990,19 +994,33 @@ def _gemm_mxfp8_triton(a_fp8, w_fp8, scale_a, scale_w):
     # AITER dropped its ``gemm_mxfp8`` wrapper; it was only an E8M0 -> FP32
     # scale conversion in front of the block-scale GEMM, so do that here.
     from aiter.ops.triton.gemm.basic.gemm_a8w8_blockscale import gemm_a8w8_blockscale
+    from aiter.ops.triton.utils.gemm_config_utils import get_gemm_config
 
     M, K = a_fp8.shape
     assert K == w_fp8.shape[1], "Incompatible K dimensions"
     block_size = K // scale_a.shape[-1]
     expected_scale_k = K // block_size
-    assert tuple(scale_a.shape) == (M, expected_scale_k), (
-        f"scale_a shape {tuple(scale_a.shape)} != expected ({M}, {expected_scale_k})"
+    assert tuple(scale_a.shape) == (
+        M,
+        expected_scale_k,
+    ), f"scale_a shape {tuple(scale_a.shape)} != expected ({M}, {expected_scale_k})"
+    assert (
+        scale_w.shape[1] == expected_scale_k
+    ), f"scale_w K-dim {scale_w.shape[1]} != expected {expected_scale_k}"
+    # The wrapper requires its K tile to match the scale block, unlike its FP8
+    # tuned tables which generally use 128-element blocks.
+    config, _ = get_gemm_config(
+        "GEMM-A8W8_BLOCKSCALE", M, w_fp8.shape[0], K, backend="triton"
     )
-    assert scale_w.shape[1] == expected_scale_k, (
-        f"scale_w K-dim {scale_w.shape[1]} != expected {expected_scale_k}"
-    )
+    config["BLOCK_SIZE_K"] = block_size
     return gemm_a8w8_blockscale(
-        a_fp8, w_fp8, _e8m0_to_fp32(scale_a), _e8m0_to_fp32(scale_w), dtype=torch.bfloat16,
+        a_fp8,
+        w_fp8,
+        _e8m0_to_fp32(scale_a),
+        _e8m0_to_fp32(scale_w),
+        dtype=torch.bfloat16,
+        config=config,
+        backend="triton",
     )
 
 
@@ -1235,6 +1253,7 @@ def _gemm_mxfp4_aiter_preshuffle(a_fp4, w_fp4, scale_a, scale_w):
     rewritten into the tiled layout the kernel reads coalesced.
     """
     from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import gemm_afp4wfp4_preshuffle
+
     from lumen.ops.quantize.ops import triton_arch
 
     arch = triton_arch()
@@ -1515,6 +1534,7 @@ def _gemm_mxfp4_aiter_asm(a_fp4, w_fp4, scale_a, scale_w):
     and CK kernels, and slices the row-padded output back to M.
     """
     import aiter
+
     from lumen.ops.quantize.ops import triton_arch
 
     arch = triton_arch()
@@ -2422,11 +2442,12 @@ class QuantizedLinearFunction(torch.autograd.Function):
         if scaling_type in ("blockwise", "blockwise2d"):
             from aiter.ops.enum import QuantType
             from aiter.ops.quant import get_hip_quant
+
+            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
             from lumen.ops.quantize.ops import (
                 quant_fp8_blockwise_dual_axis_impl,
                 quant_fp8_blockwise_impl,
             )
-            from lumen.ops.quantize.gemm_primitives import _dequant_fp8_weight
 
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
             M, N_out = grad_flat.shape

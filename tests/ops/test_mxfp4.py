@@ -195,7 +195,8 @@ def _dequant(packed, scales, block):
 
 
 def _residual_std(draws=DRAWS):
-    from lumen.ops.quantize.ops import convert_to_mxfp4
+    # This metric specifically tests the configurable legacy Philox round count.
+    from lumen.ops.quantize.ops import _legacy_convert_to_mxfp4 as convert_to_mxfp4
 
     torch.manual_seed(0)
     shape = (256, BLOCK * 8)

@@ -329,6 +329,7 @@ class LumenLayerNormLinear(nn.Module):
         config,
         init_method: Callable,
         gather_output: bool = False,
+        stride: int = 1,
         bias: bool = True,
         skip_bias_add: bool = False,
         is_expert: bool = False,
@@ -397,7 +398,9 @@ class LumenLayerNormLinear(nn.Module):
         if getattr(config, "use_cpu_initialization", False):
             self.weight = Parameter(torch.empty(self.output_size_per_partition, input_size, dtype=config.params_dtype))
             if getattr(config, "perform_initialization", True):
-                from megatron.core.tensor_parallel.layers import condition_init_method
+                # Older Megatron revisions pass the initializer directly.
+                from megatron.core.tensor_parallel import layers as tp_layers
+                condition_init_method = getattr(tp_layers, "condition_init_method", lambda config, method: method)
 
                 _initialize_affine_weight_cpu(
                     self.weight,
@@ -406,7 +409,7 @@ class LumenLayerNormLinear(nn.Module):
                     self.output_size_per_partition,
                     0,
                     condition_init_method(config, init_method),
-                    stride=1,
+                    stride=stride,
                     return_master_weight=False,
                     rank=tp_rank,
                     world_size=self.tp_size,
@@ -426,7 +429,7 @@ class LumenLayerNormLinear(nn.Module):
                     self.weight,
                     init_method,
                     partition_dim=0,
-                    stride=1,
+                    stride=stride,
                 )
         setattr(self.weight, "allreduce", True)
 
@@ -441,7 +444,7 @@ class LumenLayerNormLinear(nn.Module):
                         dtype=config.params_dtype,
                     )
                 )
-            set_tensor_model_parallel_attributes(self.bias, True, 0, 1)
+            set_tensor_model_parallel_attributes(self.bias, True, 0, stride)
             if getattr(config, "perform_initialization", True):
                 with torch.no_grad():
                     self.bias.zero_()

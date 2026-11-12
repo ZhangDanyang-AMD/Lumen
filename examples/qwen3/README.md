@@ -242,3 +242,10 @@ peak allocated memory:
 | FP8 delayed | TransformerEngine | ~11.60 s | 137.8 GB |
 | FP8 delayed | Lumen | ~10.44 s | 138.2 GB |
 | FP8 delayed | Δ | −10.0% | +0.3% |
+# Numbered MXFP4 smoke tests
+
+The 13-example runbook's #12 is Megatron mock pretraining; #13 is FSDP2
+**LoRA SFT**, using `run_qwen3_fsdp_mxfp4_sft.sh`. The separate
+`run_qwen3_fsdp_mxfp4_pretrain.sh` is full-parameter training and is not #13.
+Use the [fixed-runtime reproduction guide](MXFP4_REPRODUCIBILITY.md) for current
+AITER versions, 8-GPU/20-step settings, input preparation and dated test evidence.
