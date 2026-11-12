@@ -78,7 +78,7 @@ on already shuffled input still uses the documented Lumen implementation: AITER'
 public transpose API does not express this input-layout contract. Non-32 block
 quantization and 2D stochastic rounding also retain explicit legacy paths.
 Thus these runs must not be described as using exclusively AITER kernels.
-See [integration mapping](../../docs/aiter_public_api_integration_2026-11-10.md).
+See [integration mapping](AITER_INTEGRATION.md).
 
 On 2026-11-12, both rows passed from committed Lumen
 `00edddf545fffdba2dcb2d6c9bb00776a1decb27` and clean initial AITER/Megatron
@@ -94,7 +94,10 @@ CPU regressions: 3 passed. CPU/GPU initializer dispatch and stride metadata:
 2 passed. MXFP4 AITER GPU integration: 13 passed. Bash syntax and dry-run passed.
 Both training logs contain finite loss/gradient norms, and row 12 has zero skipped
 and NaN iterations. Both still exercise the documented shuffled-input packed
-transpose fallback. Evidence: [manifest and compressed logs](../../docs/evidence/mxfp4-2026-11-12/).
+transpose fallback. Preserve the generated manifest and logs in the chosen results
+directory. The original verification evidence is archived in
+[tested commit 900fce2](https://github.com/ZhangDanyang-AMD/Lumen/tree/900fce2c0a2f4cfc24459a25e37e225655824a33/docs/evidence/mxfp4-2026-11-12);
+raw evidence and task plans are excluded from the current source tree.
 
 The earlier MI355X runs (346.8 ms row 12, 564.9 ms row 13) used temporary runtime
 compatibility patches; they remain historical debugging evidence. The old

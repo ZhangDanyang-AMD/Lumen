@@ -1,6 +1,0 @@
-{
-  "path": "mock_train_s2048_g8_t20.jsonl",
-  "sha256": "dcfac6e2bf3bc0ddb149d200748280f4f7d696807a1641c177381ea9142eff94",
-  "generator": "examples/scripts/train_pretrain.sh",
-  "seed": 1234
-}
