@@ -76,9 +76,24 @@ adapter clears seed/offset for RTN and preserves explicit values for SR. Both
 SwiGLU functions live in fusions.activation at this pin. After these fixes all
 13 integration GPU tests passed, and six CPU regressions passed.
 
-The original queued alola3 job status above is historical. The MI355X FSDP2
-LoRA case completed 20 steps with finite loss/grad norm. The Megatron case is
-being validated separately against the available image's Megatron revision.
+The original queued alola3 job status above is historical. Both numbered MXFP4
+runbook cases completed 20 steps on eight MI355X GPUs with exit code zero:
+
+| Case | Loss at step 20 | Median ms, steps 2-20 | Validation |
+| --- | --- | --- | --- |
+| #12 Megatron mock pretrain | 3.077231 | 346.8 | 3.036381; zero skipped/NaN iterations |
+| #13 FSDP2 LoRA SFT | 1.1821 | 564.9 | finite loss and gradient norm |
+
+Both used micro-batch 1, seq 2048 and seed 1234; #12 used GBS 8 and five
+BF16 tail layers, #13 used gradient accumulation 1 and warmup 2. The existing
+image was 8110221cb3ac (Torch 2.9.1/ROCm 7.2.0), with AITER extensions built
+from the exact source pin in a fresh JIT directory and FlyDSL 0.5.0 supplied
+in an isolated dependency directory. Its Megatron revision was a1b00d4259e.
+The test worktree required compatibility patches for an inactive MoE keyword,
+LayerNormLinear initialization stride, and absent attention/MLP padding masks.
+Those patches are recorded with the logs; the public API fix is commit 4680446.
+Both training paths used the documented legacy packed transpose for shuffled
+input. Completion does not establish that every kernel ran upstream-only.
 The image and newly downloaded Alpaca split differ from the old runbook, so
 these numbers are not a paired loss/performance comparison. No Docker rebuild
 or full training convergence result is claimed.
