@@ -92,8 +92,9 @@ Two things apply whatever LUMEN_PATCH says, baseline included, because without
 them the run does not start rather than runs slower. A DiT that FSDP2 does not
 wrap (one process, or fsdp_mode=ddp) runs its forward under BF16 autocast over
 FP32 weights; see _autocast_unsharded_dit. On gfx1250, SDPA calls wider than
-head_dim 256 go to the MATH backend (veomni_patches.sdpa.install_wide_head_math)
-and MIOpen's GEMM convolution solvers are disabled (_disable_miopen_gemm_conv).
+head_dim 256 go to the MATH backend (veomni_patches.sdpa.install_wide_head_math),
+SDPA's mem-efficient backend is off (_disable_mem_efficient_sdpa), and MIOpen's
+GEMM convolution solvers are disabled (_disable_miopen_gemm_conv).
 On 8 GPUs with FSDP2 on gfx950 none of these does anything.
 
 Use run_10steps.sh or run_wan_10steps.sh rather than invoking this directly;
@@ -371,6 +372,26 @@ def _disable_miopen_gemm_conv(gfx, environ=os.environ):
     return True
 
 
+MEM_EFFICIENT_SDPA_OFF_GFX = ("gfx1250",)
+
+
+def _disable_mem_efficient_sdpa(gfx):
+    """Turn SDPA's mem-efficient backend off on an arch in ``MEM_EFFICIENT_SDPA_OFF_GFX``.
+
+    On gfx1250 with torch 2.14 / ROCm 10.2, the Wan DiT's backward through the
+    mem-efficient (AOTriton) attention faults the GPU (TCP read permission
+    fault, GPU hang): with only mem-efficient enabled it fails in step 0, with
+    both flash and mem-efficient enabled at a varying step, and with only flash
+    enabled 10 steps run clean. Flash then takes head_dim <= 256 and MATH the rest.
+    """
+    import torch
+
+    if gfx.split(":", 1)[0] not in MEM_EFFICIENT_SDPA_OFF_GFX or not torch.backends.cuda.mem_efficient_sdp_enabled():
+        return False
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    return True
+
+
 def _install_arch_workarounds():
     """Workarounds a device needs whatever LUMEN_PATCH says, so the baseline gets them too."""
     import torch
@@ -385,6 +406,8 @@ def _install_arch_workarounds():
         _rank0(f"{gfx}: SDPA with head_dim > 256 runs on the MATH backend (mem-efficient fails there)")
     if _disable_miopen_gemm_conv(gfx):
         _rank0(f"{gfx}: MIOPEN_DEBUG_CONV_GEMM=0 (MIOpen's BF16 GemmFwdRest conv3d faults the GPU there)")
+    if _disable_mem_efficient_sdpa(gfx):
+        _rank0(f"{gfx}: SDPA mem-efficient backend off (its backward faults the GPU there); flash, then MATH")
 
 
 class _AutocastForward:

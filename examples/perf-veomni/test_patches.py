@@ -168,6 +168,21 @@ def test_miopen_gemm_conv_off_only_on_listed_arch():
     assert explicit == {"MIOPEN_DEBUG_CONV_GEMM": "1"}
 
 
+def test_mem_efficient_sdpa_off_only_on_listed_arch():
+    import train_dit_lumen
+
+    was = torch.backends.cuda.mem_efficient_sdp_enabled()
+    try:
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        assert not train_dit_lumen._disable_mem_efficient_sdpa("gfx950")
+        assert torch.backends.cuda.mem_efficient_sdp_enabled()
+        assert train_dit_lumen._disable_mem_efficient_sdpa("gfx1250:sramecc+:xnack-")
+        assert not torch.backends.cuda.mem_efficient_sdp_enabled()
+        assert not train_dit_lumen._disable_mem_efficient_sdpa("gfx1250")
+    finally:
+        torch.backends.cuda.enable_mem_efficient_sdp(was)
+
+
 # --- rmsnorm -----------------------------------------------------------------------
 
 

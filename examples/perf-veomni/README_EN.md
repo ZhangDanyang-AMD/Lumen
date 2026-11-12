@@ -478,14 +478,20 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 
 ### 3.11 Single MI450 GPU
 
-Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450 (gfx1250). **No run has reached
-10 steps yet.** On one gfx1250 engineering sample, with out-of-tree shims equivalent to the two behaviours below (BF16
-autocast on the DiT forward, wide-head SDPA on MATH), 5 of 10 steps completed: 7.4 s for step 1, about 4.6 s/step over
-steps 2–5, finite loss, and about 45.5 GB of whole-card memory in `amd-smi` (21.3 GB after the model loads; the figure
-includes the caching allocator). Step 6 hit a GPU page fault and the process hung (see the open questions at the end
-of this section). A component-level reproduction on another gfx1250 followed, one short process per piece: T5, the
-FP32 VAE (81 frames), and the DiT forward / backward / AdamW step each run clean; the BF16 VAE faults the same way on
-MIOpen, for the reason in the MIOpen item below. None of these figures compares with the 8-GPU table in §2.1.
+Wan2.1-T2V-1.3B online training (`WAN_TASK=online_training`) on one AMD Instinct MI450 (gfx1250). On one gfx1250
+engineering sample (image and aiter below), with the four behaviours below all on, both `baseline` and `flydsl` ran
+all 10 steps with no GPU error:
+
+| Mode | Result |
+|---|---|
+| `baseline` | 10/10, loss 1.13 → 0.10, about 14 s/step at steady state |
+| `flydsl` (aiter main) | 10/10, loss / grad_norm step by step close to `baseline` (step 2: 2.81 vs 2.80, step 4: 34.57 vs 33.75), about 7.9 s/step; all 525 VAE convolutions per step on FlyDSL |
+
+Step times are tqdm readings of single runs, not measured performance, and do not compare with the 8-GPU table in
+§2.1. One other `flydsl` run had an inf grad_norm at step 2 and NaN loss after; the same configuration rerun did not
+reproduce it (see the open questions at the end of this section). Before these behaviours, GPU page faults came from
+MIOpen convolutions in the BF16 VAE and from the mem-efficient SDPA in the DiT backward, each located by reproducing
+components one short process at a time.
 
 **Image.** The `amdagi/veomni:rocm7.14_torch2.12_py3.12` image of §3.1 has no gfx1250 kernels (gfx1250 is missing from
 `torch.cuda.get_arch_list()`), and the first GPU kernel fails with `hipErrorInvalidImage`. Use
@@ -570,7 +576,7 @@ yaml and before your own arguments, so the same flag given at the end of the com
 | `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | one process does not enable FSDP in VeOmni (it needs `fsdp_size > 1`), and `fsdp2` requires `init_device=meta` |
 | `--train.init_device cuda` | `meta` | the non-FSDP path refuses `meta`; `cuda` is VeOmni's literal value and means the GPU on ROCm too |
 
-`train_dit_lumen.py` also does three things that do not depend on `LUMEN_PATCH`, so `baseline` gets them too:
+`train_dit_lumen.py` also does four things that do not depend on `LUMEN_PATCH`, so `baseline` gets them too:
 
 - **BF16 autocast on the DiT forward.** With mixed precision on, VeOmni builds the DiT in FP32 and leaves the BF16
   cast to FSDP2's `MixedPrecisionPolicy`. One GPU has no FSDP2, and Wan's text encoder loads in BF16, so step 1 fails
@@ -589,11 +595,18 @@ yaml and before your own arguments, so the same flag given at the end of the com
   `MIOPEN_DEBUG_CONV_GEMM=0` the single conv3d and the 81-frame BF16 VAE both run clean (the first call spends 10-odd
   more seconds in Find). So gfx1250 gets `MIOPEN_DEBUG_CONV_GEMM=0` by default (`_disable_miopen_gemm_conv`); a value
   already in the environment is left as is.
+- **SDPA's mem-efficient backend off on gfx1250.** The DiT backward through mem-efficient (AOTriton) attention faults
+  the GPU. DiT alone, random inputs, 10 training steps: with only mem-efficient on it fails in step 0; with flash and
+  mem-efficient both on it fails at a varying step (0, 1 and 2 all seen; with a sync after each module's backward it
+  lands inside a transformer block's backward); with only flash, or only MATH, 10 steps run clean with matching
+  grad_norm. So gfx1250 gets `torch.backends.cuda.enable_mem_efficient_sdp(False)` (`_disable_mem_efficient_sdpa`): the
+  DiT runs on flash and head_dim 384 stays on MATH. The head_dim 384 forward failure above is the same backend.
 
 Expected: `$LOG_DIR/wan-baseline.meta.txt` shows `nproc: 1   arch: gfx1250` and
 `1-proc args  : --train.global_batch_size 1 ...`; the log shows
 `[lumen] gfx1250: SDPA with head_dim > 256 runs on the MATH backend ...`,
-`[lumen] gfx1250: MIOPEN_DEBUG_CONV_GEMM=0 ...` and
+`[lumen] gfx1250: MIOPEN_DEBUG_CONV_GEMM=0 ...`,
+`[lumen] gfx1250: SDPA mem-efficient backend off ...` and
 `[lumen] DiT is not under FSDP2: forward runs under torch.autocast(cuda, torch.bfloat16) over FP32 weights`, and the
 loss is finite.
 
@@ -605,6 +618,8 @@ Notes:
   convolutions run on the gfx1250 FlyDSL kernel.
 - Lumen's own rows for `conv_pad_in_kernel` (L3), `wan21_vae_padk_*`, are gfx950 only; on gfx1250 those shapes take
   the heuristic tile.
+- Do not use `sdpa_efficient` (an L-level patch) on gfx1250: it turns flash off and keeps only mem-efficient, which is
+  the backend that faults above.
 - One GPU is not sharded: the FP32 1.3B DiT with its gradients and AdamW state, about 21 GB, sits on one card. The
   21.2 GB in the §2.1 table is the sharded per-rank peak on 8 GPUs, not a single-GPU peak. MI450's 432 GiB holds it.
 - Keep gradient checkpointing on (do not add B2's `--train.gradient_checkpointing.enable false`): on 8 GPUs that
@@ -612,18 +627,17 @@ Notes:
 
 Open questions:
 
-- The GPU page fault at step 6. Kernel log: `[gfxhub0] no-retry page fault`, `Faulty UTCL2 client ID: TCP`,
-  `PERMISSION_FAULTS: 0x3` (read), then `MES ... failed to respond to msg=REMOVE_QUEUE`. The same fault on a BF16
-  conv3d is traced to MIOpen's `GemmFwdRest` (above), but that baseline run's VAE was FP32 and the FP32 VAE runs clean
-  alone, so whether the baseline fault had the same cause is not confirmed. On a host whose amdgpu is loaded with
-  `gpu_recovery=0 halt_if_hws_hang=1` the card stays hung: the process is stuck in the kernel, `amd-smi` hangs too,
-  and only a host reboot recovers it; with `gpu_recovery=1` the driver resets and recovers. Make sure you may reboot
-  the host before running.
+- The occasional inf: one `flydsl` run had an inf grad_norm at step 2 and NaN after; the same configuration rerun
+  matched `baseline`. Not investigated yet.
+- Both page faults log the same: `[gfxhub0] no-retry page fault`, `Faulty UTCL2 client ID: TCP`,
+  `PERMISSION_FAULTS: 0x3` (read), then `MES ... failed to respond to msg=REMOVE_QUEUE`. On a host whose amdgpu is
+  loaded with `gpu_recovery=0` the card stays hung: the process is stuck in the kernel, `amd-smi` hangs too, and only
+  a power cycle recovers it; with `gpu_recovery=1` the driver resets and recovers. Make sure you may reboot the host
+  before running.
 - `zhangdanyangamd/lumen:dev-gfx1250` is a development image and the dependencies above are added by hand; there is
   no gfx1250 image yet that ships them.
-- The wide-head SDPA failure and MIOpen's `GemmFwdRest` fault belong to this torch / ROCm; once a later version fixes
-  them, `WIDE_HEAD_MATH_GFX` and `MIOPEN_GEMM_OFF_GFX` should shrink.
-- Step time and memory of aiter main's gfx1250 convolution in full training are not measured yet.
+- The mem-efficient SDPA failures and MIOpen's `GemmFwdRest` fault belong to this torch / ROCm; once a later version
+  fixes them, `WIDE_HEAD_MATH_GFX`, `MEM_EFFICIENT_SDPA_OFF_GFX` and `MIOPEN_GEMM_OFF_GFX` should shrink.
 
 ---
 
