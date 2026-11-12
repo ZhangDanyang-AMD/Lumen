@@ -442,7 +442,7 @@ class LumenLayerNormLinear(nn.Module):
                         dtype=config.params_dtype,
                     )
                 )
-            set_tensor_model_parallel_attributes(self.bias, True, 0, 1)
+            set_tensor_model_parallel_attributes(self.bias, True, 0, stride)
             if getattr(config, "perform_initialization", True):
                 with torch.no_grad():
                     self.bias.zero_()

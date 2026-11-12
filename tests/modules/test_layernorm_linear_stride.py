@@ -27,7 +27,8 @@ def test_gated_partition_stride(cpu):
         patch(base + "_initialize_affine_weight_cpu") as cpu_init,
         patch("megatron.core.tensor_parallel.layers.condition_init_method", side_effect=lambda c, f: f),
     ):
-        LumenLayerNormLinear(64, 128, config=config, init_method=lambda w: w, stride=2)
+        module = LumenLayerNormLinear(64, 128, config=config, init_method=lambda w: w, stride=2)
+        assert module.bias.partition_stride == 2
         selected = cpu_init if cpu else gpu_init
         assert selected.call_args.kwargs["stride"] == 2
         assert not (gpu_init if cpu else cpu_init).called

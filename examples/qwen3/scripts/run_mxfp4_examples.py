@@ -108,6 +108,18 @@ def main():
     expected = git(LUMEN, "ls-tree", "HEAD", "third_party/aiter").split()[2]
     if git(aiter_root, "rev-parse", "HEAD") != expected:
         raise RuntimeError(f"imported AITER does not match Lumen gitlink {expected}")
+    for root in (LUMEN, aiter_root, megatron):
+        if git(root, "status", "--porcelain", "--untracked-files=no"):
+            raise RuntimeError(f"tracked modifications in {root}; commit the source before publishing a run")
+    if git(megatron, "rev-parse", "HEAD") != "a1b00d4259e92dc4a07a0be2c24088fe827f4b6e":
+        raise RuntimeError("Megatron differs from the documented fixed runtime")
+    required_packages = {"torch": "2.9.1+rocm7.2.0.lw.git7e1940d4",
+                         "triton": "3.7.0+amd.rocm7.2.0.git89002410", "flydsl": "0.5.0",
+                         "transformers": "5.16.0", "peft": "0.20.0", "accelerate": "1.14.0",
+                         "numpy": "2.4.1"}
+    for package, version in required_packages.items():
+        if importlib.metadata.version(package) != version:
+            raise RuntimeError(f"{package} must be {version} for the numbered fixed-runtime run")
     if torch.cuda.device_count() != 8:
         raise RuntimeError("numbered runs require exactly eight visible gfx950 GPUs")
     for device in range(8):
