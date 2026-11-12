@@ -56,6 +56,8 @@ def _run(api, name, run, args, kwargs):
 
 
 def _rng(use_sr, seed, offset):
+    if not use_sr:
+        return None, 0
     if use_sr:
         seed = random.randint(0, 2**31 - 2) if seed is None else seed
         offset = random.randint(0, 2**31 - 2) if offset is None else offset

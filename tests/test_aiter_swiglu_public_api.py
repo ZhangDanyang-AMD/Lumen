@@ -13,7 +13,7 @@ class TestPublicSwiGLU(unittest.TestCase):
         torch = types.ModuleType("torch")
         torch.Tensor = object
         activation = types.ModuleType("aiter.ops.triton.fusions.activation")
-        backward = types.ModuleType("aiter.ops.triton.fusions.silu_and_mul_backward")
+        backward = activation
         x, grad, out = object(), object(), object()
         activation.fused_silu_mul = lambda value: value
 

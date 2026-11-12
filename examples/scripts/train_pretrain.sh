@@ -185,7 +185,7 @@ if [ ${#MISSING_OPTIONAL[@]} -gt 0 ]; then
 fi
 
 if [[ "${LUMEN_FUSED_SWIGLU:-0}" == "1" ]] && ! python -c \
-    "from aiter.ops.triton.fusions.activation import fused_silu_mul; from aiter.ops.triton.fusions.silu_and_mul_backward import silu_and_mul_backward"; then
+    "from aiter.ops.triton.fusions.activation import fused_silu_mul; from aiter.ops.triton.fusions.activation import silu_and_mul_backward"; then
     echo "ERROR: requested fused SwiGLU APIs are unavailable in ${AITER_DIR}"
     exit 1
 fi

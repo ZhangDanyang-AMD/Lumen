@@ -477,7 +477,7 @@ def _probe_aiter_swiglu():
         from aiter.ops.triton.fusions.activation import (
             fused_silu_mul as _forward,  # noqa: F401
         )
-        from aiter.ops.triton.fusions.silu_and_mul_backward import (
+        from aiter.ops.triton.fusions.activation import (
             silu_and_mul_backward as _backward,  # noqa: F401
         )
 

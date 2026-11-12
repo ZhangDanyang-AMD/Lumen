@@ -27,7 +27,7 @@ def _probe(name):
 class TestPublicProbes(unittest.TestCase):
     def test_swiglu_requires_both_public_functions(self):
         forward = types.ModuleType("aiter.ops.triton.fusions.activation")
-        backward = types.ModuleType("aiter.ops.triton.fusions.silu_and_mul_backward")
+        backward = forward
         forward.fused_silu_mul = lambda x: x
         probe = _probe("_probe_aiter_swiglu")
         with patch.dict(

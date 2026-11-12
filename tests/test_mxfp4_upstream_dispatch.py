@@ -77,6 +77,8 @@ class TestMXFP4UpstreamDispatch(unittest.TestCase):
             spec = importlib.util.spec_from_file_location("mxfp4_under_test", path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+            self.assertEqual(module._rng(False, 123, 456), (None, 0))
+            self.assertEqual(module._rng(True, 123, 456), (123, 456))
             result = module.dual_layout_quant_mxfp4(
                 x,
                 sign,

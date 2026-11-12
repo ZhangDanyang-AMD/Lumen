@@ -41,6 +41,6 @@ def fused_swiglu_backward(
     out: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fused SwiGLU backward via AITER Triton kernel."""
-    from aiter.ops.triton.fusions.silu_and_mul_backward import silu_and_mul_backward
+    from aiter.ops.triton.fusions.activation import silu_and_mul_backward
 
     return silu_and_mul_backward(grad_output, y, out=out)

@@ -32,12 +32,12 @@ def test_quant_matches_public_api_and_reconstructs(dtype, use_sr):
 
     x = torch.randn(256, 256, device="cuda", dtype=dtype)
     packed, scales = ops.convert_to_mxfp4(
-        x, use_sr=use_sr, philox_seed=123, philox_offset=0
+        x, use_sr=use_sr, philox_seed=123 if use_sr else None, philox_offset=0
     )
     ref, ref_scale = dynamic_mxfp4_quant(
         x,
         use_sr=use_sr,
-        philox_seed=123,
+        philox_seed=123 if use_sr else None,
         philox_offset=0,
         backend="triton",
     )
@@ -84,7 +84,7 @@ def test_h16_fusions_match_upstream_in_each_layout(use_sr, swizzle, shuffle):
     kwargs = dict(
         use_sr_row=use_sr,
         use_sr_transposed=use_sr,
-        philox_seed=456,
+        philox_seed=456 if use_sr else None,
         philox_offset=0,
         swizzle_scale=swizzle,
         shuffle_col=shuffle,
@@ -95,7 +95,7 @@ def test_h16_fusions_match_upstream_in_each_layout(use_sr, swizzle, shuffle):
         torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     kwargs = dict(
         use_sr=use_sr,
-        philox_seed=456,
+        philox_seed=456 if use_sr else None,
         philox_offset=0,
         swizzle_scale=swizzle,
         shuffle_data=shuffle,

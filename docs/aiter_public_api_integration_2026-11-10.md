@@ -8,7 +8,7 @@ updated for the final upstream module names and both H16 fusion PRs.
 | --- | --- | --- |
 | #5531 | quant.quant.dynamic_mxfp4_quant, use_sr | convert_to_mxfp4 |
 | #5538 | quant.fast_transpose.transpose_packed_fp4 | transpose_packed_fp4 |
-| #5542 | fusions.silu_and_mul_backward.silu_and_mul_backward | fused_swiglu_backward and Megatron chunked out buffers |
+| #5542 | fusions.activation.silu_and_mul_backward | fused_swiglu_backward and Megatron chunked out buffers |
 | #5548 | quant.quant.dynamic_mxfp4_quant_blockscale | convert_to_mxfp4_2d, 32x32 RTN |
 | #6458 | quant.fused_quant_transpose_hadamard_mxfp4 | dual_layout_quant_mxfp4 |
 | #6476 | quant.dequant_hadamard_quant_mxfp4 | dequant_hadamard_quant_mxfp4 |
@@ -70,4 +70,15 @@ the tuning cache; a GPU matmul regression is included.
 GPU numerical validation is pending: Slurm job 68343968 was PENDING (Priority)
 at handoff. It runs the new integration suite and existing MXFP4 suite from
 /scratch/users/xdai/Lumen-aiter-integration-20261110 with the exact AITER pin.
-No GPU pass, performance result, Docker build or full training result is claimed.
+The first MI355X GPU validation on 2026-11-12 exposed an incorrect SwiGLU
+backward module path and inactive Philox arguments on RTN calls. The corrected
+adapter clears seed/offset for RTN and preserves explicit values for SR. Both
+SwiGLU functions live in fusions.activation at this pin. After these fixes all
+13 integration GPU tests passed, and six CPU regressions passed.
+
+The original queued alola3 job status above is historical. The MI355X FSDP2
+LoRA case completed 20 steps with finite loss/grad norm. The Megatron case is
+being validated separately against the available image's Megatron revision.
+The image and newly downloaded Alpaca split differ from the old runbook, so
+these numbers are not a paired loss/performance comparison. No Docker rebuild
+or full training convergence result is claimed.
