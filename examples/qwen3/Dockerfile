@@ -68,10 +68,9 @@ ENV TOKENIZER_PATH=/workspace/Lumen/examples/qwen3/tokenizer
 
 # Deliberately not baked:
 #
-#   AITER_CONFIG_GEMM_A4W4 — train_pretrain.sh builds the path list only while
-#     this is empty, and that list is what puts the model's own tuned table in
-#     front of the stock one. The two are disjoint, so any value here costs the
-#     M=16384 shapes their asm kernels.
+#   AITER_CONFIG_GEMM_A4W4 — train_pretrain.sh selects AITER's public case
+#     profile while this is empty. A baked value would suppress that selection;
+#     keep explicit table overrides at job level.
 #   CUDA_DEVICE_MAX_CONNECTIONS — the tuned value is 8, which Megatron asserts
 #     is exactly 1 once tensor or context parallelism is on.
 #   NCCL_IB_DISABLE, NCCL_SOCKET_IFNAME — single-node values.

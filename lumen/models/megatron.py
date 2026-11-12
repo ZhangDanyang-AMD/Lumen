@@ -104,19 +104,14 @@ def resolve_attn_backend(backend: str, fp8_attn: str) -> str:
 
 
 def resolve_quant_format(args) -> Optional[str]:
-    """Return the effective Lumen quantisation format string, or None.
+    """Return the shared resolved format, including generic CLI selectors."""
+    from lumen.config import LumenConfig
 
-    MXFP4 has its own ``--linear-fp4`` gate. FP8 formats follow the same
-    precedence :data:`lumen.config._ARG_MAP` uses for the ``format`` field:
-    ``--linear-fp8-format`` first, then Megatron's ``--fp8-format``.
-    """
-    if getattr(args, "linear_fp4", False):
-        return "mxfp4"
-    for attr in ("linear_fp8_format", "lumen_fp8_format"):
-        value = getattr(args, attr, None)
-        if value is not None:
-            return value
-    return None
+    if not any(getattr(args, name, None) for name in (
+        "linear_quant_format", "linear_fp8_format", "lumen_fp8_format", "linear_fp4", "linear_fp8",
+    )):
+        return None
+    return LumenConfig.from_args(args).format
 
 
 def _override_te_args_for_lumen(args):
@@ -875,10 +870,25 @@ def make_lumen_model_provider(
         import os
         from dataclasses import replace as _replace
 
-        from lumen.config import LumenConfig
+        from lumen.config import LumenConfig, linear_quant_requested
 
         args = get_args()
+        if linear_quant_requested(args) and not getattr(args, "lumen_linear", False):
+            raise ValueError("Linear quantization requires --lumen-linear to install native parallel linears.")
         model = model_builder(args, pre_process, post_process, vp_stage, config=config)
+
+        # Resolve after the builder: it translates Megatron's --fp8-format and
+        # attention flags into lumen_* attributes that from_args reads as
+        # fallbacks, so an earlier snapshot would silently keep the defaults.
+        cfg = _replace(LumenConfig.from_args(args), lora_rank=0)
+        _ = cfg.quant_config
+        if cfg.format == "mxfp4" and getattr(args, "fp8_param_storage", False):
+            # MXFP4 keeps BF16 masters and its own cache; FP8 storage would feed
+            # a scalar weight scale into the packed-FP4 path.
+            raise ValueError(
+                "--fp8-param-storage does not apply to MXFP4: it stores frozen "
+                "weights in FP8, which MXFP4's packed operands cannot consume."
+            )
 
         # 1. Megatron LoRA (not PEFT — stays separate)
         if getattr(args, "lora_rank", 0) > 0:
@@ -891,26 +901,7 @@ def make_lumen_model_provider(
         if getattr(args, "lumen_linear", False):
             _install_layernorm_linear_ckpt_hook(model)
 
-        # The native parallel-linear pass below is gated on --lumen-linear, but
-        # cfg.enable() is not. Asking for quantized linears without it produced
-        # a partially quantized model -- norms patched, params wrapped, GEMMs
-        # untouched -- and reported nothing, so the run looked like a working
-        # FP8/FP4 run and trained in BF16. Fail before anything is patched.
-        if (
-            getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False)
-        ) and not getattr(args, "lumen_linear", False):
-            _flag = "--linear-fp4" if getattr(args, "linear_fp4", False) else "--linear-fp8"
-            raise ValueError(
-                f"{_flag} quantizes Lumen's parallel linear layers, which requires "
-                "--lumen-linear to install them. Without it the GEMMs stay BF16 "
-                f"while the rest of the model is patched. Add --lumen-linear, or "
-                f"drop {_flag}."
-            )
-
-        # 2. Unified LumenConfig.enable() — skip PEFT LoRA (handled above)
-        cfg = LumenConfig.from_args(args)
-        cfg = _replace(cfg, lora_rank=0)
-
+        # Public enable owns generic linears and MXFP4-native linears.
         dp_group = None
         if cfg.reduce_amax:
             import torch.distributed as dist
@@ -928,33 +919,17 @@ def make_lumen_model_provider(
             f"break Megatron's parameter management."
         )
 
-        # 3. Megatron-specific native parallel linear quantization
-        fp8_enabled = getattr(args, "linear_fp8", False)
-        fp4_enabled = getattr(args, "linear_fp4", False)
-        if (fp8_enabled or fp4_enabled) and getattr(args, "lumen_linear", False):
-            # The resolved recipe, not the raw --linear-fp8-scaling string: MX
-            # formats carry scaling in the format, so an MXFP4 run passes
-            # "blockwise" here and would silently run FP8 blockwise instead.
-            if fp4_enabled:
-                enable_fp4_for_parallel_linear(
-                    model,
-                    scaling_type=cfg.quant_config.recipe,
-                    block_size=cfg.quant_config.block_size,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                    quant_config=cfg.quant_config,
-                )
-            else:
-                enable_fp8_for_parallel_linear(
-                    model,
-                    scaling_type=cfg.quant_config.recipe,
-                    block_size=cfg.quant_config.block_size,
-                    fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
-                    gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
-                    delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
-                    quant_config=cfg.quant_config,
-                )
+        # MXFP4 native layers were enabled by cfg.enable; FP8 keeps its legacy path.
+        if cfg.format != "mxfp4" and linear_quant_requested(args) and getattr(args, "lumen_linear", False):
+            enable_fp8_for_parallel_linear(
+                model,
+                scaling_type=cfg.quant_config.recipe,
+                block_size=cfg.quant_config.block_size,
+                fp8_mha=getattr(args, "lumen_fp8_attn", "none") == "mha",
+                gradient_accumulation_fusion=getattr(args, "lumen_gradient_accumulation_fusion", False),
+                delay_wgrad=getattr(args, "lumen_delay_wgrad", False),
+                quant_config=cfg.quant_config,
+            )
 
         if getattr(args, "fp8_param_storage", False):
             from lumen.models.fp8_param_storage import shrink_frozen_weights_to_fp8
@@ -1106,6 +1081,8 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
         global _warmup_step_counter, _warmup_completed
 
         args = get_args()
+        from lumen.config import linear_quant_requested
+
         timers = get_timers()
         warmup_steps = getattr(args, "warmup_steps", 0)
 
@@ -1128,10 +1105,10 @@ def make_forward_step(get_batch_fn: Callable, loss_fn: Callable = loss_func, zer
                         except StopIteration:
                             pass
                 else:
-                    if getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
+                    if linear_quant_requested(args):
                         reset_fp8_state(model)
                     _run_warmup_eval_pass(model, args)
-                    if getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
+                    if linear_quant_requested(args):
                         reset_fp8_state(model)
                     if torch.distributed.is_initialized():
                         torch.distributed.barrier()

@@ -112,13 +112,6 @@ def add_common_fsdp_args(parser):
     # -- Linear FP8 training --
     lfp8 = parser.add_argument_group("linear-fp8")
     add_fsdp_fp8_contract_args(lfp8)
-    lfp8.add_argument("--linear-fp8-wgrad", action="store_true", default=True)
-    lfp8.add_argument(
-        "--no-linear-fp8-wgrad",
-        dest="linear_fp8_wgrad",
-        action="store_false",
-        help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
-    )
     lfp8.add_argument(
         "--grad-quant-type",
         type=str,
@@ -457,7 +450,9 @@ def register_quant_optimizer_hooks(model: nn.Module, optimizer, args) -> bool:
 
     Returns whether a hook was registered (i.e. whether MXFP4 is in use).
     """
-    if not getattr(args, "linear_fp4", False):
+    from lumen.config import mxfp4_enabled
+
+    if not mxfp4_enabled(args):
         return False
 
     from lumen.quantize import register_mxfp4_weight_optimizer_hooks
@@ -560,15 +555,15 @@ def _wrap_frozen_base_as_blockwise2d_fp8(
 
 def validate_fsdp_quant_args(args) -> None:
     """Validate FSDP-only low-precision option combinations."""
-    linear_fp4 = getattr(args, "linear_fp4", False)
-    linear_fp8 = getattr(args, "linear_fp8", False)
+    from lumen.config import LumenConfig, mxfp4_enabled
+
+    cfg = LumenConfig.from_args(args)
+    _ = cfg.quant_config
+    linear_fp4 = mxfp4_enabled(args)
     mxfp4_comm = getattr(args, "fsdp_mxfp4_comm", False)
     fp8_param_storage = getattr(args, "fsdp_fp8_param_storage", False)
     fp8_param_gather = getattr(args, "lumen_fp8_param_gather", False)
 
-    from lumen.config import check_linear_quant_exclusive
-
-    check_linear_quant_exclusive(linear_fp8, linear_fp4)
     if mxfp4_comm and not linear_fp4:
         raise ValueError("--fsdp-mxfp4-comm requires --linear-fp4")
     if mxfp4_comm and getattr(args, "fsdp_version", 1) != 2:
@@ -644,6 +639,7 @@ def apply_fsdp2(
         The same model (in-place sharding).
     """
     validate_fsdp_quant_args(args)
+    from lumen.config import linear_quant_requested
 
     try:
         from torch.distributed.device_mesh import init_device_mesh
@@ -676,7 +672,7 @@ def apply_fsdp2(
         # each param keeps its own dtype — FP8/FP4 wrappers stay as themselves,
         # LoRA adapters stay BF16.
         mp_policy = MixedPrecisionPolicy(param_dtype=None, reduce_dtype=torch.float32)
-    elif getattr(args, "linear_fp8", False) or getattr(args, "linear_fp4", False):
+    elif linear_quant_requested(args):
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.float32,

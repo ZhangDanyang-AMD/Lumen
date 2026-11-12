@@ -258,72 +258,13 @@ def add_common_megatron_args(parser):
         help="Enable LoRA all-to-all communication optimisation.",
     )
 
-    lfp8 = parser.add_argument_group(title="linear-fp8")
-    # The two gates are mutually exclusive at the parser, not just inside
-    # LumenConfig.from_args: the FSDP and RL call sites read args.linear_fp4 off
-    # the namespace without going through it, so a config asking for both used
-    # to get as far as building a model.
-    _linear_quant_gate = parser.add_mutually_exclusive_group()
-    safe_add_argument(
-        _linear_quant_gate,
-        "--linear-fp8",
-        action="store_true",
-        default=False,
-        help="Enable FP8 quantised training for Linear layers. Excludes --linear-fp4.",
-    )
-    safe_add_argument(
-        lfp8,
-        "--linear-fp8-format",
-        type=str,
-        default=None,
-        choices=["fp8_e4m3", "fp8_e5m2", "hybrid", "mxfp8"],
-        help="FP8 quantisation format for Linear layers. Takes precedence over "
-        "Megatron's --fp8-format. MXFP4 is enabled separately with --linear-fp4. "
-        "Default None means --fp8-format decides; do not give this a "
-        "non-None default or it would silently override --fp8-format.",
-    )
-    safe_add_argument(
-        lfp8,
-        "--linear-fp8-scaling",
-        type=str,
-        default="delayed",
-        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none"],
-    )
-    safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
-    safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
-    safe_add_argument(lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False)
-    safe_add_argument(lfp8, "--linear-fp8-amax-history", type=int, default=16)
-    safe_add_argument(
-        lfp8, "--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation."
-    )
-    safe_add_argument(lfp8, "--linear-fp8-activation", action="store_true", default=True)
-    safe_add_argument(lfp8, "--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
-    safe_add_argument(lfp8, "--linear-fp8-wgrad", action="store_true", default=True)
-    safe_add_argument(
-        lfp8,
-        "--no-linear-fp8-wgrad",
-        dest="linear_fp8_wgrad",
-        action="store_false",
-        help="Execute weight gradient GEMM in higher precision (BF16) even for FP8 runs.",
-    )
-    safe_add_argument(
-        lfp8,
-        "--linear-fp8-cache-frozen-weight",
-        dest="linear_fp8_cache_frozen_weight",
-        action="store_true",
-        default=False,
-        help="Cache FP8-quantised frozen base weights to avoid re-quantisation on every forward/recompute.",
-    )
+    from lumen.cli import add_linear_quant_args
 
+    lfp8 = parser.add_argument_group(title="linear-quantization")
+    add_linear_quant_args(lfp8)
     safe_add_argument(
-        _linear_quant_gate,
-        "--linear-fp4",
-        action="store_true",
-        default=False,
-        help=(
-            "Enable MXFP4 quantised training for Linear layers (32-element blocks). "
-            "Excludes --linear-fp8."
-        ),
+        lfp8, "--linear-fp8-cache-frozen-weight", action="store_true", default=False,
+        help="Cache quantized frozen FP8 weights (not an MXFP4 cache option).",
     )
 
     grad_quant = parser.add_argument_group(title="gradient-quantization")

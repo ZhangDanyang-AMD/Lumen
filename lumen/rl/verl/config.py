@@ -50,13 +50,24 @@ class VerlLumenArgs:
         "gate_proj", "up_proj", "down_proj",
     ])
 
+    # None distinguishes unspecified recipe values from explicit legacy inputs.
+    linear_quant_format: str | None = None
+    linear_quant_scaling: str | None = None
+    linear_quant_block_size: int | None = None
+    linear_quant_amax_algo: str | None = None
+    linear_quant_margin: int | None = None
+    linear_quant_reduce_amax: bool | None = None
+    linear_quant_amax_history: int | None = None
+    linear_quant_activation: bool | None = None
+    linear_quant_wgrad: bool | None = None
+    linear_quant_output_layer: bool | None = None
     linear_fp8: bool = False
     linear_fp4: bool = False
-    linear_fp8_format: str = "fp8_e4m3"
-    linear_fp8_scaling: str = "delayed"
-    linear_fp8_activation: bool = True
-    linear_fp8_wgrad: bool = True
-    linear_fp8_reduce_amax: bool = False
+    linear_fp8_format: str | None = None
+    linear_fp8_scaling: str | None = None
+    linear_fp8_activation: bool | None = None
+    linear_fp8_wgrad: bool | None = None
+    linear_fp8_reduce_amax: bool | None = None
 
     lumen_norm: bool = False
     lumen_fp8_attn: str = "none"
@@ -81,6 +92,9 @@ class VerlLumenArgs:
         from lumen.config import check_linear_quant_exclusive
 
         check_linear_quant_exclusive(self.linear_fp8, self.linear_fp4)
+        from lumen.config import LumenConfig
+
+        LumenConfig.from_args(self)
         validate_backend_matrix(self)
 
 
@@ -124,6 +138,10 @@ def from_verl_config(cfg: Any) -> VerlLumenArgs:
         kwargs["lora_alpha"] = lora_cfg.get("alpha", 32.0)
 
     for key in (
+        "linear_quant_format", "linear_quant_scaling", "linear_quant_block_size",
+        "linear_quant_amax_algo", "linear_quant_margin", "linear_quant_reduce_amax",
+        "linear_quant_amax_history", "linear_quant_activation", "linear_quant_wgrad",
+        "linear_quant_output_layer",
         "linear_fp8", "linear_fp4", "linear_fp8_format", "linear_fp8_scaling",
         "lumen_norm", "lumen_fp8_attn", "lumen_fp8_activation_store",
         "lumen_fp8_param_gather", "lumen_fp8_weight_cache",
