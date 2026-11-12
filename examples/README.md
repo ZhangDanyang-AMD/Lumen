@@ -1,6 +1,17 @@
 # Lumen Examples Runbook
 
-> MXFP4 rows 12/13: use the fixed-runtime [reproduction guide](qwen3/MXFP4_REPRODUCIBILITY.md). The table below is historical MI350X evidence, not validation of the current AITER integration. Row 12 validation uses its training mock corpus; row 13 has no evaluation within the current 20-step smoke run. Other 11 rows have not been rerun in this integration.
+> MXFP4 rows 12/13: use the fixed-runtime [reproduction guide](qwen3/MXFP4_REPRODUCIBILITY.md). The original MI350X table is historical evidence, not validation of the current AITER integration. Row 12 validation uses its training mock corpus; row 13 has no evaluation within the current 20-step smoke run. Other 11 rows have not been rerun in this integration.
+
+Latest MXFP4 verification (2026-11-12, Lumen `00edddf`, pinned AITER `5373140`,
+8×MI355X, 20 steps, MBS 1, sequence 2048):
+
+| Row | Status | Median ms, steps 2–20 | Step-20 loss | Validation |
+|---|---|---|---|---|
+| 12 Megatron MXFP4 | passed, exit 0 | 322.5 | 3.095294 | 3.054681, shared mock corpus |
+| 13 FSDP2 MXFP4 LoRA SFT | passed, exit 0 | 523.3 | 1.1998 | Not evaluated within 20 steps |
+
+These are smoke results, not convergence evidence or paired speedup measurements.
+The reproduction guide records kernel fallbacks, dependencies, commands and logs.
 
 Small, single-node training recipes used to check a new feature. Each row is one
 command, and every command runs 20 steps. Rows are ordered by model, then by
@@ -74,7 +85,8 @@ Row 6 is hybrid FP8 with delayed scaling.
 | 12 | required | MXFP4 | Megatron | Pretrain, mock data | 8× MI350X | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | required | MXFP4 | FSDP2 | LoRA SFT | 8× MI350X | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
-Row 8 is the BF16 baseline for both row 9 and row 12. Row 9 is hybrid FP8 with
+Row 8 is the BF16 reference for row 9. Row 12 additionally enables QK normalization,
+so its loss is not a paired precision comparison with row 8. Row 9 is hybrid FP8 with
 delayed scaling. The Megatron MXFP4 recipe keeps the last 5 layers in BF16.
 
 Row 12 also takes `LAUNCH=native` (no Docker). Its image is `lumen:dev`;

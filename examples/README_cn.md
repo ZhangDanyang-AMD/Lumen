@@ -1,6 +1,17 @@
 # Lumen Examples Runbook
 
-> MXFP4 第 12/13 项请按[固定版本复现指南](qwen3/MXFP4_REPRODUCIBILITY.md)运行。下表为历史 MI350X 数据，并非当前 AITER 集成的验证结果。第 12 项验证使用训练 mock 语料；当前第 13 项 20 step 内不进行验证。其余 11 项未在本次集成中重测。
+> MXFP4 第 12/13 项请按[固定版本复现指南](qwen3/MXFP4_REPRODUCIBILITY.md)运行。原 MI350X 表为历史数据，并非当前 AITER 集成的验证结果。第 12 项验证使用训练 mock 语料；当前第 13 项 20 step 内不进行验证。其余 11 项未在本次集成中重测。
+
+最新 MXFP4 验证（2026-11-12，Lumen `00edddf`，固定 AITER `5373140`，
+8×MI355X，20 step，MBS 1，seq 2048）：
+
+| 编号 | 状态 | step 2–20 中位耗时 | step 20 loss | 验证 |
+|---|---|---|---|---|
+| 12 Megatron MXFP4 | 通过，退出码 0 | 322.5 ms | 3.095294 | 3.054681，与训练共用 mock 语料 |
+| 13 FSDP2 MXFP4 LoRA SFT | 通过，退出码 0 | 523.3 ms | 1.1998 | 20 step 内未执行 |
+
+这些是 smoke 结果，不代表收敛或配对测速结论。复现指南记录了 kernel fallback、
+固定依赖、执行命令和日志。
 
 用来检查新功能的小模型、单机训练。一行一个命令，每条都跑 20 step。先按模型排，再按精度排：BF16、FP8 delayed、FP8 blockwise、MXFP4。
 
@@ -62,7 +73,7 @@ MXFP4 跑在 gfx950（MI350 / MI355）。`run_qwen3_fsdp.sh` 遇到 `MODE=mxfp4`
 | 12 | 每次必跑 | MXFP4 | Megatron | 预训练，mock 数据 | 8× MI350X | `MBS=1 GBS=8 SEQ_LEN=2048 TRAIN_STEPS=20 bash examples/qwen3/run_pretrain_qwen3_8b_mxfp4.sh` |
 | 13 | 每次必跑 | MXFP4 | FSDP2 | LoRA SFT | 8× MI350X | `TRAIN_STEPS=20 WARMUP_STEPS=2 bash examples/qwen3/run_qwen3_fsdp_mxfp4_sft.sh` |
 
-第 8 行同时是第 9 行和第 12 行的 BF16 基线。第 9 行是 hybrid FP8、delayed scaling。Megatron 的 MXFP4 配方最后 5 层保持 BF16。
+第 8 行是第 9 行的 BF16 参考。第 12 行额外启用 QK normalization，因此它的 loss 与第 8 行不是只改变精度的配对比较。第 9 行是 hybrid FP8、delayed scaling。Megatron 的 MXFP4 配方最后 5 层保持 BF16。
 
 第 12 行还可以 `LAUNCH=native`（不进 Docker）。镜像是 `lumen:dev`；`examples/qwen3/build_mxfp4_lumen_image.sh` 会打出带 Lumen 源码的 `lumen/mxfp4-lumen:gfx950`。
 

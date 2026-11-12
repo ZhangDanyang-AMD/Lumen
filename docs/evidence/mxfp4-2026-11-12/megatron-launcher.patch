@@ -1,0 +1,28 @@
+diff --git a/megatron/core/models/gpt/gpt_layer_specs.py b/megatron/core/models/gpt/gpt_layer_specs.py
+index 0d2ca5fa6..e322ce210 100755
+--- a/megatron/core/models/gpt/gpt_layer_specs.py
++++ b/megatron/core/models/gpt/gpt_layer_specs.py
+@@ -597,7 +597,8 @@ def get_gpt_decoder_layer_specs(
+             moe_use_legacy_grouped_gemm=config.moe_use_legacy_grouped_gemm,
+         )
+     else:
+-        layer_norm_impl = LNImpl
++        from megatron.core.transformer.megatron_fused_rmsnorm import MegatronFusedRMSNorm as _MFRN
++        layer_norm_impl = _MFRN if normalization == "RMSNorm" else LNImpl  # patched-lnimpl
+         dense_layer_spec = get_gpt_layer_local_spec(
+             num_experts=None,
+             moe_grouped_gemm=False,
+diff --git a/megatron/core/transformer/transformer_block.py b/megatron/core/transformer/transformer_block.py
+index edf13b45d..2dea998f4 100755
+--- a/megatron/core/transformer/transformer_block.py
++++ b/megatron/core/transformer/transformer_block.py
+@@ -58,7 +58,8 @@ if HAVE_TE:
+     LayerNormImpl = TENorm
+ 
+ elif HAVE_APEX:
+-    LayerNormImpl = FusedLayerNorm
++    from megatron.core.transformer.megatron_fused_rmsnorm import MegatronFusedRMSNorm  # patched-lnimpl
++    LayerNormImpl = MegatronFusedRMSNorm
+ 
+ else:
+     from megatron.core.transformer.torch_norm import WrappedTorchNorm

@@ -97,3 +97,32 @@ input. Completion does not establish that every kernel ran upstream-only.
 The image and newly downloaded Alpaca split differ from the old runbook, so
 these numbers are not a paired loss/performance comparison. No Docker rebuild
 or full training convergence result is claimed.
+
+### Formal-source rerun, 2026-11-12
+
+The earlier temporary compatibility edits are now formal source changes. Lumen
+`00edddf545fffdba2dcb2d6c9bb00776a1decb27` was tested from a new checkout,
+with clean initial AITER `537314057fc0537144ef572eb28322d18a5d4b9e` and Megatron
+`a1b00d4259e92dc4a07a0be2c24088fe827f4b6e`, isolated source JIT caches and the
+fixed runtime image digest. The checked-in row-12 launcher applies its normal
+Megatron RMSNorm/ROPE source bridge automatically; its exact diff is saved.
+No hand-edited compatibility patches were used.
+
+| Case | Steps / exit | Loss at step 20 | Gradient norm | Median ms, steps 2–20 | Validation |
+|---|---|---|---|---|---|
+| 12 Megatron mock pretrain | 20 / 0 | 3.095294 | 38.790 | 322.5 | 3.054681 final validation-set pass; shared train corpus |
+| 13 FSDP2 LoRA SFT | 20 / 0 | 1.1998 | 0.3203 | 523.3 | Not run (eval interval 50) |
+
+The earlier table's case-13 “Validation” cell refers only to finite training
+metrics, not a validation loss. CPU compatibility tests passed 3, initialization
+stride tests passed 2 and GPU public-API integration tests passed 13. Both rows
+still invoke the documented shuffled-input transpose fallback. The remaining
+11 numbered examples are not retested by this evidence, nor are FP8/MXFP8 paths
+covered by these two training rows.
+
+[Reproduction recipe](../examples/qwen3/MXFP4_REPRODUCIBILITY.md) specifies inputs,
+versions, commands and limits. [Evidence](evidence/mxfp4-2026-11-12/) includes
+manifest, launch settings, compressed logs, automatic bridge patch and mock-data
+hash. The measured source commit is unchanged by the subsequent documentation
+and evidence commit. These smoke timings do not establish convergence or speedup
+relative to the historical MI350X table.

@@ -1,0 +1,38 @@
+{
+  "12": {
+    "exit_code": 0,
+    "steps": 20,
+    "passed": true,
+    "legacy_messages": [
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)"
+    ],
+    "loss20": 3.095294,
+    "grad_norm20": 38.79,
+    "median_ms_steps2_20": 322.5
+  },
+  "13": {
+    "exit_code": 0,
+    "steps": 20,
+    "passed": true,
+    "legacy_messages": [
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)",
+      "WARNING:lumen.ops.quantize.mxfp4:transpose_packed_fp4: using legacy Lumen kernel (upstream transpose reads row-major payloads only)"
+    ],
+    "loss20": 1.1998,
+    "grad_norm20": 0.3203,
+    "median_ms_steps2_20": 523.3
+  }
+}
