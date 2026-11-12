@@ -156,7 +156,11 @@ def main():
         with (case_dir / "console.log").open("w") as log:
             run = subprocess.run(commands[case], env=case_env, cwd=LUMEN, stdout=log, stderr=subprocess.STDOUT)
         (case_dir / "launch.json").write_text(json.dumps({"command": commands[case], "environment": {
-            k: v for k, v in case_env.items() if k in env and env[k] != os.environ.get(k)
+            k: v for k, v in case_env.items() if k.startswith(("LUMEN_", "AITER_", "NCCL_", "HF_"))
+            or k in ("NPROC", "MBS", "GBS", "GRAD_ACCUM", "SEQ_LEN", "TRAIN_STEPS", "SEED", "LR",
+                     "WARMUP_STEPS", "EVAL_INTERVAL", "EVAL_ITERS", "NUM_LAYERS", "TAIL_BF16", "MXFP4_COMM",
+                     "MODEL_PATH", "TOKENIZER_DIR", "TRAIN_DATA_PATH", "VALID_DATA_PATH", "MEGATRON_ROOT",
+                     "PYTHONPATH", "RESULTS_DIR", "TRITON_CACHE_DIR", "TORCH_EXTENSIONS_DIR", "TMPDIR")
         }}, indent=2) + "\n")
         text = (case_dir / "console.log").read_text()
         summary[case] = parse_result(case, text, run.returncode)
