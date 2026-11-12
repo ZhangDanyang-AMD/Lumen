@@ -398,7 +398,9 @@ class LumenLayerNormLinear(nn.Module):
         if getattr(config, "use_cpu_initialization", False):
             self.weight = Parameter(torch.empty(self.output_size_per_partition, input_size, dtype=config.params_dtype))
             if getattr(config, "perform_initialization", True):
-                from megatron.core.tensor_parallel.layers import condition_init_method
+                # Older Megatron revisions pass the initializer directly.
+                from megatron.core.tensor_parallel import layers as tp_layers
+                condition_init_method = getattr(tp_layers, "condition_init_method", lambda config, method: method)
 
                 _initialize_affine_weight_cpu(
                     self.weight,
