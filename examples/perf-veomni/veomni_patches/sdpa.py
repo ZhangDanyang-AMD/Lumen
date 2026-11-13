@@ -29,8 +29,17 @@ module. Two process-wide switches, the second built on the first:
     ``min_seq`` -- so a text encoder's causal GQA attention and a VAE's
     head_dim-384 attention take the stock path unchanged.
 
-Both look the function up on ``torch.nn.functional`` at call time, which is how
+All of these look the function up on ``torch.nn.functional`` at call time, which is how
 diffusers and VeOmni call it, so rebinding the module attribute is enough.
+
+:func:`install_wide_head_math` is not an optimization but a workaround, and is
+not a ``LUMEN_PATCH`` entry: ``train_dit_lumen.py`` installs it by arch. On
+gfx1250 (MI450) with torch 2.14 / ROCm 10.2 the mem-efficient backend fails with
+``hipErrorProfilerNotInitialized`` at head_dim 384 -- the Wan VAE's single-head
+mid-block attention -- in FP32 and BF16 alike, while MATH runs it and head_dim
+128 runs on efficient and flash. It sends only heads wider than 256 to MATH,
+which is the cut the MI450 run trained with; 128 and 384 are the only widths
+observed.
 """
 
 import logging
@@ -44,6 +53,10 @@ logger = logging.getLogger(__name__)
 _orig_sdpa = None
 _min_seq = 1024
 _stats = {"routed": 0, "stock": 0}
+
+WIDE_HEAD_MATH_GFX = ("gfx1250",)
+_WIDE_HEAD_DIM = 256
+_wide = {"orig": None, "math": 0}
 
 
 def prefer_efficient_backend():
@@ -175,11 +188,54 @@ def stats():
     return dict(_stats)
 
 
+def _wide_head_math(query, key, value, *args, **kwargs):
+    if query.shape[-1] > _WIDE_HEAD_DIM:
+        from torch.nn.attention import SDPBackend, sdpa_kernel
+
+        _wide["math"] += 1
+        with sdpa_kernel([SDPBackend.MATH]):
+            return _wide["orig"](query, key, value, *args, **kwargs)
+    return _wide["orig"](query, key, value, *args, **kwargs)
+
+
+def install_wide_head_math(gfx):
+    """On an arch in ``WIDE_HEAD_MATH_GFX``, run SDPA with head_dim > 256 on MATH. Idempotent.
+
+    Returns whether ``gfx`` (``gcnArchName``, feature suffixes allowed) needs it.
+    Install before :func:`install_triton_forward`, so that the routed path's
+    stock fallback is this one.
+    """
+    if gfx.split(":", 1)[0] not in WIDE_HEAD_MATH_GFX:
+        return False
+    if _wide["orig"] is None:
+        _wide["orig"] = F.scaled_dot_product_attention
+        F.scaled_dot_product_attention = _wide_head_math
+        logger.warning(
+            "sdpa: %s: head_dim > %d runs on the MATH backend (mem-efficient fails there)", gfx, _WIDE_HEAD_DIM
+        )
+    return True
+
+
+def uninstall_wide_head_math():
+    if _wide["orig"] is not None:
+        F.scaled_dot_product_attention = _wide["orig"]
+        _wide["orig"] = None
+
+
+def wide_head_math_calls():
+    """How many SDPA calls :func:`install_wide_head_math` sent to MATH."""
+    return _wide["math"]
+
+
 __all__ = [
     "TritonFwdEfficientBwd",
+    "WIDE_HEAD_MATH_GFX",
     "install_triton_forward",
+    "install_wide_head_math",
     "prefer_efficient_backend",
     "scaled_dot_product_attention",
     "stats",
     "uninstall_triton_forward",
+    "uninstall_wide_head_math",
+    "wide_head_math_calls",
 ]

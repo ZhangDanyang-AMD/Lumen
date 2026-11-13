@@ -438,6 +438,148 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | Qwen `offline_training` 首步 `'NoneType' ... 'config'` | VeOmni 缺陷 | 在 `LUMEN_PATCH` 中加 `qwen_offline_fix` |
 | Wan 首次运行长时间停在第 1 步 | 22 个卷积形状的 FlyDSL JIT | 等待编译完成；磁盘缓存会被后续运行复用 |
 
+### 3.11 MI450 单卡运行
+
+在 1 张 AMD Instinct MI450（gfx1250）上跑 Wan2.1-T2V-1.3B 在线训练（`WAN_TASK=online_training`）。在 1 张 gfx1250
+工程样卡上（镜像和 aiter 见下文），下面四项处理都打开时，`baseline` 与 `flydsl` 都跑满了 10 步、没有 GPU 错误：
+
+| 模式 | 结果 |
+|---|---|
+| `baseline` | 10/10，loss 1.13 → 0.10，稳态约 14 s/步 |
+| `flydsl`（aiter main） | 10/10，loss / grad_norm 与 `baseline` 逐步基本一致（第 2 步 2.81 vs 2.80，第 4 步 34.57 vs 33.75），稳态约 7.9 s/步；VAE 每步 525 次卷积全部走 FlyDSL |
+
+步时是单次运行的 tqdm 读数，不是正式性能数据，也不能和 §2.1 的 8 卡表比较。另有一次 `flydsl` 的第 2 步 grad_norm
+为 inf、之后 loss 为 NaN，同一配置重跑没有复现（见本节末尾的未知项）。加这些处理之前，GPU 页错误分别出在 BF16 VAE 的
+MIOpen 卷积和 DiT 反向的 mem-efficient SDPA，两者都是按组件拆成短进程逐段复现定位的。
+
+**镜像。** §3.1 的 `amdagi/veomni:rocm7.14_torch2.12_py3.12` 不带 gfx1250 的 kernel（`torch.cuda.get_arch_list()`
+里没有 gfx1250），第一个 GPU kernel 就报 `hipErrorInvalidImage`。改用 `zhangdanyangamd/lumen:dev-gfx1250`
+（torch `2.14.0+rocm10.2.0`，`arch_list=['gfx1250']`）。这个镜像的 `/etc/group` 里没有 `render`，所以用宿主机的数字 GID：
+
+```bash
+export ROOT=/path/to/fast-storage/perf-veomni
+mkdir -p "$ROOT"
+docker pull zhangdanyangamd/lumen:dev-gfx1250
+docker run -d --name perf-veomni \
+  --device /dev/kfd --device /dev/dri --group-add video --group-add "$(getent group render | cut -d: -f3)" \
+  --ipc host --shm-size 32g --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --security-opt label=disable --ulimit memlock=-1:-1 \
+  -e HIP_VISIBLE_DEVICES=0 -e CUDA_VISIBLE_DEVICES=0 \
+  -e PYTORCH_ROCM_ARCH=gfx1250 \
+  -v "$ROOT":/work -w /work \
+  zhangdanyangamd/lumen:dev-gfx1250 sleep infinity
+
+dx() { docker exec -w /work perf-veomni bash -lc "$*"; }
+export EX=/work/Lumen/examples/perf-veomni
+```
+
+若要在 docker 层面只暴露一张卡，把 `--device /dev/dri` 换成该卡的 `--device /dev/dri/renderD<N>`，容器内它仍是 0 号。
+
+**补依赖。** 这个镜像缺 VeOmni 和 diffusers 的依赖，自带的 transformers 是 4.57.1（VeOmni 要 5.x）。下面的版本是
+验证时用的。torch、torchvision、triton 保持镜像原样：依赖 torch 的包一律 `--no-deps`（镜像 torch 的元数据要求
+triton 3.8.0，实际装的是 3.9.0，正常解析会失败）；PyPI 的 torchcodec 是 CUDA 版（要 `libnvrtc.so.13`），改用 CPU 版。
+
+```bash
+dx 'apt-get update && apt-get install -y ffmpeg'
+dx 'pip install transformers==5.12.1 tokenizers==0.22.2 huggingface_hub==1.22.0 diffusers==0.37.0 \
+      datasets==3.6.0 wandb==0.27.2 blobfile==3.2.0 av==16.0.1 pyarrow==21.0.0 ftfy==6.3.1 imageio'
+dx 'pip install --no-deps timm==1.0.27 torchdata==0.11.0 accelerate==1.9.0 liger-kernel==0.8.0 peft==0.18.1'
+dx 'pip install --no-deps --index-url https://download.pytorch.org/whl/cpu torchcodec==0.17.0+cpu'
+```
+
+`liger-kernel` 是 VeOmni 默认的 cross-entropy 实现（`cross_entropy_loss_implementation=liger_kernel`）要的，缺了训练
+启动后 5 s 就退出。
+
+**代码、环境与数据。** 按 §3.2 执行；§3.3 只需要 Wan 那几行（模型、Tom-and-Jerry 下载、子集、parquet 转换）。
+用镜像自带的 aiter 时，`setup_env.sh` 的检查会打印 `aiter flydsl_conv_implicit: not for this GPU -- ...` 并正常结束：
+这版 aiter 的 FlyDSL 卷积只支持 gfx950（`SUPPORTED_GFX`，MMA 为 CDNA4 的 MFMA）。要让 VAE 卷积在 gfx1250 上走 FlyDSL，
+见下面的“VAE 走 aiter main 的 gfx1250 卷积”。
+
+**VAE 走 aiter main 的 gfx1250 卷积（可选，`flydsl` 模式用）。** aiter main 的 `flydsl_conv_implicit` 已支持 gfx1250
+（`SUPPORTED_GFX = ("gfx950", "gfx1250")`，TDM + WMMA 后端 `conv3d_gfx1250.py`），并带 368×544 的 Wan2.1 调优表
+`wan21_vae_gfx1250_bf16_tuned_conv3d.csv`。它要 flydsl 0.5.0。`AITER_DIR` 把这份 aiter 放到镜像的 aiter 前面，
+`FLYDSL_VERSION` 让 sidecar 装 0.5.0，镜像本身不改：
+
+```bash
+dx 'git clone https://github.com/ROCm/aiter.git /work/aiter && git -C /work/aiter checkout fb372c9c0898b0ff57be62dd57492cb3117b2d34'
+G1250='export FLYDSL_VERSION=0.5.0 AITER_DIR=/work/aiter ENABLE_CK=0'
+dx "$G1250 && . $EX/env.sh && bash \$EXAMPLE_DIR/setup_env.sh"
+```
+
+期望：`aiter flydsl_conv_implicit: available`，`aiter : /work/aiter/aiter/__init__.py`。第一次 `import aiter` 会在 CPU
+上 JIT 编译 `module_aiter_core`（验证时用 `ENABLE_CK=0`，约 13 s）。之后启动命令里也带上 `$G1250`，模式换成
+`flydsl`（`vae_bf16,vae_conv_video`）。组件级验证（同一镜像、同一 aiter、gfx1250）：81 帧 368×544 的 VAE encode 中
+545 次 BF16 conv3d 全部走 FlyDSL、命中 gfx1250 表，latent 对 FP32 encode 的 SNR 48.8 dB（gfx950 上 L1+L2 为 50.7 dB），
+同步与异步执行、样本 0 和 5 都无 GPU 错误。
+
+**启动：**
+
+```bash
+dx ". $EX/env.sh && NPROC_PER_NODE=1 HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 PYTORCH_ROCM_ARCH=gfx1250 \
+      WAN_TASK=online_training bash \$EXAMPLE_DIR/run_wan_10steps.sh baseline"
+```
+
+`NPROC_PER_NODE`、两个可见性变量和 `PYTORCH_ROCM_ARCH` 都从环境读取，默认仍是 8 卡 gfx950。`NPROC_PER_NODE=1`
+时 `run_wan_10steps.sh` 自动在 yaml 之后、用户参数之前追加三项覆盖（在命令末尾再写同名参数仍以用户的为准）：
+
+| 覆盖 | yaml 原值 | 原因 |
+|---|---|---|
+| `--train.global_batch_size 1` | 8 | 每步每卡 1 行，与脚本的行数检查 `STEPS × NPROC` 一致；留 8 会变成 8 次梯度累积 |
+| `--train.accelerator.fsdp_config.fsdp_mode ddp` | `fsdp2` | 1 个进程时 VeOmni 不启用 FSDP（`fsdp_size > 1` 才启用），而 `fsdp2` 强制 `init_device=meta` |
+| `--train.init_device cuda` | `meta` | 非 FSDP 路径拒绝 `meta`；`cuda` 是 VeOmni 的字面值，ROCm 上同样指 GPU |
+
+`train_dit_lumen.py` 另外做四件事，与 `LUMEN_PATCH` 无关，`baseline` 也生效：
+
+- **DiT 前向 BF16 autocast。** 混合精度打开时 VeOmni 以 FP32 构建 DiT，把 BF16 转换留给 FSDP2 的
+  `MixedPrecisionPolicy`。单卡没有 FSDP2，而 Wan 的文本编码器以 BF16 加载，于是第一步在
+  `condition_embedder.time_proj` 报 `mat1 and mat2 must have the same dtype`；关掉混合精度又会撞上 FP32 latent 对
+  BF16 bias（见 `wan_video.yaml`）。所以 DiT 不在 FSDP2 下时（单卡或 `fsdp_mode=ddp`），它的前向放进
+  `torch.autocast(bfloat16)`：参数、梯度、AdamW 状态是 FP32，矩阵乘是 BF16，与 8 卡的划分一致。条件模型不在这个
+  context 里。
+- **gfx1250 上宽 head 的 SDPA 走 MATH。** 在这版 torch（2.14 / ROCm 10.2）的 gfx1250 上，head_dim 384（Wan VAE
+  中段的单头注意力）走 mem-efficient 后端会报 `hipErrorProfilerNotInitialized`，FP32 和 BF16 都一样；MATH 正常，
+  head_dim 128 走 efficient 或 flash 也正常。只有 gfx1250 上 head_dim > 256 的调用改走 MATH
+  （`veomni_patches/sdpa.py` 的 `install_wide_head_math`）。
+- **gfx1250 上 MIOpen 不用 GEMM 卷积 solver。** BF16 的 3×3×3 conv3d（Wan VAE 的 `1x96x6x370x546 → 96`，高度减半也一样）
+  第一次调用时，MIOpen 的 Find 会试跑 `GemmFwdRest`，它的 `Im3d2Col` kernel 在 gfx1250 上越界读（TCP 读权限页错误），
+  随后 GPU hang；虽然最后会选中的是 `ConvHipImplicitGemm3DGroupFwdXdlops`。FP32 的 Find 不试这个 solver。单个 conv3d
+  就能复现；设 `MIOPEN_DEBUG_CONV_GEMM=0` 后单个 conv3d 和 81 帧 BF16 VAE 都正常（第一次调用多 10 多秒的 Find）。
+  所以 gfx1250 上默认设 `MIOPEN_DEBUG_CONV_GEMM=0`（`_disable_miopen_gemm_conv`），环境里已经显式给了就不改。
+- **gfx1250 上关掉 SDPA 的 mem-efficient 后端。** DiT 反向经过 mem-efficient（AOTriton）注意力时 GPU 页错误。只跑 DiT、
+  随机输入、10 步训练：只开 mem-efficient 第 0 步就出错；flash 与 mem-efficient 都开时出错的步数不固定（第 0、1、2
+  步都见过，按模块同步后落在某个 transformer block 的反向里）；只开 flash 或只用 MATH 都 10 步正常、grad_norm 一致。
+  所以 gfx1250 上 `torch.backends.cuda.enable_mem_efficient_sdp(False)`（`_disable_mem_efficient_sdpa`），DiT 走 flash，
+  head_dim 384 仍走 MATH。上面 head_dim 384 前向报错的也是这个后端。
+
+期望：`$LOG_DIR/wan-baseline.meta.txt` 里有 `nproc: 1   arch: gfx1250` 和
+`1-proc args  : --train.global_batch_size 1 ...`；日志里有
+`[lumen] gfx1250: SDPA with head_dim > 256 runs on the MATH backend ...`、
+`[lumen] gfx1250: MIOPEN_DEBUG_CONV_GEMM=0 ...`、
+`[lumen] gfx1250: SDPA mem-efficient backend off ...` 和
+`[lumen] DiT is not under FSDP2: forward runs under torch.autocast(cuda, torch.bfloat16) over FP32 weights`，
+loss 有限。
+
+注意：
+
+- 用镜像自带的 aiter 时用 `baseline`。`flydsl` 模式和 `ladder.sh wan` 的 L2 起会加 `vae_conv_video`；这时它不再报错，
+  而是打印 `vae_conv_video WARNING: flydsl_conv_implicit requires one of ['gfx950'], got gfx1250. ...` 后全部回退到
+  torch，测不到任何 FlyDSL 收益。用上面的 aiter main 时，`flydsl` 模式的卷积走 gfx1250 的 FlyDSL kernel。
+- `conv_pad_in_kernel`（L3）的 Lumen 自调行 `wan21_vae_padk_*` 只有 gfx950 的，gfx1250 上这些形状走启发式 tile。
+- 不要在 gfx1250 上用 `sdpa_efficient`（L 级补丁）：它关掉 flash、只留 mem-efficient，正好走回上面会出页错误的后端。
+- 单卡不分片：FP32 的 1.3B DiT 加梯度和 AdamW 状态约 21 GB 全在一张卡上。§2.1 表中 21.2 GB 是 8 卡分片后的单 rank
+  峰值，不是单卡峰值。MI450 的 432 GiB 显存放得下。
+- 不要关梯度检查点（B2 的 `--train.gradient_checkpointing.enable false`）：8 卡上它把峰值从 21.2 GB 推到 70.9 GB。
+
+未知项：
+
+- 偶发的 inf：一次 `flydsl` 运行第 2 步 grad_norm 为 inf、之后 NaN，同一配置重跑与 `baseline` 一致，原因未查。
+- 两类页错误的内核日志相同：`[gfxhub0] no-retry page fault`，`Faulty UTCL2 client ID: TCP`，`PERMISSION_FAULTS: 0x3`
+  （读），随后 `MES ... failed to respond to msg=REMOVE_QUEUE`。amdgpu 以 `gpu_recovery=0` 加载的机器上卡会停在挂起状态，
+  进程卡在内核里、`amd-smi` 也会挂住，只能断电重启；以 `gpu_recovery=1` 加载时驱动会复位恢复。跑之前先确认能重启主机。
+- `zhangdanyangamd/lumen:dev-gfx1250` 是开发镜像，上面的依赖是手工补的；还没有一张自带这些依赖的 gfx1250 镜像。
+- mem-efficient SDPA 和 MIOpen `GemmFwdRest` 的失败都是这版 torch / ROCm 的问题；之后的版本修好后，
+  `WIDE_HEAD_MATH_GFX`、`MEM_EFFICIENT_SDPA_OFF_GFX` 和 `MIOPEN_GEMM_OFF_GFX` 应当收窄。
+
 ---
 
 ## 4. 文件索引
@@ -445,7 +587,7 @@ dx ". $EX/env.sh && PYTHONPATH=\$LUMEN_PYTHONPATH python3 \$EXAMPLE_DIR/tune_con
 | 文件 | 作用 |
 |---|---|
 | `ladder.sh` | 三级阶梯的全部级定义与按轮次交替的重复 |
-| `run_10steps.sh` / `run_wan_10steps.sh` | 单次 8 卡 10 步运行；`custom` 模式读取 `LUMEN_PATCH`，其余参数透传给 VeOmni |
+| `run_10steps.sh` / `run_wan_10steps.sh` | 单次 8 卡 10 步运行；`custom` 模式读取 `LUMEN_PATCH`，其余参数透传给 VeOmni；卡数、可见设备、架构可由环境覆盖（单卡见 §3.11） |
 | `profile.sh` | 用 VeOmni 自带的 profiler 采任一级的 trace |
 | `train_dit_lumen.py` | VeOmni 训练入口的包装：按 `LUMEN_PATCH` 装配补丁，并报告卷积实现、查表与路由计数 |
 | `lumen_vae_conv.py` | VAE 卷积改写：T=1 精确转 conv2d、T>1 替换底层 kernel、padding 交给 kernel |

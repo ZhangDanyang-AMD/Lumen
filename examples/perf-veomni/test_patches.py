@@ -1,4 +1,4 @@
-"""Essential checks for veomni_patches/ (one GPU for all but the last).
+"""Essential checks for veomni_patches/ (one GPU for all but the CPU ones).
 
     HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 python -m pytest -q test_patches.py
 """
@@ -44,6 +44,30 @@ def test_conv_uses_flydsl_for_bf16_and_torch_otherwise():
     assert _snr(fp32, bf16) > 30
 
 
+def test_conv_falls_back_to_torch_on_unsupported_arch(monkeypatch):
+    from veomni_patches import aiter_conv
+
+    def refuse():
+        raise RuntimeError("flydsl_conv_implicit requires one of ['gfx950'], got gfx1250.")
+
+    def kernel(*args, **kwargs):
+        raise AssertionError("the kernel must not run on an unsupported arch")
+
+    mod = types.SimpleNamespace(flydsl_conv_implicit=kernel, _check_supported_arch=refuse)
+    monkeypatch.setattr(aiter_conv, "_install_config_property", lambda: False)
+    monkeypatch.setattr(aiter_conv, "import_flydsl_module", lambda name: mod)
+    monkeypatch.setitem(aiter_conv._arch, "refused", None)
+    aiter_conv.load.cache_clear()
+    try:
+        assert aiter_conv.load() is None
+        assert "gfx1250" in aiter_conv.unsupported_arch()
+        x = torch.randn(1, 8, 3, 6, 6, dtype=torch.bfloat16)
+        w = torch.randn(8, 8, 3, 3, 3, dtype=torch.bfloat16)
+        assert torch.equal(aiter_conv.conv(x, w, None, 1, 1, 1), F.conv3d(x, w, None, 1, 1, 1))
+    finally:
+        aiter_conv.load.cache_clear()
+
+
 # --- sdpa --------------------------------------------------------------------------
 
 
@@ -73,6 +97,90 @@ def test_triton_forward_routes_dit_attention_only():
         assert sdpa.stats()["stock"] == stock + 1 and torch.equal(got, want)
     finally:
         sdpa.uninstall_triton_forward()
+
+
+def test_wide_head_math_only_on_listed_arch():
+    from veomni_patches import sdpa
+
+    stock = F.scaled_dot_product_attention
+    assert not sdpa.install_wide_head_math("gfx950")
+    assert F.scaled_dot_product_attention is stock
+    assert sdpa.install_wide_head_math("gfx1250:sramecc+:xnack-")
+    try:
+        torch.manual_seed(0)
+        wide = [torch.randn(1, 1, 64, 384) for _ in range(3)]
+        narrow = [torch.randn(1, 4, 64, 128) for _ in range(3)]
+        calls = sdpa.wide_head_math_calls()
+        assert torch.allclose(F.scaled_dot_product_attention(*wide), stock(*wide), atol=1e-5)
+        assert sdpa.wide_head_math_calls() == calls + 1
+        assert torch.equal(F.scaled_dot_product_attention(*narrow), stock(*narrow))
+        assert sdpa.wide_head_math_calls() == calls + 1
+    finally:
+        sdpa.uninstall_wide_head_math()
+    assert F.scaled_dot_product_attention is stock
+
+
+# --- train_dit_lumen: unsharded DiT autocast (CPU) ------------------------------------
+
+
+def test_unsharded_dit_forward_runs_bf16_over_fp32_weights():
+    import contextlib
+
+    import train_dit_lumen
+
+    model = torch.nn.Linear(16, 16)
+    mp = types.SimpleNamespace(enable=True, param_dtype="bfloat16")
+    accelerator = types.SimpleNamespace(fsdp_config=types.SimpleNamespace(mixed_precision=mp))
+    args = types.SimpleNamespace(train=types.SimpleNamespace(accelerator=accelerator))
+
+    def trainer():
+        base = types.SimpleNamespace(args=args, model=model, model_fwd_context=contextlib.nullcontext())
+        return types.SimpleNamespace(base=base)
+
+    text = torch.randn(2, 16, dtype=torch.bfloat16)
+    with pytest.raises(RuntimeError, match="dtype"):
+        model(text)
+
+    sharded = trainer()
+    assert not train_dit_lumen._autocast_unsharded_dit(sharded, fsdp2=True)
+    assert isinstance(sharded.base.model_fwd_context, contextlib.nullcontext)
+
+    single = trainer()
+    assert train_dit_lumen._autocast_unsharded_dit(single, fsdp2=False)
+    for _ in range(2):  # entered once per step
+        with single.base.model_fwd_context:
+            out = model(text)
+        assert out.dtype is torch.bfloat16
+    assert model.weight.dtype is torch.float32
+    assert not torch.is_autocast_enabled("cpu")
+
+
+def test_miopen_gemm_conv_off_only_on_listed_arch():
+    import train_dit_lumen
+
+    env = {}
+    assert not train_dit_lumen._disable_miopen_gemm_conv("gfx950", env)
+    assert env == {}
+    assert train_dit_lumen._disable_miopen_gemm_conv("gfx1250:sramecc+:xnack-", env)
+    assert env == {"MIOPEN_DEBUG_CONV_GEMM": "0"}
+    explicit = {"MIOPEN_DEBUG_CONV_GEMM": "1"}
+    assert not train_dit_lumen._disable_miopen_gemm_conv("gfx1250", explicit)
+    assert explicit == {"MIOPEN_DEBUG_CONV_GEMM": "1"}
+
+
+def test_mem_efficient_sdpa_off_only_on_listed_arch():
+    import train_dit_lumen
+
+    was = torch.backends.cuda.mem_efficient_sdp_enabled()
+    try:
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        assert not train_dit_lumen._disable_mem_efficient_sdpa("gfx950")
+        assert torch.backends.cuda.mem_efficient_sdp_enabled()
+        assert train_dit_lumen._disable_mem_efficient_sdpa("gfx1250:sramecc+:xnack-")
+        assert not torch.backends.cuda.mem_efficient_sdp_enabled()
+        assert not train_dit_lumen._disable_mem_efficient_sdpa("gfx1250")
+    finally:
+        torch.backends.cuda.enable_mem_efficient_sdp(was)
 
 
 # --- rmsnorm -----------------------------------------------------------------------

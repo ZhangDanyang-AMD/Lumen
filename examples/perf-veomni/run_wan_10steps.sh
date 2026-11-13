@@ -1,5 +1,8 @@
 #!/bin/bash
 # One 10-step Wan2.1-T2V-1.3B full-parameter SFT run on 8 GPUs.
+# NPROC_PER_NODE, HIP/CUDA_VISIBLE_DEVICES and PYTORCH_ROCM_ARCH override the
+# 8-GPU gfx950 defaults; NPROC_PER_NODE=1 also adds the single-process overrides
+# below (README "Single MI450 GPU").
 #
 #   run_wan_10steps.sh baseline    [VeOmni CLI overrides...]  # no Lumen patch
 #   run_wan_10steps.sh flydsl      [...]   # vae_bf16,vae_conv_video (T>1 included)
@@ -47,6 +50,18 @@ esac
 CONFIG="${CONFIG:-$EXAMPLE_DIR/wan_video.yaml}"
 STEPS="${STEPS:-10}"
 NPROC="${NPROC_PER_NODE:-8}"
+
+# One process is not FSDP to VeOmni (fsdp_enabled is fsdp_size > 1,
+# parallel_state.py), and the yaml's fsdp2 + init_device=meta then trips two
+# asserts at once: fsdp2 requires meta (arguments_types.py) and the non-FSDP
+# path refuses meta (torch_parallelize.py). ddp + cuda passes both. A global
+# batch of 1 keeps one row per rank per step, which is what NEED below counts;
+# left at the yaml's 8 it would accumulate eight. Placed before "$@", so an
+# explicit override still wins.
+SINGLE=()
+if [ "$NPROC" -eq 1 ]; then
+    SINGLE=(--train.global_batch_size 1 --train.accelerator.fsdp_config.fsdp_mode ddp --train.init_device cuda)
+fi
 
 # WAN_TASK=offline_embedding runs VeOmni's own pre-embedding task instead of
 # training: it builds no DiT, no optimizer and does no backward
@@ -97,7 +112,7 @@ fi
 export HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 export NPROC_PER_NODE="$NPROC"
-export PYTORCH_ROCM_ARCH=gfx950
+export PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx950}
 export MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK=1
 export FLA_TILELANG=0
 export TOKENIZERS_PARALLELISM=false
@@ -127,15 +142,17 @@ META="$LOG_DIR/$RUN.meta.txt"
 {
     echo "=== run: $RUN ==="
     echo "started      : $(date -Is)"
-    echo "VeOmni       : $VEOMNI_DIR @ $(git -C "$VEOMNI_DIR" rev-parse --short HEAD 2>/dev/null)"
-    echo "VeOmni dirty : $(git -C "$VEOMNI_DIR" status --short 2>/dev/null | wc -l) files"
+    echo "VeOmni       : $VEOMNI_DIR @ $(git -C "$VEOMNI_DIR" -c safe.directory='*' rev-parse --short HEAD 2>/dev/null)"
+    echo "VeOmni dirty : $(git -C "$VEOMNI_DIR" -c safe.directory='*' status --short 2>/dev/null | wc -l) files"
     echo "Lumen        : $LUMEN_DIR @ $(git -C "$LUMEN_DIR" -c safe.directory='*' rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$LUMEN_DIR" -c safe.directory='*' rev-parse --short HEAD 2>/dev/null)"
     echo "Lumen dirty  : $(git -C "$LUMEN_DIR" -c safe.directory='*' status --short 2>/dev/null | wc -l) files"
+    echo "aiter        : ${AITER_DIR:-<image aiter>}${AITER_DIR:+ @ $(git -C "$AITER_DIR" -c safe.directory='*' rev-parse --short HEAD 2>/dev/null)}   flydsl sidecar: $FLYDSL_SIDECAR"
     echo "config       : $CONFIG"
     echo "task         : $TASK"
     echo "model        : $WAN_DIR"
     echo "data         : $WAN_DATA_DIR ($ROWS rows)"
-    echo "max_steps    : $STEPS   nproc: $NPROC"
+    echo "max_steps    : $STEPS   nproc: $NPROC   arch: $PYTORCH_ROCM_ARCH"
+    echo "1-proc args  : ${SINGLE[*]:-<none>}"
     echo "LUMEN_TIME_VAE: ${LUMEN_TIME_VAE:-<unset>}"
     echo "LUMEN_PATCH  : ${LUMEN_PATCH:-<unset, baseline>}"
     echo "PYTHONPATH   : $PYTHONPATH"
@@ -157,6 +174,7 @@ bash train.sh "$ENTRY" "$CONFIG" \
     --train.wandb.project Wan2.1-FlyDSL \
     --train.wandb.name "$RUN" \
     --train.checkpoint.output_dir "$OUT_DIR/ckpt-$RUN" \
+    "${SINGLE[@]}" \
     "$@"
 rc=$?
 END=$(date +%s)

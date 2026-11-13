@@ -80,7 +80,7 @@ fi
 export HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 export NPROC_PER_NODE="$NPROC"
-export PYTORCH_ROCM_ARCH=gfx950
+export PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx950}
 export MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK=1
 export FLA_TILELANG=0
 export TOKENIZERS_PARALLELISM=false
@@ -110,8 +110,8 @@ META="$LOG_DIR/$RUN.meta.txt"
 {
     echo "=== run: $RUN ==="
     echo "started      : $(date -Is)"
-    echo "VeOmni       : $VEOMNI_DIR @ $(git -C "$VEOMNI_DIR" rev-parse --short HEAD 2>/dev/null)"
-    echo "VeOmni dirty : $(git -C "$VEOMNI_DIR" status --short 2>/dev/null | wc -l) files"
+    echo "VeOmni       : $VEOMNI_DIR @ $(git -C "$VEOMNI_DIR" -c safe.directory='*' rev-parse --short HEAD 2>/dev/null)"
+    echo "VeOmni dirty : $(git -C "$VEOMNI_DIR" -c safe.directory='*' status --short 2>/dev/null | wc -l) files"
     echo "Lumen        : $LUMEN_DIR @ $(git -C "$LUMEN_DIR" -c safe.directory='*' rev-parse --abbrev-ref HEAD 2>/dev/null) $(git -C "$LUMEN_DIR" -c safe.directory='*' rev-parse --short HEAD 2>/dev/null)"
     echo "Lumen dirty  : $(git -C "$LUMEN_DIR" -c safe.directory='*' status --short 2>/dev/null | wc -l) files"
     echo "config       : $CONFIG   (RES=$RES)"

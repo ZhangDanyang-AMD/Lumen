@@ -66,7 +66,9 @@ anything (see that package for what each one does and how it was measured):
 
 vae_conv* run aiter's FlyDSL convolution (ROCm/aiter#5370) with its tuned
 tables (veomni_patches/aiter_conv.py); the run refuses to start if it is
-unavailable. Only `linear` imports the Lumen library.
+unavailable, except on a card the installed kernel does not support (gfx950
+only, unless aiter is new enough for gfx1250 as well), where every convolution
+falls back to torch with a warning. Only `linear` imports the Lumen library.
 
 The DiT is constructed under init_device=meta. The linear patch only rebinds
 `forward` and never touches weights, so it is safe there. vae_conv reads
@@ -85,6 +87,15 @@ get_condition / process_condition receive, per rank and call, so two
 data-loading configurations can be shown to feed identical bytes in identical
 order (compare_batch_hash.py) -- the only way to show it on Wan, whose loss does
 not reproduce run to run. It copies every sample to the host; never time it.
+
+Two things apply whatever LUMEN_PATCH says, baseline included, because without
+them the run does not start rather than runs slower. A DiT that FSDP2 does not
+wrap (one process, or fsdp_mode=ddp) runs its forward under BF16 autocast over
+FP32 weights; see _autocast_unsharded_dit. On gfx1250, SDPA calls wider than
+head_dim 256 go to the MATH backend (veomni_patches.sdpa.install_wide_head_math),
+SDPA's mem-efficient backend is off (_disable_mem_efficient_sdpa), and MIOpen's
+GEMM convolution solvers are disabled (_disable_miopen_gemm_conv).
+On 8 GPUs with FSDP2 on gfx950 none of these does anything.
 
 Use run_10steps.sh or run_wan_10steps.sh rather than invoking this directly;
 they set every variable the comparison needs to hold fixed.
@@ -186,6 +197,12 @@ def _patch_vae_conv(trainer, video):
 
     from veomni_patches import aiter_conv
 
+    # The kernel is written for one MFMA, so on any other card there is no
+    # FlyDSL path to measure; the run still trains, on torch convolutions.
+    refused = aiter_conv.unsupported_arch()
+    if refused:
+        _rank0(f"{who} WARNING: {refused} Every convolution falls back to torch; this run measures no FlyDSL kernel.")
+        return
     if aiter_conv.load() is None:
         raise SystemExit(
             f"[lumen] {who}: aiter's flydsl_conv_implicit is unavailable, so every call would run on torch. "
@@ -336,7 +353,111 @@ def _report_backends():
         _rank0(f"rmsnorm_fuse calls: {rmsnorm.stats()}")
 
 
+MIOPEN_GEMM_OFF_GFX = ("gfx1250",)
+
+
+def _disable_miopen_gemm_conv(gfx, environ=os.environ):
+    """Keep MIOpen off its GEMM convolution solvers on an arch in ``MIOPEN_GEMM_OFF_GFX``.
+
+    On gfx1250 with ROCm 10.2, MIOpen's Find benchmarks GemmFwdRest for a BF16
+    3x3x3 conv3d (the Wan VAE's 1x96x6x370x546 -> 96, and the same at half the
+    height) and its Im3d2Col kernel faults the GPU (TCP read permission fault,
+    then a GPU hang), even though ConvHipImplicitGemm3DGroupFwdXdlops would be
+    selected. FP32 Find does not try it. Must be set before the first MIOpen
+    call; an explicit MIOPEN_DEBUG_CONV_GEMM is left as given.
+    """
+    if gfx.split(":", 1)[0] not in MIOPEN_GEMM_OFF_GFX or "MIOPEN_DEBUG_CONV_GEMM" in environ:
+        return False
+    environ["MIOPEN_DEBUG_CONV_GEMM"] = "0"
+    return True
+
+
+MEM_EFFICIENT_SDPA_OFF_GFX = ("gfx1250",)
+
+
+def _disable_mem_efficient_sdpa(gfx):
+    """Turn SDPA's mem-efficient backend off on an arch in ``MEM_EFFICIENT_SDPA_OFF_GFX``.
+
+    On gfx1250 with torch 2.14 / ROCm 10.2, the Wan DiT's backward through the
+    mem-efficient (AOTriton) attention faults the GPU (TCP read permission
+    fault, GPU hang): with only mem-efficient enabled it fails in step 0, with
+    both flash and mem-efficient enabled at a varying step, and with only flash
+    enabled 10 steps run clean. Flash then takes head_dim <= 256 and MATH the rest.
+    """
+    import torch
+
+    if gfx.split(":", 1)[0] not in MEM_EFFICIENT_SDPA_OFF_GFX or not torch.backends.cuda.mem_efficient_sdp_enabled():
+        return False
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    return True
+
+
+def _install_arch_workarounds():
+    """Workarounds a device needs whatever LUMEN_PATCH says, so the baseline gets them too."""
+    import torch
+
+    if not torch.cuda.is_available():
+        return
+    props = torch.cuda.get_device_properties(int(os.environ.get("LOCAL_RANK", "0")))
+    gfx = getattr(props, "gcnArchName", "")
+    from veomni_patches.sdpa import install_wide_head_math
+
+    if install_wide_head_math(gfx):
+        _rank0(f"{gfx}: SDPA with head_dim > 256 runs on the MATH backend (mem-efficient fails there)")
+    if _disable_miopen_gemm_conv(gfx):
+        _rank0(f"{gfx}: MIOPEN_DEBUG_CONV_GEMM=0 (MIOpen's BF16 GemmFwdRest conv3d faults the GPU there)")
+    if _disable_mem_efficient_sdpa(gfx):
+        _rank0(f"{gfx}: SDPA mem-efficient backend off (its backward faults the GPU there); flash, then MATH")
+
+
+class _AutocastForward:
+    """``inner`` (the trainer's forward context, entered every step) inside a fresh autocast."""
+
+    def __init__(self, inner, device_type, dtype):
+        self.inner, self.device_type, self.dtype = inner, device_type, dtype
+
+    def __enter__(self):
+        import contextlib
+
+        import torch
+
+        self._stack = contextlib.ExitStack()
+        self._stack.enter_context(torch.autocast(self.device_type, dtype=self.dtype))
+        return self._stack.enter_context(self.inner)
+
+    def __exit__(self, *exc):
+        return self._stack.__exit__(*exc)
+
+
+def _autocast_unsharded_dit(trainer, fsdp2):
+    """BF16 compute over FP32 master weights for a DiT that FSDP2 does not wrap.
+
+    With mixed precision on, VeOmni builds the DiT in FP32 and leaves the cast
+    to FSDP2's MixedPrecisionPolicy. One process does not enable FSDP, and DDP
+    has no such policy, so the DiT would stay FP32 while the condition model's
+    text embeddings are BF16 (the Wan text encoder loads in BF16), and the first
+    forward fails in condition_embedder.time_proj with "mat1 and mat2 must have
+    the same dtype". Turning mixed precision off does not help: the DiT is then
+    BF16 and meets the FP32 latents instead (see wan_video.yaml). Autocast
+    around the DiT forward -- the condition model runs outside this context --
+    gives the same split as FSDP2: FP32 parameters, gradients and optimizer
+    state, BF16 matmuls in param_dtype.
+    """
+    import torch
+
+    mp = trainer.base.args.train.accelerator.fsdp_config.mixed_precision
+    model = getattr(trainer.base, "model", None)
+    if fsdp2 or not mp.enable or model is None or not hasattr(trainer.base, "model_fwd_context"):
+        return False
+    dtype = getattr(torch, mp.param_dtype)
+    device_type = next(model.parameters()).device.type
+    trainer.base.model_fwd_context = _AutocastForward(trainer.base.model_fwd_context, device_type, dtype)
+    _rank0(f"DiT is not under FSDP2: forward runs under torch.autocast({device_type}, {dtype}) over FP32 weights")
+    return True
+
+
 def _install_hook():
+    _install_arch_workarounds()
     time_vae = os.environ.get("LUMEN_TIME_VAE", "") not in ("", "0")
     if os.environ.get("LUMEN_BATCH_HASH", "") not in ("", "0"):
         _install_batch_hash()
@@ -404,10 +525,13 @@ if __name__ == "__main__":
     _install_hook()
 
     from veomni.arguments import parse_args
+    from veomni.distributed.parallel_state import get_parallel_state
     from veomni.trainer.dit_trainer import DiTTrainer, VeOmniDiTArguments
 
     args = parse_args(VeOmniDiTArguments)
     trainer = DiTTrainer(args)
+    ps = get_parallel_state()
+    _autocast_unsharded_dit(trainer, fsdp2=ps.fsdp_enabled and ps.dp_mode == "fsdp2")
     _t0 = time.time()
     trainer.train()
     _report_vae_time(time.time() - _t0)

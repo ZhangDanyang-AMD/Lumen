@@ -142,9 +142,12 @@ def _count_lookups(mod):
     mod._lookup_tuned_tile = counted
 
 
+_arch = {"refused": None}
+
+
 @functools.lru_cache(maxsize=1)
 def load():
-    """``flydsl_conv_implicit`` from aiter, or None if this install cannot provide it."""
+    """``flydsl_conv_implicit`` from aiter, or None if this install or device cannot provide it."""
     try:
         _install_config_property()
         mod = import_flydsl_module("conv_kernels")
@@ -152,12 +155,29 @@ def load():
     except (ImportError, OSError, AttributeError) as exc:
         logger.info("aiter conv: unavailable (%s: %s)", type(exc).__name__, exc)
         return None
+    # The kernel checks the arch only when called, so without asking here an
+    # unsupported card would import fine and then raise on the first VAE encode.
+    # Refusing at load sends every call to torch instead.
+    check = getattr(mod, "_check_supported_arch", None)
+    if check is not None:
+        try:
+            check()
+        except RuntimeError as exc:
+            _arch["refused"] = str(exc)
+            logger.warning("aiter conv: %s Falling back to torch for every convolution.", exc)
+            return None
     _count_lookups(mod)
     rows = len(mod._load_tuned_table())
     if not rows:
         logger.warning("aiter conv: tuned table is empty; every convolution will take the heuristic tile")
     logger.info("aiter conv: %s.conv_kernels with %d tuned rows", _PKG, rows)
     return fn
+
+
+def unsupported_arch():
+    """The kernel's reason for refusing this device, or None if it did not refuse it."""
+    load()
+    return _arch["refused"]
 
 
 def tuned_lookup_stats():
@@ -199,4 +219,12 @@ def conv_calls():
     return dict(_calls)
 
 
-__all__ = ["conv", "conv_calls", "import_flydsl_module", "load", "tuned_lookup_stats", "tuned_misses"]
+__all__ = [
+    "conv",
+    "conv_calls",
+    "import_flydsl_module",
+    "load",
+    "tuned_lookup_stats",
+    "tuned_misses",
+    "unsupported_arch",
+]
