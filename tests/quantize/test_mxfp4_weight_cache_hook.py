@@ -14,7 +14,10 @@ fire leaves the run training against the step-0 weights without raising.
 import torch
 import torch.nn as nn
 
-from lumen.quantize import register_mxfp4_weight_optimizer_hooks
+from lumen.quantize import (
+    invalidate_mxfp4_weight_caches,
+    register_mxfp4_weight_optimizer_hooks,
+)
 
 
 class _MegatronStyleOptimizer:
@@ -44,6 +47,19 @@ def _cached(model):
 
 
 class TestMXFP4WeightCacheHook:
+    def test_public_invalidation_is_idempotent(self):
+        model = _model_with_cache()
+        for layer in model:
+            layer._mxfp4_w_cache_version = 0
+            layer.weight._mxfp4_w_cache = ((False, False), "fp4", "scale")
+
+        assert invalidate_mxfp4_weight_caches(model) == 4
+        assert invalidate_mxfp4_weight_caches(model) == 0
+        assert not any(_cached(model))
+        assert not any(
+            hasattr(layer.weight, "_mxfp4_w_cache") for layer in model
+        )
+
     def test_weight_version_invalidates_cache_without_optimizer_hook(self, monkeypatch):
         """Generic nn.Linear training must not depend on Megatron's setup hook."""
         from lumen.ops.quantize import linear as linear_mod
@@ -100,9 +116,10 @@ class TestMXFP4WeightCacheHook:
         optimizer = _MegatronStyleOptimizer()
         register_mxfp4_weight_optimizer_hooks(model, optimizer)
 
-        optimizer.step()
+        result = optimizer.step()
         assert not any(_cached(model))
         assert optimizer.steps == 1, "wrapping must still run the original step()"
+        assert result == "step-result"
 
     def test_native_parameter_cache_is_cleared(self):
         """Native parallel linears keep the cache on weight, not the module."""
@@ -136,12 +153,6 @@ class TestMXFP4WeightCacheHook:
         assert not any(
             hasattr(getattr(experts, f"weight{i}"), "_mxfp4_w_cache") for i in range(3)
         )
-
-    def test_wrapped_step_returns_original_result(self):
-        optimizer = _MegatronStyleOptimizer()
-        register_mxfp4_weight_optimizer_hooks(_model_with_cache(), optimizer)
-
-        assert optimizer.step() == "step-result"
 
     def test_model_chunk_list_is_walked(self):
         """Megatron hands out a list of chunks under virtual pipeline parallelism."""

@@ -1030,6 +1030,18 @@ def hadamard_quant_mxfp4(
     return fp4_packed.view(out_shape), scales_e8m0.view(scale_shape)
 
 
+def _resolve_target_rows(M: int, target_rows: Optional[int], block_size: int, g: int) -> int:
+    target_rows = M if target_rows is None else int(target_rows)
+    assert target_rows >= M, f"target_rows={target_rows} is smaller than M={M}"
+    assert target_rows % block_size == 0, (
+        f"target_rows={target_rows} not divisible by block_size={block_size}"
+    )
+    assert target_rows % g == 0, (
+        f"target_rows={target_rows} not divisible by g={g}"
+    )
+    return target_rows
+
+
 def dual_layout_quant_mxfp4(
     x: torch.Tensor,
     sign_vector: torch.Tensor,
@@ -1041,6 +1053,7 @@ def dual_layout_quant_mxfp4(
     philox_offset: Optional[int] = None,
     swizzle_scale: bool = False,
     shuffle_col: bool = False,
+    target_rows: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Both MXFP4 layouts the backward pass needs, from one read of *x*.
 
@@ -1054,8 +1067,11 @@ def dual_layout_quant_mxfp4(
     whose strided load forces a register layout that costs 1.70x on the same
     shape (report §5.10).
 
-    *x* must be 2D and contiguous, with both dimensions a whole number of quant
-    blocks and the row count a whole number of Hadamard groups.
+    *x* must be 2D and contiguous. With ``target_rows``, zero rows are generated
+    directly in both outputs instead of materializing a padded BF16 input.
+    ``target_rows`` must cover *x* and tile by both the quant block and Hadamard
+    group; valid rows keep the same Philox indexing as quantizing an explicitly
+    padded tensor.
 
     With *swizzle_scale*, both scale tensors come back already in the layout the
     gfx950 MXFP4 GEMMs read, saving a separate permuting pass over each. Only
@@ -1075,8 +1091,8 @@ def dual_layout_quant_mxfp4(
     assert x.is_contiguous(), "x must be contiguous; the point is to avoid a strided read"
     assert x.dtype in (torch.float32, torch.bfloat16)
     M, N = x.shape
-    assert M % block_size == 0 and N % block_size == 0, f"({M}, {N}) not a whole number of {block_size}-blocks"
-    assert M % g == 0, f"M={M} not divisible by g={g}"
+    assert N % block_size == 0, f"N={N} not divisible by block_size={block_size}"
+    target_rows = _resolve_target_rows(M, target_rows, block_size, g)
 
     # The counter only reaches the kernel through the SR path; an all-RTN call
     # that drew from Python's RNG anyway would also shift the stream every SR
@@ -1092,37 +1108,40 @@ def dual_layout_quant_mxfp4(
 
     from lumen.kernels.mxfp4 import MXFP4_SCALE_KCHUNK, MXFP4_SCALE_STRIPE
 
-    n_scale_a, n_scale_b = N // block_size, M // block_size
+    n_scale_a, n_scale_b = N // block_size, target_rows // block_size
     if swizzle_scale:
-        assert mxfp4_scale_swizzle_supported(M, n_scale_a), (
-            f"row scales ({M}, {n_scale_a}) do not tile evenly"
+        assert mxfp4_scale_swizzle_supported(target_rows, n_scale_a), (
+            f"row scales ({target_rows}, {n_scale_a}) do not tile evenly"
         )
         assert mxfp4_scale_swizzle_supported(N, n_scale_b), (
             f"col scales ({N}, {n_scale_b}) do not tile evenly"
         )
-    assert not shuffle_col or mxfp4_data_shuffle_supported(N, M // 2), (
-        f"col operand ({N}, {M // 2}) does not tile evenly for the B shuffle"
+    assert not shuffle_col or mxfp4_data_shuffle_supported(N, target_rows // 2), (
+        f"col operand ({N}, {target_rows // 2}) does not tile evenly for the B shuffle"
     )
     scale_a_shape = (
-        (M // MXFP4_SCALE_STRIPE, n_scale_a * MXFP4_SCALE_STRIPE) if swizzle_scale
-        else (M, n_scale_a)
+        (target_rows // MXFP4_SCALE_STRIPE, n_scale_a * MXFP4_SCALE_STRIPE)
+        if swizzle_scale
+        else (target_rows, n_scale_a)
     )
     scale_b_shape = (
         (N // MXFP4_SCALE_STRIPE, n_scale_b * MXFP4_SCALE_STRIPE) if swizzle_scale
         else (N, n_scale_b)
     )
 
-    row_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device=x.device)
+    row_fp4 = torch.empty((target_rows, N // 2), dtype=torch.uint8, device=x.device)
     row_scales = torch.empty(scale_a_shape, dtype=torch.uint8, device=x.device)
-    col_fp4 = torch.empty((N, M // 2), dtype=torch.uint8, device=x.device)
+    col_fp4 = torch.empty((N, target_rows // 2), dtype=torch.uint8, device=x.device)
     col_scales = torch.empty(scale_b_shape, dtype=torch.uint8, device=x.device)
 
-    # BLOCK_M is the transposed output's contiguous run (BLOCK_M/2 bytes), so it
-    # wants to be the larger of the two. (256, 32) measured fastest across
-    # Qwen3-8B's wgrad shapes.
-    BLOCK_M = _dividing_block(M, 256, floor=max(block_size, g))
-    BLOCK_N = _dividing_block(N, 32, floor=block_size)
-    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
+    # Keep the structural tile independent of the ragged token count. The
+    # kernel masks the final partial tile, so a new M reuses the same compiled
+    # module instead of selecting an exact-M BLOCK_M; a grid that tiles x
+    # exactly gets the unmasked variant.
+    BLOCK_M = 256
+    BLOCK_N = 32
+    grid = (triton.cdiv(target_rows, BLOCK_M), triton.cdiv(N, BLOCK_N))
+    even_tiles = M == target_rows and M % BLOCK_M == 0 and N % BLOCK_N == 0
 
     from lumen.kernels.mxfp4 import _dual_layout_quant_mxfp4_kernel
 
@@ -1131,6 +1150,7 @@ def dual_layout_quant_mxfp4(
         row_fp4, row_scales,
         col_fp4, col_scales,
         sign_vector, _rht_matrix_bf16(sign_vector, g),
+        M, target_rows, N,
         x.stride(0), x.stride(1),
         row_fp4.stride(0), row_fp4.stride(1),
         row_scales.stride(0), row_scales.stride(1),
@@ -1139,16 +1159,15 @@ def dual_layout_quant_mxfp4(
         # Separate streams: the two outputs feed different GEMMs and correlating
         # their rounding noise would defeat the point of using SR on both.
         philox_seed, philox_offset, philox_offset + 0x9E3779B9,
+        n_scale_a, n_scale_b, target_rows // 2,
         BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
         QUANT_BLOCK_SIZE=block_size,
         USE_SR_A=use_sr_row,
         USE_SR_B=use_sr_transposed,
         USE_ASM=is_cdna4(),
         SWIZZLE_SCALE=swizzle_scale,
-        NUM_SCALE_COLS_A=n_scale_a,
-        NUM_SCALE_COLS_B=n_scale_b,
         SHUFFLE_B=shuffle_col,
-        NUM_PACKED_COLS_B=M // 2,
+        EVEN_TILES=even_tiles,
     )
 
     return row_fp4, row_scales, col_fp4, col_scales
@@ -1166,6 +1185,7 @@ def dequant_hadamard_quant_mxfp4(
     swizzle_scale: bool = False,
     shuffle_data: bool = False,
     in_scale_swizzled: bool = False,
+    target_rows: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Packed MXFP4 (M, K/2) → Hadamard-rotated, transposed MXFP4 (K, M/2).
 
@@ -1176,8 +1196,9 @@ def dequant_hadamard_quant_mxfp4(
     but never writes the BF16 (K, M) intermediate, which is four times the bytes
     of either FP4 end and has to be read straight back.
 
-    Both dimensions must be a whole number of quant blocks and *M* a whole number
-    of Hadamard groups, so that every output quant block lies inside one tile.
+    ``target_rows`` emits zero-padded output columns directly while reading only
+    the logical input rows. It must tile by both the quant block and Hadamard
+    group; this is bit-equivalent to padding the packed input and scales first.
 
     ``shuffle_data`` stores the result in the B-operand order the gfx950 MXFP4
     GEMMs read, which the caller must therefore only ask for when it knows the
@@ -1190,10 +1211,10 @@ def dequant_hadamard_quant_mxfp4(
     assert data_fp4.dim() == 2, f"expected 2D, got {tuple(data_fp4.shape)}"
     M, K_packed = data_fp4.shape
     K = K_packed * 2
-    assert M % block_size == 0 and K % block_size == 0, (
-        f"({M}, {K}) not a whole number of {block_size}-blocks"
+    assert K % block_size == 0, (
+        f"K={K} not divisible by block_size={block_size}"
     )
-    assert M % g == 0, f"M={M} not divisible by g={g}"
+    target_rows = _resolve_target_rows(M, target_rows, block_size, g)
     assert g == 16, f"kernel is hardcoded for g=16, got {g}"
 
     # Activations take this path with RTN, where the kernel never reads the
@@ -1212,7 +1233,7 @@ def dequant_hadamard_quant_mxfp4(
 
     from lumen.kernels.mxfp4 import MXFP4_SCALE_STRIPE
 
-    n_scale_cols = M // block_size
+    n_scale_cols = target_rows // block_size
     if swizzle_scale:
         assert mxfp4_scale_swizzle_supported(K, n_scale_cols), (
             f"scales ({K}, {n_scale_cols}) do not tile evenly"
@@ -1222,43 +1243,44 @@ def dequant_hadamard_quant_mxfp4(
             f"input scales ({M}, {K // block_size}) do not tile evenly"
         )
     if shuffle_data:
-        assert mxfp4_data_shuffle_supported(K, M // 2), (
-            f"packed output ({K}, {M // 2}) does not tile evenly for the B-operand shuffle"
+        assert mxfp4_data_shuffle_supported(K, target_rows // 2), (
+            f"packed output ({K}, {target_rows // 2}) does not tile evenly for the B-operand shuffle"
         )
-    out = torch.empty((K, M // 2), dtype=torch.uint8, device=data_fp4.device)
+    out = torch.empty(
+        (K, target_rows // 2), dtype=torch.uint8, device=data_fp4.device,
+    )
     out_scales = torch.empty(
         (K // MXFP4_SCALE_STRIPE, n_scale_cols * MXFP4_SCALE_STRIPE) if swizzle_scale
         else (K, n_scale_cols),
         dtype=torch.uint8, device=data_fp4.device,
     )
 
-    # BLOCK_M is the output's contiguous run (BLOCK_M/2 bytes) and carries the
-    # quant blocks, so it wants to be the larger of the two. (128, 64) measured
-    # 5-9% ahead of (128, 32) across Qwen3-8B's activation shapes: FP4 on both
-    # sides leaves few bytes to hide latency behind, so the wider tile wins.
-    BLOCK_M = _dividing_block(M, 128, floor=max(block_size, g))
-    BLOCK_K = _dividing_block(K, 64, floor=block_size)
-    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(K, BLOCK_K))
+    # Fixed structural tiles make M/K runtime dimensions. Both dimensions stay
+    # block aligned by contract, while the kernel masks a final half-full tile.
+    BLOCK_M = 128
+    BLOCK_K = 64
+    grid = (triton.cdiv(target_rows, BLOCK_M), triton.cdiv(K, BLOCK_K))
+    even_tiles = M == target_rows and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
     _dequant_hadamard_quant_mxfp4_kernel[grid](
         data_fp4, scales,
         out, out_scales,
         _rht_matrix_bf16(sign_vector, g),
+        M, K,
         data_fp4.stride(0), data_fp4.stride(1),
         scales.stride(0), scales.stride(1),
         out.stride(0), out.stride(1),
         out_scales.stride(0), out_scales.stride(1),
         philox_seed, philox_offset,
+        n_scale_cols, target_rows // 2, K // block_size,
         BLOCK_M=BLOCK_M, BLOCK_K=BLOCK_K,
         QUANT_BLOCK_SIZE=block_size,
         USE_SR=use_sr,
         USE_ASM=is_cdna4(),
         SWIZZLE_SCALE=swizzle_scale,
-        NUM_SCALE_COLS=n_scale_cols,
         SHUFFLE_DATA=shuffle_data,
-        NUM_PACKED_COLS=M // 2,
         IN_SCALE_SWIZZLED=in_scale_swizzled,
-        NUM_IN_SCALE_COLS=K // block_size,
+        EVEN_TILES=even_tiles,
     )
     return out, out_scales
 

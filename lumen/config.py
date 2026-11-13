@@ -28,6 +28,11 @@ import os
 from dataclasses import dataclass, field, fields, replace
 from typing import Optional
 
+from lumen.quantize.config import (
+    MXFP4QuantWeightSelectionConfig,
+    coerce_mxfp4_quant_weight_selection,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -147,6 +152,9 @@ class LumenConfig:
     num_layers_at_end_in_bf16: int = 1
     num_layers: int = 0
     use_sdma: bool = False
+    mxfp4_quant_weight_selection: MXFP4QuantWeightSelectionConfig = field(
+        default_factory=MXFP4QuantWeightSelectionConfig
+    )
 
     # -- Tier 2: Attention FP8 --
     fp8_attn: str = "none"
@@ -193,6 +201,21 @@ class LumenConfig:
     # Derived properties
     # -----------------------------------------------------------------------
 
+    def __post_init__(self) -> None:
+        self.mxfp4_quant_weight_selection = (
+            coerce_mxfp4_quant_weight_selection(
+                self.mxfp4_quant_weight_selection
+            )
+        )
+
+        selection = self.mxfp4_quant_weight_selection
+        if self.format == "mxfp4" and self.lumen_linear and not selection.is_default:
+            raise ValueError(
+                "Selective MXFP4 weight matching is not supported together with "
+                "lumen_linear because native grouped parallel linears are patched "
+                "as indivisible modules; disable lumen_linear"
+            )
+
     @property
     def quant_config(self):
         """Build the inner :class:`~lumen.quantize.QuantConfig`."""
@@ -225,6 +248,7 @@ class LumenConfig:
             num_layers_at_end_in_bf16=self.num_layers_at_end_in_bf16,
             num_layers=self.num_layers,
             use_sdma=self.use_sdma,
+            mxfp4_quant_weight_selection=self.mxfp4_quant_weight_selection,
             fp8_dpa=self.fp8_attn in ("dpa", "mha"),
             fp8_mha=self.fp8_attn == "mha",
         )
