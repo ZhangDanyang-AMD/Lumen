@@ -76,6 +76,72 @@ def triton_arch() -> str:
     return "" if target is None else target.arch
 
 
+def _blockwise_kernel_has_dual() -> bool:
+    """True when the installed aiter kernel can emit both scale axes at once.
+
+    The image kernel is ``(x, x_fp8, x_scales, M, N, BLOCK_SIZE, FP8_MAX, AXIS)``.
+    A newer aiter adds the column pointers and a ``DUAL`` constexpr. Calling the
+    short kernel with the long argument list fails inside ``wrap_triton`` with
+    ``dynamic_func() takes 8 positional arguments but 11 were given``.
+    """
+    fn = getattr(quant_fp8_blockwise_kernel, "fn", None)
+    code = getattr(fn, "__code__", None)
+    return code is not None and "DUAL" in code.co_varnames
+
+
+def _launch_quant_fp8_blockwise(
+    grid,
+    x,
+    x_fp8,
+    x_scales,
+    x_fp8_col,
+    x_scales_col,
+    M,
+    N,
+    block_size,
+    fp8_max,
+    axis,
+    dual,
+) -> None:
+    """Launch blockwise FP8 quant, matching whichever aiter kernel is installed."""
+    if _blockwise_kernel_has_dual():
+        wrap_triton(quant_fp8_blockwise_kernel)[grid](
+            x,
+            x_fp8,
+            x_scales,
+            x_fp8_col,
+            x_scales_col,
+            M,
+            N,
+            block_size,
+            fp8_max,
+            axis,
+            dual,
+        )
+        return
+    wrap_triton(quant_fp8_blockwise_kernel)[grid](
+        x,
+        x_fp8,
+        x_scales,
+        M,
+        N,
+        block_size,
+        fp8_max,
+        axis,
+    )
+    if dual:
+        wrap_triton(quant_fp8_blockwise_kernel)[grid](
+            x,
+            x_fp8_col,
+            x_scales_col,
+            M,
+            N,
+            block_size,
+            fp8_max,
+            0,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Tensorwise Quantization
 # ---------------------------------------------------------------------------
@@ -117,20 +183,9 @@ def quant_fp8_blockwise_impl(
     x_scales = torch.empty(scales_shape, dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    wrap_triton(quant_fp8_blockwise_kernel)[grid](
-        x,
-        x_fp8,
-        x_scales,
-        # The column outputs are only written when DUAL, which is a constexpr:
-        # Triton drops those stores, so reusing the primary buffers is free.
-        x_fp8,
-        x_scales,
-        M,
-        N,
-        block_size,
-        torch.finfo(dtype).max,
-        axis,
-        False,  # DUAL
+    fp8_max = torch.finfo(dtype).max
+    _launch_quant_fp8_blockwise(
+        grid, x, x_fp8, x_scales, x_fp8, x_scales, M, N, block_size, fp8_max, axis, False,
     )
     return x_fp8, x_scales
 
@@ -180,9 +235,10 @@ def quant_fp8_blockwise_dual_axis_impl(
     x_scales_col = torch.empty((triton.cdiv(M, block_size), N), dtype=torch.float32, device=x.device)
 
     grid = (triton.cdiv(M, block_size), triton.cdiv(N, block_size))
-    # One kernel serves both: AXIS=1 is the row-wise (1xB) copy, DUAL adds the
-    # col-wise (Bx1) copy from the same loaded tile.
-    wrap_triton(quant_fp8_blockwise_kernel)[grid](
+    # AXIS=1 is the row-wise (1xB) copy. DUAL adds the col-wise (Bx1) copy.
+    # An aiter kernel without DUAL runs the same math as a second launch.
+    _launch_quant_fp8_blockwise(
+        grid,
         x,
         x_fp8_row,
         x_scales_row,
@@ -192,8 +248,8 @@ def quant_fp8_blockwise_dual_axis_impl(
         N,
         block_size,
         torch.finfo(dtype).max,
-        1,  # AXIS
-        True,  # DUAL
+        1,
+        True,
     )
     return x_fp8_row, x_scales_row, x_fp8_col, x_scales_col
 

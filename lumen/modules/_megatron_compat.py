@@ -8,8 +8,9 @@
 
 Lumen is imported against whatever Megatron the user has on PYTHONPATH, so a
 symbol that a recent Megatron added cannot be imported unconditionally: the
-failure lands as an ImportError at ``import lumen.modules``, which takes down
-every entry point, including the ones that never touch the missing API.
+failure lands when ``parallel_linear`` is imported. ``lumen.modules`` itself
+stays importable, and ``from lumen.modules import LumenColumnParallelLinear``
+is what pulls that module in.
 """
 
 from __future__ import annotations

@@ -7,6 +7,10 @@
 """Unified Lumen configuration — single dataclass covering quantization,
 attention, norm replacement, and execution/fusion features.
 
+Operator implementations live next to the existing kernels, ops, and
+modules. This module parses the configuration and decides which operators
+to install.
+
 Usage::
 
     from lumen.config import LumenConfig
@@ -86,6 +90,8 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "lora_alpha": ("lora_alpha",),
     "lora_dropout": ("lora_dropout",),
     "use_8bit_adam": ("use_8bit_adam",),
+    "rollout": ("lumen_rollout",),
+    "atom_ops": ("lumen_atom_ops", "atom_ops"),
 }
 
 
@@ -174,6 +180,19 @@ class LumenConfig:
     hip_graphs: bool = False
     fp8_checkpoint: bool = False
 
+    # -- Rollout: forward-op alignment with inference engines --
+    rollout: str = ""  # "" = default Lumen ops, "ATOM" = align forward with ATOM inference
+    # Comma-separated tags applied on top of rollout=ATOM. LUMEN_ATOM_OPS is merged in.
+    # The checklist of what rollout=ATOM already replaces, and what each tag adds,
+    # is qwen3-8b-lumen-toward-atom.html, section 二.
+    # rmsnorm: Qwen3RMSNorm -> aiter.rmsnorm2d_fwd
+    # residual_rmsnorm: residual add + RMSNorm -> aiter.rmsnorm2d_fwd_with_add
+    # qkv: q_proj, k_proj, v_proj -> one tgemm.mm on the concatenated weight
+    # rope: Qwen3 RoPE -> aiter rope_cached_positions_2c_fwd_inplace
+    # varlen_attn: PyTorch SDPA -> aiter.flash_attn_varlen_func
+    # gate_up: gate_proj, up_proj -> one tgemm.mm on the concatenated weight
+    atom_ops: str = ""
+
     # -- Tier 0: FP8 weight storage (applied before everything else) --
     fp8_param_manager: bool = False
 
@@ -237,7 +256,8 @@ class LumenConfig:
     def has_any_features(self) -> bool:
         """Return True if any Lumen feature is enabled."""
         return (
-            self.quant_config.is_quantized
+            bool(self.rollout)
+            or self.quant_config.is_quantized
             or self.lumen_norm
             or self.hf_attn_patch
             or self.lumen_linear
@@ -284,6 +304,36 @@ class LumenConfig:
                 "which requires BF16/FP32 masters. Disable fp8_param_manager; "
                 "MXFP4 already caches packed FP4 weights per master-weight version."
             )
+
+        if self.rollout.upper() == "ATOM":
+            tags = self.atom_op_tags()
+            if "residual_rmsnorm" in tags:
+                tags.add("rmsnorm")
+            self._patch_norms(
+                model,
+                atom_mode=True,
+                extra_classes=("Qwen3RMSNorm",) if "rmsnorm" in tags else (),
+            )
+            try:
+                self._patch_sdpa()
+            except ImportError as exc:
+                _rank0_print(f"> ATOM rollout: SDPA patch skipped ({exc})")
+            if "varlen_attn" in tags:
+                self._patch_varlen_attn()
+            self._patch_linear(model, atom_mode=True)
+            self._patch_mlp_activation(model)
+            if "qkv" in tags:
+                self._patch_qwen3_qkv(model)
+            if "gate_up" in tags:
+                self._patch_qwen3_gate_up(model)
+            if "rope" in tags:
+                self._patch_qwen3_rope(model)
+            if "residual_rmsnorm" in tags:
+                self._patch_qwen3_residual_rmsnorm(model)
+            model._lumen_config = self
+            tag_text = ",".join(sorted(tags)) if tags else "none"
+            _rank0_print(f"> ATOM rollout mode: forward ops aligned with ATOM inference; atom_ops={tag_text}")
+            return None, model
 
         # 0a. FP8 param storage (replaces weight.data with FP8, freezes)
         fp8pm_mgr = None
@@ -399,50 +449,53 @@ class LumenConfig:
         )
         return model
 
-    def _patch_norms(self, model) -> None:
-        import torch
-        from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
+    def atom_op_tags(self) -> set[str]:
+        """Tags that turn on one ATOM operator replacement at a time."""
+        import os
 
-        count = 0
-        for _name, module in model.named_modules():
-            for attr_name, child in list(module.named_children()):
-                cls_name = type(child).__name__
-                if cls_name in (
-                    "RMSNorm",
-                    "LlamaRMSNorm",
-                    "MistralRMSNorm",
-                    "Qwen2RMSNorm",
-                    "Qwen3RMSNorm",
-                ):
-                    hidden = child.weight.shape[0]
-                    eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
-                    target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
-                    repl = LumenRMSNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
-                    if not child.weight.is_meta:
-                        repl.weight.data.copy_(child.weight.data)
-                    repl.to(target_dtype)
-                    if child.weight.is_meta:
-                        repl.to(device="meta")
-                    setattr(module, attr_name, repl)
-                    count += 1
-                elif cls_name in ("LayerNorm",):
-                    hidden = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
-                    eps = getattr(child, "eps", 1e-5)
-                    repl = LumenLayerNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
-                    is_meta = child.weight is not None and child.weight.is_meta
-                    target_dtype = child.weight.dtype if (child.weight is not None and not is_meta) else torch.bfloat16
-                    if child.weight is not None and not is_meta:
-                        repl.weight.data.copy_(child.weight.data)
-                    if hasattr(child, "bias") and child.bias is not None and repl.bias is not None and not is_meta:
-                        repl.bias.data.copy_(child.bias.data)
-                    repl.to(target_dtype)
-                    if is_meta:
-                        repl.to(device="meta")
-                    setattr(module, attr_name, repl)
-                    count += 1
+        known = {"rmsnorm", "residual_rmsnorm", "qkv", "rope", "varlen_attn", "gate_up"}
+        raw = ",".join(part for part in (self.atom_ops, os.environ.get("LUMEN_ATOM_OPS", "")) if part)
+        tags = {part.strip() for part in raw.split(",") if part.strip()}
+        unknown = tags - known
+        if unknown:
+            _rank0_print(f"> ATOM atom_ops ignored unknown tags: {', '.join(sorted(unknown))}")
+        return tags & known
 
-        if count:
-            _rank0_print(f"> Replaced {count} norm modules with Lumen implementations")
+    def _patch_norms(self, model, *, atom_mode: bool = False, extra_classes: tuple[str, ...] = ()) -> None:
+        from lumen.ops.normalization.rmsnorm_layernorm_patch import patch_norms
+
+        patch_norms(
+            model,
+            atom_mode=atom_mode,
+            extra_classes=extra_classes,
+            quantize_grad=self.quantize_grad,
+        )
+
+    @staticmethod
+    def _stable_tgemm_mm(tgemm, x, weight, bias, otype):
+        from lumen.ops.gemm.stable_tgemm_mm import stable_tgemm_mm
+
+        return stable_tgemm_mm(tgemm, x, weight, bias, otype)
+
+    def _patch_qwen3_qkv(self, model) -> None:
+        from lumen.models.qwen3_fusion import patch_qwen3_qkv
+
+        patch_qwen3_qkv(model)
+
+    def _patch_qwen3_gate_up(self, model) -> None:
+        from lumen.models.qwen3_fusion import patch_qwen3_gate_up
+
+        patch_qwen3_gate_up(model)
+
+    def _patch_qwen3_rope(self, model) -> None:
+        from lumen.models.qwen3_fusion import patch_qwen3_rope
+
+        patch_qwen3_rope(model)
+
+    def _patch_qwen3_residual_rmsnorm(self, model) -> None:
+        from lumen.models.qwen3_fusion import patch_qwen3_residual_rmsnorm
+
+        patch_qwen3_residual_rmsnorm(model)
 
     def _patch_sdpa(self) -> None:
         """Monkey-patch ``F.scaled_dot_product_attention`` with AITER attention."""
@@ -450,63 +503,20 @@ class LumenConfig:
 
         patch_sdpa()
 
-    @staticmethod
-    def _auto_tune_bf16_gemm(model) -> None:
-        """Placeholder — BF16 GEMM uses torch.mm fallback (safe on MI350).
+    def _patch_varlen_attn(self) -> None:
+        from lumen.ops.attention.varlen_sdpa_patch import patch_varlen_attn
 
-        hipBLASLt and ASM JIT both SIGABRT on MI350 gfx950, so we skip
-        tuned GEMM injection and let ``tuned_gemm.gemm_a16w16`` fall back
-        to ``torch.mm`` (which internally uses hipBLASLt via PyTorch).
-        """
-        pass
+        patch_varlen_attn()
 
-    def _patch_linear(self, model) -> None:
-        """Replace ``nn.Linear`` forward with AITER GEMM (BF16, autograd-safe).
+    def _patch_linear(self, model, *, atom_mode: bool = False) -> None:
+        from lumen.ops.gemm.linear_patch import patch_linear
 
-        Runs ``_auto_tune_bf16_gemm`` first to ensure hipBLASLt tuning
-        configs exist, then patches forward with ``dispatch_gemm``.
-        """
-        import torch
-        import torch.nn as nn
+        patch_linear(model, atom_mode=atom_mode)
 
-        self._auto_tune_bf16_gemm(model)
+    def _patch_mlp_activation(self, model) -> None:
+        from lumen.ops.mlp.mlp_activation_patch import patch_mlp_activation
 
-        from lumen.ops.quantize.linear import dispatch_gemm
-
-        class _GemmA16W16Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, input, weight, bias):
-                ctx.save_for_backward(input, weight)
-                ctx.has_bias = bias is not None
-                output = dispatch_gemm(input, weight, scaling_type="none", bias=bias)
-                return output
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                input, weight = ctx.saved_tensors
-                grad_flat = grad_output.reshape(-1, grad_output.shape[-1])
-                input_flat = input.reshape(-1, input.shape[-1])
-                grad_input = grad_flat @ weight
-                grad_input = grad_input.reshape(input.shape)
-                grad_weight = grad_flat.t() @ input_flat
-                grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
-                return grad_input, grad_weight, grad_bias
-
-        count = 0
-        for _name, module in model.named_modules():
-            if isinstance(module, nn.Linear):
-
-                def _make_aiter_forward(mod):
-                    def _aiter_forward(input):
-                        return _GemmA16W16Fn.apply(input, mod.weight, mod.bias)
-
-                    return _aiter_forward
-
-                module.forward = _make_aiter_forward(module)
-                count += 1
-
-        if count:
-            _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+        patch_mlp_activation(model)
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
