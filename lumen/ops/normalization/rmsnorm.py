@@ -183,7 +183,7 @@ class _RMSNormGradQuant(torch.autograd.Function):
         ctx.eps = eps
         ctx.save_for_backward(x, weight)
         orig_shape = x.shape
-        x_2d = x.reshape(-1, x.shape[-1])
+        x_2d = _to_2d(x)
         y = try_backends(_get_rmsnorm_chain(), x_2d, weight, eps, op_name="rmsnorm")
         return y.reshape(orig_shape)
 
@@ -196,7 +196,7 @@ class _RMSNormGradQuant(torch.autograd.Function):
             x_detached = x.detach().requires_grad_(True)
             w_detached = weight.detach().requires_grad_(True)
             orig_shape = x_detached.shape
-            x_2d = x_detached.reshape(-1, x_detached.shape[-1])
+            x_2d = _to_2d(x_detached)
             if _probe_aiter_triton_rmsnorm():
                 y = _rmsnorm_triton(x_2d, w_detached, ctx.eps)
             else:
@@ -251,7 +251,8 @@ def rmsnorm(
         return _RMSNormGradQuant.apply(x, weight, eps, grad_quant_type)
 
     orig_shape = x.shape
-    x_2d = x.reshape(-1, x.shape[-1])
+    # AITER kernels read rows as contiguous memory; reshape can return a strided view.
+    x_2d = _to_2d(x)
     needs_grad = torch.is_grad_enabled() and (x.requires_grad or weight.requires_grad)
 
     if _USE_APEX_RMSNORM:

@@ -6,7 +6,8 @@
 
 """LayerNorm with Triton auto-fallback and fused quantization for all 6 scaling modes.
 
-All backends are AITER implementations — no torch.nn.functional fallbacks.
+The forward uses AITER. The backward on gfx950 faults or returns Inf, so any
+call that needs gradients uses ``torch.nn.functional.layer_norm`` instead.
 
 Supported quantization modes (fused into norm forward where possible):
     - ``delayed``    — norm then per-tensor static quant (unfused)
@@ -121,7 +122,7 @@ class _LayerNormGradQuant(torch.autograd.Function):
         ctx.eps = eps
         ctx.save_for_backward(x, weight, bias)
         orig_shape = x.shape
-        x_2d = x.reshape(-1, x.shape[-1])
+        x_2d = x.reshape(-1, x.shape[-1]).contiguous()
         y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
         return y.reshape(orig_shape)
 
@@ -188,9 +189,19 @@ def layernorm(
     needs_grad = torch.is_grad_enabled() and (
         x.requires_grad or weight.requires_grad or (bias is not None and bias.requires_grad)
     )
-    if needs_grad and _probe_aiter_triton_norm():
-        y = _layernorm_triton(x_2d, weight, bias, eps)
+    # AITER's layernorm backward (_layernorm_bwd_dx_fused_triton) is not usable
+    # on gfx950: for SigLIP's width (1152) it reads past the row, and for
+    # DINO's width (1024) at a few hundred rows it faults or returns Inf.
+    # Either way the next forward comes back as NaN. The forward kernel is
+    # fine, so inference keeps it; training uses PyTorch's LayerNorm.
+    n = x_2d.shape[-1]
+    if needs_grad:
+        y = torch.nn.functional.layer_norm(x_2d, (n,), weight, bias, eps)
     else:
+        # The AITER kernel reads rows as contiguous memory. ``reshape`` returns a
+        # strided view when the leading dim is 1 (e.g. a transposed (1, S, H)
+        # activation), which gives wrong results, so make the rows contiguous.
+        x_2d = x_2d.contiguous()
         y = try_backends(_get_layernorm_chain(), x_2d, weight, bias, eps, op_name="layernorm")
     return y.reshape(orig_shape)
 
