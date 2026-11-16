@@ -19,6 +19,7 @@ from typing import Optional, Tuple
 import torch
 import triton
 from aiter.ops.quant import static_per_tensor_quant
+
 try:
     from aiter.ops.triton._triton_kernels.quant.quant_fp8_blockwise import (
         quant_fp8_blockwise_kernel,
@@ -492,7 +493,7 @@ def _probe_aiter_fp4_utils() -> bool:
     if _AITER_FP4_UTILS_AVAILABLE is not None:
         return _AITER_FP4_UTILS_AVAILABLE
     try:
-        from aiter.utility.fp4_utils import mxfp4_to_f32, e8m0_to_f32  # noqa: F401
+        from aiter.utility.fp4_utils import e8m0_to_f32, mxfp4_to_f32  # noqa: F401
         _AITER_FP4_UTILS_AVAILABLE = True
     except ImportError:
         _AITER_FP4_UTILS_AVAILABLE = False
@@ -514,7 +515,7 @@ def _dividing_block(dim: int, cap: int, floor: int = 1) -> int:
     return max(block, floor)
 
 
-def convert_to_mxfp4(
+def _legacy_convert_to_mxfp4(
     data_hp: torch.Tensor,
     block_size: int = 32,
     axis: int = -1,
@@ -623,7 +624,7 @@ def convert_to_mxfp4(
     return fp4_packed.reshape(out_shape), scales_e8m0.reshape(scale_shape)
 
 
-def convert_to_mxfp4_2d(
+def _legacy_convert_to_mxfp4_2d(
     data_hp: torch.Tensor,
     block_size: int = 32,
     use_sr: bool = False,
@@ -732,7 +733,7 @@ def convert_from_mxfp4(
     N = N_packed * 2
 
     if _probe_aiter_fp4_utils():
-        from aiter.utility.fp4_utils import mxfp4_to_f32, e8m0_to_f32
+        from aiter.utility.fp4_utils import e8m0_to_f32, mxfp4_to_f32
         values = mxfp4_to_f32(data_flat.view(torch.uint8))
         scale_f32 = e8m0_to_f32(scales_flat.view(torch.uint8))
         scale_expanded = scale_f32.unsqueeze(-1).expand(
@@ -843,7 +844,7 @@ def convert_to_mxfp4_dual_axis(
     return row_fp4, row_scales, col_fp4, col_scales
 
 
-def transpose_packed_fp4(
+def _legacy_transpose_packed_fp4(
     data_fp4: torch.Tensor, shuffle_data: bool = False, in_shuffled: bool = False,
 ) -> torch.Tensor:
     """Transpose a packed MXFP4 matrix: (M, N//2) -> (N, M//2).
@@ -1030,7 +1031,7 @@ def hadamard_quant_mxfp4(
     return fp4_packed.view(out_shape), scales_e8m0.view(scale_shape)
 
 
-def dual_layout_quant_mxfp4(
+def _legacy_dual_layout_quant_mxfp4(
     x: torch.Tensor,
     sign_vector: torch.Tensor,
     block_size: int = 32,
@@ -1090,7 +1091,7 @@ def dual_layout_quant_mxfp4(
         philox_seed = philox_seed or 0
         philox_offset = philox_offset or 0
 
-    from lumen.kernels.mxfp4 import MXFP4_SCALE_KCHUNK, MXFP4_SCALE_STRIPE
+    from lumen.kernels.mxfp4 import MXFP4_SCALE_STRIPE
 
     n_scale_a, n_scale_b = N // block_size, M // block_size
     if swizzle_scale:
@@ -1154,7 +1155,7 @@ def dual_layout_quant_mxfp4(
     return row_fp4, row_scales, col_fp4, col_scales
 
 
-def dequant_hadamard_quant_mxfp4(
+def _legacy_dequant_hadamard_quant_mxfp4(
     data_fp4: torch.Tensor,
     scales: torch.Tensor,
     sign_vector: torch.Tensor,
@@ -1208,9 +1209,10 @@ def dequant_hadamard_quant_mxfp4(
         philox_seed = philox_seed or 0
         philox_offset = philox_offset or 0
 
-    from lumen.kernels.mxfp4 import _dequant_hadamard_quant_mxfp4_kernel
-
-    from lumen.kernels.mxfp4 import MXFP4_SCALE_STRIPE
+    from lumen.kernels.mxfp4 import (
+        MXFP4_SCALE_STRIPE,
+        _dequant_hadamard_quant_mxfp4_kernel,
+    )
 
     n_scale_cols = M // block_size
     if swizzle_scale:
@@ -1361,6 +1363,16 @@ def swizzle_mxfp4_scale(scales: torch.Tensor) -> torch.Tensor:
         STRIPE=MXFP4_SCALE_STRIPE, KCHUNK=MXFP4_SCALE_KCHUNK, BLOCK_K=BLOCK_K,
     )
     return out
+
+
+# Stable Lumen interfaces; legacy implementations above cover API capability gaps.
+from lumen.ops.quantize.mxfp4 import (  # noqa: E402, F401
+    convert_to_mxfp4,
+    convert_to_mxfp4_2d,
+    dequant_hadamard_quant_mxfp4,
+    dual_layout_quant_mxfp4,
+    transpose_packed_fp4,
+)
 
 
 def swizzle_expanded_mxfp4_scale(

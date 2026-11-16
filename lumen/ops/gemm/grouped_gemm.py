@@ -147,7 +147,9 @@ def _get_moe_gemm_a8w8():
 
 
 def _get_moe_gemm_a8w8_blockscale():
-    from aiter.ops.triton.moe.moe_op_gemm_a8w8_blockscale import moe_gemm_a8w8_blockscale
+    from aiter.ops.triton.moe.moe_op_gemm_a8w8_blockscale import (
+        moe_gemm_a8w8_blockscale,
+    )
 
     return moe_gemm_a8w8_blockscale
 

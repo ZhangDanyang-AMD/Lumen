@@ -1,22 +1,11 @@
 FROM lumen/llama2:latest
 
 WORKDIR /workspace/Lumen
-
-# Lumen Python package and llama2 training scripts
-COPY lumen/           lumen/
+COPY lumen/ lumen/
 COPY examples/llama2/ examples/llama2/
+COPY third_party/aiter/ /opt/lumen-aiter/
 
-# aiter: reinstall the whole pinned submodule. Lumen calls the Triton modules
-# upstream aiter took over from the Lumen fork (renamed and refactored), and
-# their dependencies reach into jit/core.py and the Triton config utilities, so
-# copying a few files onto the base image's older aiter no longer works.
-#
-# The old tree goes first: COPY only adds files, and aiter loads any .so already
-# sitting in aiter/jit/ instead of building it, so modules prebuilt against the
-# old sources (and files upstream has since removed) would otherwise survive.
-# PREBUILD_KERNELS=1 then rebuilds the CK modules against the new sources, as
-# the base image did; JIT-compiling them on first call SIGSEGVs inside
-# mp.spawn subprocesses. aiter's setup.py also installs the flydsl it pins.
-RUN rm -rf third_party/aiter
-COPY third_party/aiter/ third_party/aiter/
-RUN cd third_party/aiter && PREBUILD_KERNELS=1 pip install -e .
+# Old Python overlays leave incompatible prebuilt extensions behind.
+RUN pip uninstall -y aiter && rm -rf /opt/aiter && \
+    mv /opt/lumen-aiter /opt/aiter && \
+    cd /opt/aiter && PREBUILD_KERNELS=1 pip install -e .

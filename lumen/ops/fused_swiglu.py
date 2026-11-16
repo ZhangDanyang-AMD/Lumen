@@ -30,13 +30,17 @@ def _probe_aiter_swiglu() -> bool:
 
 def fused_swiglu(y: torch.Tensor) -> torch.Tensor:
     """Fused SwiGLU forward via AITER Triton kernel."""
-    from aiter.ops.triton.activation import swiglu_fwd
+    from aiter.ops.triton.fusions.activation import fused_silu_mul
 
-    return swiglu_fwd(y)
+    return fused_silu_mul(y)
 
 
-def fused_swiglu_backward(grad_output: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def fused_swiglu_backward(
+    grad_output: torch.Tensor,
+    y: torch.Tensor,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Fused SwiGLU backward via AITER Triton kernel."""
-    from aiter.ops.triton.activation import swiglu_bwd
+    from aiter.ops.triton.fusions.activation import silu_and_mul_backward
 
-    return swiglu_bwd(grad_output, y)
+    return silu_and_mul_backward(grad_output, y, out=out)
