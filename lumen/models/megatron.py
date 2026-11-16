@@ -219,15 +219,13 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     # keyword. The registry's lumen_gpt_config patch carries the assignments.
     apply_config_build(config, args, tags={"lumen", "builder"})
 
-    import megatron.core.models.gpt.gpt_layer_specs as _gls
-
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
         args.moe_grouped_gemm,
         args.qk_layernorm,
         args.multi_latent_attention,
         **_legacy_moe_spec_kwargs(
-            getattr(_gls, "get_gpt_layer_local_submodules", get_gpt_layer_local_spec),
+            get_gpt_layer_local_spec,
             getattr(args, "moe_use_legacy_grouped_gemm", False),
         ),
         normalization=args.normalization,
@@ -307,8 +305,7 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
             qk_layernorm=getattr(args, "qk_layernorm", False),
             multi_latent_attention=getattr(args, "multi_latent_attention", False),
             **_legacy_moe_spec_kwargs(
-                getattr(_gls, "get_gpt_layer_with_transformer_engine_submodules",
-                        get_gpt_layer_with_transformer_engine_spec),
+                get_gpt_layer_with_transformer_engine_spec,
                 getattr(args, "moe_use_legacy_grouped_gemm", False),
             ),
             use_kitchen=getattr(config, "use_kitchen", False),

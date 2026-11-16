@@ -890,6 +890,13 @@ def install_fused_residual_norm():
         if padding_mask is not None:
             if not _orig_mlp_accepts_padding_mask:
                 raise NotImplementedError("this Megatron MLP does not support padding masks")
+            if self._lumen_deferred_bda is not None:
+                # The masked MLP bypasses fusion, so finish its attention residual first.
+                from lumen.ops.fused_residual_norm import deferred_bda_add
+
+                attention_output_with_bias, residual = self._lumen_deferred_bda
+                hidden_states = deferred_bda_add(attention_output_with_bias, residual)
+                self._lumen_deferred_bda = None
             return _orig_fwd_mlp(
                 self, hidden_states, inference_context=inference_context,
                 padding_mask=padding_mask,
