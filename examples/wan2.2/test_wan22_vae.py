@@ -133,6 +133,28 @@ def test_patch_binds_every_conv_and_keeps_causal_forward(monkeypatch):
     assert calls.as_dict() == {"aiter": 0, "torch": 30}
 
 
+def test_flydsl_patch_binds_every_conv_and_t1_rewrite_is_exact():
+    """flydsl_conv.patch_vae on CPU: all 72 convolutions bound, 60 CausalConv3d take the
+    T=1 -> conv2d rewrite (the two stride-2 temporal downsamplers cannot), and a 1-frame
+    encode -- every call on torch here -- matches the stock model at 1e-5."""
+    V = _simwam()
+    import flydsl_conv as FC
+
+    with torch.device("meta"):
+        assert FC.patch_vae(V.WanVideoVAE38()) == (62, 10, 60)
+    torch.manual_seed(0)
+    stock = V.VideoVAE38_(dim=16, dec_dim=16).eval()
+    patched = copy.deepcopy(stock)
+    assert FC.patch_vae(patched) == (62, 10, 60)
+    x, scale = torch.rand(1, 3, 1, 64, 96) * 2 - 1, [torch.zeros(48), torch.ones(48)]
+    c0 = FC.conv_calls()
+    with torch.no_grad():
+        want, got = stock.encode(x, scale), patched.encode(x, scale)
+    c1 = FC.conv_calls()
+    assert {k: c1[k] - c0[k] for k in c1} == {"flydsl": 0, "torch": 30}
+    torch.testing.assert_close(got, want, rtol=RTOL, atol=ATOL)
+
+
 # --- GPU: the aiter path in BF16 against the stock model, rtol = atol = 1e-5 -----
 
 
@@ -160,6 +182,68 @@ def test_bf16_encode_matches_stock(navsim_bf16):
         got = W.encode(patched, x)
     assert calls.as_dict() == {"aiter": 30, "torch": 0}
     torch.testing.assert_close(got, z, rtol=RTOL, atol=ATOL)
+
+
+def _flydsl():
+    """This example's FlyDSL conv (flydsl_conv.py) with aiter's kernel behind it, or skip."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required")
+    import flydsl_conv as FC
+
+    if FC.load() is None:
+        pytest.skip("aiter FlyDSL conv unavailable (aiter main >= 78a14ae5d, flydsl 0.5.0)")
+    return FC
+
+
+@pytest.fixture(scope="module")
+def navsim_flydsl():
+    """Stock BF16 VAE and the same VAE on this example's FlyDSL conv, and the stock latent."""
+    FC = _flydsl()
+    _simwam()
+    base = W.load(_weights(), dtype=torch.bfloat16, device="cpu")
+    stock = copy.deepcopy(base).cuda()
+    patched = copy.deepcopy(base).cuda()
+    assert FC.patch_vae(patched) == (62, 10, 60)  # CausalConv3d, Conv2d, T=1 rewrites
+    torch.manual_seed(0)
+    x = (torch.rand(W.NAVSIM_FRAME, device="cuda") * 2 - 1).bfloat16()
+    z = W.encode(stock, x)
+    return FC, patched, x, z
+
+
+def test_flydsl_encode_matches_stock(navsim_flydsl):
+    """The 1-frame encode on FlyDSL: 30 calls all on the kernel, 16 distinct convolutions,
+    25 tuned-table lookups all exact (needs ROCm/aiter#7372's Wan2.2 table), then the
+    latent against stock BF16 at rtol = atol = 1e-5."""
+    FC, patched, x, z = navsim_flydsl
+    c0, l0 = FC.conv_calls(), FC.lookup_stats()["calls"]
+    with FC.Trace() as trace:
+        got = W.encode(patched, x)
+    c1, l1 = FC.conv_calls(), FC.lookup_stats()["calls"]
+    assert {k: c1[k] - c0[k] for k in c1} == {"flydsl": 30, "torch": 0}
+    assert len(trace.calls) == 16
+    lookups = {k: l1[k] - l0[k] for k in l1}
+    why = "without ROCm/aiter#7372's Wan2.2 table the lookups fall back to the heuristic tile"
+    assert lookups == {"exact": 25, "borrowed": 0, "heuristic": 0, "unkeyed": 0}, f"{lookups}: {why}"
+    torch.testing.assert_close(got, z, rtol=RTOL, atol=ATOL)
+
+
+def test_flydsl_kernels_exact_on_grpo_conv_shapes(navsim_flydsl):
+    """Each of the 16 distinct convolutions the FlyDSL path runs in a 1-frame encode (after
+    the T=1 rewrite) on {-1, 0, 1} BF16 data: bit-exact against a CPU fp32 reference."""
+    FC, patched, x, _ = navsim_flydsl
+    with FC.Trace() as trace:
+        W.encode(patched, x)
+    assert len(trace.calls) == 16
+    gen = torch.Generator().manual_seed(0)
+    failed = []
+    for call in trace.calls:
+        n, d, got, ref = FC.ternary_check(call, gen)
+        assert n == 1, (call, "fell back to torch")
+        try:
+            torch.testing.assert_close(got, ref, rtol=RTOL, atol=ATOL)
+        except AssertionError:
+            failed.append((call, d))
+    assert not failed, failed
 
 
 def test_aiter_kernels_exact_on_navsim_conv_shapes():

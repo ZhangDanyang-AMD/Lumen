@@ -11,7 +11,14 @@ BF16 WanVideoVAE38 and through the patched one, and reports:
   * SNR of stock and patched against an FP32 encode, and ms per call
 
 then runs every distinct convolution of that encode on {-1, 0, 1} data, where the
-exact answer is known (wan22_vae.ternary_conv_check), at the same tolerance.
+exact answer is known (wan22_vae.ternary_conv_check / flydsl_conv.ternary_check), at
+the same tolerance.
+
+``--backend triton`` (default) patches with ``LumenConfig(aiter_conv=True)``, Lumen's
+library path (aiter's Triton conv). ``--backend flydsl`` patches with this example's
+``flydsl_conv.py`` (aiter's FlyDSL implicit-GEMM conv) and also reports the tuned-table
+lookups; without ROCm/aiter#7372's Wan2.2 table they take the heuristic tile and the
+check fails.
 
     SIMWAM_DIR=... WAN22_VAE=... python3 verify_vae.py
 
@@ -59,13 +66,22 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--iters", type=int, default=5)
     ap.add_argument("--skip-ternary", action="store_true", help="skip the per-convolution exact check")
+    ap.add_argument("--backend", choices=("triton", "flydsl"), default="triton",
+                    help="triton: LumenConfig(aiter_conv=True) (Lumen's library path); "
+                         "flydsl: this example's flydsl_conv.py (aiter's FlyDSL implicit-GEMM conv)")  # fmt: skip
     args = ap.parse_args()
 
-    import lumen.ops.conv as lc
-    from lumen.config import LumenConfig
+    if args.backend == "triton":
+        import lumen.ops.conv as lc
+        from lumen.config import LumenConfig
 
-    if lc._conv3d() is None:
-        raise SystemExit("aiter Triton conv3d unavailable: install aiter >= c8325e00c or set AITER_SRC")
+        if lc._conv3d() is None:
+            raise SystemExit("aiter Triton conv3d unavailable: install aiter >= c8325e00c or set AITER_SRC")
+    else:
+        import flydsl_conv as FC
+
+        if FC.load() is None:
+            raise SystemExit("aiter FlyDSL conv unavailable: install aiter main >= 78a14ae5d with flydsl 0.5.0")
 
     base = W.load(device="cpu")
     n_c3 = sum(type(m).__name__ == "CausalConv3d" for m in base.modules())
@@ -87,27 +103,55 @@ def main():
 
     stock = copy.deepcopy(base).cuda().bfloat16()
     patched = copy.deepcopy(base).cuda().bfloat16()
-    LumenConfig(aiter_conv=True).enable(patched)
-    bound = sum(getattr(m._conv_forward, "_lumen_conv", False) for m in W.convs(patched))
-    print(f"LumenConfig(aiter_conv=True): {bound} of {n_c3 + n_c2} convolutions bound")
+    if args.backend == "triton":
+        LumenConfig(aiter_conv=True).enable(patched)
+        bound = sum(getattr(m._conv_forward, "_lumen_conv", False) for m in W.convs(patched))
+        print(f"LumenConfig(aiter_conv=True): {bound} of {n_c3 + n_c2} convolutions bound")
+    else:
+        c3, c2, t1 = FC.patch_vae(patched)
+        print(f"flydsl_conv.patch_vae: {c3} CausalConv3d ({t1} with the T=1 -> conv2d rewrite) and {c2} Conv2d bound")
     x = x32.bfloat16()
 
     verdict = True
-    for what, fn, inp, ref32 in (("encode", W.encode, x, z32),):
-        want = fn(stock, inp)
+    want = W.encode(stock, x)
+    if args.backend == "triton":
         with W.ConvCalls(patched, lc) as calls:
-            got = fn(patched, inp)
-        ms_stock = timed(lambda: fn(stock, inp), args.iters)
-        ms_patched = timed(lambda: fn(patched, inp), args.iters)
-        d, outside, n = compare(got, want)
-        ok = outside == 0 and calls.torch == 0
-        verdict &= ok
-        print(f"{what}: conv calls {calls.as_dict()}   patched vs stock BF16 max|d| {d:.3e}, "
-              f"{outside}/{n} outside rtol=atol=1e-5 -> {'PASS' if ok else 'FAIL'}")  # fmt: skip
-        print(f"        SNR vs FP32: stock {snr_db(ref32, want):5.1f} dB, patched {snr_db(ref32, got):5.1f} dB;"
-              f"   ms: stock {ms_stock:7.1f}, patched {ms_patched:7.1f}")  # fmt: skip
+            got = W.encode(patched, x)
+        cc = calls.as_dict()
+    else:
+        c0, l0 = FC.conv_calls(), FC.lookup_stats()["calls"]
+        with FC.Trace() as trace:
+            got = W.encode(patched, x)
+        c1, l1 = FC.conv_calls(), FC.lookup_stats()["calls"]
+        cc = {"aiter": c1["flydsl"] - c0["flydsl"], "torch": c1["torch"] - c0["torch"]}
+        lookups = {k: l1[k] - l0[k] for k in l1}
+        print(f"FlyDSL tuned-table lookups: {lookups} over {len(trace.calls)} distinct convolutions")
+        if FC.warn_if_untuned():
+            print("        some lookups took the heuristic tile: ROCm/aiter#7372's Wan2.2 table is missing")
+            verdict = False
+    ms_stock = timed(lambda: W.encode(stock, x), args.iters)
+    ms_patched = timed(lambda: W.encode(patched, x), args.iters)
+    d, outside, n = compare(got, want)
+    ok = outside == 0 and cc["torch"] == 0
+    verdict &= ok
+    print(f"encode: conv calls {cc}   patched vs stock BF16 max|d| {d:.3e}, "
+          f"{outside}/{n} outside rtol=atol=1e-5 -> {'PASS' if ok else 'FAIL'}")  # fmt: skip
+    print(f"        SNR vs FP32: stock {snr_db(z32, want):5.1f} dB, patched {snr_db(z32, got):5.1f} dB;"
+          f"   ms: stock {ms_stock:7.1f}, patched {ms_patched:7.1f}")  # fmt: skip
 
-    if not args.skip_ternary:
+    if not args.skip_ternary and args.backend == "flydsl":
+        gen = torch.Generator().manual_seed(0)
+        failed = []
+        for call in trace.calls:
+            n_fly, d, got_t, ref = FC.ternary_check(call, gen)
+            if n_fly != 1 or compare(got_t, ref)[1]:
+                failed.append((call, n_fly, d))
+        print(f"ternary per-convolution check, {len(trace.calls)} FlyDSL calls of the 1-frame encode: "
+              f"{len(trace.calls) - len(failed)} exact at rtol=atol=1e-5, {len(failed)} failed")  # fmt: skip
+        for call, n_fly, d in failed:
+            print(f"    FAILED {call}: {n_fly} FlyDSL calls, max|d| {d:.3e}")
+        verdict &= not failed
+    elif not args.skip_ternary:
         gen = torch.Generator().manual_seed(0)
         sigs = W.conv_signatures(base)
         exact = fallback = 0
