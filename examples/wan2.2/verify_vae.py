@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Single-GPU check of LumenConfig(aiter_conv=True) on SimWAM's Wan2.2 VAE at NAVSIM's shapes.
+"""Single-GPU check of LumenConfig(aiter_conv=True) on SimWAM's Wan2.2 VAE at NAVSIM GRPO's shapes.
 
-Encodes (1, 3, 9, 384, 672) and decodes (1, 48, 3, 24, 42) through the stock BF16
-WanVideoVAE38 and through the patched one, and reports for each:
+Encodes one frame (1, 3, 1, 384, 672) to the (1, 48, 1, 24, 42) latent, as the GRPO
+rollout and the navtest action-only eval do (neither decodes), through the stock
+BF16 WanVideoVAE38 and through the patched one, and reports:
 
   * convolution calls on aiter vs torch (a fallback is otherwise silent)
   * patched against stock BF16 at rtol = atol = 1e-5: max|d|, how many elements
     are outside, PASS/FAIL
-  * SNR of stock and patched against an FP32 encode/decode, and ms per call
+  * SNR of stock and patched against an FP32 encode, and ms per call
 
-then runs every distinct NAVSIM convolution on {-1, 0, 1} data, where the exact
-answer is known (wan22_vae.ternary_conv_check), at the same tolerance.
+then runs every distinct convolution of that encode on {-1, 0, 1} data, where the
+exact answer is known (wan22_vae.ternary_conv_check), at the same tolerance.
 
     SIMWAM_DIR=... WAN22_VAE=... python3 verify_vae.py
 
@@ -74,16 +75,15 @@ def main():
           f"temporal {base.temporal_downsample_factor}x")  # fmt: skip
 
     torch.manual_seed(0)
-    x32 = torch.rand(W.NAVSIM_VIDEO, device="cuda") * 2 - 1
+    x32 = torch.rand(W.NAVSIM_FRAME, device="cuda") * 2 - 1
     vae32 = copy.deepcopy(base).cuda()
     z32 = W.encode(vae32, x32)
-    v32 = W.decode(vae32, z32)
     del vae32
     per_frame, tokens = W.dit_tokens(z32.shape)
-    print(f"input {tuple(x32.shape)} -> latent {tuple(z32.shape)} -> decode {tuple(v32.shape)}; "
+    print(f"input {tuple(x32.shape)} -> latent {tuple(z32.shape)} (no decode); "
           f"DiT patch {list(W.DIT_PATCH)}: {per_frame} tokens per latent frame, {tokens} total")  # fmt: skip
-    if tuple(z32.shape) != W.NAVSIM_LATENT or tuple(v32.shape) != W.NAVSIM_VIDEO or tokens != 756:
-        raise SystemExit("shapes do not match SimWAM NAVSIM")
+    if tuple(z32.shape) != W.NAVSIM_LATENT or tokens != 252:
+        raise SystemExit("shapes do not match SimWAM NAVSIM GRPO")
 
     stock = copy.deepcopy(base).cuda().bfloat16()
     patched = copy.deepcopy(base).cuda().bfloat16()
@@ -91,10 +91,9 @@ def main():
     bound = sum(getattr(m._conv_forward, "_lumen_conv", False) for m in W.convs(patched))
     print(f"LumenConfig(aiter_conv=True): {bound} of {n_c3 + n_c2} convolutions bound")
     x = x32.bfloat16()
-    z = W.encode(stock, x)  # decode input for both, so decode is compared on the same latent
 
     verdict = True
-    for what, fn, inp, ref32 in (("encode", W.encode, x, z32), ("decode", W.decode, z, v32)):
+    for what, fn, inp, ref32 in (("encode", W.encode, x, z32),):
         want = fn(stock, inp)
         with W.ConvCalls(patched, lc) as calls:
             got = fn(patched, inp)
@@ -126,7 +125,7 @@ def main():
                 exact += 1
             else:
                 failed.append((sig, route, f"max|d| {d:.3e}"))
-        print(f"ternary per-convolution check, {len(sigs)} NAVSIM shapes: {exact} exact at rtol=atol=1e-5, "
+        print(f"ternary per-convolution check, {len(sigs)} GRPO-encode shapes: {exact} exact at rtol=atol=1e-5, "
               f"{len(winograd)} Winograd (not exact by construction, not asserted), "
               f"{len(failed)} failed ({fallback} fell back to torch)")  # fmt: skip
         for sig, route, d in winograd:

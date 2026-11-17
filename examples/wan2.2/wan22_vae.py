@@ -1,4 +1,4 @@
-"""SimWAM's Wan2.2-TI2V-5B VAE (WanVideoVAE38) at its NAVSIM shapes, on Lumen's aiter conv.
+"""SimWAM's Wan2.2-TI2V-5B VAE (WanVideoVAE38) at its NAVSIM GRPO shapes, on Lumen's aiter conv.
 
 The class is SimWAM's own, imported from ``$SIMWAM_DIR/src/simwam/models/wan22/
 wan_video_vae.py`` (H-EmbodVis/SimWAM, MIT, pinned as ``SIMWAM_COMMIT``) rather
@@ -7,11 +7,13 @@ its own and SimWAM's package, with its training dependencies, is never imported.
 Weights load the way SimWAM's loader does (helpers/loader.py: the checkpoint's
 keys under ``model.``), but strictly.
 
-NAVSIM, as SimWAM's NAVSIM config runs it: 9 frames of 384x672 encode to a
-48x3x24x42 latent -- temporal (9-1)/4+1, spatial 384/16 and 672/16, the 16 being
-patchify 2 and three 2x downsamples -- and decode back to 9x384x672. The DiT then
-patchifies the latent [1, 2, 2] (configs/model/simwam_navsim.yaml): 12x21 tokens
-per latent frame, 756 in all.
+NAVSIM GRPO, as SimWAM's FlowGRPO rollout runs it (trainer_grpo.py,
+simwam_grpo.build_action_condition): only the current frame conditions the action,
+so the VAE encodes one 384x672 frame per sample to a 48x1x24x42 latent -- spatial
+384/16 and 672/16, the 16 being patchify 2 and three 2x downsamples -- and never
+decodes. The navtest action-only eval encodes the same frame the same way. The
+DiT then patchifies the latent [1, 2, 2] (configs/model/simwam_navsim.yaml):
+12x21 = 252 tokens.
 
 The convolutions are patched with ``LumenConfig(aiter_conv=True).enable(vae)``,
 which routes every ``nn.Conv2d`` / ``nn.Conv3d`` forward to aiter's Triton conv
@@ -30,8 +32,8 @@ import torch.nn.functional as F
 from torch import nn
 
 SIMWAM_COMMIT = "1433ee7e06a62bd8b89da74455df0d82bda7b726"
-NAVSIM_VIDEO = (1, 3, 9, 384, 672)
-NAVSIM_LATENT = (1, 48, 3, 24, 42)
+NAVSIM_FRAME = (1, 3, 1, 384, 672)
+NAVSIM_LATENT = (1, 48, 1, 24, 42)
 DIT_PATCH = (1, 2, 2)
 
 _MODULE = "simwam_wan_video_vae"
@@ -71,12 +73,6 @@ def encode(vae, video):
     """Normalised latent mean, as SimWAM's ``single_encode``."""
     with torch.no_grad():
         return vae.model.encode(video, vae.scale)
-
-
-def decode(vae, latent):
-    """Video in [-1, 1], as SimWAM's ``single_decode``."""
-    with torch.no_grad():
-        return vae.model.decode(latent, vae.scale).clamp_(-1, 1)
 
 
 def dit_tokens(latent_shape, patch=DIT_PATCH):
@@ -152,7 +148,7 @@ class ConvCalls:
 
 
 def conv_signatures(vae):
-    """Every distinct convolution one NAVSIM encode and one decode make, traced on meta.
+    """Every distinct convolution one NAVSIM GRPO (1-frame) encode makes, traced on meta.
 
     Each is ``(spatial_rank, x_shape, w_shape, stride, padding)`` as
     ``_conv_forward`` -- and so aiter -- receives it: after the causal pad and the
@@ -170,8 +166,7 @@ def conv_signatures(vae):
 
         m._conv_forward = record.__get__(m)
     with torch.no_grad():
-        z = meta.model.encode(torch.empty(NAVSIM_VIDEO, device="meta"), meta.scale)
-        meta.model.decode(z, meta.scale)
+        meta.model.encode(torch.empty(NAVSIM_FRAME, device="meta"), meta.scale)
     return list(seen)
 
 

@@ -1,4 +1,7 @@
-"""SimWAM's Wan2.2 VAE (WanVideoVAE38) at NAVSIM's shapes with LumenConfig(aiter_conv=True).
+"""SimWAM's Wan2.2 VAE (WanVideoVAE38) at NAVSIM GRPO's shapes with LumenConfig(aiter_conv=True).
+
+The GRPO rollout (and the navtest action-only eval) encodes one 384x672 frame per
+sample and never decodes, so that 1-frame encode is what is tested.
 
     SIMWAM_DIR=... WAN22_VAE=... HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 python -m pytest -q test_wan22_vae.py
 
@@ -86,11 +89,12 @@ def test_structure_and_shapes_match_navsim():
             out = fn(torch.empty(shape, device="meta"), vae.scale)
         return tuple(out.shape), len(flops), sum(flops)
 
-    # Convolution calls and FLOPs of SimWAM's own trace of this model.
-    assert run(m.encode, W.NAVSIM_VIDEO) == (W.NAVSIM_LATENT, 92, 8_404_617_166_848)
-    assert run(m.decode, W.NAVSIM_LATENT) == (W.NAVSIM_VIDEO, 116, 43_850_007_355_392)
-    assert W.dit_tokens(W.NAVSIM_LATENT) == (12 * 21, 756)
-    assert len(W.conv_signatures(vae)) == 58
+    # Convolution calls and FLOPs of one GRPO (1-frame) encode.
+    assert run(m.encode, W.NAVSIM_FRAME) == (W.NAVSIM_LATENT, 30, 1_198_310_916_096)
+    assert W.dit_tokens(W.NAVSIM_LATENT) == (12 * 21, 252)
+    sigs = W.conv_signatures(vae)
+    assert len(sigs) == 16
+    assert sum(rank == 3 for rank, *_ in sigs) == 11 and sum(rank == 2 for rank, *_ in sigs) == 5
 
 
 def _patch_conv_without_aiter(monkeypatch):
@@ -125,9 +129,8 @@ def test_patch_binds_every_conv_and_keeps_causal_forward(monkeypatch):
     assert all(getattr(c._conv_forward, "_lumen_conv", False) for c in W.convs(vae))
     assert all(type(c).forward is V.CausalConv3d.forward for c in vae.modules() if type(c) is V.CausalConv3d)
     with W.ConvCalls(vae, lc) as calls, torch.no_grad():
-        vae.decode(vae.encode(torch.rand(1, 3, 9, 64, 96) * 2 - 1, [torch.zeros(48), torch.ones(48)]),
-                   [torch.zeros(48), torch.ones(48)])  # fmt: skip
-    assert calls.as_dict() == {"aiter": 0, "torch": 92 + 116}
+        vae.encode(torch.rand(1, 3, 1, 64, 96) * 2 - 1, [torch.zeros(48), torch.ones(48)])
+    assert calls.as_dict() == {"aiter": 0, "torch": 30}
 
 
 # --- GPU: the aiter path in BF16 against the stock model, rtol = atol = 1e-5 -----
@@ -145,31 +148,22 @@ def navsim_bf16():
     patched = copy.deepcopy(base).cuda()
     LumenConfig(aiter_conv=True).enable(patched)
     torch.manual_seed(0)
-    x = (torch.rand(W.NAVSIM_VIDEO, device="cuda") * 2 - 1).bfloat16()
+    x = (torch.rand(W.NAVSIM_FRAME, device="cuda") * 2 - 1).bfloat16()
     z = W.encode(stock, x)
-    video = W.decode(stock, z)
-    assert tuple(z.shape) == W.NAVSIM_LATENT and tuple(video.shape) == W.NAVSIM_VIDEO
-    return lc, stock, patched, x, z, video
+    assert tuple(z.shape) == W.NAVSIM_LATENT
+    return lc, stock, patched, x, z
 
 
 def test_bf16_encode_matches_stock(navsim_bf16):
-    lc, _, patched, x, z, _ = navsim_bf16
+    lc, _, patched, x, z = navsim_bf16
     with W.ConvCalls(patched, lc) as calls:
         got = W.encode(patched, x)
-    assert calls.as_dict() == {"aiter": 92, "torch": 0}
+    assert calls.as_dict() == {"aiter": 30, "torch": 0}
     torch.testing.assert_close(got, z, rtol=RTOL, atol=ATOL)
 
 
-def test_bf16_decode_matches_stock(navsim_bf16):
-    lc, _, patched, _, z, video = navsim_bf16
-    with W.ConvCalls(patched, lc) as calls:
-        got = W.decode(patched, z)
-    assert calls.as_dict() == {"aiter": 116, "torch": 0}
-    torch.testing.assert_close(got, video, rtol=RTOL, atol=ATOL)
-
-
 def test_aiter_kernels_exact_on_navsim_conv_shapes():
-    """Each of the 58 distinct NAVSIM convolutions on {-1, 0, 1} BF16 data, where the
+    """Each of the 16 distinct GRPO-encode convolutions on {-1, 0, 1} BF16 data, where the
     exact answer is known (wan22_vae.ternary_conv_check). Non-Winograd routes must
     match the CPU fp32 reference at rtol = atol = 1e-5; Winograd routes are not
     exact by construction and are not asserted on."""
