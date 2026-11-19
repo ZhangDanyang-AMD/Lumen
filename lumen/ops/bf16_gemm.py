@@ -19,11 +19,13 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 
 logger = logging.getLogger(__name__)
 
 _FP16 = (torch.float16, torch.bfloat16)
 _logged = False
+_StopRecomputation = getattr(torch.utils.checkpoint, "_StopRecomputationError", ())
 
 
 def _use_aiter(x: torch.Tensor, weight: torch.Tensor) -> bool:
@@ -35,10 +37,11 @@ class _GemmFn(torch.autograd.Function):
     def forward(ctx, x, weight, bias):
         from lumen.ops.quantize.linear import dispatch_gemm
 
+        with torch.no_grad():
+            out = dispatch_gemm(x, weight, scaling_type="none", bias=bias)
         ctx.save_for_backward(x, weight)
         ctx.has_bias = bias is not None
-        with torch.no_grad():
-            return dispatch_gemm(x, weight, scaling_type="none", bias=bias)
+        return out
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -58,6 +61,9 @@ def linear(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = No
         return F.linear(x, weight, bias)
     try:
         return _GemmFn.apply(x, weight, bias)
+    except _StopRecomputation:
+        # Non-reentrant checkpointing ends a recompute early with this exception.
+        raise
     except Exception as exc:
         if not _logged:
             logger.warning("aiter gemm fell back to torch: %s", exc)

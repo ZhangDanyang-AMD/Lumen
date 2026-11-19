@@ -1690,7 +1690,29 @@ def gemm_mxfp4_dispatch(a_fp4, w_fp4, scale_a, scale_w):
     )
 
 
+def _gemm_bf16_opus(a, w, bias):
+    """``Y = A @ W.T`` through opus. hipBLASLt's tuned launch can fail without writing its output."""
+    from aiter.ops.opus.gemm_op_a16w16 import gemm_a16w16_opus
+
+    lead = a.shape[:-1]
+    flat = a.reshape(-1, a.shape[-1])
+    if flat.shape[0] == 0:
+        return a.new_empty(*lead, w.shape[0])
+    if not flat.is_contiguous():
+        flat = flat.contiguous()
+    if not w.is_contiguous():
+        w = w.contiguous()
+    if bias is not None and not bias.is_contiguous():
+        bias = bias.contiguous()
+    out = gemm_a16w16_opus(flat, w, bias=bias, dtype=flat.dtype)
+    return out.view(*lead, w.shape[0])
+
+
 def _gemm_bf16_tuned(a, w, bias):
+    # LUMEN_BF16_GEMM=opus skips the hipBLASLt tuned table. A failed hipBLASLt
+    # launch leaves the unwritten output buffer in place, which shows up as NaN.
+    if os.environ.get("LUMEN_BF16_GEMM") == "opus":
+        return _gemm_bf16_opus(a, w, bias)
     from aiter.tuned_gemm import gemm_a16w16
 
     return gemm_a16w16(a, w, bias=bias)
