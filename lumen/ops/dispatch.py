@@ -656,6 +656,20 @@ def _probe_aiter_pre_routed_a8w4f():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_mapped():
+    """Resolve the versioned public mapped dual-quant expert API."""
+    try:
+        from aiter.ops.triton.moe import sonic_mxfp4
+
+        if getattr(sonic_mxfp4, "MAPPED_DUAL_QUANT_API_VERSION", 0) != 1:
+            return None
+        operation = sonic_mxfp4.moe_pre_routed_quantized_mapped
+        return operation if callable(operation) else None
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_pack_pre_routed_weights():
     """Resolve the weight-packing helper used to cache packed experts per step."""
     try:

@@ -22,6 +22,7 @@ def op(monkeypatch):
         "pre_routed_a4w4_wgrad_gluon",
         "pre_routed_a8w4",
         "pre_routed_a8w4f",
+        "pre_routed_mapped",
     ):
         setattr(dispatch, "_probe_aiter_" + name, lambda: None)
     dispatch.try_backends = lambda backends, *args, **kwargs: backends[0][1](
@@ -231,3 +232,62 @@ def test_explicit_gluon_to_bf16_fallback_logs(op, monkeypatch, caplog):
 def test_invalid_native_backend_rejected(op):
     with pytest.raises(ValueError, match="wgrad_backend"):
         op.pre_routed_a4w4(1, 2, 3, 4, 5, wgrad_mode="mxfp4", wgrad_backend="auto")
+
+
+def test_mapped_api_forwards_source_routing_and_native_options(op, monkeypatch):
+    calls = []
+
+    def mapped(*args, **kwargs):
+        calls.append((args, kwargs))
+        return "mapped"
+
+    monkeypatch.setattr(op, "_probe_aiter_pre_routed_mapped", lambda: mapped)
+    buffers = (object(), object())
+    assert (
+        op.pre_routed_quantized_mapped(
+            "a4w4",
+            "source",
+            "scores",
+            (2, 1),
+            "gather",
+            "w1",
+            "w2",
+            "packed",
+            wgrad_mode="mxfp4",
+            main_grads=buffers,
+            wgrad_fallback="bf16",
+            wgrad_backend="gluon",
+        )
+        == "mapped"
+    )
+    assert calls == [
+        (
+            ("source", "scores", (2, 1), "gather", "w1", "w2", "packed"),
+            {
+                "recipe": "a4w4",
+                "wgrad_mode": "mxfp4",
+                "main_grads": buffers,
+                "wgrad_fallback": "bf16",
+                "wgrad_backend": "gluon",
+            },
+        )
+    ]
+
+
+def test_missing_mapped_api_fails_closed(op):
+    assert not op.mapped_pre_routed_available()
+    with pytest.raises(RuntimeError, match="MAPPED_DUAL_QUANT_API_VERSION=1"):
+        op.pre_routed_quantized_mapped("a4w4", 1, 2, (1,), 3, 4, 5, wgrad_mode="mxfp4")
+
+
+def test_mapped_runtime_failure_is_not_retried(op, monkeypatch):
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise RuntimeError("mapped kernel failed")
+
+    monkeypatch.setattr(op, "_probe_aiter_pre_routed_mapped", lambda: fail)
+    with pytest.raises(RuntimeError, match="mapped kernel failed"):
+        op.pre_routed_quantized_mapped("a8w4f", 1, 2, (1,), 3, 4, 5)
+    assert len(calls) == 1
