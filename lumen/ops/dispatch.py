@@ -1,3 +1,4 @@
+# ruff: noqa: BLE001, F401, RUF100
 ###############################################################################
 # Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -15,7 +16,7 @@ first successful result, logging fallbacks as warnings.
 import functools
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
@@ -23,8 +24,7 @@ import torch
 
 _SKIP_BACKEND_SYNC = os.environ.get("LUMEN_SKIP_BACKEND_SYNC", "0") == "1"
 
-# op_name -> winning backend label; also op_name + ":hits" / ":prev" / ":warned".
-_backend_cache: dict[str, Any] = {}
+_backend_cache: dict[str, int] = {}
 _BACKEND_WARMUP_CALLS = 3
 
 _IN_GRAPH_CAPTURE = False
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 class Backend(Enum):
     ASM = "asm"
     TRITON = "triton"
+    GLUON = "gluon"
     HIPBLAS = "hipblas"
 
 
@@ -97,7 +98,7 @@ def _probe_aiter_triton_gemm():
 def _probe_aiter_triton_gemm_bf16():
     try:
         from aiter.ops.triton.gemm.basic.gemm_a16w16 import (
-            gemm_a16w16 as _,  # noqa: F401
+            gemm_a16w16 as _,
         )
 
         return True
@@ -166,14 +167,17 @@ def _probe_hipblas_fp8_output() -> bool:
     hipb_mm's ``out_dtype=FP8`` corrupts the hipBLASLt tuning cache.
     This probe verifies the API exists without running a real GEMM.
     """
-    return hasattr(torch, "_scaled_mm")
+    try:
+        return hasattr(torch, "_scaled_mm")
+    except Exception:
+        return False
 
 
 @functools.lru_cache(maxsize=1)
 def _probe_aiter_fused_quant():
     try:
         from aiter.ops.triton.quant.fused_fp8_quant import (
-            fused_rms_fp8_per_tensor_static_quant as _,  # noqa: F401
+            fused_rms_fp8_per_tensor_static_quant as _,
         )
 
         return True
@@ -186,7 +190,7 @@ def _probe_aiter_fused_silu_mul_fp8():
     """True if AITER fused SwiGLU + per-tensor FP8 quant kernel is importable."""
     try:
         from aiter.ops.triton.quant.fused_fp8_quant import (
-            fused_silu_mul_fp8_per_tensor_static_quant as _,  # noqa: F401
+            fused_silu_mul_fp8_per_tensor_static_quant as _,
         )
 
         return True
@@ -226,63 +230,6 @@ def _probe_aiter_triton_gemm_mxfp8():
 
 
 @functools.lru_cache(maxsize=1)
-def _probe_aiter_triton_gemm_mxfp4():
-    """Check if AITER Triton MXFP4 GEMM (gemm_afp4wfp4) is available."""
-    try:
-        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import (
-            gemm_afp4wfp4 as _,  # noqa: F401
-        )
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_triton_gemm_mxfp4_preshuffle():
-    """Check if AITER Triton MXFP4 GEMM with shuffled operand layout is available.
-
-    Needs both the kernel and the shuffle helpers that build its layout.
-    """
-    try:
-        from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import (
-            gemm_afp4wfp4_preshuffle as _,  # noqa: F401
-        )
-        from aiter.ops.triton.utils.shuffle import (  # noqa: F401
-            shuffle_scale_gemm as _s,
-        )
-        from aiter.ops.triton.utils.shuffle import (
-            shuffle_weight as _w,
-        )
-
-        del _w  # The import itself is the availability check.
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
-def _probe_aiter_gemm_mxfp4_asm():
-    """Check if AITER's prebuilt A4W4 ASM/CK MXFP4 GEMM is available.
-
-    Needs the dispatcher, the tuned-config table it picks kernels from, and the
-    two layout helpers that build the operand layout those kernels read.
-    """
-    try:
-        from aiter import gemm_a4w4 as _  # noqa: F401
-        from aiter.ops.gemm_op_a4w4 import get_GEMM_config as _c  # noqa: F401
-        from aiter.ops.shuffle import shuffle_weight as _w  # noqa: F401
-        from aiter.ops.triton.utils.shuffle import (
-            shuffle_scale_gemm as _s,  # noqa: F401
-        )
-
-        return True
-    except (ImportError, OSError):
-        return False
-
-
-@functools.lru_cache(maxsize=1)
 def _probe_aiter_triton_rope_cached():
     """Check if AITER Triton cached RoPE (SBHD layout) is available."""
     try:
@@ -298,7 +245,7 @@ def _probe_aiter_triton_rope_cached_2c():
     """Check if AITER Triton cached RoPE 2-component (THD Q+K) is available."""
     try:
         from aiter.ops.triton.rope.rope import (
-            rope_cached_thd_positions_2c_fwd as _,  # noqa: F401
+            rope_cached_thd_positions_2c_fwd as _,
         )
 
         return True
@@ -355,10 +302,10 @@ def _probe_aiter_triton_moe_aux_loss():
     """Check if AITER Triton moe_aux_loss kernels are available."""
     try:
         from aiter.ops.triton.moe.moe_aux_loss import (
-            moe_aux_loss_bwd as _bwd,  # noqa: F401
+            moe_aux_loss_bwd as _bwd,
         )
         from aiter.ops.triton.moe.moe_aux_loss import (
-            moe_aux_loss_fwd as _fwd,  # noqa: F401
+            moe_aux_loss_fwd as _fwd,
         )
 
         return True
@@ -393,7 +340,7 @@ def _probe_aiter_moe_gemm_per_token():
     """Check if AITER fused per-token MOE GEMM is available."""
     try:
         from aiter.ops.triton.moe.moe_gemm_per_token import (
-            moe_gemm_per_token as _,  # noqa: F401
+            moe_gemm_per_token as _,
         )
 
         return True
@@ -406,7 +353,7 @@ def _probe_aiter_moe_gemm_mxfp8():
     """Check if AITER fused MXFP8 MOE GEMM is available."""
     try:
         from aiter.ops.triton.moe.moe_gemm_mxfp8 import (
-            moe_gemm_mxfp8 as _,  # noqa: F401
+            moe_gemm_mxfp8 as _,
         )
 
         return True
@@ -419,7 +366,7 @@ def _probe_aiter_triton_moe_align():
     """Check if AITER Triton MoE block alignment kernel is available."""
     try:
         from aiter.ops.triton.moe.moe_align_block_size import (
-            moe_align_block_size_triton as _,  # noqa: F401
+            moe_align_block_size_triton as _,
         )
 
         return True
@@ -443,7 +390,7 @@ def _probe_aiter_fused_gated():
     """Check if AITER Triton fused gated feed-forward is available."""
     try:
         from aiter.ops.triton.gemm.feed_forward import (
-            ff_a16w16_fused_gated as _,  # noqa: F401
+            ff_a16w16_fused_gated as _,
         )
 
         return True
@@ -456,7 +403,7 @@ def _probe_aiter_fused_ungated():
     """Check if AITER Triton fused ungated feed-forward is available."""
     try:
         from aiter.ops.triton.gemm.feed_forward import (
-            ff_a16w16_fused_ungated as _,  # noqa: F401
+            ff_a16w16_fused_ungated as _,
         )
 
         return True
@@ -480,7 +427,7 @@ def _probe_aiter_fast_transpose():
     """Check if AITER Triton fast 2D transpose kernel is available."""
     try:
         from aiter.ops.triton.quant.fast_transpose import (
-            fast_transpose_2d as _,  # noqa: F401
+            fast_transpose_2d as _,
         )
 
         return True
@@ -493,7 +440,7 @@ def _probe_aiter_fused_add_rmsnorm_pad():
     """Check if AITER Triton fused add+RMSNorm+pad kernel is available."""
     try:
         from aiter.ops.triton.normalization.fused_add_rmsnorm_pad import (
-            fused_add_rmsnorm_pad as _,  # noqa: F401
+            fused_add_rmsnorm_pad as _,
         )
 
         return True
@@ -519,24 +466,10 @@ def _probe_aiter_fused_gemm_blockscale_mul_add():
 # ---------------------------------------------------------------------------
 
 
-def _entry_label(entry: tuple) -> str:
-    """Stable identity for one fallback-chain entry.
-
-    ``Backend`` on its own is not unique: ``gemm_mxfp4`` offers three
-    ``Backend.TRITON`` entries (preshuffled, row-major, and the dequant→BF16
-    fallback), so a chain that reuses a ``Backend`` passes an explicit label as
-    a third tuple element.
-    """
-    if len(entry) >= 3:
-        return entry[2]
-    return entry[0].value
-
-
 def try_backends(
     backends: list[tuple[Backend, Callable]],
     *args,
     op_name: str = "op",
-    slow_labels: Sequence[str] = (),
     **kwargs,
 ) -> Any:
     """Try each ``(backend, fn)`` pair in order; return first success.
@@ -549,17 +482,8 @@ def try_backends(
     lookup fails.  If all fail, raises the last exception.
 
     After a backend succeeds ``_BACKEND_WARMUP_CALLS`` consecutive times
-    for a given ``op_name``, the winning backend is cached by *label* and
-    subsequent calls skip the fallback chain entirely.  Caching the label
-    rather than the list position matters for any op that rebuilds its chain
-    per call: a position means a different backend once the order or length
-    changes, so an index cached from one shape can hand a later shape the
-    fallback -- or a kernel that shape is not allowed to use.  A label that is
-    no longer on offer simply misses and re-runs the chain.
-
-    Labels named in ``slow_labels`` are reported at ``warning`` rather than
-    ``debug`` when they win, because locking onto a degraded path is not
-    something a run should have to read debug logs to discover.
+    for a given ``op_name``, the winning index is cached and subsequent
+    calls skip the fallback chain entirely.
 
     ``torch.cuda.synchronize()`` is issued during warmup for error
     detection.  After warmup (or when ``LUMEN_SKIP_BACKEND_SYNC=1``),
@@ -578,26 +502,10 @@ def try_backends(
     if _TritonOutOfResources is not None:
         _catchable = _catchable + (_TritonOutOfResources,)
 
-    cached_label = _backend_cache.get(op_name)
-    if cached_label is not None:
-        for entry in backends:
-            if _entry_label(entry) == cached_label:
-                try:
-                    return entry[1](*args, **kwargs)
-                except _catchable as exc:
-                    # The lock is a warmup shortcut, not a promise that these
-                    # operands still suit the winner. Forget it and re-run the
-                    # chain rather than propagating, so the degradation the
-                    # chain exists to provide survives warmup.
-                    logger.warning(
-                        "%s: cached %s backend failed (%s), re-running the fallback chain",
-                        op_name,
-                        cached_label,
-                        exc,
-                    )
-                    for suffix in ("", ":hits", ":prev"):
-                        _backend_cache.pop(op_name + suffix, None)
-                break
+    cached_idx = _backend_cache.get(op_name)
+    if cached_idx is not None and cached_idx < len(backends):
+        _, fn = backends[cached_idx]
+        return fn(*args, **kwargs)
 
     if _IN_GRAPH_CAPTURE:
         raise RuntimeError(
@@ -606,9 +514,7 @@ def try_backends(
         )
 
     last_exc = None
-    for entry in backends:
-        backend, fn = entry[0], entry[1]
-        label = _entry_label(entry)
+    for i, (backend, fn) in enumerate(backends):
         try:
             result = fn(*args, **kwargs)
             if (
@@ -618,36 +524,23 @@ def try_backends(
             ):
                 torch.cuda.synchronize()
 
-            # Count consecutive wins for *this* backend. Reading the running
-            # count before comparing would let a switch of backend inherit the
-            # previous one's streak and lock on its first success.
-            if _backend_cache.get(op_name + ":prev") == label:
-                hit_count = _backend_cache.get(op_name + ":hits", 0) + 1
+            hit_count = _backend_cache.get(op_name + ":hits", 0) + 1
+            prev_idx = _backend_cache.get(op_name + ":prev", i)
+            if prev_idx == i:
+                _backend_cache[op_name + ":hits"] = hit_count
             else:
-                hit_count = 1
-            _backend_cache[op_name + ":hits"] = hit_count
-            _backend_cache[op_name + ":prev"] = label
+                _backend_cache[op_name + ":hits"] = 1
+            _backend_cache[op_name + ":prev"] = i
 
             if hit_count >= _BACKEND_WARMUP_CALLS:
-                _backend_cache[op_name] = label
-                if label in slow_labels and not _backend_cache.get(op_name + ":warned"):
-                    _backend_cache[op_name + ":warned"] = True
-                    logger.warning(
-                        "%s: locked to the %s fallback after %d successes -- every later "
-                        "call with this operand shape takes it. The faster backends were "
-                        "tried first and failed; check the warnings above.",
-                        op_name,
-                        label,
-                        hit_count,
-                    )
-                else:
-                    logger.debug(
-                        "%s: locked to %s backend (%s) after %d successes",
-                        op_name,
-                        backend.value,
-                        label,
-                        hit_count,
-                    )
+                _backend_cache[op_name] = i
+                logger.debug(
+                    "%s: locked to %s backend (index %d) after %d successes",
+                    op_name,
+                    backend.value,
+                    i,
+                    hit_count,
+                )
 
             return result
         except _catchable as exc:
@@ -657,10 +550,9 @@ def try_backends(
                 backend.value,
                 exc,
             )
-            # Deliberately *not* resetting the streak here. The winner's count
-            # has to survive a failure earlier in the chain, or a backend that
-            # is never first can never lock -- which left every call paying the
-            # cost of a kernel known to reject these operands, plus a warning.
+            _backend_cache.pop(op_name, None)
+            _backend_cache.pop(op_name + ":hits", None)
+            _backend_cache.pop(op_name + ":prev", None)
             last_exc = exc
     raise RuntimeError(
         f"{op_name}: all AITER backends exhausted. Last error: {last_exc}"
@@ -684,20 +576,91 @@ def build_fallback_chain(
 
 
 @functools.lru_cache(maxsize=1)
-def _probe_aiter_mxfp4_training():
-    """Probe the isolated training facade; selected launches never fallback."""
+def _probe_aiter_pre_routed_w4a16():
+    """Resolve the explicit quantized expert API without importing kernels."""
     try:
-        from aiter.ops.triton.gemm.basic import gemm_afp4wfp4 as api
-    except ImportError:
+        from aiter.ops.triton.moe.sonic_mxfp4 import moe_pre_routed_w4a16
+
+        return moe_pre_routed_w4a16
+    except (ImportError, OSError):
         return None
-    names = (
-        "mxfp4_dense_query_static_v1",
-        "mxfp4_dense_prepare_kernel_v1",
-        "mxfp4_dense_bind_v1",
-        "mxfp4_dense_attach_backward_v1",
-        "mxfp4_dense_launch_forward_v1",
-        "mxfp4_dense_launch_packed_forward_v1",
-        "mxfp4_dense_launch_backward_v1",
-        "mxfp4_zero_output_out_v1",
-    )
-    return api if all(callable(getattr(api, name, None)) for name in names) else None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a4w4():
+    """Resolve the explicit activation-and-weight MXFP4 expert API."""
+    try:
+        from aiter.ops.triton.moe.sonic_mxfp4 import moe_pre_routed_a4w4
+
+        return moe_pre_routed_a4w4
+    except (ImportError, OSError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a4w4_wgrad():
+    """Resolve the versioned native MXFP4 Wgrad API, never a private kernel."""
+    try:
+        from aiter.ops.triton.gemm.grouped.mxfp4_wgrad import grouped_mxfp4_wgrad
+        from aiter.ops.triton.moe import sonic_mxfp4
+
+        if getattr(sonic_mxfp4, "MXFP4_WGRAD_API_VERSION", 0) != 1:
+            return None
+        if not callable(grouped_mxfp4_wgrad):
+            return None
+        return functools.partial(sonic_mxfp4.moe_pre_routed_a4w4, wgrad_mode="mxfp4")
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a4w4_wgrad_gluon():
+    """Resolve the public native Gluon capability, not a kernel body."""
+    try:
+        from aiter.ops.triton.gemm.grouped.mxfp4_wgrad import MXFP4_WGRAD_BACKENDS
+        from aiter.ops.triton.moe import sonic_mxfp4
+
+        if getattr(sonic_mxfp4, "MXFP4_WGRAD_API_VERSION", 0) != 1:
+            return None
+        if "gluon" not in MXFP4_WGRAD_BACKENDS:
+            return None
+        return functools.partial(
+            sonic_mxfp4.moe_pre_routed_a4w4,
+            wgrad_mode="mxfp4",
+            wgrad_backend="gluon",
+        )
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a8w4():
+    """Resolve the MXFP8-activation x MXFP4-weight expert API."""
+    try:
+        from aiter.ops.triton.moe.sonic_mxfp4 import moe_pre_routed_a8w4
+
+        return moe_pre_routed_a8w4
+    except (ImportError, OSError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a8w4f():
+    """Resolve the FP8xFP4 forward + BF16-activation dgrad expert API."""
+    try:
+        from aiter.ops.triton.moe.sonic_mxfp4 import moe_pre_routed_a8w4f
+
+        return moe_pre_routed_a8w4f
+    except (ImportError, OSError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pack_pre_routed_weights():
+    """Resolve the weight-packing helper used to cache packed experts per step."""
+    try:
+        from aiter.ops.triton.moe.sonic_mxfp4 import pack_pre_routed_weights
+
+        return pack_pre_routed_weights
+    except (ImportError, OSError):
+        return None
