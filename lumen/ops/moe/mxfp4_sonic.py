@@ -198,6 +198,8 @@ def pre_routed_quantized_mapped(
 
     The versioned AITER operation owns gather-aware forward quantization and
     source-order dX. Its output stays expert-major for the dispatcher to combine.
+    MORI may reuse the source buffer after forward, so AITER must retain private
+    backward operands rather than saving that mutable buffer by reference.
     """
     if recipe not in _PROBES:
         raise ValueError(f"Unsupported expert precision: {recipe}")

@@ -98,11 +98,11 @@ def integration(monkeypatch):
     experts.w1 = "w1"
     experts.w2 = "w2"
     experts._cached_packed_weights = lambda: "packed"
-    return handoff, experts, mapped, regular
+    return handoff, sonic, experts, mapped, regular
 
 
 def test_sonic_consumes_mapped_handoff_once(integration):
-    handoff, experts, mapped, regular = integration
+    handoff, _, experts, mapped, regular = integration
     source = CpuTensor((3, 8), "bfloat16")
     scores = CpuTensor((4,), "float32")
     gather = CpuTensor((4,), "int32")
@@ -128,7 +128,7 @@ def test_sonic_consumes_mapped_handoff_once(integration):
 
 
 def test_disabled_scope_preserves_regular_path(integration):
-    handoff, experts, mapped, regular = integration
+    handoff, _, experts, mapped, regular = integration
     source = CpuTensor((3, 8), "bfloat16")
     scores = CpuTensor((3,), "float32")
     with handoff.mapped_handoff_scope(False):
@@ -141,7 +141,19 @@ def test_disabled_scope_preserves_regular_path(integration):
 
 
 def test_missing_aiter_capability_requests_dispatcher_fallback(integration):
-    _, experts, _, _ = integration
+    _, _, experts, _, _ = integration
     enabled, reason = experts.mori_mapped_handoff_capability()
     assert not enabled
     assert "API version 1 is unavailable" in reason
+
+
+def test_replacement_installs_real_manager_patch_when_enabled(integration, monkeypatch):
+    _, sonic, _, _, _ = integration
+    installer = _module("lumen.modules.mori_sonic_handoff")
+    installer.install_mori_sonic_handoff = mock.Mock(return_value=True)
+    monkeypatch.setitem(sys.modules, installer.__name__, installer)
+    monkeypatch.setenv("LUMEN_MORI_SONIC_MXFP4_HANDOFF", "1")
+    model = type("Model", (), {"modules": lambda self: []})()
+
+    assert sonic.replace_megatron_moe_experts(model) == 0
+    installer.install_mori_sonic_handoff.assert_called_once_with()
