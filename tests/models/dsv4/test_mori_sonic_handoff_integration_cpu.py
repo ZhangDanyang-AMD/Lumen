@@ -109,8 +109,13 @@ def mori(monkeypatch):
     moe_layer = sys.modules["megatron.core.transformer.moe.moe_layer"]
 
     class MoELayer:
-        def routed_experts_compute(self, hidden_states, probs):
-            return hidden_states, probs
+        def forward(
+            self,
+            hidden_states,
+            intermediate_tensors=None,
+            padding_mask=None,
+        ):
+            return hidden_states, intermediate_tensors, padding_mask
 
     MoELayer.__module__ = moe_layer.__name__
     moe_layer.MoELayer = MoELayer
@@ -134,17 +139,15 @@ def mori(monkeypatch):
 
     handoff = sys.modules["lumen.utils.sonic_moe_handoff"]
     handoff.mapped_handoff_enabled = mock.Mock(return_value=True)
-    handoff.mapped_handoff_scope_for_source = mock.Mock(return_value=None)
     handoff.publish_mapped_handoff = mock.Mock(return_value=True)
-    handoff.register_mapped_handoff_source = mock.Mock()
-    handoff.unregister_mapped_handoff_source = mock.Mock()
     scope_entries = []
+    handoff_scope = object()
 
     @contextmanager
     def scope(_enabled):
         scope_entries.append("enter")
         try:
-            yield
+            yield handoff_scope
         finally:
             scope_entries.append("exit")
 
@@ -257,18 +260,12 @@ def test_exact_signature_gate_rejects_method_drift(mori):
     )
 
 
-def test_residual_routed_expert_signature_remains_supported(mori):
-    def routed(self, hidden_states, probs, residual):
-        del self, hidden_states, probs, residual
-
-    names, defaults = mori.module._ROUTED_EXPERT_SIGNATURES[True]
-    assert mori.module._has_signature(routed, names, defaults)
-
-
 def test_moe_layer_scope_is_limited_to_exact_mori_sonic_pair(mori):
     layer = mori.layer_type()
-    layer.token_dispatcher = SimpleNamespace(_comm_manager=_manager(mori))
+    manager = _manager(mori)
+    layer.token_dispatcher = SimpleNamespace(_comm_manager=manager)
     layer.experts = SimpleNamespace(mori_mapped_handoff_capability=lambda: (True, ""))
-    result = layer.routed_experts_compute("hidden", "probs")
-    assert result == ("hidden", "probs")
+    result = layer.forward("hidden")
+    assert result == ("hidden", None, None)
     assert mori.scope_entries == ["enter", "exit"]
+    assert not hasattr(manager, mori.module._MANAGER_SCOPE_ATTR)

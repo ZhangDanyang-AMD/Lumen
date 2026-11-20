@@ -5,7 +5,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from threading import Lock, local
 from typing import Any
 
 MAPPED_HANDOFF_API_VERSION = 1
@@ -106,63 +105,16 @@ class _HandoffScope:
 _ACTIVE_SCOPE: ContextVar[_HandoffScope | None] = ContextVar(
     "lumen_sonic_moe_mapped_handoff", default=None
 )
-_THREAD_SCOPE = local()
-_PROCESS_SCOPE_LOCK = Lock()
-_PROCESS_SCOPES: dict[int, _HandoffScope] = {}
-_SOURCE_SCOPE_LOCK = Lock()
-_SOURCE_SCOPES: dict[int, tuple[Any, _HandoffScope]] = {}
 
 
 def _current_scope() -> _HandoffScope | None:
-    """Return the context scope, or its same-thread compatibility fallback."""
-    scope = _ACTIVE_SCOPE.get()
-    if scope is not None:
-        return scope
-    scope = getattr(_THREAD_SCOPE, "scope", None)
-    if scope is not None:
-        return scope
-    with _PROCESS_SCOPE_LOCK:
-        if len(_PROCESS_SCOPES) == 1:
-            return next(iter(_PROCESS_SCOPES.values()))
-    return None
+    return _ACTIVE_SCOPE.get()
 
 
 def _normalize_counts(counts: Any) -> tuple[int, ...]:
     if hasattr(counts, "tolist"):
         counts = counts.tolist()
     return tuple(int(count) for count in counts)
-
-
-def register_mapped_handoff_source(scope: _HandoffScope, source_tokens: Any) -> None:
-    """Bind one routed invocation to its exact dispatch tensor."""
-    if not isinstance(scope, _HandoffScope):
-        raise MappedHandoffError("INVALID_HANDOFF_SCOPE")
-    key = id(source_tokens)
-    with _SOURCE_SCOPE_LOCK:
-        if key in _SOURCE_SCOPES:
-            raise MappedHandoffError("DUPLICATE_HANDOFF_SOURCE")
-        _SOURCE_SCOPES[key] = (source_tokens, scope)
-
-
-def mapped_handoff_scope_for_source(source_tokens: Any) -> _HandoffScope | None:
-    """Resolve a worker-thread scope by exact source tensor identity."""
-    with _SOURCE_SCOPE_LOCK:
-        entry = _SOURCE_SCOPES.get(id(source_tokens))
-    if entry is None:
-        return None
-    registered_source, scope = entry
-    if registered_source is not source_tokens:
-        raise MappedHandoffError("HANDOFF_SOURCE_IDENTITY_COLLISION")
-    return scope
-
-
-def unregister_mapped_handoff_source(scope: _HandoffScope, source_tokens: Any) -> None:
-    """Release one source binding after routed expert compute completes."""
-    key = id(source_tokens)
-    with _SOURCE_SCOPE_LOCK:
-        entry = _SOURCE_SCOPES.pop(key, None)
-    if entry is None or entry[0] is not source_tokens or entry[1] is not scope:
-        raise MappedHandoffError("HANDOFF_SOURCE_REGISTRY_MISMATCH")
 
 
 @contextmanager
@@ -172,9 +124,6 @@ def mapped_handoff_scope(enabled: bool):
         raise MappedHandoffError("NESTED_HANDOFF_SCOPE")
     scope = _HandoffScope(enabled=enabled)
     token = _ACTIVE_SCOPE.set(scope)
-    _THREAD_SCOPE.scope = scope
-    with _PROCESS_SCOPE_LOCK:
-        _PROCESS_SCOPES[id(scope)] = scope
     failed = False
     try:
         yield scope
@@ -183,11 +132,6 @@ def mapped_handoff_scope(enabled: bool):
         raise
     finally:
         _ACTIVE_SCOPE.reset(token)
-        del _THREAD_SCOPE.scope
-        with _PROCESS_SCOPE_LOCK:
-            removed = _PROCESS_SCOPES.pop(id(scope), None)
-        if removed is not scope:
-            raise MappedHandoffError("HANDOFF_SCOPE_REGISTRY_MISMATCH")
         if not failed and scope.enabled and scope.published and not scope.consumed:
             raise MappedHandoffError("UNCONSUMED_HANDOFF")
 
@@ -244,8 +188,5 @@ __all__ = [
     "consume_mapped_handoff",
     "mapped_handoff_enabled",
     "mapped_handoff_scope",
-    "mapped_handoff_scope_for_source",
     "publish_mapped_handoff",
-    "register_mapped_handoff_source",
-    "unregister_mapped_handoff_source",
 ]

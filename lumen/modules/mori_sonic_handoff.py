@@ -9,10 +9,7 @@ import os
 from lumen.utils.sonic_moe_handoff import (
     mapped_handoff_enabled,
     mapped_handoff_scope,
-    mapped_handoff_scope_for_source,
     publish_mapped_handoff,
-    register_mapped_handoff_source,
-    unregister_mapped_handoff_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,19 +31,19 @@ _EXPECTED_SIGNATURES = {
         "async_finish",
         "allocate_on_comm_stream",
     ),
+    "MoELayer.forward": (
+        "self",
+        "hidden_states",
+        "intermediate_tensors",
+        "padding_mask",
+    ),
 }
 _EMPTY = inspect.Parameter.empty
 _EXPECTED_DEFAULTS = {
     "_MoriManager.dispatch": (_EMPTY, _EMPTY, True, True),
     "_MoriManager._permute_by_experts": (_EMPTY, _EMPTY),
     "_MoriManager.combine": (_EMPTY, _EMPTY, True, True),
-}
-_ROUTED_EXPERT_SIGNATURES = {
-    False: (("self", "hidden_states", "probs"), (_EMPTY, _EMPTY, _EMPTY)),
-    True: (
-        ("self", "hidden_states", "probs", "residual"),
-        (_EMPTY, _EMPTY, _EMPTY, _EMPTY),
-    ),
+    "MoELayer.forward": (_EMPTY, _EMPTY, None, None),
 }
 
 
@@ -105,6 +102,7 @@ def _resolve_targets():
         ("_MoriManager.dispatch", manager.dispatch),
         ("_MoriManager._permute_by_experts", manager._permute_by_experts),
         ("_MoriManager.combine", manager.combine),
+        ("MoELayer.forward", moe_layer.MoELayer.forward),
     )
     for name, operation in checks:
         if not _has_signature(
@@ -114,23 +112,11 @@ def _resolve_targets():
         ):
             return None, f"{name} signature mismatch"
 
-    routed_operation = moe_layer.MoELayer.routed_experts_compute
-    routed_has_residual = next(
-        (
-            has_residual
-            for has_residual, (names, defaults) in _ROUTED_EXPERT_SIGNATURES.items()
-            if _has_signature(routed_operation, names, defaults)
-        ),
-        None,
-    )
-    if routed_has_residual is None:
-        return None, "MoELayer.routed_experts_compute signature mismatch"
     return (
         manager,
         moe_layer.MoELayer,
         permute,
         fused_indices_to_multihot,
-        routed_has_residual,
     ), ""
 
 
@@ -209,18 +195,15 @@ def install_mori_sonic_handoff() -> bool:
         moe_layer_type,
         permute,
         fused_indices_to_multihot,
-        routed_has_residual,
     ) = targets
     if getattr(manager_type, "_lumen_mapped_handoff_v1", False):
         return True
 
     original_permute = manager_type._permute_by_experts
-    original_routed_experts_compute = moe_layer_type.routed_experts_compute
+    original_forward = moe_layer_type.forward
 
     def _patched_permute(self, hidden_states):
-        scope = mapped_handoff_scope_for_source(hidden_states)
-        if scope is None:
-            scope = getattr(self, _MANAGER_SCOPE_ATTR, None)
+        scope = getattr(self, _MANAGER_SCOPE_ATTR, None)
         if not mapped_handoff_enabled(scope):
             return original_permute(self, hidden_states)
         try:
@@ -255,46 +238,42 @@ def install_mori_sonic_handoff() -> bool:
         )
         return hidden_states
 
-    def _call_routed_experts(self, hidden_states, probs, residual=_EMPTY):
-        call_args = (
-            (self, hidden_states, probs, residual)
-            if routed_has_residual
-            else (self, hidden_states, probs)
-        )
+    def _patched_forward(
+        self,
+        hidden_states,
+        intermediate_tensors=None,
+        padding_mask=None,
+    ):
         manager = getattr(self.token_dispatcher, "_comm_manager", None)
         if type(manager) is not manager_type:
-            return original_routed_experts_compute(*call_args)
+            return original_forward(
+                self, hidden_states, intermediate_tensors, padding_mask
+            )
         capability = getattr(self.experts, "mori_mapped_handoff_capability", None)
         if not callable(capability):
             _notice(f"{type(self.experts).__name__} is not a SonicMoEExperts consumer")
-            return original_routed_experts_compute(*call_args)
+            return original_forward(
+                self, hidden_states, intermediate_tensors, padding_mask
+            )
         enabled, reason = capability()
         if not enabled:
             _notice(reason)
-            return original_routed_experts_compute(*call_args)
+            return original_forward(
+                self, hidden_states, intermediate_tensors, padding_mask
+            )
         with mapped_handoff_scope(True) as scope:
             if hasattr(manager, _MANAGER_SCOPE_ATTR):
                 raise RuntimeError("MORI manager already owns a mapped handoff scope")
-            register_mapped_handoff_source(scope, hidden_states)
             setattr(manager, _MANAGER_SCOPE_ATTR, scope)
             try:
-                return original_routed_experts_compute(*call_args)
+                return original_forward(
+                    self, hidden_states, intermediate_tensors, padding_mask
+                )
             finally:
                 delattr(manager, _MANAGER_SCOPE_ATTR)
-                unregister_mapped_handoff_source(scope, hidden_states)
-
-    if routed_has_residual:
-
-        def _patched_routed_experts_compute(self, hidden_states, probs, residual):
-            return _call_routed_experts(self, hidden_states, probs, residual)
-
-    else:
-
-        def _patched_routed_experts_compute(self, hidden_states, probs):
-            return _call_routed_experts(self, hidden_states, probs)
 
     manager_type._permute_by_experts = _patched_permute
-    moe_layer_type.routed_experts_compute = _patched_routed_experts_compute
+    moe_layer_type.forward = _patched_forward
     manager_type._lumen_mapped_handoff_v1 = True
     logger.info("Installed MORI-to-Sonic mapped MXFP4 handoff v1")
     return True
