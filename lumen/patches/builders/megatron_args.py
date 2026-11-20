@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from lumen.models.training_contract import add_shared_checkpoint_args, add_shared_experiment_args
+from lumen.models.training_contract import (
+    add_shared_checkpoint_args,
+    add_shared_experiment_args,
+)
 from lumen.models.utils import safe_add_argument
 from lumen.patches.registry import PatchPhase, register_patch
 
@@ -29,7 +32,12 @@ def add_common_megatron_args(parser):
     calling this function.
     """
     safe_add_argument(
-        parser, "--backend", type=str, default="megatron", choices=["megatron", "fsdp"], help="Training backend."
+        parser,
+        "--backend",
+        type=str,
+        default="megatron",
+        choices=["megatron", "fsdp"],
+        help="Training backend.",
     )
 
     lumen = parser.add_argument_group(title="Lumen")
@@ -58,7 +66,15 @@ def add_common_megatron_args(parser):
         "--lumen-fp8-quant-type",
         type=str,
         default="blockwise",
-        choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"],
+        choices=[
+            "dynamic",
+            "delayed",
+            "blockwise",
+            "blockwise2d",
+            "per_token",
+            "none",
+            "mxfp8",
+        ],
         help="FP8 quantisation type for FP8 attention backends.",
     )
     safe_add_argument(
@@ -82,6 +98,20 @@ def add_common_megatron_args(parser):
         default=False,
         help="Use Lumen parallel linear modules (LumenColumnParallelLinear, "
         "LumenRowParallelLinear, LumenLayerNormLinear) via the Lumen spec provider.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-sonic-moe",
+        action="store_true",
+        default=False,
+        help="Replace Megatron MoE expert MLPs with AITER SonicMoE.",
+    )
+    safe_add_argument(
+        lumen,
+        "--lumen-fused-router",
+        action="store_true",
+        default=False,
+        help="Install Lumen's fused Megatron MoE router functions.",
     )
     safe_add_argument(
         lumen,
@@ -197,7 +227,8 @@ def add_common_megatron_args(parser):
         type=str,
         default="nccl",
         choices=["nccl"],
-        help="Communication backend for 'pipeline' overlap mode. Currently only 'nccl' " "is supported.",
+        help="Communication backend for 'pipeline' overlap mode. Currently only 'nccl' "
+        "is supported.",
     )
     safe_add_argument(
         lumen,
@@ -238,7 +269,9 @@ def add_common_megatron_args(parser):
     safe_add_argument(mxfp8, "--mxfp8-quant-block-size", type=int, default=128)
 
     lora = parser.add_argument_group(title="lora")
-    safe_add_argument(lora, "--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled.")
+    safe_add_argument(
+        lora, "--lora-rank", type=int, default=0, help="LoRA rank. 0 = disabled."
+    )
     safe_add_argument(lora, "--lora-alpha", type=float, default=32.0)
     safe_add_argument(lora, "--lora-dropout", type=float, default=0.1)
     safe_add_argument(
@@ -290,14 +323,33 @@ def add_common_megatron_args(parser):
         choices=["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none"],
     )
     safe_add_argument(lfp8, "--linear-fp8-block-size", type=int, default=128)
-    safe_add_argument(lfp8, "--linear-fp8-amax-algo", type=str, default="max", choices=["max", "most_recent"])
-    safe_add_argument(lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False)
+    safe_add_argument(
+        lfp8,
+        "--linear-fp8-amax-algo",
+        type=str,
+        default="max",
+        choices=["max", "most_recent"],
+    )
+    safe_add_argument(
+        lfp8, "--linear-fp8-reduce-amax", action="store_true", default=False
+    )
     safe_add_argument(lfp8, "--linear-fp8-amax-history", type=int, default=16)
     safe_add_argument(
-        lfp8, "--linear-fp8-margin", type=int, default=0, help="Margin for FP8 scaling factor computation."
+        lfp8,
+        "--linear-fp8-margin",
+        type=int,
+        default=0,
+        help="Margin for FP8 scaling factor computation.",
     )
-    safe_add_argument(lfp8, "--linear-fp8-activation", action="store_true", default=True)
-    safe_add_argument(lfp8, "--no-linear-fp8-activation", dest="linear_fp8_activation", action="store_false")
+    safe_add_argument(
+        lfp8, "--linear-fp8-activation", action="store_true", default=True
+    )
+    safe_add_argument(
+        lfp8,
+        "--no-linear-fp8-activation",
+        dest="linear_fp8_activation",
+        action="store_false",
+    )
     safe_add_argument(lfp8, "--linear-fp8-wgrad", action="store_true", default=True)
     safe_add_argument(
         lfp8,

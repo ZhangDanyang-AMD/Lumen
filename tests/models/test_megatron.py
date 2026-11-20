@@ -108,7 +108,11 @@ class TestMegatronCompatibleTLLayerNorm:
         """LayerNorm wrapper output should match pure-PyTorch golden."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda().bfloat16()
+        norm = (
+            _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps)
+            .cuda()
+            .bfloat16()
+        )
         torch.manual_seed(0)
         x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
         out = norm(x)
@@ -122,15 +126,23 @@ class TestMegatronCompatibleTLLayerNorm:
         """LayerNorm wrapper output should be correct with non-zero bias."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps).cuda().bfloat16()
+        norm = (
+            _MegatronCompatibleTLLayerNorm(config, hidden_size=64, eps=eps)
+            .cuda()
+            .bfloat16()
+        )
         norm._norm.bias.data.uniform_(-0.5, 0.5)
         torch.manual_seed(0)
         x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
         out = norm(x)
 
-        golden = _layernorm_golden(x, norm.weight.data, bias=norm._norm.bias.data, eps=eps)
+        golden = _layernorm_golden(
+            x, norm.weight.data, bias=norm._norm.bias.data, eps=eps
+        )
         snr = _compute_snr(golden, out)
-        assert snr > 30, f"LayerNorm wrapper (non-zero bias) vs golden SNR: {snr:.1f} dB"
+        assert (
+            snr > 30
+        ), f"LayerNorm wrapper (non-zero bias) vs golden SNR: {snr:.1f} dB"
 
 
 class TestMegatronCompatibleTLNorm:
@@ -172,7 +184,11 @@ class TestMegatronCompatibleTLNorm:
         """Auto-dispatch LayerNorm output should match golden."""
         config = _FakeMegatronConfig("LayerNorm")
         eps = 1e-5
-        norm = _MegatronCompatibleTLNorm(config, hidden_size=128, eps=eps).cuda().bfloat16()
+        norm = (
+            _MegatronCompatibleTLNorm(config, hidden_size=128, eps=eps)
+            .cuda()
+            .bfloat16()
+        )
         torch.manual_seed(1)
         x = torch.randn(2, 32, 128, device="cuda", dtype=torch.bfloat16)
         out = norm(x)
@@ -274,7 +290,9 @@ class TestPatchNormsInSpec:
         assert spec.final_layernorm is _MegatronCompatibleTLNorm
 
     def test_patches_submodule_attrs(self):
-        sub = _FakeSubmodules(input_layernorm=nn.LayerNorm, pre_mlp_layernorm=nn.LayerNorm)
+        sub = _FakeSubmodules(
+            input_layernorm=nn.LayerNorm, pre_mlp_layernorm=nn.LayerNorm
+        )
         spec = _FakeModuleSpec(submodules=sub)
         _patch_norms_in_spec(spec)
         assert sub.input_layernorm is _MegatronCompatibleTLNorm
@@ -303,7 +321,9 @@ class TestPatchNormsInSpec:
         )
         _patch_norms_in_spec(spec)
         for attr in _NORM_ATTRS:
-            assert getattr(spec, attr) is _MegatronCompatibleTLNorm, f"{attr} not patched"
+            assert (
+                getattr(spec, attr) is _MegatronCompatibleTLNorm
+            ), f"{attr} not patched"
 
 
 # ===================================================================
@@ -428,7 +448,9 @@ class TestPatchRMSNorm:
         from lumen.models.megatron import _patch_rmsnorm
 
         _patch_rmsnorm(model)
-        assert isinstance(model.norm, LumenRMSNorm), f"Expected replacement for {cls_name}"
+        assert isinstance(
+            model.norm, LumenRMSNorm
+        ), f"Expected replacement for {cls_name}"
 
     @mock.patch("lumen.models.megatron.print_rank_0")
     def test_patched_rmsnorm_forward_matches_golden(self, mock_print):
@@ -525,7 +547,9 @@ class TestPatchLayerNorm:
         assert model.norm.eps == custom_eps
 
     @mock.patch("lumen.models.megatron.print_rank_0")
-    @pytest.mark.parametrize("cls_name", ["LayerNorm", "FusedLayerNorm", "WrappedTorchNorm"])
+    @pytest.mark.parametrize(
+        "cls_name", ["LayerNorm", "FusedLayerNorm", "WrappedTorchNorm"]
+    )
     def test_replaces_by_class_name(self, mock_print, cls_name):
         """_patch_layernorm should match all expected class names."""
         from lumen.ops.normalization import LumenLayerNorm
@@ -548,7 +572,9 @@ class TestPatchLayerNorm:
         from lumen.models.megatron import _patch_layernorm
 
         _patch_layernorm(model)
-        assert isinstance(model.norm, LumenLayerNorm), f"Expected replacement for {cls_name}"
+        assert isinstance(
+            model.norm, LumenLayerNorm
+        ), f"Expected replacement for {cls_name}"
 
     @mock.patch("lumen.models.megatron.print_rank_0")
     def test_patched_layernorm_forward_matches_golden(self, mock_print):
@@ -565,7 +591,11 @@ class TestPatchLayerNorm:
         x = torch.randn(4, 16, 64, device="cuda", dtype=torch.bfloat16)
         out = model.norm(x)
 
-        bias = model.norm.bias.data if hasattr(model.norm, "bias") and model.norm.bias is not None else None
+        bias = (
+            model.norm.bias.data
+            if hasattr(model.norm, "bias") and model.norm.bias is not None
+            else None
+        )
         golden = _layernorm_golden(x, model.norm.weight.data, bias=bias)
         snr = _compute_snr(golden, out)
         assert snr > 30, f"Patched LayerNorm vs golden SNR: {snr:.1f} dB"
@@ -647,29 +677,39 @@ class TestOverrideTEArgs:
         assert not hasattr(args, "lumen_fp8_format")
 
     def test_fp8_attn_dpa_resolves_backend(self):
-        args = SimpleNamespace(fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="auto")
+        args = SimpleNamespace(
+            fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="auto"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_fp8_attn == "dpa"
         assert args.lumen_attn_backend == "aiter_triton_fp8"
 
     def test_fp8_attn_mha_resolves_backend(self):
-        args = SimpleNamespace(fp8=None, lumen_fp8_attn="mha", lumen_attn_backend="auto")
+        args = SimpleNamespace(
+            fp8=None, lumen_fp8_attn="mha", lumen_attn_backend="auto"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_fp8_attn == "mha"
         assert args.lumen_attn_backend == "aiter_triton_fp8"
 
     def test_fp8_attn_none_keeps_bf16_backend(self):
-        args = SimpleNamespace(fp8=None, lumen_fp8_attn="none", lumen_attn_backend="auto")
+        args = SimpleNamespace(
+            fp8=None, lumen_fp8_attn="none", lumen_attn_backend="auto"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_attn_backend == "aiter_csrc"
 
     def test_triton_backend_with_dpa(self):
-        args = SimpleNamespace(fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="triton")
+        args = SimpleNamespace(
+            fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="triton"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_attn_backend == "aiter_triton_fp8"
 
     def test_csrc_backend_with_dpa(self):
-        args = SimpleNamespace(fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="csrc")
+        args = SimpleNamespace(
+            fp8=None, lumen_fp8_attn="dpa", lumen_attn_backend="csrc"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_attn_backend == "aiter_csrc_fp8"
 
@@ -679,13 +719,17 @@ class TestOverrideTEArgs:
         assert args.lumen_attn_backend == "aiter_asm_fp8"
 
     def test_megatron_fp8_dpa_promotes_to_dpa(self):
-        args = SimpleNamespace(fp8=None, fp8_dot_product_attention=True, lumen_attn_backend="auto")
+        args = SimpleNamespace(
+            fp8=None, fp8_dot_product_attention=True, lumen_attn_backend="auto"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_fp8_attn == "dpa"
         assert args.lumen_attn_backend == "aiter_triton_fp8"
 
     def test_megatron_fp8_mha_promotes_to_mha(self):
-        args = SimpleNamespace(fp8=None, fp8_multi_head_attention=True, lumen_attn_backend="auto")
+        args = SimpleNamespace(
+            fp8=None, fp8_multi_head_attention=True, lumen_attn_backend="auto"
+        )
         _override_te_args_for_lumen(args)
         assert args.lumen_fp8_attn == "mha"
         assert args.lumen_attn_backend == "aiter_triton_fp8"
@@ -716,7 +760,9 @@ class TestOverrideTEArgs:
 class TestGetSyntheticBatch:
     def test_shapes(self):
         args = SimpleNamespace(seq_length=128, micro_batch_size=2)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert tokens.shape == (2, 128)
         assert labels.shape == (2, 128)
         assert loss_mask.shape == (2, 128)
@@ -725,7 +771,9 @@ class TestGetSyntheticBatch:
 
     def test_dtypes(self):
         args = SimpleNamespace(seq_length=64, micro_batch_size=1)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert tokens.dtype == torch.long
         assert labels.dtype == torch.long
         assert loss_mask.dtype == torch.float
@@ -734,39 +782,53 @@ class TestGetSyntheticBatch:
 
     def test_on_cuda(self):
         args = SimpleNamespace(seq_length=32, micro_batch_size=1)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert tokens.device.type == "cuda"
         assert labels.device.type == "cuda"
 
     def test_tokens_have_eos(self):
         args = SimpleNamespace(seq_length=16, micro_batch_size=2)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert (tokens[:, -1] == 2).all()
 
     def test_labels_match_tokens(self):
         args = SimpleNamespace(seq_length=16, micro_batch_size=1)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert torch.equal(tokens, labels)
 
     def test_loss_mask_all_ones_default(self):
         args = SimpleNamespace(seq_length=16, micro_batch_size=1)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert (loss_mask == 1.0).all()
 
     def test_zero_last_loss_mask(self):
         args = SimpleNamespace(seq_length=16, micro_batch_size=2)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args, zero_last_loss_mask=True)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args, zero_last_loss_mask=True
+        )
         assert (loss_mask[:, -1] == 0.0).all()
         assert (loss_mask[:, :-1] == 1.0).all()
 
     def test_attention_mask_all_true(self):
         args = SimpleNamespace(seq_length=8, micro_batch_size=1)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         assert attention_mask.all()
 
     def test_position_ids_sequential(self):
         args = SimpleNamespace(seq_length=16, micro_batch_size=2)
-        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(args)
+        tokens, labels, loss_mask, attention_mask, position_ids = _get_synthetic_batch(
+            args
+        )
         expected = torch.arange(16, device="cuda").unsqueeze(0).expand(2, -1)
         assert torch.equal(position_ids, expected)
 
@@ -827,7 +889,9 @@ class TestLossFunc:
 
         loss, num_tokens, report = loss_func(loss_mask, output_tensor)
         expected_loss = 0.5 * 1.0 + 1.0 * 1.0 + 0.2 * 0.0
-        assert torch.isclose(loss, torch.tensor(expected_loss, device="cuda"), atol=1e-5)
+        assert torch.isclose(
+            loss, torch.tensor(expected_loss, device="cuda"), atol=1e-5
+        )
         assert num_tokens.item() == 2
         assert "lm loss" in report
         report_tensor = report["lm loss"]
@@ -934,7 +998,9 @@ class TestAddCommonMegatronArgs:
 
         with pytest.raises(NotImplementedError, match="mxfp4"):
             ScalingManager.quantize_grad_tensor(
-                torch.zeros(4, 4), grad_quant_type="fp4", block_size=32,
+                torch.zeros(4, 4),
+                grad_quant_type="fp4",
+                block_size=32,
             )
 
     def test_linear_fp8_and_fp4_are_exclusive_at_the_parser(self):
@@ -968,6 +1034,20 @@ class TestAddCommonMegatronArgs:
     def test_lumen_linear_default(self):
         args = self._parse()
         assert args.lumen_linear is False
+
+    def test_lumen_sonic_moe_flag(self):
+        from lumen.config import LumenConfig
+
+        args = self._parse(["--lumen-sonic-moe"])
+        assert args.lumen_sonic_moe is True
+        assert LumenConfig.from_args(args).sonic_moe is True
+
+    def test_lumen_fused_router_flag(self):
+        from lumen.config import LumenConfig
+
+        args = self._parse(["--lumen-fused-router"])
+        assert args.lumen_fused_router is True
+        assert LumenConfig.from_args(args).fused_router is True
 
     def test_lumen_cross_entropy_default(self):
         args = self._parse()
@@ -1036,7 +1116,15 @@ class TestAddCommonMegatronArgs:
         assert args.lumen_fp8_quant_type == "blockwise2d"
 
     def test_lumen_fp8_quant_type_all_choices(self):
-        for qt in ["dynamic", "delayed", "blockwise", "blockwise2d", "per_token", "none", "mxfp8"]:
+        for qt in [
+            "dynamic",
+            "delayed",
+            "blockwise",
+            "blockwise2d",
+            "per_token",
+            "none",
+            "mxfp8",
+        ]:
             args = self._parse(["--lumen-fp8-quant-type", qt])
             assert args.lumen_fp8_quant_type == qt
 
@@ -1116,7 +1204,10 @@ class TestApplyFP8TrainingMegatron:
 
         with mock.patch("lumen.quantize.enable") as mock_enable, mock.patch(
             "torch.distributed.is_initialized", return_value=True
-        ), mock.patch("megatron.core.parallel_state.get_data_parallel_group", return_value=mock_dp_group):
+        ), mock.patch(
+            "megatron.core.parallel_state.get_data_parallel_group",
+            return_value=mock_dp_group,
+        ):
             meg_apply_fp8(model, args)
             assert mock_enable.call_args[1]["dp_group"] is mock_dp_group
 
@@ -1289,7 +1380,9 @@ class TestModelProviderParallelLinearRecipe:
             )
         )
         captured = {}
-        with mock.patch("lumen.models.megatron.get_args", return_value=self._args(fmt)), mock.patch(
+        with mock.patch(
+            "lumen.models.megatron.get_args", return_value=self._args(fmt)
+        ), mock.patch(
             "lumen.models.megatron.enable_fp8_for_parallel_linear",
             side_effect=lambda model, **kw: captured.update(kw),
         ), mock.patch(
@@ -1585,7 +1678,9 @@ class TestMakeForwardStep:
     @mock.patch("lumen.models.megatron.get_timers")
     @mock.patch("lumen.models.megatron.stimer")
     @mock.patch("lumen.models.megatron.get_attr_wrapped_model")
-    def test_output_matches_model_return(self, mock_gawm, mock_stimer, mock_timers, mock_get_args):
+    def test_output_matches_model_return(
+        self, mock_gawm, mock_stimer, mock_timers, mock_get_args
+    ):
         import lumen.models.megatron as meg_mod
 
         orig_counter = meg_mod._warmup_step_counter
@@ -1654,7 +1749,9 @@ class TestNormWrapperBenchmark:
         avg_ms = start.elapsed_time(end) / iters
         total_bytes = 4 * 256 * hidden * 2 * 2
         bw_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3)
-        print(f"\n[MegatronRMSNorm] hidden={hidden}: {avg_ms:.3f}ms, {bw_gb_s:.1f} GB/s")
+        print(
+            f"\n[MegatronRMSNorm] hidden={hidden}: {avg_ms:.3f}ms, {bw_gb_s:.1f} GB/s"
+        )
 
     @pytest.mark.parametrize("hidden", [1024, 4096, 8192])
     def test_layernorm_wrapper_throughput(self, hidden):
@@ -1679,4 +1776,6 @@ class TestNormWrapperBenchmark:
         avg_ms = start.elapsed_time(end) / iters
         total_bytes = 4 * 256 * hidden * 2 * 2
         bw_gb_s = (total_bytes / (avg_ms / 1000.0)) / (1024**3)
-        print(f"\n[MegatronLayerNorm] hidden={hidden}: {avg_ms:.3f}ms, {bw_gb_s:.1f} GB/s")
+        print(
+            f"\n[MegatronLayerNorm] hidden={hidden}: {avg_ms:.3f}ms, {bw_gb_s:.1f} GB/s"
+        )

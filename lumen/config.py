@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,10 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "cache_frozen_weight": ("linear_fp8_cache_frozen_weight",),
     "bpreshuffle_gemm": ("linear_fp8_bpreshuffle",),
     "quantize_grad": ("grad_quant_type",),
-    "quantize_output_layer": ("linear_fp8_quantize_output_layer", "quantize_output_layer"),
+    "quantize_output_layer": (
+        "linear_fp8_quantize_output_layer",
+        "quantize_output_layer",
+    ),
     "first_last_layers_bf16": ("first_last_layers_bf16",),
     "num_layers_at_start_in_bf16": ("num_layers_at_start_in_bf16",),
     "num_layers_at_end_in_bf16": ("num_layers_at_end_in_bf16",),
@@ -71,6 +74,8 @@ _ARG_MAP: dict[str, tuple[str, ...]] = {
     "lumen_norm": ("lumen_norm",),
     "hf_attn_patch": ("hf_attn_patch",),
     "lumen_linear": ("lumen_linear",),
+    "sonic_moe": ("lumen_sonic_moe",),
+    "fused_router": ("lumen_fused_router",),
     "fused_mlp": ("lumen_fused_mlp",),
     "fp8_activation_store": ("lumen_fp8_activation_store",),
     "cpu_offload": ("lumen_cpu_offload",),
@@ -162,6 +167,10 @@ class LumenConfig:
     # -- Tier 2: Linear GEMM patching (BF16) --
     lumen_linear: bool = False
 
+    # -- Tier 2: Megatron MoE integration --
+    sonic_moe: bool = False
+    fused_router: bool = False
+
     # -- Tier 3: Execution / fusion --
     fused_mlp: bool = False
     fp8_activation_store: bool = False
@@ -181,10 +190,17 @@ class LumenConfig:
     lora_rank: int = 0
     lora_alpha: float = 32.0
     lora_dropout: float = 0.1
-    lora_target_modules: list[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj",
-    ])
+    lora_target_modules: list[str] = field(
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
+    )
 
     # -- Optimizer hint (not applied to model, read by trainer) --
     use_8bit_adam: bool = False
@@ -241,6 +257,8 @@ class LumenConfig:
             or self.lumen_norm
             or self.hf_attn_patch
             or self.lumen_linear
+            or self.sonic_moe
+            or self.fused_router
             or self.fp8_param_manager
             or self.lora_rank > 0
             or self.fused_mlp
@@ -275,7 +293,6 @@ class LumenConfig:
             ``(manager, model)`` — the :class:`~lumen.quantize.ScalingManager`
             (or ``None``) and the model (may be a new PEFT wrapper).
         """
-        import torch
 
         if self.fp8_param_manager and self.format == "mxfp4":
             raise ValueError(
@@ -305,6 +322,12 @@ class LumenConfig:
         # 1c. Linear GEMM patching (BF16 AITER Triton)
         if self.lumen_linear:
             self._patch_linear(model)
+
+        # 1d. Megatron MoE expert and router integration
+        if self.sonic_moe:
+            self._patch_sonic_moe(model)
+        if self.fused_router:
+            self._patch_fused_router(model)
 
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
@@ -355,7 +378,9 @@ class LumenConfig:
         mgr = FP8ParamManager(fp8_dtype=torch.float8_e4m3fn)
         count = mgr.quantize_params(model)
         hooks = mgr.register_dequant_hooks(model)
-        _rank0_print(f"> FP8ParamManager: quantized {count} params, registered {hooks} hooks")
+        _rank0_print(
+            f"> FP8ParamManager: quantized {count} params, registered {hooks} hooks"
+        )
         return mgr
 
     def _apply_lora(self, model):
@@ -382,8 +407,10 @@ class LumenConfig:
             fixed = 0
             for name, param in model.named_parameters():
                 if "lora_" in name and param.dtype in (
-                    torch.float8_e4m3fn, torch.float8_e4m3fnuz,
-                    torch.float8_e5m2, torch.float8_e5m2fnuz,
+                    torch.float8_e4m3fn,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e5m2,
+                    torch.float8_e5m2fnuz,
                 ):
                     param.data = param.data.to(torch.bfloat16)
                     param.requires_grad_(True)
@@ -401,6 +428,7 @@ class LumenConfig:
 
     def _patch_norms(self, model) -> None:
         import torch
+
         from lumen.ops.normalization import LumenLayerNorm, LumenRMSNorm
 
         count = 0
@@ -415,9 +443,17 @@ class LumenConfig:
                     "Qwen3RMSNorm",
                 ):
                     hidden = child.weight.shape[0]
-                    eps = getattr(child, "eps", getattr(child, "variance_epsilon", 1e-6))
-                    target_dtype = child.weight.dtype if not child.weight.is_meta else torch.bfloat16
-                    repl = LumenRMSNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
+                    eps = getattr(
+                        child, "eps", getattr(child, "variance_epsilon", 1e-6)
+                    )
+                    target_dtype = (
+                        child.weight.dtype
+                        if not child.weight.is_meta
+                        else torch.bfloat16
+                    )
+                    repl = LumenRMSNorm(
+                        hidden, eps=eps, grad_quant_type=self.quantize_grad
+                    )
                     if not child.weight.is_meta:
                         repl.weight.data.copy_(child.weight.data)
                     repl.to(target_dtype)
@@ -426,14 +462,29 @@ class LumenConfig:
                     setattr(module, attr_name, repl)
                     count += 1
                 elif cls_name in ("LayerNorm",):
-                    hidden = child.weight.shape[0] if child.weight is not None else child.normalized_shape[0]
+                    hidden = (
+                        child.weight.shape[0]
+                        if child.weight is not None
+                        else child.normalized_shape[0]
+                    )
                     eps = getattr(child, "eps", 1e-5)
-                    repl = LumenLayerNorm(hidden, eps=eps, grad_quant_type=self.quantize_grad)
+                    repl = LumenLayerNorm(
+                        hidden, eps=eps, grad_quant_type=self.quantize_grad
+                    )
                     is_meta = child.weight is not None and child.weight.is_meta
-                    target_dtype = child.weight.dtype if (child.weight is not None and not is_meta) else torch.bfloat16
+                    target_dtype = (
+                        child.weight.dtype
+                        if (child.weight is not None and not is_meta)
+                        else torch.bfloat16
+                    )
                     if child.weight is not None and not is_meta:
                         repl.weight.data.copy_(child.weight.data)
-                    if hasattr(child, "bias") and child.bias is not None and repl.bias is not None and not is_meta:
+                    if (
+                        hasattr(child, "bias")
+                        and child.bias is not None
+                        and repl.bias is not None
+                        and not is_meta
+                    ):
                         repl.bias.data.copy_(child.bias.data)
                     repl.to(target_dtype)
                     if is_meta:
@@ -489,7 +540,7 @@ class LumenConfig:
                 grad_input = grad_flat @ weight
                 grad_input = grad_input.reshape(input.shape)
                 grad_weight = grad_flat.t() @ input_flat
-                grad_bias = (grad_flat.sum(0) if ctx.has_bias else None)
+                grad_bias = grad_flat.sum(0) if ctx.has_bias else None
                 return grad_input, grad_weight, grad_bias
 
         count = 0
@@ -506,7 +557,35 @@ class LumenConfig:
                 count += 1
 
         if count:
-            _rank0_print(f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)")
+            _rank0_print(
+                f"> Replaced {count} nn.Linear forward with AITER GEMM (ASM→HIP→Triton)"
+            )
+
+    def _patch_sonic_moe(self, model) -> None:
+        """Replace Megatron expert MLPs with the SonicMoE adapter."""
+        if self.quant_config.is_quantized:
+            raise ValueError(
+                "SonicMoE expert precision is selected independently; "
+                "global Lumen linear quantization must be disabled"
+            )
+
+        from lumen.modules.sonic_moe import replace_megatron_moe_experts
+
+        count = replace_megatron_moe_experts(model)
+        if count == 0:
+            raise ValueError(
+                "sonic_moe=True but no Megatron MoELayer modules were found"
+            )
+        _rank0_print(f"> Replaced {count} Megatron MoE expert modules with SonicMoE")
+
+    def _patch_fused_router(self, model) -> None:
+        """Install the Lumen fused-router functions in Megatron."""
+        del model
+        from lumen.patches.runtime.moe_fused_router import (
+            install_moe_fused_router,
+        )
+
+        install_moe_fused_router()
 
     def _apply_pre_quant(self, model) -> None:
         """Set module attributes that must exist before ``quant.enable()``.
@@ -549,7 +628,9 @@ class LumenConfig:
                 if lumen_types and isinstance(module, lumen_types):
                     if self.delay_wgrad and hasattr(module, "delay_wgrad"):
                         module.delay_wgrad = True
-                    if self.gradient_accumulation_fusion and hasattr(module, "gradient_accumulation_fusion"):
+                    if self.gradient_accumulation_fusion and hasattr(
+                        module, "gradient_accumulation_fusion"
+                    ):
                         module.gradient_accumulation_fusion = True
                     if has_act_store:
                         module.fp8_activation_store = True
@@ -595,7 +676,11 @@ class LumenConfig:
         if self.fp8_param_gather or _weight_quant_once:
             if manager is not None:
                 manager.enable_fp8_params(model)
-                _tag = "FP8 param gather" if self.fp8_param_gather else "per-step weight quant"
+                _tag = (
+                    "FP8 param gather"
+                    if self.fp8_param_gather
+                    else "per-step weight quant"
+                )
                 _rank0_print(f"> {_tag} enabled ({manager.num_fp8_params} params)")
             else:
                 _rank0_print("> WARNING: fp8 param cache requires FP8 quantization")
@@ -659,6 +744,10 @@ class LumenConfig:
             parts.append("hf_attn_patch")
         if self.lumen_linear:
             parts.append("lumen_linear")
+        if self.sonic_moe:
+            parts.append("sonic_moe")
+        if self.fused_router:
+            parts.append("fused_router")
         if self.use_8bit_adam:
             parts.append("use_8bit_adam")
         tier3 = [
@@ -715,7 +804,9 @@ class LumenConfig:
             kwargs["block_size"] = 32
         elif linear_fp8_enabled:
             if kwargs.get("format") == "mxfp4":
-                raise ValueError("MXFP4 must be enabled with --linear-fp4, not --linear-fp8-format")
+                raise ValueError(
+                    "MXFP4 must be enabled with --linear-fp4, not --linear-fp8-format"
+                )
         elif linear_fp8_enabled is False:
             kwargs["scaling"] = "none"
 
