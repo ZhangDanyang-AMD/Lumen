@@ -77,6 +77,19 @@ def test_failed_scope_does_not_leak_into_next_microbatch():
         HANDOFF.consume_mapped_handoff(source, scores, counts)
 
 
+def test_same_thread_fallback_survives_contextvar_boundary():
+    source, scores, counts, gather = _routing()
+    with HANDOFF.mapped_handoff_scope(True):
+        token = HANDOFF._ACTIVE_SCOPE.set(None)
+        try:
+            assert HANDOFF.mapped_handoff_enabled()
+            HANDOFF.publish_mapped_handoff(source, scores, counts, gather)
+            value = HANDOFF.consume_mapped_handoff(source, scores, counts)
+            assert value.source_tokens is source
+        finally:
+            HANDOFF._ACTIVE_SCOPE.reset(token)
+
+
 @pytest.mark.parametrize("mutated", ["source", "scores", "gather"])
 def test_mutation_is_rejected_before_consume(mutated):
     source, scores, counts, gather = _routing()

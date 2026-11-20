@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from threading import local
 from typing import Any
 
 MAPPED_HANDOFF_API_VERSION = 1
@@ -105,6 +106,15 @@ class _HandoffScope:
 _ACTIVE_SCOPE: ContextVar[_HandoffScope | None] = ContextVar(
     "lumen_sonic_moe_mapped_handoff", default=None
 )
+_THREAD_SCOPE = local()
+
+
+def _current_scope() -> _HandoffScope | None:
+    """Return the context scope, or its same-thread compatibility fallback."""
+    scope = _ACTIVE_SCOPE.get()
+    if scope is not None:
+        return scope
+    return getattr(_THREAD_SCOPE, "scope", None)
 
 
 def _normalize_counts(counts: Any) -> tuple[int, ...]:
@@ -116,10 +126,11 @@ def _normalize_counts(counts: Any) -> tuple[int, ...]:
 @contextmanager
 def mapped_handoff_scope(enabled: bool):
     """Bound one optional handoff to a single routed-expert invocation."""
-    if _ACTIVE_SCOPE.get() is not None:
+    if _current_scope() is not None:
         raise MappedHandoffError("NESTED_HANDOFF_SCOPE")
     scope = _HandoffScope(enabled=enabled)
     token = _ACTIVE_SCOPE.set(scope)
+    _THREAD_SCOPE.scope = scope
     failed = False
     try:
         yield scope
@@ -128,6 +139,7 @@ def mapped_handoff_scope(enabled: bool):
         raise
     finally:
         _ACTIVE_SCOPE.reset(token)
+        del _THREAD_SCOPE.scope
         if not failed and scope.enabled and scope.published and not scope.consumed:
             raise MappedHandoffError("UNCONSUMED_HANDOFF")
 
@@ -139,7 +151,7 @@ def publish_mapped_handoff(
     gather_map: Any,
 ) -> bool:
     """Publish one handoff, or return False when the surrounding scope disabled it."""
-    scope = _ACTIVE_SCOPE.get()
+    scope = _current_scope()
     if scope is None or not scope.enabled:
         return False
     if scope.published:
@@ -151,7 +163,7 @@ def publish_mapped_handoff(
 
 def mapped_handoff_enabled() -> bool:
     """Whether the current routed-expert scope accepts a mapped handoff."""
-    scope = _ACTIVE_SCOPE.get()
+    scope = _current_scope()
     return scope is not None and scope.enabled
 
 
@@ -161,7 +173,7 @@ def consume_mapped_handoff(
     counts: Any,
 ) -> MappedHandoffV1 | None:
     """Consume the active handoff once; absence means use the normal expert path."""
-    scope = _ACTIVE_SCOPE.get()
+    scope = _current_scope()
     if scope is None or not scope.enabled:
         return None
     if scope.consumed:
