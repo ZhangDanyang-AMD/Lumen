@@ -170,7 +170,15 @@ def _patch_cross_entropy():
 # ---------------------------------------------------------------------------
 
 
-def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=None, model_name="GPT"):
+def lumen_gpt_builder(
+    args,
+    pre_process,
+    post_process,
+    vp_stage=None,
+    config=None,
+    pg_collection=None,
+    model_name="GPT",
+):
     """Build a GPTModel with Lumen attention replacing the default
     DotProductAttention in every layer.
 
@@ -188,6 +196,7 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
             post_process,
             vp_stage=vp_stage,
             config=config,
+            pg_collection=pg_collection,
             model_name=model_name,
         )
 
@@ -239,6 +248,7 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
         rotary_percent=args.rotary_percent,
         rotary_base=args.rotary_base,
         rope_scaling=args.use_rope_scaling,
+        pg_collection=pg_collection,
         vp_stage=vp_stage,
     )
 
@@ -252,7 +262,15 @@ def lumen_gpt_builder(args, pre_process, post_process, vp_stage=None, config=Non
     return model
 
 
-def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, config=None, model_name="GPT"):
+def lumen_gpt_builder_with_spec(
+    args,
+    pre_process,
+    post_process,
+    vp_stage=None,
+    config=None,
+    pg_collection=None,
+    model_name="GPT",
+):
     """Build a GPTModel using the Lumen spec provider.
 
     Instead of patching individual modules post-hoc, this builder uses
@@ -328,6 +346,7 @@ def lumen_gpt_builder_with_spec(args, pre_process, post_process, vp_stage=None, 
         rotary_percent=args.rotary_percent,
         rotary_base=args.rotary_base,
         rope_scaling=args.use_rope_scaling,
+        pg_collection=pg_collection,
         vp_stage=vp_stage,
     )
 
