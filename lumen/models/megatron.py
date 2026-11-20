@@ -222,7 +222,9 @@ def lumen_gpt_builder(
         args.moe_grouped_gemm,
         args.qk_layernorm,
         args.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
+        moe_use_legacy_grouped_gemm=getattr(
+            args, "moe_use_legacy_grouped_gemm", False
+        ),
         normalization=args.normalization,
         use_kitchen=config.use_kitchen,
     )
