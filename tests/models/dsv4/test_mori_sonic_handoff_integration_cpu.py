@@ -109,8 +109,8 @@ def mori(monkeypatch):
     moe_layer = sys.modules["megatron.core.transformer.moe.moe_layer"]
 
     class MoELayer:
-        def routed_experts_compute(self, hidden_states, probs, residual):
-            return hidden_states, probs, residual
+        def routed_experts_compute(self, hidden_states, probs):
+            return hidden_states, probs
 
     MoELayer.__module__ = moe_layer.__name__
     moe_layer.MoELayer = MoELayer
@@ -254,10 +254,18 @@ def test_exact_signature_gate_rejects_method_drift(mori):
     )
 
 
+def test_residual_routed_expert_signature_remains_supported(mori):
+    def routed(self, hidden_states, probs, residual):
+        del self, hidden_states, probs, residual
+
+    names, defaults = mori.module._ROUTED_EXPERT_SIGNATURES[True]
+    assert mori.module._has_signature(routed, names, defaults)
+
+
 def test_moe_layer_scope_is_limited_to_exact_mori_sonic_pair(mori):
     layer = mori.layer_type()
     layer.token_dispatcher = SimpleNamespace(_comm_manager=_manager(mori))
     layer.experts = SimpleNamespace(mori_mapped_handoff_capability=lambda: (True, ""))
-    result = layer.routed_experts_compute("hidden", "probs", "residual")
-    assert result == ("hidden", "probs", "residual")
+    result = layer.routed_experts_compute("hidden", "probs")
+    assert result == ("hidden", "probs")
     assert mori.scope_entries == ["enter", "exit"]

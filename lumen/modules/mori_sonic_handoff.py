@@ -30,19 +30,19 @@ _EXPECTED_SIGNATURES = {
         "async_finish",
         "allocate_on_comm_stream",
     ),
-    "MoELayer.routed_experts_compute": (
-        "self",
-        "hidden_states",
-        "probs",
-        "residual",
-    ),
 }
 _EMPTY = inspect.Parameter.empty
 _EXPECTED_DEFAULTS = {
     "_MoriManager.dispatch": (_EMPTY, _EMPTY, True, True),
     "_MoriManager._permute_by_experts": (_EMPTY, _EMPTY),
     "_MoriManager.combine": (_EMPTY, _EMPTY, True, True),
-    "MoELayer.routed_experts_compute": (_EMPTY, _EMPTY, _EMPTY, _EMPTY),
+}
+_ROUTED_EXPERT_SIGNATURES = {
+    False: (("self", "hidden_states", "probs"), (_EMPTY, _EMPTY, _EMPTY)),
+    True: (
+        ("self", "hidden_states", "probs", "residual"),
+        (_EMPTY, _EMPTY, _EMPTY, _EMPTY),
+    ),
 }
 
 
@@ -101,7 +101,6 @@ def _resolve_targets():
         ("_MoriManager.dispatch", manager.dispatch),
         ("_MoriManager._permute_by_experts", manager._permute_by_experts),
         ("_MoriManager.combine", manager.combine),
-        ("MoELayer.routed_experts_compute", moe_layer.MoELayer.routed_experts_compute),
     )
     for name, operation in checks:
         if not _has_signature(
@@ -110,11 +109,24 @@ def _resolve_targets():
             _EXPECTED_DEFAULTS[name],
         ):
             return None, f"{name} signature mismatch"
+
+    routed_operation = moe_layer.MoELayer.routed_experts_compute
+    routed_has_residual = next(
+        (
+            has_residual
+            for has_residual, (names, defaults) in _ROUTED_EXPERT_SIGNATURES.items()
+            if _has_signature(routed_operation, names, defaults)
+        ),
+        None,
+    )
+    if routed_has_residual is None:
+        return None, "MoELayer.routed_experts_compute signature mismatch"
     return (
         manager,
         moe_layer.MoELayer,
         permute,
         fused_indices_to_multihot,
+        routed_has_residual,
     ), ""
 
 
@@ -188,7 +200,13 @@ def install_mori_sonic_handoff() -> bool:
     if targets is None:
         _notice(reason)
         return False
-    manager_type, moe_layer_type, permute, fused_indices_to_multihot = targets
+    (
+        manager_type,
+        moe_layer_type,
+        permute,
+        fused_indices_to_multihot,
+        routed_has_residual,
+    ) = targets
     if getattr(manager_type, "_lumen_mapped_handoff_v1", False):
         return True
 
@@ -229,20 +247,35 @@ def install_mori_sonic_handoff() -> bool:
         )
         return hidden_states
 
-    def _patched_routed_experts_compute(self, hidden_states, probs, residual):
+    def _call_routed_experts(self, hidden_states, probs, residual=_EMPTY):
+        call_args = (
+            (self, hidden_states, probs, residual)
+            if routed_has_residual
+            else (self, hidden_states, probs)
+        )
         manager = getattr(self.token_dispatcher, "_comm_manager", None)
         if type(manager) is not manager_type:
-            return original_routed_experts_compute(self, hidden_states, probs, residual)
+            return original_routed_experts_compute(*call_args)
         capability = getattr(self.experts, "mori_mapped_handoff_capability", None)
         if not callable(capability):
             _notice(f"{type(self.experts).__name__} is not a SonicMoEExperts consumer")
-            return original_routed_experts_compute(self, hidden_states, probs, residual)
+            return original_routed_experts_compute(*call_args)
         enabled, reason = capability()
         if not enabled:
             _notice(reason)
-            return original_routed_experts_compute(self, hidden_states, probs, residual)
+            return original_routed_experts_compute(*call_args)
         with mapped_handoff_scope(True):
-            return original_routed_experts_compute(self, hidden_states, probs, residual)
+            return original_routed_experts_compute(*call_args)
+
+    if routed_has_residual:
+
+        def _patched_routed_experts_compute(self, hidden_states, probs, residual):
+            return _call_routed_experts(self, hidden_states, probs, residual)
+
+    else:
+
+        def _patched_routed_experts_compute(self, hidden_states, probs):
+            return _call_routed_experts(self, hidden_states, probs)
 
     manager_type._permute_by_experts = _patched_permute
     moe_layer_type.routed_experts_compute = _patched_routed_experts_compute
