@@ -94,26 +94,32 @@ def test_same_thread_fallback_survives_contextvar_boundary():
 def test_explicit_scope_bridges_worker_thread():
     source, scores, counts, gather = _routing()
     errors = []
-    with HANDOFF.mapped_handoff_scope(True):
+    with HANDOFF.mapped_handoff_scope(True) as scope:
+        HANDOFF.register_mapped_handoff_source(scope, source)
+        try:
 
-        def publish_from_worker():
-            try:
-                assert HANDOFF.mapped_handoff_enabled()
-                HANDOFF.publish_mapped_handoff(
-                    source,
-                    scores,
-                    counts,
-                    gather,
-                )
-            except (AssertionError, HANDOFF.MappedHandoffError) as exc:
-                errors.append(exc)
+            def publish_from_worker():
+                try:
+                    worker_scope = HANDOFF.mapped_handoff_scope_for_source(source)
+                    assert worker_scope is scope
+                    HANDOFF.publish_mapped_handoff(
+                        source,
+                        scores,
+                        counts,
+                        gather,
+                        scope=worker_scope,
+                    )
+                except (AssertionError, HANDOFF.MappedHandoffError) as exc:
+                    errors.append(exc)
 
-        worker = Thread(target=publish_from_worker)
-        worker.start()
-        worker.join()
-        assert not errors
-        value = HANDOFF.consume_mapped_handoff(source, scores, counts)
-        assert value.source_tokens is source
+            worker = Thread(target=publish_from_worker)
+            worker.start()
+            worker.join()
+            assert not errors
+            value = HANDOFF.consume_mapped_handoff(source, scores, counts)
+            assert value.source_tokens is source
+        finally:
+            HANDOFF.unregister_mapped_handoff_source(scope, source)
 
 
 @pytest.mark.parametrize("mutated", ["source", "scores", "gather"])

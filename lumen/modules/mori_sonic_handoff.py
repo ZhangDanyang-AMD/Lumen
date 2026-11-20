@@ -9,7 +9,10 @@ import os
 from lumen.utils.sonic_moe_handoff import (
     mapped_handoff_enabled,
     mapped_handoff_scope,
+    mapped_handoff_scope_for_source,
     publish_mapped_handoff,
+    register_mapped_handoff_source,
+    unregister_mapped_handoff_source,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,7 +218,9 @@ def install_mori_sonic_handoff() -> bool:
     original_routed_experts_compute = moe_layer_type.routed_experts_compute
 
     def _patched_permute(self, hidden_states):
-        scope = getattr(self, _MANAGER_SCOPE_ATTR, None)
+        scope = mapped_handoff_scope_for_source(hidden_states)
+        if scope is None:
+            scope = getattr(self, _MANAGER_SCOPE_ATTR, None)
         if not mapped_handoff_enabled(scope):
             return original_permute(self, hidden_states)
         try:
@@ -270,11 +275,13 @@ def install_mori_sonic_handoff() -> bool:
         with mapped_handoff_scope(True) as scope:
             if hasattr(manager, _MANAGER_SCOPE_ATTR):
                 raise RuntimeError("MORI manager already owns a mapped handoff scope")
+            register_mapped_handoff_source(scope, hidden_states)
             setattr(manager, _MANAGER_SCOPE_ATTR, scope)
             try:
                 return original_routed_experts_compute(*call_args)
             finally:
                 delattr(manager, _MANAGER_SCOPE_ATTR)
+                unregister_mapped_handoff_source(scope, hidden_states)
 
     if routed_has_residual:
 

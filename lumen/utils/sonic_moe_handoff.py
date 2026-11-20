@@ -109,6 +109,8 @@ _ACTIVE_SCOPE: ContextVar[_HandoffScope | None] = ContextVar(
 _THREAD_SCOPE = local()
 _PROCESS_SCOPE_LOCK = Lock()
 _PROCESS_SCOPES: dict[int, _HandoffScope] = {}
+_SOURCE_SCOPE_LOCK = Lock()
+_SOURCE_SCOPES: dict[int, tuple[Any, _HandoffScope]] = {}
 
 
 def _current_scope() -> _HandoffScope | None:
@@ -129,6 +131,38 @@ def _normalize_counts(counts: Any) -> tuple[int, ...]:
     if hasattr(counts, "tolist"):
         counts = counts.tolist()
     return tuple(int(count) for count in counts)
+
+
+def register_mapped_handoff_source(scope: _HandoffScope, source_tokens: Any) -> None:
+    """Bind one routed invocation to its exact dispatch tensor."""
+    if not isinstance(scope, _HandoffScope):
+        raise MappedHandoffError("INVALID_HANDOFF_SCOPE")
+    key = id(source_tokens)
+    with _SOURCE_SCOPE_LOCK:
+        if key in _SOURCE_SCOPES:
+            raise MappedHandoffError("DUPLICATE_HANDOFF_SOURCE")
+        _SOURCE_SCOPES[key] = (source_tokens, scope)
+
+
+def mapped_handoff_scope_for_source(source_tokens: Any) -> _HandoffScope | None:
+    """Resolve a worker-thread scope by exact source tensor identity."""
+    with _SOURCE_SCOPE_LOCK:
+        entry = _SOURCE_SCOPES.get(id(source_tokens))
+    if entry is None:
+        return None
+    registered_source, scope = entry
+    if registered_source is not source_tokens:
+        raise MappedHandoffError("HANDOFF_SOURCE_IDENTITY_COLLISION")
+    return scope
+
+
+def unregister_mapped_handoff_source(scope: _HandoffScope, source_tokens: Any) -> None:
+    """Release one source binding after routed expert compute completes."""
+    key = id(source_tokens)
+    with _SOURCE_SCOPE_LOCK:
+        entry = _SOURCE_SCOPES.pop(key, None)
+    if entry is None or entry[0] is not source_tokens or entry[1] is not scope:
+        raise MappedHandoffError("HANDOFF_SOURCE_REGISTRY_MISMATCH")
 
 
 @contextmanager
@@ -210,5 +244,8 @@ __all__ = [
     "consume_mapped_handoff",
     "mapped_handoff_enabled",
     "mapped_handoff_scope",
+    "mapped_handoff_scope_for_source",
     "publish_mapped_handoff",
+    "register_mapped_handoff_source",
+    "unregister_mapped_handoff_source",
 ]

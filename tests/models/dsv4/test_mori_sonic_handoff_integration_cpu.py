@@ -134,7 +134,10 @@ def mori(monkeypatch):
 
     handoff = sys.modules["lumen.utils.sonic_moe_handoff"]
     handoff.mapped_handoff_enabled = mock.Mock(return_value=True)
+    handoff.mapped_handoff_scope_for_source = mock.Mock(return_value=None)
     handoff.publish_mapped_handoff = mock.Mock(return_value=True)
+    handoff.register_mapped_handoff_source = mock.Mock()
+    handoff.unregister_mapped_handoff_source = mock.Mock()
     scope_entries = []
 
     @contextmanager
