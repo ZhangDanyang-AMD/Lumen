@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from threading import local
+from threading import Lock, local
 from typing import Any
 
 MAPPED_HANDOFF_API_VERSION = 1
@@ -107,6 +107,8 @@ _ACTIVE_SCOPE: ContextVar[_HandoffScope | None] = ContextVar(
     "lumen_sonic_moe_mapped_handoff", default=None
 )
 _THREAD_SCOPE = local()
+_PROCESS_SCOPE_LOCK = Lock()
+_PROCESS_SCOPES: dict[int, _HandoffScope] = {}
 
 
 def _current_scope() -> _HandoffScope | None:
@@ -114,7 +116,13 @@ def _current_scope() -> _HandoffScope | None:
     scope = _ACTIVE_SCOPE.get()
     if scope is not None:
         return scope
-    return getattr(_THREAD_SCOPE, "scope", None)
+    scope = getattr(_THREAD_SCOPE, "scope", None)
+    if scope is not None:
+        return scope
+    with _PROCESS_SCOPE_LOCK:
+        if len(_PROCESS_SCOPES) == 1:
+            return next(iter(_PROCESS_SCOPES.values()))
+    return None
 
 
 def _normalize_counts(counts: Any) -> tuple[int, ...]:
@@ -131,6 +139,8 @@ def mapped_handoff_scope(enabled: bool):
     scope = _HandoffScope(enabled=enabled)
     token = _ACTIVE_SCOPE.set(scope)
     _THREAD_SCOPE.scope = scope
+    with _PROCESS_SCOPE_LOCK:
+        _PROCESS_SCOPES[id(scope)] = scope
     failed = False
     try:
         yield scope
@@ -140,6 +150,10 @@ def mapped_handoff_scope(enabled: bool):
     finally:
         _ACTIVE_SCOPE.reset(token)
         del _THREAD_SCOPE.scope
+        with _PROCESS_SCOPE_LOCK:
+            removed = _PROCESS_SCOPES.pop(id(scope), None)
+        if removed is not scope:
+            raise MappedHandoffError("HANDOFF_SCOPE_REGISTRY_MISMATCH")
         if not failed and scope.enabled and scope.published and not scope.consumed:
             raise MappedHandoffError("UNCONSUMED_HANDOFF")
 

@@ -94,17 +94,16 @@ def test_same_thread_fallback_survives_contextvar_boundary():
 def test_explicit_scope_bridges_worker_thread():
     source, scores, counts, gather = _routing()
     errors = []
-    with HANDOFF.mapped_handoff_scope(True) as scope:
+    with HANDOFF.mapped_handoff_scope(True):
 
         def publish_from_worker():
             try:
-                assert HANDOFF.mapped_handoff_enabled(scope)
+                assert HANDOFF.mapped_handoff_enabled()
                 HANDOFF.publish_mapped_handoff(
                     source,
                     scores,
                     counts,
                     gather,
-                    scope=scope,
                 )
             except (AssertionError, HANDOFF.MappedHandoffError) as exc:
                 errors.append(exc)
