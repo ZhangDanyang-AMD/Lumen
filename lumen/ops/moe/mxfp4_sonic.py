@@ -12,6 +12,7 @@ from lumen.ops.dispatch import (
     _probe_aiter_pre_routed_a4w4_wgrad_gluon,
     _probe_aiter_pre_routed_a8w4,
     _probe_aiter_pre_routed_a8w4f,
+    _probe_aiter_pre_routed_mapped,
     _probe_aiter_pre_routed_w4a16,
     try_backends,
 )
@@ -171,6 +172,64 @@ def pre_routed_quantized(
         raise ValueError("native MXFP4 Wgrad requires the a4w4 recipe")
     operation, name = _resolve(recipe)
     return _run(operation, name, x, scores, counts, w1, w2, packed)
+
+
+def mapped_pre_routed_available():
+    """Whether AITER exposes the exact mapped dual-quant contract Lumen requires."""
+    return _probe_aiter_pre_routed_mapped() is not None
+
+
+def pre_routed_quantized_mapped(
+    recipe,
+    source_tokens,
+    scores,
+    counts,
+    gather_map,
+    w1,
+    w2,
+    packed=None,
+    *,
+    wgrad_mode="bf16",
+    main_grads=None,
+    wgrad_fallback="error",
+    wgrad_backend="triton",
+):
+    """Run expert-major MXFP4 work from unsorted source rows.
+
+    The versioned AITER operation owns gather-aware forward quantization and
+    source-order dX. Its output stays expert-major for the dispatcher to combine.
+    MORI may reuse the source buffer after forward, so AITER must retain private
+    backward operands rather than saving that mutable buffer by reference.
+    """
+    if recipe not in _PROBES:
+        raise ValueError(f"Unsupported expert precision: {recipe}")
+    if wgrad_mode not in ("bf16", "mxfp4"):
+        raise ValueError("wgrad_mode must be bf16 or mxfp4")
+    if wgrad_mode == "mxfp4" and recipe != "a4w4":
+        raise ValueError("native MXFP4 Wgrad requires the a4w4 recipe")
+    operation = _probe_aiter_pre_routed_mapped()
+    if operation is None:
+        raise RuntimeError(
+            "mapped MORI handoff requires AITER MAPPED_DUAL_QUANT_API_VERSION=1"
+        )
+    # Once source reordering is skipped, a failed mapped call cannot safely
+    # retry the non-mapped operation with a different input layout.
+    return try_backends(
+        [(Backend.TRITON, operation)],
+        source_tokens,
+        scores,
+        counts,
+        gather_map,
+        w1,
+        w2,
+        packed,
+        recipe=recipe,
+        wgrad_mode=wgrad_mode,
+        main_grads=main_grads,
+        wgrad_fallback=wgrad_fallback,
+        wgrad_backend=wgrad_backend,
+        op_name="moe_pre_routed_quantized_mapped:v1",
+    )
 
 
 # Preserve the optional Round-80 dual-orientation weight pack.

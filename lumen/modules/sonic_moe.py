@@ -20,6 +20,8 @@ from megatron.core.dist_checkpointing.mapping import ShardedTensor, ShardedTenso
 from megatron.core.utils import get_pg_rank
 from torch import nn
 
+from lumen.utils.sonic_moe_handoff import consume_mapped_handoff
+
 
 def _expert_weights(
     experts: nn.Module,
@@ -260,6 +262,16 @@ class SonicMoEExperts(nn.Module):
             self._packed_stamp = stamp
         return self._packed_weights
 
+    def mori_mapped_handoff_capability(self) -> tuple[bool, str]:
+        """Return whether this instance can consume the optional MORI handoff."""
+        if self.precision_recipe not in ("w4a16", "a4w4", "a8w4", "a8w4f"):
+            return False, f"precision recipe is {self.precision_recipe!r}, not MXFP4"
+        from lumen.ops.moe.mxfp4_sonic import mapped_pre_routed_available
+
+        if not mapped_pre_routed_available():
+            return False, "AITER mapped dual-quant API version 1 is unavailable"
+        return True, ""
+
     def _remap_checkpoint_state(
         self,
         state_dict: MutableMapping[str, torch.Tensor],
@@ -338,6 +350,12 @@ class SonicMoEExperts(nn.Module):
             cpu_counts, gpu_counts = tokens_per_expert
             tokens_per_expert = cpu_counts if cpu_counts is not None else gpu_counts
 
+        handoff = consume_mapped_handoff(
+            permuted_local_hidden_states,
+            permuted_probs,
+            tokens_per_expert,
+        )
+
         # Keep Megatron's dispatcher-produced host counts on the CPU. The
         # pre-routed entry point creates the GPU offsets needed by Triton while
         # the multi-stream hipBLASLt backend reuses host offsets, matching
@@ -345,7 +363,10 @@ class SonicMoEExperts(nn.Module):
         counts = torch.as_tensor(tokens_per_expert, dtype=torch.int32)
 
         if self.precision_recipe in ("w4a16", "a4w4", "a8w4", "a8w4f"):
-            from lumen.ops.moe.mxfp4_sonic import pre_routed_quantized
+            from lumen.ops.moe.mxfp4_sonic import (
+                pre_routed_quantized,
+                pre_routed_quantized_mapped,
+            )
 
             native_wgrad = (
                 self.precision_recipe == "a4w4"
@@ -362,8 +383,32 @@ class SonicMoEExperts(nn.Module):
                     raise ValueError(
                         "native MXFP4 Wgrad requires both main_grad buffers or neither"
                     )
-            return (
-                pre_routed_quantized(
+            common_kwargs = {
+                "wgrad_mode": "mxfp4" if native_wgrad else "bf16",
+                "main_grads": main_grads,
+                "wgrad_fallback": os.environ.get(
+                    "SONIC_MOE_MXFP4_WGRAD_FALLBACK", "error"
+                ),
+                "wgrad_backend": (
+                    os.environ.get("SONIC_MOE_MXFP4_WGRAD_BACKEND", "triton")
+                    if native_wgrad
+                    else "triton"
+                ),
+            }
+            if handoff is not None:
+                output = pre_routed_quantized_mapped(
+                    self.precision_recipe,
+                    handoff.source_tokens,
+                    handoff.scores,
+                    handoff.counts,
+                    handoff.gather_map,
+                    self.w1,
+                    self.w2,
+                    self._cached_packed_weights(),
+                    **common_kwargs,
+                )
+            else:
+                output = pre_routed_quantized(
                     self.precision_recipe,
                     permuted_local_hidden_states,
                     permuted_probs.reshape(-1).float(),
@@ -371,19 +416,14 @@ class SonicMoEExperts(nn.Module):
                     self.w1,
                     self.w2,
                     self._cached_packed_weights(),
-                    wgrad_mode="mxfp4" if native_wgrad else "bf16",
-                    main_grads=main_grads,
-                    wgrad_fallback=os.environ.get(
-                        "SONIC_MOE_MXFP4_WGRAD_FALLBACK", "error"
-                    ),
-                    wgrad_backend=(
-                        os.environ.get("SONIC_MOE_MXFP4_WGRAD_BACKEND", "triton")
-                        if native_wgrad
-                        else "triton"
-                    ),
-                ),
+                    **common_kwargs,
+                )
+            return (
+                output,
                 None,
             )
+        if handoff is not None:
+            raise RuntimeError("mapped MORI handoff reached a non-MXFP4 Sonic expert")
         if self.precision_recipe != "bf16":
             raise ValueError(f"Unsupported expert precision: {self.precision_recipe}")
 
@@ -418,6 +458,10 @@ def replace_megatron_moe_experts(model: nn.Module) -> int:
             continue
         module.experts = SonicMoEExperts(module.experts)
         replaced += 1
+    if os.environ.get("LUMEN_MORI_SONIC_MXFP4_HANDOFF", "0") == "1":
+        from lumen.modules.mori_sonic_handoff import install_mori_sonic_handoff
+
+        install_mori_sonic_handoff()
     return replaced
 
 
