@@ -18,20 +18,11 @@ function for vocab-parallel cross-entropy computation.
 
 from functools import reduce
 from operator import mul
-from typing import Union
 
 import torch
 import torch.distributed as dist
 import triton
-from aiter.ops.triton._triton_kernels.cross_entropy import (
-    cross_entropy_kernel,
-    online_softmax_kernel,
-)
-from aiter.ops.triton.cross_entropy import (
-    MAX_FUSED_SIZE,
-    NUM_WARPS,
-    cross_entropy_backward,
-)
+from aiter.ops.triton.cross_entropy import cross_entropy_backward
 from aiter.ops.triton.cross_entropy import cross_entropy_forward as _aiter_ce_forward
 
 
@@ -40,7 +31,9 @@ def _aiter_ce_forward_chunked(*args, **kwargs):
     # base image was built.  Importing at module load time would fail on older
     # images where the symbol doesn't exist yet.
     from aiter.ops.triton.cross_entropy import cross_entropy_forward_chunked
+
     return cross_entropy_forward_chunked(*args, **kwargs)
+
 
 __all__ = ["parallel_cross_entropy"]
 
@@ -50,7 +43,7 @@ def _cross_entropy_forward_sdma(
     target: torch.Tensor,
     label_smoothing: float,
     reduce_loss: bool,
-    dist_group: Union[dist.ProcessGroup, None],
+    dist_group: dist.ProcessGroup | None,
     ignore_idx: int,
     chunk_rows: int = 0,
 ):
@@ -63,6 +56,12 @@ def _cross_entropy_forward_sdma(
     each chunk's allgather transfers only ``chunk_rows * 3`` floats instead
     of ``n_rows * 3``, reducing peak activation memory.
     """
+    from aiter.ops.triton._triton_kernels.cross_entropy import (
+        cross_entropy_kernel,
+        online_softmax_kernel,
+    )
+    from aiter.ops.triton.cross_entropy import MAX_FUSED_SIZE, NUM_WARPS
+
     from lumen.modules.sdma_comm import SdmaTpComm
 
     B, SQ, V = _input.shape
@@ -80,9 +79,20 @@ def _cross_entropy_forward_sdma(
 
     if chunk_rows > 0:
         return _cross_entropy_forward_sdma_chunked(
-            _input, target, label_smoothing, reduce_loss,
-            dist_group, ignore_idx, chunk_rows,
-            B, SQ, V, n_rows, BLOCK_SIZE, rank, world_size,
+            _input,
+            target,
+            label_smoothing,
+            reduce_loss,
+            dist_group,
+            ignore_idx,
+            chunk_rows,
+            B,
+            SQ,
+            V,
+            n_rows,
+            BLOCK_SIZE,
+            rank,
+            world_size,
         )
 
     loss_1d = torch.empty(n_rows, dtype=torch.float32, device=_input.device)
@@ -137,7 +147,7 @@ def _cross_entropy_forward_sdma_chunked(
     target: torch.Tensor,
     label_smoothing: float,
     reduce_loss: bool,
-    dist_group: Union[dist.ProcessGroup, None],
+    dist_group: dist.ProcessGroup | None,
     ignore_idx: int,
     chunk_rows: int,
     B: int,
@@ -158,10 +168,16 @@ def _cross_entropy_forward_sdma_chunked(
     it across chunks — so the first chunk (or the largest, when the last chunk
     is smaller) pays the realloc cost; subsequent same-size chunks are free.
     """
+    from aiter.ops.triton._triton_kernels.cross_entropy import (
+        cross_entropy_kernel,
+        online_softmax_kernel,
+    )
+    from aiter.ops.triton.cross_entropy import NUM_WARPS
+
     from lumen.modules.sdma_comm import SdmaTpComm
 
-    input_2d = _input.reshape(n_rows, V)   # view
-    target_1d = target.reshape(n_rows)     # view
+    input_2d = _input.reshape(n_rows, V)  # view
+    target_1d = target.reshape(n_rows)  # view
     loss_1d = torch.empty(n_rows, dtype=torch.float32, device=_input.device)
 
     # Pre-allocate at full chunk size; last chunk may be smaller but the
@@ -173,36 +189,50 @@ def _cross_entropy_forward_sdma_chunked(
     row = 0
     while row < n_rows:
         rows_this = min(chunk_rows, n_rows - row)
-        chunk_x = input_2d[row : row + rows_this]      # view [rows_this, V]
-        chunk_y = target_1d[row : row + rows_this]     # view [rows_this]
-        chunk_loss = loss_1d[row : row + rows_this]    # view [rows_this]
+        chunk_x = input_2d[row : row + rows_this]  # view [rows_this, V]
+        chunk_y = target_1d[row : row + rows_this]  # view [rows_this]
+        chunk_loss = loss_1d[row : row + rows_this]  # view [rows_this]
         m_d_Xy_chunk = m_d_Xy[: rows_this * 3]
 
         online_softmax_kernel[(rows_this,)](
-            chunk_x, chunk_x.stride(0),
-            chunk_y, chunk_y.stride(0),
-            m_d_Xy_chunk, 1,
-            rank, V,
-            BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS,
+            chunk_x,
+            chunk_x.stride(0),
+            chunk_y,
+            chunk_y.stride(0),
+            m_d_Xy_chunk,
+            1,
+            rank,
+            V,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=NUM_WARPS,
         )
 
         if world_size > 1:
             # SDMA allgather: transfers rows_this*3 floats.
             # _ag._ensure grows on first call; subsequent same-size chunks reuse.
-            ag_result = comm._ag(m_d_Xy_chunk)        # (npes, rows_this*3)
-            gathered = ag_result.reshape(-1)           # (world_size*rows_this*3,)
+            ag_result = comm._ag(m_d_Xy_chunk)  # (npes, rows_this*3)
+            gathered = ag_result.reshape(-1)  # (world_size*rows_this*3,)
         else:
             gathered = m_d_Xy_chunk
 
         cross_entropy_kernel[(rows_this,)](
-            chunk_x, chunk_x.stride(0),
-            chunk_y, chunk_y.stride(0),
-            chunk_loss, chunk_loss.stride(0),
-            gathered, 1,
-            rank, world_size, ignore_idx, V, rows_this,
+            chunk_x,
+            chunk_x.stride(0),
+            chunk_y,
+            chunk_y.stride(0),
+            chunk_loss,
+            chunk_loss.stride(0),
+            gathered,
+            1,
+            rank,
+            world_size,
+            ignore_idx,
+            V,
+            rows_this,
             reduce_loss=False,  # accumulate manually after the loop
             label_smoothing=label_smoothing,
-            BLOCK_SIZE=BLOCK_SIZE, num_warps=NUM_WARPS,
+            BLOCK_SIZE=BLOCK_SIZE,
+            num_warps=NUM_WARPS,
         )
 
         row += rows_this
@@ -268,7 +298,9 @@ class _ParallelCrossEntropy(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         (grad_input,) = ctx.saved_tensors
-        grad_input = cross_entropy_backward(grad_input, grad_output, ctx.is_cg_capturable)
+        grad_input = cross_entropy_backward(
+            grad_input, grad_output, ctx.is_cg_capturable
+        )
         # extra None for chunk_rows
         return grad_input, None, None, None, None, None, None, None, None
 
