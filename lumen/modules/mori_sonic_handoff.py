@@ -15,6 +15,7 @@ from lumen.utils.sonic_moe_handoff import (
 logger = logging.getLogger(__name__)
 
 _ENV = "LUMEN_MORI_SONIC_MXFP4_HANDOFF"
+_MANAGER_SCOPE_ATTR = "_lumen_mapped_handoff_scope_v1"
 _FALLBACK_NOTICES: set[str] = set()
 _EXPECTED_SIGNATURES = {
     "_MoriManager.dispatch": (
@@ -214,7 +215,8 @@ def install_mori_sonic_handoff() -> bool:
     original_routed_experts_compute = moe_layer_type.routed_experts_compute
 
     def _patched_permute(self, hidden_states):
-        if not mapped_handoff_enabled():
+        scope = getattr(self, _MANAGER_SCOPE_ATTR, None)
+        if not mapped_handoff_enabled(scope):
             return original_permute(self, hidden_states)
         try:
             counts, gather_map, permuted_probs, reversed_mapping = (
@@ -244,6 +246,7 @@ def install_mori_sonic_handoff() -> bool:
             permuted_probs,
             counts,
             gather_map,
+            scope=scope,
         )
         return hidden_states
 
@@ -264,8 +267,14 @@ def install_mori_sonic_handoff() -> bool:
         if not enabled:
             _notice(reason)
             return original_routed_experts_compute(*call_args)
-        with mapped_handoff_scope(True):
-            return original_routed_experts_compute(*call_args)
+        with mapped_handoff_scope(True) as scope:
+            if hasattr(manager, _MANAGER_SCOPE_ATTR):
+                raise RuntimeError("MORI manager already owns a mapped handoff scope")
+            setattr(manager, _MANAGER_SCOPE_ATTR, scope)
+            try:
+                return original_routed_experts_compute(*call_args)
+            finally:
+                delattr(manager, _MANAGER_SCOPE_ATTR)
 
     if routed_has_residual:
 

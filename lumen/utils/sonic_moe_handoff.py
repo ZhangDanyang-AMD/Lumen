@@ -149,11 +149,15 @@ def publish_mapped_handoff(
     scores: Any,
     counts: Any,
     gather_map: Any,
+    *,
+    scope: _HandoffScope | None = None,
 ) -> bool:
     """Publish one handoff, or return False when the surrounding scope disabled it."""
-    scope = _current_scope()
+    scope = scope if scope is not None else _current_scope()
     if scope is None or not scope.enabled:
         return False
+    if not isinstance(scope, _HandoffScope):
+        raise MappedHandoffError("INVALID_HANDOFF_SCOPE")
     if scope.published:
         raise MappedHandoffError("DUPLICATE_HANDOFF")
     scope.handoff = MappedHandoffV1.create(source_tokens, scores, counts, gather_map)
@@ -161,9 +165,9 @@ def publish_mapped_handoff(
     return True
 
 
-def mapped_handoff_enabled() -> bool:
+def mapped_handoff_enabled(scope: _HandoffScope | None = None) -> bool:
     """Whether the current routed-expert scope accepts a mapped handoff."""
-    scope = _current_scope()
+    scope = scope if scope is not None else _current_scope()
     return scope is not None and scope.enabled
 
 

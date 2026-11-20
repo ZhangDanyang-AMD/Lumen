@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -88,6 +89,32 @@ def test_same_thread_fallback_survives_contextvar_boundary():
             assert value.source_tokens is source
         finally:
             HANDOFF._ACTIVE_SCOPE.reset(token)
+
+
+def test_explicit_scope_bridges_worker_thread():
+    source, scores, counts, gather = _routing()
+    errors = []
+    with HANDOFF.mapped_handoff_scope(True) as scope:
+
+        def publish_from_worker():
+            try:
+                assert HANDOFF.mapped_handoff_enabled(scope)
+                HANDOFF.publish_mapped_handoff(
+                    source,
+                    scores,
+                    counts,
+                    gather,
+                    scope=scope,
+                )
+            except (AssertionError, HANDOFF.MappedHandoffError) as exc:
+                errors.append(exc)
+
+        worker = Thread(target=publish_from_worker)
+        worker.start()
+        worker.join()
+        assert not errors
+        value = HANDOFF.consume_mapped_handoff(source, scores, counts)
+        assert value.source_tokens is source
 
 
 @pytest.mark.parametrize("mutated", ["source", "scores", "gather"])
