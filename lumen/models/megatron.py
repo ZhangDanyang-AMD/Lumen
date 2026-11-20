@@ -165,6 +165,27 @@ def _patch_cross_entropy():
     install_cross_entropy()
 
 
+def _install_legacy_input_norm_load_hook(model: torch.nn.Module) -> None:
+    """Remap checkpoints that stored local-spec input norms under fused keys."""
+
+    def remap_input_norms(_module, state_dict, _prefix, *_args):
+        suffix = ".self_attention.linear_qkv.layer_norm_weight"
+        remapped = 0
+        for old_key in [key for key in state_dict if key.endswith(suffix)]:
+            new_key = old_key[: -len(suffix)] + ".input_layernorm.weight"
+            if new_key not in state_dict:
+                state_dict[new_key] = state_dict[old_key]
+                remapped += 1
+            del state_dict[old_key]
+        if remapped:
+            print_rank_0(
+                f"> remapped {remapped} legacy fused input-norm checkpoint keys "
+                "to the local transformer spec"
+            )
+
+    model.register_load_state_dict_pre_hook(remap_input_norms)
+
+
 # ---------------------------------------------------------------------------
 # Custom GPT builder that injects Lumen attention
 # ---------------------------------------------------------------------------
@@ -261,6 +282,7 @@ def lumen_gpt_builder(
         pg_collection=pg_collection,
         vp_stage=vp_stage,
     )
+    _install_legacy_input_norm_load_hook(model)
 
     apply_model_build(
         config=config,

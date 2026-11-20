@@ -43,6 +43,7 @@ from lumen.models.megatron import (  # noqa: E402
     _NORM_ATTRS,
     _TE_FORCE_OVERRIDES,
     _get_synthetic_batch,
+    _install_legacy_input_norm_load_hook,
     _MegatronCompatibleTLLayerNorm,
     _MegatronCompatibleTLNorm,
     _MegatronCompatibleTLRMSNorm,
@@ -934,6 +935,22 @@ class TestLossFunc:
 # ===================================================================
 # add_common_megatron_args
 # ===================================================================
+
+
+def test_legacy_input_norm_load_hook_remaps_fused_checkpoint_key():
+    class FakeModel:
+        def register_load_state_dict_pre_hook(self, hook):
+            self.hook = hook
+
+    model = FakeModel()
+    _install_legacy_input_norm_load_hook(model)
+    value = object()
+    state_dict = {
+        "decoder.layers.0.self_attention.linear_qkv.layer_norm_weight": value,
+    }
+    model.hook(model, state_dict, "")
+
+    assert state_dict == {"decoder.layers.0.input_layernorm.weight": value}
 
 
 class TestAddCommonMegatronArgs:
