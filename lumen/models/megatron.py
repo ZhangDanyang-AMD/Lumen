@@ -217,16 +217,24 @@ def lumen_gpt_builder(
     # keyword. The registry's lumen_gpt_config patch carries the assignments.
     apply_config_build(config, args, tags={"lumen", "builder"})
 
+    import inspect
+
+    optional_spec_args = {}
+    if (
+        "moe_use_legacy_grouped_gemm"
+        in inspect.signature(get_gpt_layer_local_spec).parameters
+    ):
+        optional_spec_args["moe_use_legacy_grouped_gemm"] = getattr(
+            args, "moe_use_legacy_grouped_gemm", False
+        )
     transformer_layer_spec = get_gpt_layer_local_spec(
         args.num_experts,
         args.moe_grouped_gemm,
         args.qk_layernorm,
         args.multi_latent_attention,
-        moe_use_legacy_grouped_gemm=getattr(
-            args, "moe_use_legacy_grouped_gemm", False
-        ),
         normalization=args.normalization,
         use_kitchen=config.use_kitchen,
+        **optional_spec_args,
     )
 
     apply_model_build(
