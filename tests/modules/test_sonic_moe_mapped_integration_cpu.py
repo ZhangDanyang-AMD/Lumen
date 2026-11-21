@@ -45,6 +45,7 @@ def integration(monkeypatch):
     nn = _module("torch.nn")
     nn.Module = object
     torch.nn = nn
+    torch.Tensor = CpuTensor
     torch.is_grad_enabled = lambda: False
     torch.as_tensor = lambda value, **_kwargs: value
     torch.int32 = "int32"
@@ -138,6 +139,17 @@ def test_disabled_scope_preserves_regular_path(integration):
         )
     mapped.assert_not_called()
     regular.assert_called_once()
+
+
+def test_regular_path_preserves_dispatcher_count_tensor(integration):
+    handoff, _, experts, mapped, regular = integration
+    source = CpuTensor((3, 8), "bfloat16")
+    scores = CpuTensor((3,), "float32")
+    counts = CpuTensor((2,), "int64")
+    with handoff.mapped_handoff_scope(False):
+        assert experts.forward(source, counts, scores) == ("regular-output", None)
+    mapped.assert_not_called()
+    assert regular.call_args.args[3] is counts
 
 
 def test_missing_aiter_capability_requests_dispatcher_fallback(integration):

@@ -356,18 +356,19 @@ class SonicMoEExperts(nn.Module):
             tokens_per_expert,
         )
 
-        # Keep Megatron's dispatcher-produced host counts on the CPU. The
-        # pre-routed entry point creates the GPU offsets needed by Triton while
-        # the multi-stream hipBLASLt backend reuses host offsets, matching
-        # TEGroupedMLP's one-D2H-per-layer metadata boundary.
-        counts = torch.as_tensor(tokens_per_expert, dtype=torch.int32)
-
         if self.precision_recipe in ("w4a16", "a4w4", "a8w4", "a8w4f"):
             from lumen.ops.moe.mxfp4_sonic import (
                 pre_routed_quantized,
                 pre_routed_quantized_mapped,
             )
 
+            # Preserve the dispatcher's pinned host tensor so AITER can upload
+            # counts asynchronously while it validates the same host values.
+            counts = (
+                tokens_per_expert
+                if isinstance(tokens_per_expert, torch.Tensor)
+                else torch.as_tensor(tokens_per_expert, dtype=torch.int32)
+            )
             native_wgrad = (
                 self.precision_recipe == "a4w4"
                 and os.environ.get("SONIC_MOE_MXFP4_WGRAD", "0") == "1"
@@ -427,6 +428,7 @@ class SonicMoEExperts(nn.Module):
         if self.precision_recipe != "bf16":
             raise ValueError(f"Unsupported expert precision: {self.precision_recipe}")
 
+        counts = torch.as_tensor(tokens_per_expert, dtype=torch.int32)
         from aiter.ops.triton.moe.sonicmoe import (
             SonicMoEActivationType,
             moe_pre_routed_inputs,
