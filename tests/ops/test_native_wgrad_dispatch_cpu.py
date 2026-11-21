@@ -18,6 +18,7 @@ def op(monkeypatch):
         "pack_pre_routed_weights",
         "pre_routed_w4a16",
         "pre_routed_a4w4",
+        "pre_routed_a4w4_bf16_main_grad",
         "pre_routed_a4w4_wgrad",
         "pre_routed_a4w4_wgrad_gluon",
         "pre_routed_a8w4",
@@ -106,6 +107,35 @@ def test_native_forwards_main_grad_buffers_and_distinct_label(op, monkeypatch):
     assert labels == ["moe_pre_routed_a4w4:native_wgrad"]
 
 
+def test_bf16_wgrad_forwards_main_grad_buffers_and_distinct_label(op, monkeypatch):
+    calls = []
+    buffers = (object(), object())
+    monkeypatch.setattr(
+        op,
+        "_probe_aiter_pre_routed_a4w4_bf16_main_grad",
+        lambda: lambda *a, **kw: calls.append((a, kw)) or "bf16-direct",
+    )
+    labels = []
+    original = op.try_backends
+
+    def dispatch(backends, *args, **kwargs):
+        labels.append(kwargs["op_name"])
+        return original(backends, *args, **kwargs)
+
+    monkeypatch.setattr(op, "try_backends", dispatch)
+    assert (
+        op.pre_routed_a4w4(1, 2, 3, 4, 5, 6, main_grads=buffers)
+        == "bf16-direct"
+    )
+    assert calls == [((1, 2, 3, 4, 5, 6), {"main_grads": buffers})]
+    assert labels == ["moe_pre_routed_a4w4:bf16_wgrad_main_grad"]
+
+
+def test_missing_bf16_main_grad_capability_fails_closed(op):
+    with pytest.raises(RuntimeError, match="BF16_WGRAD_MAIN_GRAD_API_VERSION=1"):
+        op.pre_routed_a4w4(1, 2, 3, 4, 5, main_grads=(1, 2))
+
+
 def test_native_runtime_failure_is_not_retried(op, monkeypatch):
     fallback_calls = []
 
@@ -129,7 +159,7 @@ def test_other_recipe_cannot_silently_enable_native_wgrad(op, recipe):
 
 @pytest.mark.parametrize(
     "kwargs",
-    [{"wgrad_mode": "fp8"}, {"wgrad_fallback": "auto"}, {"main_grads": (1, 2)}],
+    [{"wgrad_mode": "fp8"}, {"wgrad_fallback": "auto"}],
 )
 def test_invalid_contract_rejected_before_call(op, kwargs):
     with pytest.raises(ValueError):

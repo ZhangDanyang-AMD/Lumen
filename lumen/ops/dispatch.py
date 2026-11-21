@@ -647,6 +647,22 @@ def _probe_aiter_pre_routed_a4w4():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a4w4_bf16_main_grad():
+    """Resolve versioned BF16 Wgrad direct accumulation through the public API."""
+    try:
+        from aiter.ops.triton.gemm.grouped.bf16_wgrad import grouped_bf16_wgrad
+        from aiter.ops.triton.moe import sonic_mxfp4
+
+        if getattr(sonic_mxfp4, "BF16_WGRAD_MAIN_GRAD_API_VERSION", 0) != 1:
+            return None
+        if not callable(grouped_bf16_wgrad):
+            return None
+        return functools.partial(sonic_mxfp4.moe_pre_routed_a4w4, wgrad_mode="bf16")
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_pre_routed_a4w4_wgrad():
     """Resolve the versioned native MXFP4 Wgrad API, never a private kernel."""
     try:

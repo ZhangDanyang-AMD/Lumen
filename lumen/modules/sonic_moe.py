@@ -373,8 +373,14 @@ class SonicMoEExperts(nn.Module):
                 self.precision_recipe == "a4w4"
                 and os.environ.get("SONIC_MOE_MXFP4_WGRAD", "0") == "1"
             )
+            bf16_main_grad = (
+                self.precision_recipe == "a4w4"
+                and not native_wgrad
+                and handoff is None
+                and os.environ.get("SONIC_MOE_BF16_WGRAD_MAIN_GRAD", "0") == "1"
+            )
             main_grads = None
-            if native_wgrad and torch.is_grad_enabled():
+            if (native_wgrad or bf16_main_grad) and torch.is_grad_enabled():
                 buffers = tuple(
                     getattr(p, "main_grad", None) for p in (self.w1, self.w2)
                 )
@@ -382,7 +388,7 @@ class SonicMoEExperts(nn.Module):
                     main_grads = buffers
                 elif any(buffer is not None for buffer in buffers):
                     raise ValueError(
-                        "native MXFP4 Wgrad requires both main_grad buffers or neither"
+                        "Sonic Wgrad requires both main_grad buffers or neither"
                     )
             common_kwargs = {
                 "wgrad_mode": "mxfp4" if native_wgrad else "bf16",

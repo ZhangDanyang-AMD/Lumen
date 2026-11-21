@@ -152,6 +152,23 @@ def test_regular_path_preserves_dispatcher_count_tensor(integration):
     assert regular.call_args.args[3] is counts
 
 
+def test_bf16_wgrad_main_grad_opt_in_forwards_buffers(integration, monkeypatch):
+    handoff, sonic, experts, mapped, regular = integration
+    experts.precision_recipe = "a4w4"
+    experts.w1 = type("Weight", (), {"main_grad": "g1"})()
+    experts.w2 = type("Weight", (), {"main_grad": "g2"})()
+    sonic.torch.is_grad_enabled = lambda: True
+    monkeypatch.setenv("SONIC_MOE_BF16_WGRAD_MAIN_GRAD", "1")
+    source = CpuTensor((3, 8), "bfloat16")
+    scores = CpuTensor((3,), "float32")
+    counts = CpuTensor((2,), "int64")
+    with handoff.mapped_handoff_scope(False):
+        assert experts.forward(source, counts, scores) == ("regular-output", None)
+    mapped.assert_not_called()
+    assert regular.call_args.kwargs["wgrad_mode"] == "bf16"
+    assert regular.call_args.kwargs["main_grads"] == ("g1", "g2")
+
+
 def test_missing_aiter_capability_requests_dispatcher_fallback(integration):
     _, _, experts, _, _ = integration
     enabled, reason = experts.mori_mapped_handoff_capability()

@@ -8,6 +8,7 @@ from lumen.ops.dispatch import (
     Backend,
     _probe_aiter_pack_pre_routed_weights,
     _probe_aiter_pre_routed_a4w4,
+    _probe_aiter_pre_routed_a4w4_bf16_main_grad,
     _probe_aiter_pre_routed_a4w4_wgrad,
     _probe_aiter_pre_routed_a4w4_wgrad_gluon,
     _probe_aiter_pre_routed_a8w4,
@@ -86,11 +87,27 @@ def pre_routed_a4w4(
         raise ValueError("wgrad_fallback must be error or bf16")
     if wgrad_backend not in ("triton", "gluon"):
         raise ValueError("wgrad_backend must be triton or gluon")
-    if wgrad_mode == "bf16":
-        if main_grads is not None:
-            raise ValueError("main_grads require the native MXFP4 Wgrad API")
+    if wgrad_mode == "bf16" and main_grads is None:
         operation, name = _resolve("a4w4")
         return _run(operation, name, x, scores, counts, w1, w2, packed)
+    if wgrad_mode == "bf16":
+        operation = _probe_aiter_pre_routed_a4w4_bf16_main_grad()
+        if operation is None:
+            raise RuntimeError(
+                "BF16 Wgrad main_grad accumulation requires "
+                "BF16_WGRAD_MAIN_GRAD_API_VERSION=1"
+            )
+        return try_backends(
+            [(Backend.TRITON, operation)],
+            x,
+            scores,
+            counts,
+            w1,
+            w2,
+            packed,
+            main_grads=main_grads,
+            op_name="moe_pre_routed_a4w4:bf16_wgrad_main_grad",
+        )
     probe = (
         _probe_aiter_pre_routed_a4w4_wgrad_gluon
         if wgrad_backend == "gluon"
