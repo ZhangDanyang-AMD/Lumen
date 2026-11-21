@@ -427,7 +427,7 @@ class SonicMoEExperts(nn.Module):
         if self.precision_recipe != "bf16":
             raise ValueError(f"Unsupported expert precision: {self.precision_recipe}")
 
-        from aiter.ops.triton.sonicmoe import (
+        from aiter.ops.triton.moe.sonicmoe import (
             SonicMoEActivationType,
             moe_pre_routed_inputs,
         )
