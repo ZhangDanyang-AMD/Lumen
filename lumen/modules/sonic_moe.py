@@ -467,8 +467,10 @@ def replace_megatron_moe_experts(model: nn.Module) -> int:
         replaced += 1
     if replaced:
         from lumen.modules.mori_fused_recv import install_mori_fused_recv
+        from lumen.modules.mori_row_id_prefetch import install_mori_row_id_prefetch
 
         install_mori_fused_recv()
+        install_mori_row_id_prefetch()
     if os.environ.get("LUMEN_MORI_SONIC_MXFP4_HANDOFF", "0") == "1":
         from lumen.modules.mori_sonic_handoff import install_mori_sonic_handoff
 
