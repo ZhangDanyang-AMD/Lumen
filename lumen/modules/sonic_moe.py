@@ -247,10 +247,9 @@ class SonicMoEExperts(nn.Module):
                 pack_pre_routed_weights_dual,
             )
 
-            # Round-80 optional candidate: one-read dual orientation pack.  Default off; the
-            # old 4-call loop stays the default and remains the explicit fallback (logged in
-            # the op layer), so behavior/precision never changes silently.
-            if os.environ.get("R80_DUAL_WEIGHT_PACK", "0") == "1":
+            # One-read dual orientation pack, byte-identical to the 4-call loop; the loop stays
+            # the logged fallback in the op layer and R80_DUAL_WEIGHT_PACK=0 restores it.
+            if os.environ.get("R80_DUAL_WEIGHT_PACK", "1") == "1":
                 if not _DUAL_PACK_NOTICE["logged"]:
                     _DUAL_PACK_NOTICE["logged"] = True
                     logger.info(

@@ -276,7 +276,7 @@ def _probe_aiter_pack_pre_routed_weights_dual():
 def pack_pre_routed_weights_dual(w1, w2):
     """Optional one-read pack with the historical four-orientation contract.
 
-    R80_DUAL_WEIGHT_PACK=1 opts in. Missing capability or pack failure logs
+    Default on; R80_DUAL_WEIGHT_PACK=0 opts out. Missing capability or pack failure logs
     and uses the historical loop without changing the numerical recipe.
     """
     operation = _probe_aiter_pack_pre_routed_weights_dual()
