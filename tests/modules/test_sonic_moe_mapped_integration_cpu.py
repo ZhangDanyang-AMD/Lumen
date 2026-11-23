@@ -186,3 +186,49 @@ def test_replacement_installs_real_manager_patch_when_enabled(integration, monke
 
     assert sonic.replace_megatron_moe_experts(model) == 0
     installer.install_mori_sonic_handoff.assert_called_once_with()
+
+
+def _mori_layer(calls):
+    class _MoriManager:
+        def _synced_tokens_per_expert(self):
+            calls.append("sync")
+            return "counts"
+
+    experts = mock.Mock()
+    experts.prepare_before_count_sync.side_effect = lambda: calls.append("pack")
+    dispatcher = type("Dispatcher", (), {})()
+    dispatcher._comm_manager = _MoriManager()
+    return type("MoELayer", (), {})(), dispatcher, experts
+
+
+def test_weight_pack_runs_before_each_mori_count_sync(integration):
+    _, sonic, _, _, _ = integration
+    calls = []
+    layer, dispatcher, experts = _mori_layer(calls)
+    layer.token_dispatcher, layer.experts = dispatcher, experts
+    manager = dispatcher._comm_manager
+
+    assert sonic._pack_before_count_sync(layer)
+    assert manager._synced_tokens_per_expert() == "counts"
+    assert manager._synced_tokens_per_expert() == "counts"
+    assert calls == ["pack", "sync", "pack", "sync"]
+    assert not sonic._pack_before_count_sync(layer)
+
+
+def test_weight_pack_hook_skips_other_dispatchers(integration):
+    _, sonic, _, _, _ = integration
+    layer = type("MoELayer", (), {})()
+    layer.experts = mock.Mock()
+    layer.token_dispatcher = type("Dispatcher", (), {})()
+    layer.token_dispatcher._comm_manager = type("_DeepepManager", (), {})()
+    assert not sonic._pack_before_count_sync(layer)
+    assert not sonic._pack_before_count_sync(type("MoELayer", (), {"experts": None})())
+
+
+def test_prepare_before_count_sync_packs_only_mxfp4(integration):
+    _, _, experts, _, _ = integration
+    experts._cached_packed_weights = mock.Mock()
+    experts.prepare_before_count_sync()
+    experts.precision_recipe = "bf16"
+    experts.prepare_before_count_sync()
+    experts._cached_packed_weights.assert_called_once_with()

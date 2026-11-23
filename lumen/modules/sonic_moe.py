@@ -261,6 +261,11 @@ class SonicMoEExperts(nn.Module):
             self._packed_stamp = stamp
         return self._packed_weights
 
+    def prepare_before_count_sync(self) -> None:
+        """Launch the count-independent weight pack before the dispatcher blocks on counts."""
+        if self.precision_recipe in ("w4a16", "a4w4", "a8w4", "a8w4f"):
+            self._cached_packed_weights()
+
     def mori_mapped_handoff_capability(self) -> tuple[bool, str]:
         """Return whether this instance can consume the optional MORI handoff."""
         if self.precision_recipe not in ("w4a16", "a4w4", "a8w4", "a8w4f"):
@@ -455,15 +460,33 @@ class SonicMoEExperts(nn.Module):
         return output, None
 
 
+def _pack_before_count_sync(moe_layer: nn.Module) -> bool:
+    """Run the layer's expert weight pack ahead of its MORI manager's host count sync."""
+    manager = getattr(getattr(moe_layer, "token_dispatcher", None), "_comm_manager", None)
+    if type(manager).__name__ != "_MoriManager" or "_synced_tokens_per_expert" in vars(manager):
+        return False
+    experts = moe_layer.experts
+
+    def _synced_tokens_per_expert():
+        experts.prepare_before_count_sync()
+        return type(manager)._synced_tokens_per_expert(manager)
+
+    manager._synced_tokens_per_expert = _synced_tokens_per_expert
+    return True
+
+
 def replace_megatron_moe_experts(model: nn.Module) -> int:
     """Replace Megatron ``MoELayer.experts`` modules with SonicMoE adapters."""
     replaced = 0
+    presync_pack = os.environ.get("LUMEN_MORI_PRESYNC_PACK", "1") != "0"
     for module in model.modules():
         if type(module).__name__ != "MoELayer" or not hasattr(module, "experts"):
             continue
         if isinstance(module.experts, SonicMoEExperts):
             continue
         module.experts = SonicMoEExperts(module.experts)
+        if presync_pack:
+            _pack_before_count_sync(module)
         replaced += 1
     if replaced:
         from lumen.modules.mori_fused_recv import install_mori_fused_recv
