@@ -98,6 +98,10 @@ export AITER_GROUPED_MXFP4_DUAL_V2=${AITER_GROUPED_MXFP4_DUAL_V2:-1}
 export LUMEN_MORI_PRESYNC_PACK=${LUMEN_MORI_PRESYNC_PACK:-1}
 
 # ---- ROCm runtime ------------------------------------------------------------
+# These defaults apply only when the variables are unset. Container images often
+# preset CUDA_DEVICE_MAX_CONNECTIONS=1, GPU_MAX_HW_QUEUES=8 and OMP_NUM_THREADS=1,
+# which cost ~17% of the MXFP4 step here; run_docker.sh passes the values below
+# explicitly, and a launch inside such an image must export them itself.
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-32}
 export GPU_MAX_HW_QUEUES=${GPU_MAX_HW_QUEUES:-4}
 export GPU_ARCHS=${GPU_ARCHS:-gfx950}

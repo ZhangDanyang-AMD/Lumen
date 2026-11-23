@@ -35,8 +35,9 @@ and the distributed optimizer.
 | `SONIC_MOE_PACK_CACHE`, `R80_CACHE_GENERATION` | `1` | `1` | Cache packed MXFP4 expert weights once per optimizer step |
 | `R80_DUAL_WEIGHT_PACK`, `AITER_GROUPED_MXFP4_DUAL_V2` | `1` | `1` | Dual-orientation weight pack for Fprop/Dgrad |
 | `LUMEN_MORI_PRESYNC_PACK` | `1` | `1` | Pack expert weights while the host waits on the MORI count sync |
-| `LUMEN_ATTN_BACKEND`, `ATTN_AITER_TRITON_MHA` | `csrc`, `1` | `csrc`, `1` | Attention through `aiter.ops.mha.flash_attn_func`, served by AITER's Triton MHA (`0` for CK-enabled AITER builds) |
-| `GPU_MAX_HW_QUEUES`, `CUDA_DEVICE_MAX_CONNECTIONS` | `4`, `32` | `4`, `32` | ROCm runtime |
+| `LUMEN_ATTN_BACKEND`, `LUMEN_ATTN_AITER_TRITON_MHA` | `csrc`, `1` | `csrc`, `1` | Attention through `aiter.ops.mha.flash_attn_func`, served by AITER's Triton MHA (`0` for CK-enabled AITER builds) |
+| `LUMEN_ATTN_AITER_FUSED_BWD` | `1` | `1` | AITER's fused dq/dk/dv attention backward |
+| `CUDA_DEVICE_MAX_CONNECTIONS`, `GPU_MAX_HW_QUEUES`, `OMP_NUM_THREADS` | `32`, `4`, `4` | `32`, `4`, `4` | ROCm runtime; `run_docker.sh` passes them explicitly because the image presets `1`, `8`, `1` |
 
 `LUMEN_ROPE_IMPL=apex` needs `USE_ROCM_AITER_ROPE_BACKEND=0` before apex is first imported;
 `run_docker.sh` sets it, and Lumen raises at start-up if apex picked its AITER backend anyway.
@@ -46,10 +47,9 @@ Expert placement and expert-count logging (`LUMEN_EXPERT_PLACEMENT`,
 The entry point adds what Lumen and Megatron do not expose as switches: it sets
 `precision_recipe` on the 48 SonicMoE expert modules from `EXPERT_RECIPE`, installs the
 packed-weight cache lifecycle after the optimizer is built, turns `apply_rope_fusion` on,
-passes `gpu_per_node` to MORI's dispatch config, runs MORI dispatch/combine on the current
-stream (with Megatron's default communication-stream path the first step does not
-complete), and with `ATTN_AITER_TRITON_MHA=1` serves Lumen's `csrc` attention from AITER's
-Triton MHA (the image's AITER has no CK MHA kernels).
+passes `gpu_per_node` to MORI's dispatch config, and runs MORI dispatch/combine on the
+current stream (with Megatron's default communication-stream path the first step does not
+complete).
 
 ## Software
 
@@ -125,9 +125,10 @@ only. Use `EXIT_INTERVAL` for short runs that should match the first steps of a 
 ## Expected results
 
 Reference runs (4 x MI350X, ShareGPT selection above, 3000 iterations, checkpoint every 1000).
-They used the same Megatron arguments and recipe switches, AITER's Triton MHA with its fused
-dq/dk/dv backward bound into `aiter.ops.mha` out of tree, and a few experiment-only host-side
-patches (router zero-fill removal, int32 MoE index cast, GC freeze, per-step timing barrier):
+They used the same Megatron arguments, recipe and ROCm runtime settings, with the fused
+attention backward bound into AITER out of tree; this example reaches the same step time
+with `LUMEN_ATTN_AITER_FUSED_BWD=1` (the further host-side patches of those runs measured
+within noise and are not part of the example):
 
 | | MXFP4 (W&B `8yxwuewg`) | BF16 (W&B `ga5slrwf`) |
 | --- | --- | --- |
@@ -141,18 +142,18 @@ iteration 3000 for both recipes (MXFP4 stays about 0.008 above BF16 over the las
 iterations), and validation loss rises over the run, so the numbers are a numerics and
 throughput check, not a convergence result.
 
-This example as shipped, 10-iteration smoke on the 3000-iteration schedule
-(`TRAIN_ITERS=3000 EXIT_INTERVAL=10`, median of iterations 3-10, one 4-GPU group):
+This example as shipped, through `run_docker.sh`, on the 3000-iteration schedule
+(`TRAIN_ITERS=3000 EXIT_INTERVAL=100`, median of iterations 51-100, one 4-GPU group; the
+reference stack measured 798.5 ms MXFP4 on the same node in the same session):
 
 | | MXFP4 | BF16 |
 | --- | --- | --- |
-| Step-1 loss / grad norm | 1.095539 / 8.471 | 1.051953 / 7.877 |
-| Median step time | 1147 ms | 1303 ms (1.14x) |
+| Step-1 loss / grad norm | 1.095539 / 8.66 | 1.051953 / 7.878 |
+| Median step time | 794.0 / 794.8 ms | 926.6 ms (1.17x) |
 
 The step-1 losses match the reference runs exactly (the forward pass is the same). The
-attention backward here is AITER's one-kernel Triton MHA backward rather than the fused
-one; on the same node that accounts for about 165 ms of the MXFP4 step (981 ms with the
-fused backward), and the experiment-only patches listed above for the remainder.
+step-1 grad norm varies by up to about 3% between runs: the fused attention backward
+accumulates dK/dV with atomics, so its reduction order is not fixed.
 
 ## Known issues
 
@@ -164,9 +165,14 @@ fused backward), and the experiment-only patches listed above for the remainder.
   Megatron logs to W&B through its TensorBoard writer, so `tensorboard` must be importable.
 * `--lumen-attn-backend triton` does not work with this AITER revision (Lumen's Triton
   attention imports an AITER FP8 attention kernel module that is not present); use `csrc`.
-* `ATTN_AITER_TRITON_MHA=1` only switches `aiter.ops.mha.flash_attn_func`; the
+* `LUMEN_ATTN_AITER_TRITON_MHA=1` only switches `aiter.ops.mha.flash_attn_func`; the
   process-wide `ENABLE_CK=0` would also move other AITER ops off CK. With a CK-enabled
-  AITER build set `ATTN_AITER_TRITON_MHA=0` to use the CK MHA kernels.
-* AITER's own fused attention backward switch (`mha_set_use_fused_bwd_kernel`) is not
-  used: through AITER's wrapper it produced wrong dk/dv in our checks.
+  AITER build set `LUMEN_ATTN_AITER_TRITON_MHA=0` to use the CK MHA kernels.
+* `LUMEN_ATTN_AITER_FUSED_BWD=1` needs an AITER that zero-initialises dK/dV for the fused
+  kernel (the `third_party/aiter` revision of this checkout); older revisions accumulate
+  into uninitialised memory and produce wrong dK/dV.
+* Images may preset `CUDA_DEVICE_MAX_CONNECTIONS=1`, `GPU_MAX_HW_QUEUES=8` and
+  `OMP_NUM_THREADS=1`; with those the MXFP4 step is about 17% slower (961 vs 794 ms).
+  `run_docker.sh` overrides them; export the recipe values yourself when launching
+  `run_pretrain_qwen3_30b_a3b_megatron.sh` inside such an image.
 * The step-1 loss depends on `TRAIN_ITERS` (see above), not only on the recipe.
