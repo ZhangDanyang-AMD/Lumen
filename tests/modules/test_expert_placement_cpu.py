@@ -18,16 +18,26 @@ def _import_modules():
         from lumen.modules import expert_placement
         from lumen.modules.sonic_moe import SonicMoEExperts
     except Exception:
-        # lumen/__init__ imports AITER ops that need a GPU; load just these modules by path.
-        for name in [m for m in sys.modules if m == "lumen" or m.startswith(("lumen.", "aiter"))]:
+        # lumen/__init__ imports AITER ops that need a GPU; load just these modules by path, then
+        # restore sys.modules so test files collected in the same session keep their lumen modules.
+        def owned(name):
+            return name == "lumen" or name.startswith(("lumen.", "aiter"))
+
+        saved = {name: module for name, module in sys.modules.items() if owned(name)}
+        for name in saved:
             del sys.modules[name]
         root = Path(__file__).resolve().parents[2] / "lumen"
         for name, path in (("lumen", root), ("lumen.utils", root / "utils"), ("lumen.modules", root / "modules")):
             package = types.ModuleType(name)
             package.__path__ = [str(path)]
             sys.modules[name] = package
-        from lumen.modules import expert_placement
-        from lumen.modules.sonic_moe import SonicMoEExperts
+        try:
+            from lumen.modules import expert_placement
+            from lumen.modules.sonic_moe import SonicMoEExperts
+        finally:
+            for name in [m for m in sys.modules if owned(m)]:
+                del sys.modules[name]
+            sys.modules.update(saved)
     return expert_placement, SonicMoEExperts
 
 
