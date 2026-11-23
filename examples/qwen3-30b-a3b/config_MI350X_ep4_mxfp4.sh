@@ -78,11 +78,12 @@ export LUMEN_ATTN_LINEAR_RECIPE=${LUMEN_ATTN_LINEAR_RECIPE:-a4w4}
 # Fused RoPE kernel: apex (native apex kernel) | aiter (AITER rope_cached)
 export LUMEN_ROPE_IMPL=${LUMEN_ROPE_IMPL:-apex}
 # Attention kernel. The csrc backend calls aiter.ops.mha.flash_attn_func.
-# ATTN_AITER_TRITON_MHA=1 makes that function use AITER's Triton MHA, which needs
-# no CK build; only the attention dispatcher changes, other AITER ops are left
-# alone. Set 0 when AITER was built with its composable_kernel submodule.
+# LUMEN_ATTN_AITER_TRITON_MHA=1 serves it from AITER's Triton MHA, which needs no
+# CK build (set 0 when AITER was built with its composable_kernel submodule);
+# LUMEN_ATTN_AITER_FUSED_BWD=1 selects AITER's fused dq/dk/dv backward for it.
 export LUMEN_ATTN_BACKEND=${LUMEN_ATTN_BACKEND:-csrc}
-export ATTN_AITER_TRITON_MHA=${ATTN_AITER_TRITON_MHA:-1}
+export LUMEN_ATTN_AITER_TRITON_MHA=${LUMEN_ATTN_AITER_TRITON_MHA:-1}
+export LUMEN_ATTN_AITER_FUSED_BWD=${LUMEN_ATTN_AITER_FUSED_BWD:-1}
 
 # ---- SonicMoE / MXFP4 runtime ------------------------------------------------
 # Expert Wgrad stays BF16 and accumulates straight into main_grad.

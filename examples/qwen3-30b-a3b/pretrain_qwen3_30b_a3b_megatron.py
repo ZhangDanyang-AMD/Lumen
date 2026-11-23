@@ -18,9 +18,6 @@ Lumen GPT builder this entry point:
   leaves at MORI's default, so expert parallelism over fewer GPUs than the node
   has builds an intra-node config of the right size, and releases MORI's
   symmetric heap at exit;
-* with ``ATTN_AITER_TRITON_MHA=1`` serves ``aiter.ops.mha.flash_attn_func``
-  (Lumen's ``csrc`` attention backend) from AITER's Triton MHA, for AITER
-  builds without the CK MHA kernels;
 * runs MORI dispatch/combine on the current stream (``async_finish=False``,
   ``allocate_on_comm_stream=False``), the path the reference runs used; with
   Megatron's default communication-stream path the first step does not finish.
@@ -116,15 +113,6 @@ def _install_pack_cache_lifecycle():
     mt_training.setup_model_and_optimizer = setup_model_and_optimizer
 
 
-def _use_aiter_triton_mha():
-    # aiter.ops.mha.flash_attn_func dispatches on this module global; the
-    # process-wide ENABLE_CK=0 env would also move other AITER ops off CK.
-    if os.environ.get("ATTN_AITER_TRITON_MHA", "0") == "1":
-        import aiter.ops.mha
-
-        aiter.ops.mha.ENABLE_CK = False
-
-
 def _install_mori_current_stream():
     from megatron.core.transformer.moe.token_dispatcher import _MoriManager
 
@@ -170,7 +158,6 @@ def main():
             fp8_applier=apply_fp8_training,
         )
     )
-    _use_aiter_triton_mha()
     install_fp8_param_gather_hook()
     _install_pack_cache_lifecycle()
     _install_mori_gpu_per_node()

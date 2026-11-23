@@ -27,6 +27,10 @@ def _is_aiter_available() -> bool:
 if _is_aiter_available():
     from aiter.ops.mha import flash_attn_func
 
+    from lumen.ops.attention.aiter_mha_config import configure_aiter_mha
+
+    configure_aiter_mha()
+
 _ck_jit_warned = False
 
 
