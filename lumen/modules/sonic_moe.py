@@ -84,11 +84,19 @@ def _stacked_expert_factory(
     sharded_offsets: tuple,
     split_swiglu: bool,
     singleton_local_shards: bool,
+    global_indices: list[int] | None = None,
+    on_merge=None,
 ) -> ShardedTensorFactory:
-    """Expose stacked Sonic weights using Megatron's per-expert checkpoint layout."""
+    """Expose stacked Sonic weights using Megatron's per-expert checkpoint layout.
+
+    ``global_indices[i]`` is the logical expert held in local slot ``i`` (contiguous by
+    default), so checkpoints stay in logical expert order under an expert placement.
+    """
     local_key = f"{prefix}{'w1' if layer_name == 'linear_fc1' else 'w2'}"
     num_local_experts = tensor.shape[0]
     num_global_experts = ep_size * num_local_experts
+    if global_indices is None:
+        global_indices = [ep_rank * num_local_experts + i for i in range(num_local_experts)]
 
     @torch.no_grad()
     def build_fn(key, data, factory_replica_id, flattened_range):
@@ -98,7 +106,7 @@ def _stacked_expert_factory(
             )
         shards = []
         for local_index in range(num_local_experts):
-            global_index = ep_rank * num_local_experts + local_index
+            global_index = global_indices[local_index]
             expert_tensor = data[local_index].transpose(0, 1)
             if singleton_local_shards:
                 checkpoint_key = f"{prefix}experts.{global_index}.{layer_name}.weight"
@@ -150,6 +158,8 @@ def _stacked_expert_factory(
             ]
         else:
             experts = list(loaded)
+        if on_merge is not None:
+            on_merge()
         return torch.stack(experts, dim=0).transpose(1, 2).contiguous()
 
     return ShardedTensorFactory(
@@ -212,7 +222,12 @@ class SonicMoEExperts(nn.Module):
         )
         for parameter in self.parameters():
             parameter.allreduce = False
+        # Global physical slot -> logical expert; None keeps Megatron's contiguous slots.
+        self._expert_layout = None
+        self._loaded_expert_layout = None
+        self._sharded_layout_loaded = False
         self._register_load_state_dict_pre_hook(self._remap_checkpoint_state)
+        self.register_load_state_dict_post_hook(SonicMoEExperts._apply_loaded_layout)
         self.precision_recipe = "bf16"
         # Packed MXFP4 expert weights are reused for every microbatch of an optimizer
         # step. Each orientation costs ~0.3x the BF16 weight bytes, so the whole
@@ -276,6 +291,79 @@ class SonicMoEExperts(nn.Module):
             return False, "AITER mapped dual-quant API version 1 is unavailable"
         return True, ""
 
+    def _ep_rank_size(self) -> tuple[int, int]:
+        if self.ep_group is None:
+            return 0, 1
+        return get_pg_rank(self.ep_group), self.ep_group.size()
+
+    def set_expert_layout(self, layout: list[int]) -> None:
+        """Hold logical expert ``layout[s]`` in global slot ``s`` (rank ``s // local``).
+
+        The layout is saved with the module state, so a checkpoint records the order of
+        its expert weights; loading reorders them into this layout when they differ.
+        """
+        ep_rank, ep_size = self._ep_rank_size()
+        if len(layout) != ep_size * self.num_local_experts or sorted(layout) != list(
+            range(len(layout))
+        ):
+            raise ValueError(
+                f"expert layout must permute {ep_size} x {self.num_local_experts} experts"
+            )
+        self._expert_layout = list(layout)
+        self.register_buffer(
+            "expert_layout",
+            torch.tensor(layout, dtype=torch.long, device=self.w1.device),
+            persistent=True,
+        )
+
+    def _target_layout(self) -> list[int]:
+        if self._expert_layout is not None:
+            return self._expert_layout
+        _, ep_size = self._ep_rank_size()
+        return list(range(ep_size * self.num_local_experts))
+
+    def _relayout(self, loaded: list[int], target: list[int]) -> None:
+        """Move expert weights from the ``loaded`` slot order to ``target`` across EP ranks."""
+        ep_rank, ep_size = self._ep_rank_size()
+        local = self.num_local_experts
+        slot_of = {expert: slot for slot, expert in enumerate(loaded)}
+        source = [slot_of[target[ep_rank * local + i]] for i in range(local)]
+        index = torch.tensor(source, dtype=torch.long, device=self.w1.device)
+        with torch.no_grad():
+            for parameter in (self.w1, self.w2):
+                data = parameter.data.contiguous()
+                if ep_size == 1:
+                    gathered = data.clone()
+                else:
+                    parts = [torch.empty_like(data) for _ in range(ep_size)]
+                    torch.distributed.all_gather(parts, data, group=self.ep_group)
+                    gathered = torch.cat(parts, dim=0)
+                parameter.data.copy_(gathered.index_select(0, index))
+        self._invalidate_packed_weights()
+
+    @staticmethod
+    def _apply_loaded_layout(module, incompatible_keys) -> None:
+        loaded, module._loaded_expert_layout = module._loaded_expert_layout, None
+        target = module._target_layout()
+        if loaded is None or loaded == target:
+            return
+        try:
+            from megatron.training import get_args
+
+            args = get_args()
+            loads_optimizer = not (args.finetune or args.no_load_optim)
+        except (ImportError, AssertionError, AttributeError):
+            loads_optimizer = False
+        if loads_optimizer:
+            raise RuntimeError(
+                "checkpoint expert layout differs from LUMEN_EXPERT_PLACEMENT; its optimizer "
+                "state cannot be reordered, so resume with the checkpoint's placement or load "
+                "with --finetune / --no-load-optim"
+            )
+        module._relayout(loaded, target)
+        if module._expert_layout is not None:
+            module.expert_layout.copy_(torch.tensor(target, dtype=torch.long))
+
     def _remap_checkpoint_state(
         self,
         state_dict: MutableMapping[str, torch.Tensor],
@@ -283,6 +371,21 @@ class SonicMoEExperts(nn.Module):
         *args,
     ) -> None:
         """Map SequentialMLP or TEGroupedMLP checkpoint keys to Sonic storage."""
+        layout_key = f"{prefix}expert_layout"
+        saved_layout = state_dict.get(layout_key)
+        if saved_layout is not None:
+            loaded = [int(x) for x in saved_layout.tolist()]
+        elif self._sharded_layout_loaded:
+            # Distributed checkpoints are read straight into the current layout.
+            loaded = self._target_layout()
+        else:
+            loaded = list(range(len(self._target_layout())))
+        self._sharded_layout_loaded = False
+        self._loaded_expert_layout = loaded
+        if self._expert_layout is None:
+            state_dict.pop(layout_key, None)
+        elif saved_layout is None:
+            state_dict[layout_key] = torch.tensor(loaded, dtype=torch.long)
         w1_key = f"{prefix}w1"
         w2_key = f"{prefix}w2"
         if w1_key not in state_dict:
@@ -319,6 +422,12 @@ class SonicMoEExperts(nn.Module):
             get_pg_rank(self.tp_group),
             get_pg_rank(self.dp_group),
         )
+        local = self.num_local_experts
+        global_indices = self._target_layout()[ep_rank * local : (ep_rank + 1) * local]
+
+        def on_merge():
+            self._sharded_layout_loaded = True
+
         return {
             f"{prefix}w1": _stacked_expert_factory(
                 self.w1,
@@ -330,6 +439,8 @@ class SonicMoEExperts(nn.Module):
                 sharded_offsets=sharded_offsets,
                 split_swiglu=True,
                 singleton_local_shards=singleton_local_shards,
+                global_indices=global_indices,
+                on_merge=on_merge,
             ),
             f"{prefix}w2": _stacked_expert_factory(
                 self.w2,
@@ -341,6 +452,8 @@ class SonicMoEExperts(nn.Module):
                 sharded_offsets=sharded_offsets,
                 split_swiglu=False,
                 singleton_local_shards=singleton_local_shards,
+                global_indices=global_indices,
+                on_merge=on_merge,
             ),
         }
 
@@ -479,14 +592,24 @@ def replace_megatron_moe_experts(model: nn.Module) -> int:
     """Replace Megatron ``MoELayer.experts`` modules with SonicMoE adapters."""
     replaced = 0
     presync_pack = os.environ.get("LUMEN_MORI_PRESYNC_PACK", "1") != "0"
+    placement = None
+    if os.environ.get("LUMEN_EXPERT_PLACEMENT"):
+        from lumen.modules.expert_placement import install_expert_placement, placement_table
+
+        placement = placement_table()
     for module in model.modules():
         if type(module).__name__ != "MoELayer" or not hasattr(module, "experts"):
             continue
         if isinstance(module.experts, SonicMoEExperts):
             continue
         module.experts = SonicMoEExperts(module.experts)
+        if placement is not None:
+            install_expert_placement(module, placement)
         if presync_pack:
             _pack_before_count_sync(module)
+        from lumen.modules.mori_expert_count_log import install_expert_count_log
+
+        install_expert_count_log(module, replaced)
         replaced += 1
     if replaced:
         from lumen.modules.mori_fused_recv import install_mori_fused_recv
