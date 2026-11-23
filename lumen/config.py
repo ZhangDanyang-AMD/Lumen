@@ -329,6 +329,9 @@ class LumenConfig:
         if self.fused_router:
             self._patch_fused_router(model)
 
+        # 1e. MXFP4 attention projections (LUMEN_ATTN_LINEAR_RECIPE=a4w4)
+        self._patch_attention_linears(model)
+
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
 
@@ -577,6 +580,31 @@ class LumenConfig:
                 "sonic_moe=True but no Megatron MoELayer modules were found"
             )
         _rank0_print(f"> Replaced {count} Megatron MoE expert modules with SonicMoE")
+
+    def _patch_attention_linears(self, model) -> None:
+        """Run attention linear_qkv/linear_proj with the a4w4 recipe when requested."""
+        from lumen.modules.mxfp4_attention_linear import (
+            attention_linear_recipe,
+            install_mxfp4_attention_linears,
+        )
+
+        recipe = attention_linear_recipe()
+        if recipe == "bf16":
+            return
+        if self.quant_config.is_quantized or self.lumen_linear:
+            raise ValueError(
+                f"LUMEN_ATTN_LINEAR_RECIPE={recipe} patches Megatron local-spec "
+                "linears; global Lumen linear quantization and --lumen-linear "
+                "must be disabled"
+            )
+        count = install_mxfp4_attention_linears(model)
+        if count == 0:
+            raise ValueError(
+                f"LUMEN_ATTN_LINEAR_RECIPE={recipe} but no attention linears were found"
+            )
+        _rank0_print(
+            f"> Routed {count} attention linears through MXFP4 ({recipe}, BF16 Wgrad)"
+        )
 
     def _patch_fused_router(self, model) -> None:
         """Install the Lumen fused-router functions in Megatron."""

@@ -735,6 +735,20 @@ def _probe_aiter_pre_routed_mapped():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_mxfp4_linear():
+    """Resolve the dense MXFP4 x MXFP4 linear GEMM and its two-axis weight pack."""
+    try:
+        from aiter.ops.triton.gemm.basic.mxfp4_linear import (
+            mxfp4_linear_gemm,
+            pack_mxfp4_linear_weight,
+        )
+
+        return mxfp4_linear_gemm, pack_mxfp4_linear_weight
+    except (ImportError, OSError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_pack_pre_routed_weights():
     """Resolve the weight-packing helper used to cache packed experts per step."""
     try:
