@@ -1,8 +1,9 @@
 """Runtime (import-time) patch registrations."""
 
+from lumen.patches.runtime import megatron_eager_regions as megatron_eager_regions  # noqa: F401
 from lumen.patches.runtime import moe_fused_router as moe_fused_router  # noqa: F401
 
-__all__ = ["moe_fused_router"]
+__all__ = ["megatron_eager_regions", "moe_fused_router"]
 
 
 def apply_import_patches(*, default_only: bool = True, dry_run: bool = False):
