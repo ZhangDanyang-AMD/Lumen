@@ -31,6 +31,8 @@ def _stub_package(monkeypatch, name, module):
         if parent not in sys.modules:
             monkeypatch.setitem(sys.modules, parent, types.ModuleType(parent))
     monkeypatch.setitem(sys.modules, name, module)
+    # A real Megatron imported earlier in the session resolves the import through the parent.
+    monkeypatch.setattr(sys.modules[".".join(parts[:-1])], parts[-1], module, raising=False)
 
 
 class TestEagerTinyRegions:
