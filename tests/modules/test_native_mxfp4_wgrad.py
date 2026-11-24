@@ -13,7 +13,12 @@ from lumen.modules.sonic_moe import SonicMoEExperts
 _CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
 
-def source():
+BACKENDS = ["triton", "gluon", "opus"]
+# The fused OPUS chain needs an intermediate size that is a multiple of 128.
+FFN = {"triton": 64, "gluon": 64, "opus": 128}
+
+
+def source(ffn=64):
     module = nn.Module()
     module.config = SimpleNamespace(
         gated_linear_unit=True, add_bias_linear=False, expert_tensor_parallel_size=1
@@ -23,17 +28,17 @@ def source():
     for _ in range(4):
         expert = nn.Module()
         expert.linear_fc1 = nn.Linear(
-            128, 128, bias=False, device="cuda", dtype=torch.bfloat16
+            128, 2 * ffn, bias=False, device="cuda", dtype=torch.bfloat16
         )
         expert.linear_fc2 = nn.Linear(
-            64, 128, bias=False, device="cuda", dtype=torch.bfloat16
+            ffn, 128, bias=False, device="cuda", dtype=torch.bfloat16
         )
         module.local_experts.append(expert)
     return module
 
 
-def model_with_buffers():
-    model = SonicMoEExperts(source())
+def model_with_buffers(ffn=64):
+    model = SonicMoEExperts(source(ffn))
     model.precision_recipe = "a4w4"
     for p in (model.w1, model.w2):
         p.main_grad = torch.zeros_like(p, dtype=torch.float32)
@@ -68,15 +73,16 @@ def run(model, data):
 
 
 @_CUDA
-@pytest.mark.parametrize("backend", ["triton", "gluon"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_distinct_microbatches_accumulate_fp32_without_double_add(monkeypatch, backend):
     monkeypatch.setenv("SONIC_MOE_MXFP4_WGRAD_BACKEND", backend)
     monkeypatch.setenv("SONIC_MOE_MXFP4_WGRAD", "1")
     monkeypatch.setenv("SONIC_MOE_MXFP4_WGRAD_FALLBACK", "error")
     monkeypatch.setenv("SONIC_MOE_PACK_CACHE", "0")
     torch.manual_seed(8103)
-    combined = model_with_buffers()
-    independent = [model_with_buffers(), model_with_buffers()]
+    ffn = FFN[backend]
+    combined = model_with_buffers(ffn)
+    independent = [model_with_buffers(ffn), model_with_buffers(ffn)]
     for model in independent:
         model.load_state_dict(combined.state_dict())
     data = [mb([3, 0, 33, 129], 8104), mb([0, 31, 1, 257], 8105)]
@@ -99,14 +105,15 @@ def test_distinct_microbatches_accumulate_fp32_without_double_add(monkeypatch, b
 
 
 @_CUDA
-@pytest.mark.parametrize("backend", ["triton", "gluon"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_data_copy_update_consumes_new_packed_weights(monkeypatch, backend):
     monkeypatch.setenv("SONIC_MOE_MXFP4_WGRAD_BACKEND", backend)
     monkeypatch.setenv("SONIC_MOE_MXFP4_WGRAD", "1")
     monkeypatch.setenv("SONIC_MOE_PACK_CACHE", "1")
     monkeypatch.setenv("R80_CACHE_GENERATION", "1")
     torch.manual_seed(8106)
-    cached = model_with_buffers()
+    ffn = FFN[backend]
+    cached = model_with_buffers(ffn)
     data = mb([1, 0, 32, 129], 8107)
 
     class CopyOptimizer:
@@ -129,7 +136,7 @@ def test_data_copy_update_consumes_new_packed_weights(monkeypatch, backend):
     updated = run(cached, data)
     assert cached._packed_stamp != stamp
     assert not torch.equal(first, updated)
-    uncached = model_with_buffers()
+    uncached = model_with_buffers(ffn)
     uncached.load_state_dict(cached.state_dict())
     uncached._pack_cache_enabled = False
     fresh = run(uncached, data)

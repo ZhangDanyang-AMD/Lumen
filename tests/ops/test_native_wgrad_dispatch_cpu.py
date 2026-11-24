@@ -13,7 +13,9 @@ import pytest
 @pytest.fixture
 def op(monkeypatch):
     dispatch = ModuleType("lumen.ops.dispatch")
-    dispatch.Backend = type("Backend", (), {"TRITON": "triton", "GLUON": "gluon"})
+    dispatch.Backend = type(
+        "Backend", (), {"TRITON": "triton", "GLUON": "gluon", "OPUS": "opus"}
+    )
     for name in (
         "pack_pre_routed_weights",
         "pre_routed_w4a16",
@@ -21,6 +23,7 @@ def op(monkeypatch):
         "pre_routed_a4w4_bf16_main_grad",
         "pre_routed_a4w4_wgrad",
         "pre_routed_a4w4_wgrad_gluon",
+        "pre_routed_a4w4_wgrad_opus",
         "pre_routed_a8w4",
         "pre_routed_a8w4f",
         "pre_routed_mapped",
@@ -123,10 +126,7 @@ def test_bf16_wgrad_forwards_main_grad_buffers_and_distinct_label(op, monkeypatc
         return original(backends, *args, **kwargs)
 
     monkeypatch.setattr(op, "try_backends", dispatch)
-    assert (
-        op.pre_routed_a4w4(1, 2, 3, 4, 5, 6, main_grads=buffers)
-        == "bf16-direct"
-    )
+    assert op.pre_routed_a4w4(1, 2, 3, 4, 5, 6, main_grads=buffers) == "bf16-direct"
     assert calls == [((1, 2, 3, 4, 5, 6), {"main_grads": buffers})]
     assert labels == ["moe_pre_routed_a4w4:bf16_wgrad_main_grad"]
 
@@ -262,6 +262,49 @@ def test_explicit_gluon_to_bf16_fallback_logs(op, monkeypatch, caplog):
 def test_invalid_native_backend_rejected(op):
     with pytest.raises(ValueError, match="wgrad_backend"):
         op.pre_routed_a4w4(1, 2, 3, 4, 5, wgrad_mode="mxfp4", wgrad_backend="auto")
+
+
+def test_opus_forwards_buffers_and_uses_opus_dispatch_label(op, monkeypatch):
+    calls = []
+    buffers = (object(), object())
+    monkeypatch.setattr(
+        op,
+        "_probe_aiter_pre_routed_a4w4_wgrad_opus",
+        lambda: lambda *a, **kw: calls.append((a, kw)) or "opus",
+    )
+    original = op.try_backends
+    labels = []
+
+    def dispatch(backends, *args, **kwargs):
+        labels.append((backends[0][0], kwargs["op_name"]))
+        return original(backends, *args, **kwargs)
+
+    monkeypatch.setattr(op, "try_backends", dispatch)
+    result = op.pre_routed_a4w4(
+        1, 2, 3, 4, 5, 6, wgrad_mode="mxfp4", wgrad_backend="opus", main_grads=buffers
+    )
+    assert result == "opus"
+    assert calls == [((1, 2, 3, 4, 5, 6), {"main_grads": buffers})]
+    assert labels == [(op.Backend.OPUS, "moe_pre_routed_a4w4:native_wgrad:opus")]
+
+
+def test_opus_capability_missing_does_not_silently_use_triton(op, monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        op, "_probe_aiter_pre_routed_a4w4_wgrad", lambda: lambda *a: called.append(a)
+    )
+    monkeypatch.setattr(op, "_probe_aiter_pre_routed_a4w4_wgrad_opus", lambda: None)
+    with pytest.raises(RuntimeError, match="opus"):
+        op.pre_routed_a4w4(1, 2, 3, 4, 5, wgrad_mode="mxfp4", wgrad_backend="opus")
+    assert called == []
+
+
+def test_mapped_rejects_opus_before_call(op, monkeypatch):
+    monkeypatch.setattr(op, "_probe_aiter_pre_routed_mapped", lambda: pytest.fail)
+    with pytest.raises(ValueError, match="opus"):
+        op.pre_routed_quantized_mapped(
+            "a4w4", 1, 2, (1,), 3, 4, 5, wgrad_mode="mxfp4", wgrad_backend="opus"
+        )
 
 
 def test_mapped_api_forwards_source_routing_and_native_options(op, monkeypatch):

@@ -11,6 +11,7 @@ from lumen.ops.dispatch import (
     _probe_aiter_pre_routed_a4w4_bf16_main_grad,
     _probe_aiter_pre_routed_a4w4_wgrad,
     _probe_aiter_pre_routed_a4w4_wgrad_gluon,
+    _probe_aiter_pre_routed_a4w4_wgrad_opus,
     _probe_aiter_pre_routed_a8w4,
     _probe_aiter_pre_routed_a8w4f,
     _probe_aiter_pre_routed_mapped,
@@ -19,6 +20,8 @@ from lumen.ops.dispatch import (
 )
 
 logger = logging.getLogger(__name__)
+
+WGRAD_BACKENDS = ("triton", "gluon", "opus")
 
 _PROBES = {
     "w4a16": ("_probe_aiter_pre_routed_w4a16", "moe_pre_routed_w4a16"),
@@ -80,13 +83,14 @@ def pre_routed_a4w4(
 
     Missing native capability raises unless wgrad_fallback='bf16' is explicit.
     Backward failures are not retried after possible writes to main_grad.
+    wgrad_backend='opus' runs the whole expert chain on AITER's fused OPUS path.
     """
     if wgrad_mode not in ("bf16", "mxfp4"):
         raise ValueError("wgrad_mode must be bf16 or mxfp4")
     if wgrad_fallback not in ("error", "bf16"):
         raise ValueError("wgrad_fallback must be error or bf16")
-    if wgrad_backend not in ("triton", "gluon"):
-        raise ValueError("wgrad_backend must be triton or gluon")
+    if wgrad_backend not in WGRAD_BACKENDS:
+        raise ValueError("wgrad_backend must be triton, gluon or opus")
     if wgrad_mode == "bf16" and main_grads is None:
         operation, name = _resolve("a4w4")
         return _run(operation, name, x, scores, counts, w1, w2, packed)
@@ -108,11 +112,11 @@ def pre_routed_a4w4(
             main_grads=main_grads,
             op_name="moe_pre_routed_a4w4:bf16_wgrad_main_grad",
         )
-    probe = (
-        _probe_aiter_pre_routed_a4w4_wgrad_gluon
-        if wgrad_backend == "gluon"
-        else _probe_aiter_pre_routed_a4w4_wgrad
-    )
+    probe = {
+        "triton": _probe_aiter_pre_routed_a4w4_wgrad,
+        "gluon": _probe_aiter_pre_routed_a4w4_wgrad_gluon,
+        "opus": _probe_aiter_pre_routed_a4w4_wgrad_opus,
+    }[wgrad_backend]
     operation = probe()
     if operation is None:
         if wgrad_fallback != "bf16":
@@ -130,10 +134,14 @@ def pre_routed_a4w4(
             operation, name + ":explicit_bf16_wgrad", x, scores, counts, w1, w2, packed
         )
     # Backend selection is explicit; never retry a partial backward on another backend.
-    backend = Backend.GLUON if wgrad_backend == "gluon" else Backend.TRITON
+    backend = {
+        "triton": Backend.TRITON,
+        "gluon": Backend.GLUON,
+        "opus": Backend.OPUS,
+    }[wgrad_backend]
     label = "moe_pre_routed_a4w4:native_wgrad"
-    if wgrad_backend == "gluon":
-        label += ":gluon"
+    if wgrad_backend != "triton":
+        label += f":{wgrad_backend}"
     return try_backends(
         [(backend, operation)],
         x,
@@ -224,6 +232,8 @@ def pre_routed_quantized_mapped(
         raise ValueError("wgrad_mode must be bf16 or mxfp4")
     if wgrad_mode == "mxfp4" and recipe != "a4w4":
         raise ValueError("native MXFP4 Wgrad requires the a4w4 recipe")
+    if wgrad_backend == "opus":
+        raise ValueError("the mapped MORI handoff does not support wgrad_backend=opus")
     operation = _probe_aiter_pre_routed_mapped()
     if operation is None:
         raise RuntimeError(

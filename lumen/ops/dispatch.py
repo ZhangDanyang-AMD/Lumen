@@ -54,6 +54,7 @@ class Backend(Enum):
     TRITON = "triton"
     GLUON = "gluon"
     HIPBLAS = "hipblas"
+    OPUS = "opus"
 
 
 FALLBACK_ORDER = [Backend.ASM, Backend.TRITON]
@@ -693,6 +694,25 @@ def _probe_aiter_pre_routed_a4w4_wgrad_gluon():
             sonic_mxfp4.moe_pre_routed_a4w4,
             wgrad_mode="mxfp4",
             wgrad_backend="gluon",
+        )
+    except (ImportError, OSError, AttributeError):
+        return None
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_aiter_pre_routed_a4w4_wgrad_opus():
+    """Resolve the public fused OPUS expert chain capability, not a kernel body."""
+    try:
+        from aiter.ops.triton.moe import sonic_mxfp4
+
+        if getattr(sonic_mxfp4, "MXFP4_WGRAD_API_VERSION", 0) != 1:
+            return None
+        if "opus" not in getattr(sonic_mxfp4, "PRE_ROUTED_MXFP4_WGRAD_BACKENDS", ()):
+            return None
+        return functools.partial(
+            sonic_mxfp4.moe_pre_routed_a4w4,
+            wgrad_mode="mxfp4",
+            wgrad_backend="opus",
         )
     except (ImportError, OSError, AttributeError):
         return None
