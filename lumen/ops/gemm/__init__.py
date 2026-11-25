@@ -1,4 +1,12 @@
-from lumen.ops.gemm.epilogue import GemmEpilogue, gemm_with_epilogue, is_fp8_output_enabled
-from lumen.ops.gemm.fp8_output import gemm_fp8_output, gemm_scaled_mm
+###############################################################################
+# Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0
+###############################################################################
 
-__all__ = ["GemmEpilogue", "gemm_with_epilogue", "gemm_fp8_output", "gemm_scaled_mm", "is_fp8_output_enabled"]
+"""GEMM operators.
+
+Import a submodule directly, for example ``lumen.ops.gemm.stable_tgemm_mm`` or
+``lumen.ops.gemm.grouped_gemm``. This package does not load those modules
+on import.
+"""
