@@ -319,3 +319,12 @@ differentiable calls it runs the same layer with a PyTorch recurrence: aiter's `
 the in-kernel gate formula. That recurrence matches aiter's torch layer to about 1e-7 in fp32,
 including varlen. The per-layer and recurrence tests then compare forward against FLA and backward
 against that PyTorch recurrence, and print the reason.
+
+Lumen's fast `quantized_linear(scaling_type="mxfp8")` follows TE as well. The scale rule is TE's by
+default (`LUMEN_MXFP8_SCALE_MODE=te`), through aiter's `convert_to_mxfp8(scale_mode="te")` from #8757,
+or the PyTorch TE reference when that aiter build is missing. Forward quantizes X and W rowwise. It
+also quantizes them columnwise directly from the bf16 tensors and saves those columnwise copies for
+backward. dgrad then uses dY rowwise × W columnwise, and wgrad uses dY columnwise × X columnwise, with
+fp32 output that is optionally added into `main_grad`. No operand is re-quantized from a dequantized
+copy. `test_lumen_mxfp8_vs_te` requires every quantized operand to be bit-exact against
+`mxfp8_te_reference`.

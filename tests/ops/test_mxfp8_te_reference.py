@@ -78,24 +78,35 @@ def _gfx950():
 
 @pytest.mark.skipif(not _gfx950(), reason="Lumen's MXFP8 kernels need gfx950")
 def test_lumen_mxfp8_vs_te():
-    """Reports how far Lumen's fast MXFP8 path (aiter torchao-style scales) is from TE's numerics.
+    """Lumen's MXFP8 linear against the TE MXFP8BlockScaling reference.
 
-    The KDA Megatron reference uses ``te_mxfp8_linear``; this test documents the gap and fails only
-    if the scale rule disagrees in a way other than the known round-down (one binade smaller).
+    Bit-exact: every quantized operand (data and E8M0 bytes), i.e. X/W rowwise for fprop, dY rowwise
+    and W columnwise for dgrad, dY/X columnwise for wgrad, all quantized from the bf16 tensors.
+    Close (fp32 summation order only): fprop, dgrad (bf16 out) and wgrad (fp32).
     """
-    from lumen.ops.quantize.linear import quantized_linear
-    from lumen.ops.quantize.ops import convert_to_mxfp8
+    from lumen.ops.quantize.linear import _mxfp8_colwise, quantize_input, quantized_linear
 
     torch.manual_seed(0)
+    fp8 = torch.float8_e4m3fn
     x = (torch.randn(256, 512, device="cuda") * 3).bfloat16()
-    _, lumen_scale = convert_to_mxfp8(x, block_size=32, axis=-1, float8_dtype_pt=torch.float8_e4m3fn)
-    te_scale = te.e8m0_scale_exponent(x.float().reshape(256, -1, 32).abs().amax(-1))
-    diff = te_scale - lumen_scale.view(256, -1).to(torch.int32)
-    print(f"scale bytes differing: {(diff != 0).float().mean().item():.2%}, values {diff.unique().tolist()}")
-    assert set(diff.unique().tolist()) <= {0, 1}
-
     w = (torch.randn(384, 512, device="cuda") * 0.05).bfloat16()
     dy = torch.randn(256, 384, device="cuda").bfloat16()
+
+    def same(name, lumen_q, lumen_s, ref_t, axis):
+        q, b = te.quantize(ref_t, axis)
+        if axis == 0:  # Lumen stores columnwise copies transposed
+            q = q.t()
+        ls = lumen_s.view(torch.uint8).to(torch.int32)
+        assert torch.equal(ls.reshape(b.shape), b), f"{name}: E8M0 bytes differ"
+        assert torch.equal(lumen_q.view(torch.uint8), q.contiguous().view(torch.uint8)), f"{name}: E4M3 data differ"
+
+    for name, t in [("X rowwise", x), ("W rowwise", w), ("dY rowwise", dy)]:
+        d = quantize_input(t, "mxfp8", fp8, 32)
+        same(name, d.data, d.scale, t, -1)
+    for name, t in [("X columnwise", x), ("W columnwise", w), ("dY columnwise", dy)]:
+        qd, qs = _mxfp8_colwise(t, fp8)
+        same(name, qd, qs, t, 0)
+
     out = {}
     for name, fn in [("te", te.te_mxfp8_linear),
                      ("lumen", lambda a, b: quantized_linear(a, b, scaling_type="mxfp8", block_size=32))]:  # fmt: skip
@@ -105,4 +116,6 @@ def test_lumen_mxfp8_vs_te():
         out[name] = (y.float(), xs.grad.float(), ws.grad.float())
     for i, n in enumerate(["fprop", "dgrad", "wgrad"]):
         r, o = out["te"][i], out["lumen"][i]
-        print(f"{n}: ||lumen - te|| / ||te|| = {((o - r).norm() / r.norm()).item():.3e}")
+        e = ((o - r).norm() / r.norm()).item()
+        print(f"{n}: ||lumen - te|| / ||te|| = {e:.3e}")
+        assert e < 1e-2, n  # same quantized operands; bf16 output rounding / summation order only

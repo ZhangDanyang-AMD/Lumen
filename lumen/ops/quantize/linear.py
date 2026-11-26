@@ -396,6 +396,28 @@ def _safe_fp8_desc(x_fp8, x_scale, fp8_dtype):
     return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
 
+# MXFP8 (1x32) E8M0 scale rule. "te": Transformer Engine MXFP8BlockScaling / Megatron-LM
+# --fp8-recipe mxfp8, exponent ceil(log2(amax / 448)); "torchao": floor(log2(rne_3bit(amax))) - 8,
+# which can be one binade smaller and clip the block maximum at 448.
+_MXFP8_SCALE_MODE = os.environ.get("LUMEN_MXFP8_SCALE_MODE", "te")
+
+
+def _convert_to_mxfp8_te(x_2d, fp8_dtype):
+    """1x32-along-the-last-axis MXFP8 with TE's scale rule: aiter's kernel (``scale_mode="te"``,
+    ROCm/aiter#8757) when available, else the PyTorch TE reference (identical bytes)."""
+    try:
+        from aiter.ops.triton.quant.quant_mxfp8 import convert_to_mxfp8 as _aiter_convert
+
+        return _aiter_convert(x_2d, fp8_dtype, quant_block_size=32, scale_mode="te")
+    except (ImportError, TypeError, ValueError) as e:
+        # aiter without scale_mode="te": exact TE bytes from the PyTorch reference (slower)
+        _logger.warning("mxfp8: aiter TE-scale quantizer unavailable (%s), using the PyTorch TE reference", e)
+        from lumen.ops.quantize.mxfp8_te_reference import quantize
+
+        q, biased = quantize(x_2d, -1)
+        return q.to(fp8_dtype), biased.to(torch.uint8).reshape(x_2d.shape[0], -1)
+
+
 def quantize_input(
     x_2d,
     scaling_type,
@@ -500,9 +522,12 @@ def quantize_input(
         mxfp8_block = 32 if block_size > 64 else block_size
         x_2d, _orig_m = pad_to_block(x_2d, mxfp8_block, dim=0)
         x_2d, _orig_n = pad_to_block(x_2d, mxfp8_block, dim=-1)
-        x_fp8, x_scale = convert_to_mxfp8(
-            x_2d, block_size=mxfp8_block, axis=-1, float8_dtype_pt=fp8_dtype
-        )
+        if mxfp8_block == 32 and _MXFP8_SCALE_MODE == "te":
+            x_fp8, x_scale = _convert_to_mxfp8_te(x_2d, fp8_dtype)
+        else:
+            x_fp8, x_scale = convert_to_mxfp8(
+                x_2d, block_size=mxfp8_block, axis=-1, float8_dtype_pt=fp8_dtype
+            )
         return FP8Descriptor(data=x_fp8, scale=x_scale, fp8_dtype=fp8_dtype)
 
     if scaling_type == "mxfp4":
@@ -1011,17 +1036,12 @@ def _gemm_mxfp8_triton(a_fp8, w_fp8, scale_a, scale_w):
     )
 
 
-def _dequant_mxfp8(data, scale_e8m0):
-    """fp32 values of 1x32-along-the-last-axis MXFP8 data (padded columns kept)."""
-    s = _e8m0_to_fp32(scale_e8m0.view(torch.uint8)).repeat_interleave(32, dim=-1)
-    return data.float() * s[..., : data.shape[-1]]
-
-
-def _mxfp8_mm_requant(a, b, fp8_dtype):
-    """a [M, R] @ b [N, R]^T with both operands MXFP8-quantized (1x32) along R; bf16 out."""
-    a_desc = quantize_input(a, "mxfp8", fp8_dtype, 32)
-    b_desc = quantize_input(b, "mxfp8", fp8_dtype, 32)
-    return _gemm_mxfp8_1x32(a_desc.data, b_desc.data, a_desc.scale, b_desc.scale)
+def _mxfp8_colwise(t, fp8_dtype):
+    """Columnwise MXFP8 of a 2-D tensor (1x32 blocks along dim 0), returned transposed:
+    data [cols, rows] and E8M0 scales [cols, rows/32] quantized directly from ``t``."""
+    t2 = t.reshape(-1, t.shape[-1])
+    desc = quantize_input(t2.t().contiguous().to(torch.bfloat16), "mxfp8", fp8_dtype, 32)
+    return desc.data, desc.scale
 
 
 def _pad_rows(t, mult, value=0):
@@ -1031,7 +1051,7 @@ def _pad_rows(t, mult, value=0):
     return torch.cat([t, torch.full((pad, *t.shape[1:]), value, dtype=t.dtype, device=t.device)])
 
 
-def _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w):
+def _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w, out_fp32=False):
     """Y = A @ W^T for E4M3 data with one E8M0 byte per 1x32 block along K (bf16 out).
 
     aiter's ``gemm_a8w8_mxfp8_bpreshuffle`` needs K % 128 == 0 and N % 16 == 0. Padding K with
@@ -1040,6 +1060,9 @@ def _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w):
     """
     M, K = a_fp8.shape
     N = w_fp8.shape[0]
+    if out_fp32:
+        # wgrad: TE writes fp32 (fused into fp32 main_grad); the native kernel only writes bf16
+        return _gemm_mxfp8_dequant(a_fp8, w_fp8, scale_a, scale_w, K, out_fp32=True)
     try:
         from aiter import dtypes
         from aiter.ops.gemm_op_a8w8 import gemm_a8w8_mxfp8_bpreshuffle
@@ -1065,9 +1088,20 @@ def _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w):
     except (ImportError, AttributeError, RuntimeError, ValueError, AssertionError) as e:
         # No native MXFP8 GEMM in this aiter / on this GPU: exact dequantized fp32 GEMM instead.
         _logger.warning("gemm_mxfp8: aiter MXFP8 GEMM unavailable (%s), using dequantized fp32 GEMM", e)
-    a = a_fp8.float() * _e8m0_to_fp32(scale_a).repeat_interleave(32, dim=1)[:, :K]
-    w = w_fp8.float() * _e8m0_to_fp32(scale_w).repeat_interleave(32, dim=1)[:, :K]
-    return (a @ w.t()).to(torch.bfloat16)
+    return _gemm_mxfp8_dequant(a_fp8, w_fp8, scale_a, scale_w, K)
+
+
+def _gemm_mxfp8_dequant(a_fp8, w_fp8, scale_a, scale_w, K, out_fp32=False):
+    """Exact products of the dequantized MXFP8 operands, accumulated in fp32 (no TF32)."""
+    a = a_fp8.float() * _e8m0_to_fp32(scale_a.view(torch.uint8)).repeat_interleave(32, dim=1)[:, :K]
+    w = w_fp8.float() * _e8m0_to_fp32(scale_w.view(torch.uint8)).repeat_interleave(32, dim=1)[:, :K]
+    prev = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        out = a @ w.t()
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = prev
+    return out if out_fp32 else out.to(torch.bfloat16)
 
 
 def gemm_mxfp8(a_fp8, w_fp8, scale_a, scale_w):
@@ -2276,6 +2310,16 @@ class QuantizedLinearFunction(torch.autograd.Function):
                     w_fp4_t,
                     w_scale_t,
                 )
+        elif scaling_type == "mxfp8" and (block_size == 32 or block_size > 64):  # 1x32 blocks
+            # TE MXFP8BlockScaling: backward operands are quantized columnwise from the original
+            # high-precision tensors (not re-quantized from the rowwise copy). Columnwise = 1x32
+            # blocks along the token axis for X and along N for W, stored transposed.
+            ctx.save_for_backward(
+                *_mxfp8_colwise(input_2d, fp8_dtype),
+                *_mxfp8_colwise(weight, fp8_dtype),
+            )
+            ctx.mxfp8_colwise = True
+            ctx.mxfp8_k = weight.shape[-1]
         else:
             ctx.save_for_backward(
                 input_desc.data,
@@ -2656,29 +2700,28 @@ class QuantizedLinearFunction(torch.autograd.Function):
         # ----- end blockwise2d -----
 
         # ----- MXFP8 (1x32 E8M0): DGrad + WGrad with TE MXFP8BlockScaling operand axes -----
-        # The 1x32-along-K blocks of the saved X / W do not survive transposition, so both are
-        # dequantized and re-quantized along each GEMM's reduction axis:
-        #   dgrad dX = dY (blocks along N) x W^T (blocks along N)
-        #   wgrad dW = dY^T (blocks along M) x X^T (blocks along M)
-        # TE quantizes the original bf16 columnwise instead; re-quantizing the rowwise copy rounds
-        # twice, which is the remaining difference.
-        if scaling_type == "mxfp8":
+        #   dgrad dX = dY (rowwise, blocks along N) x W (columnwise, blocks along N)
+        #   wgrad dW = dY (columnwise, blocks along M) x X (columnwise, blocks along M)
+        # The columnwise X / W were quantized from the original bf16 in forward (saved transposed).
+        if scaling_type == "mxfp8" and getattr(ctx, "mxfp8_colwise", False):
+            xT_q, xT_s, wT_q, wT_s = input_data, input_scale, weight_data, weight_scale
             grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
             M, N = grad_flat.shape
-            K = weight_data.shape[-1]
-            w_hp = _dequant_mxfp8(weight_data, weight_scale)[:N, :K]
-            x_hp = _dequant_mxfp8(input_data.reshape(-1, input_data.shape[-1]), input_scale)[:M, :K]
+            K = ctx.mxfp8_k
             dy = grad_flat.to(torch.bfloat16)
-            grad_input = _mxfp8_mm_requant(dy, w_hp.t().contiguous().to(torch.bfloat16), bwd_dtype)[:M, :K]
+            dy_row = quantize_input(dy, "mxfp8", bwd_dtype, 32)
+            grad_input = _gemm_mxfp8_1x32(dy_row.data, wT_q, dy_row.scale, wT_s)[:M, :K]
             grad_input = grad_input.to(grad_output.dtype).view(*grad_output.shape[:-1], K)
-            grad_weight = _mxfp8_mm_requant(
-                dy.t().contiguous(), x_hp.t().contiguous().to(torch.bfloat16), bwd_dtype
-            )[:N, :K].to(ctx.weight_ref.dtype if ctx.weight_ref is not None else grad_output.dtype)
-            if mgr is not None:
-                grad_weight = mgr.quantize_grad(grad_weight)
-            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
-                ctx.weight_ref.main_grad.add_(grad_weight)
+            dyT_q, dyT_s = _mxfp8_colwise(dy, bwd_dtype)
+            grad_weight = _gemm_mxfp8_1x32(dyT_q, xT_q, dyT_s, xT_s, out_fp32=True)[:N, :K]
+            w_ref = getattr(ctx, "weight_ref", None)
+            if ctx.gradient_accumulation_fusion and hasattr(w_ref, "main_grad"):
+                w_ref.main_grad.add_(grad_weight)  # fp32, as TE's fused wgrad accumulation
                 grad_weight = None
+            else:
+                grad_weight = grad_weight.to(w_ref.dtype if w_ref is not None else grad_output.dtype)
+                if mgr is not None:
+                    grad_weight = mgr.quantize_grad(grad_weight)
             grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
             return (
                 grad_input, grad_weight, grad_bias,
