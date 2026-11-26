@@ -18,7 +18,9 @@ original parameters and no weight is copied.
 Enable with ``LUMEN_KDA_AITER=1`` (or ``patch_kda_layers(model)`` directly).
 ``LUMEN_KDA_AITER_BACKEND`` picks the aiter layer backend (``torch`` or
 ``fused``, default ``fused``); ``LUMEN_KDA_AITER_GEMM_PRECISION=mxfp8`` passes
-``gemm_precision="mxfp8"`` (needs the MXFP8 aiter PR stacked on #8739); per-piece kernels inside the fused backend are
+``gemm_precision="mxfp8"`` (needs the MXFP8 aiter PR stacked on #8739);
+``LUMEN_KDA_AITER_PRECISION=megatron`` (or ``kda_precision=``) selects aiter's Megatron
+rounding mode (#8739 95a82cd); per-piece kernels inside the fused backend are
 chosen by aiter's ``AITER_KDA_PIECES`` / ``set_kda_pieces``.
 
 ``A_log`` is per head and may be padded past ``num_heads`` (K3 checkpoints
@@ -43,6 +45,24 @@ logger = logging.getLogger(__name__)
 KDA_AITER_ENV = "LUMEN_KDA_AITER"
 KDA_AITER_BACKEND_ENV = "LUMEN_KDA_AITER_BACKEND"
 KDA_AITER_GEMM_PRECISION_ENV = "LUMEN_KDA_AITER_GEMM_PRECISION"
+KDA_AITER_PRECISION_ENV = "LUMEN_KDA_AITER_PRECISION"
+
+
+def set_aiter_kda_precision(mode):
+    """aiter's KDA rounding mode (``"default"`` or ``"megatron"``, #8739 95a82cd+); ``None`` resets it.
+
+    ``"megatron"`` rounds like Megatron-LM#6872: bf16 projection outputs, conv rounded to bf16
+    before SiLU, bf16 q/k after the L2 norm, bf16 o, gated norm rounded before the gate,
+    bf16 conv/norm weights, fp32 A_log/dt_bias. The mode is process-global in aiter, so it
+    covers the backward pass too.
+    """
+    from aiter.ops import kda_fused_layer as kfl
+
+    if not hasattr(kfl, "set_kda_precision"):
+        if mode in (None, "default"):
+            return
+        raise ImportError(f"aiter kda_fused_layer has no set_kda_precision; {mode!r} needs #8739 at 95a82cd or later")
+    kfl.set_kda_precision(mode)
 _ORIG_FORWARD = "_lumen_kda_orig_forward"
 _KDA_ATTRS = ("q_proj", "k_proj", "v_proj", "q_conv1d", "f_a_proj", "f_b_proj", "A_log", "o_norm", "o_proj")
 
@@ -182,7 +202,11 @@ def kda_layer_ids(model: torch.nn.Module):
 
 
 def patch_kda_layers(
-    model: torch.nn.Module, backend: str | None = None, chunk_size: int = 64, gemm_precision: str | None = None
+    model: torch.nn.Module,
+    backend: str | None = None,
+    chunk_size: int = 64,
+    gemm_precision: str | None = None,
+    kda_precision: str | None = None,
 ) -> int:
     """Replace every KDA layer forward in ``model`` with aiter's; returns the count patched.
 
@@ -195,6 +219,9 @@ def patch_kda_layers(
         )
     backend = backend or os.environ.get(KDA_AITER_BACKEND_ENV, "fused")
     gemm_precision = gemm_precision or os.environ.get(KDA_AITER_GEMM_PRECISION_ENV, "bf16")
+    kda_precision = kda_precision or os.environ.get(KDA_AITER_PRECISION_ENV)
+    if kda_precision is not None:
+        set_aiter_kda_precision(kda_precision)
     layer_ids = kda_layer_ids(model)
     n = 0
     for name, mod in model.named_modules():
@@ -214,6 +241,8 @@ def patch_kda_layers(
 
 def unpatch_kda_layers(model: torch.nn.Module) -> int:
     n = 0
+    if any(hasattr(m, _ORIG_FORWARD) for m in model.modules()) and _probe_aiter_kda_fused_layer():
+        set_aiter_kda_precision(None)
     for mod in model.modules():
         if hasattr(mod, _ORIG_FORWARD):
             mod.forward = getattr(mod, _ORIG_FORWARD)
@@ -222,6 +251,10 @@ def unpatch_kda_layers(model: torch.nn.Module) -> int:
     return n
 
 
-def maybe_patch_kda_layers(model: torch.nn.Module, gemm_precision: str | None = None) -> int:
+def maybe_patch_kda_layers(
+    model: torch.nn.Module, gemm_precision: str | None = None, kda_precision: str | None = None
+) -> int:
     """``patch_kda_layers`` when ``LUMEN_KDA_AITER`` is set, else a no-op."""
-    return patch_kda_layers(model, gemm_precision=gemm_precision) if kda_aiter_enabled() else 0
+    if not kda_aiter_enabled():
+        return 0
+    return patch_kda_layers(model, gemm_precision=gemm_precision, kda_precision=kda_precision)

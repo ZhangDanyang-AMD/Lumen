@@ -71,6 +71,8 @@ def parse_args():
                    help="eager KDA: Megatron-LM#6872 KDA layer with the FLA recurrence (primary), or aiter torch")
     p.add_argument("--precision", choices=list(kda_reference.PRECISIONS), default=None,
                    help="KDA projection GEMMs on both sides (default: mxfp8 for megatron-fla, bf16 for aiter-torch)")
+    p.add_argument("--aiter-precision", choices=["default", "megatron"], default=None,
+                   help="aiter KDA rounding mode (#8739 AITER_KDA_PRECISION; default: megatron with megatron-fla)")
     p.add_argument("--lr-schedule", choices=["megatron-continuation", "constant"], default=None,
                    help="megatron-continuation: lr 1e-5 cosine to 1e-6 over 50 iters, no warm-up "
                         "(default with megatron-fla); constant: --lr")
@@ -142,7 +144,7 @@ def lm_loss(model, ids):
 def run_mode(model, mode, args, init, ids_steps):
     os.environ[KDA_AITER_ENV] = "1" if mode == "aiter" else "0"
     unpatch_kda_layers(model)
-    patched = maybe_patch_kda_layers(model, gemm_precision=args.precision)
+    patched = maybe_patch_kda_layers(model, gemm_precision=args.precision, kda_precision=args.aiter_precision)
     with torch.no_grad():
         for p, p0 in zip(trainable(model), init):
             p.copy_(p0)
@@ -238,6 +240,8 @@ def main():
         args.grad_check = args.tier == "kda-only"
     if args.precision is None:
         args.precision = "mxfp8" if args.reference == "megatron-fla" else "bf16"
+    if args.aiter_precision is None:
+        args.aiter_precision = "megatron" if args.reference == "megatron-fla" else "default"
     if args.lr_schedule is None:
         args.lr_schedule = "megatron-continuation" if args.reference == "megatron-fla" else "constant"
     if args.reference == "megatron-fla" and not kda_reference.fla_available():
@@ -291,6 +295,7 @@ def main():
         dgn = [abs(a["grad_norm"] - b["grad_norm"]) / max(abs(a["grad_norm"]), 1e-12) for a, b in zip(ref, got)]
         ok = max(dloss) <= LOSS_PARITY_TOL
         print(f"\n[primary] Megatron-LM#6872 LM-loss parity vs {args.reference} ({args.precision}, "
+              f"aiter precision {args.aiter_precision}, "
               f"lr {args.lr_schedule}) over {n} steps: max |dloss| = {max(dloss):.3e} "
               f"(step {dloss.index(max(dloss)) + 1}), final {dloss[-1]:.3e} -> {'PASS' if ok else 'FAIL'} "
               f"(tol {LOSS_PARITY_TOL:g})")  # fmt: skip

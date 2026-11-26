@@ -46,10 +46,11 @@ def _gfx950():
     return torch.cuda.is_available() and "gfx950" in torch.cuda.get_device_properties(0).gcnArchName
 
 
-def _step(model, ids, aiter_kda, gemm_precision="bf16"):
+def _step(model, ids, aiter_kda, gemm_precision="bf16", kda_precision=None):
     os.environ[KDA_AITER_ENV] = "1" if aiter_kda else "0"
     unpatch_kda_layers(model)
-    assert maybe_patch_kda_layers(model, gemm_precision=gemm_precision) == (len(model.layers) if aiter_kda else 0)
+    patched = maybe_patch_kda_layers(model, gemm_precision=gemm_precision, kda_precision=kda_precision)
+    assert patched == (len(model.layers) if aiter_kda else 0)
     model.zero_grad(set_to_none=True)
     loss, logits = model(ids, labels=ids)
     loss.backward()
@@ -197,7 +198,8 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
     heads = model.layers[0].self_attn.num_heads
 
     _, _, g_meg = _step(model, ids, False)
-    _, _, g_aiter = _step(model, ids, True, prec)
+    # aiter in Megatron rounding mode against the Megatron reference
+    _, _, g_aiter = _step(model, ids, True, prec, "megatron")
     kda_stack.set_reference(model, "aiter-torch", "bf16")
     _, _, g_torch = _step(model, ids, False)
     kda_stack.set_reference(model, "megatron-fla", prec)
@@ -214,7 +216,7 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
                 p.copy_(init[n])
         curve = []
         for step in range(STEPS):
-            l, _, grads = _step(model, ids, aiter_kda, prec)
+            l, _, grads = _step(model, ids, aiter_kda, prec, "megatron" if aiter_kda else None)
             curve.append(l)
             with torch.no_grad():
                 for n, p in model.named_parameters():

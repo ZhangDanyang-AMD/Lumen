@@ -181,7 +181,7 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
 
     meg32, meg16 = module(torch.float32, "megatron-fla"), module(torch.bfloat16, "megatron-fla", prec)
     torch16, fused16 = module(torch.bfloat16, "aiter-torch"), module(torch.bfloat16, "aiter-torch")
-    assert patch_kda_layers(fused16, backend="fused", gemm_precision=prec) == 1
+    assert patch_kda_layers(fused16, backend="fused", gemm_precision=prec, kda_precision="megatron") == 1
     g = torch.Generator(device="cuda").manual_seed(layer)
     x = torch.randn(1, seqlen, cfg["hidden"], generator=g, device="cuda").to(torch.bfloat16)
     dy = torch.randn(x.shape, generator=g, device="cuda").to(torch.bfloat16)
@@ -197,4 +197,5 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
     rows_t, _ = grad_parity_vs_fp32(res[0], res[1], res[3], cfg["heads"])
     print(f"layer {layer} T={seqlen} precision={prec} vs Megatron-FLA fp32 (megatron_bf16, aiter_fused_bf16, limit):", list(rows.items())[:5])
     print("  [secondary] aiter-torch bf16:", list(rows_t.items())[:5])
+    unpatch_kda_layers(fused16)
     assert not problems, f"layer {layer}: {problems}"

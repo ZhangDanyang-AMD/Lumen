@@ -92,7 +92,7 @@ def _trainable(model):
 def _run(model, ids, aiter_kda):
     os.environ[KDA_AITER_ENV] = "1" if aiter_kda else "0"
     unpatch_kda_layers(model)
-    patched = maybe_patch_kda_layers(model, gemm_precision=PRECISION)
+    patched = maybe_patch_kda_layers(model, gemm_precision=PRECISION, kda_precision="megatron")
     assert patched == (len(tiny_l13.KDA_LAYERS) if aiter_kda else 0)
     model.zero_grad(set_to_none=True)
     out = model(input_ids=ids, labels=ids)

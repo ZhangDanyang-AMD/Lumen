@@ -220,3 +220,18 @@ to the TE-faithful helper (`--precision mxfp8`). `--precision mxfp8-lumen` keeps
 
 In the benchmark, `--main-grad` (on by default) keeps fp32 master weights. With `--precision mxfp8`,
 the reference accumulates the KDA projections' wgrad into fp32 `main_grad`.
+
+## aiter in Megatron precision
+
+#8739 `95a82cd` adds aiter's Megatron rounding mode, `AITER_KDA_PRECISION=megatron`. In this mode
+aiter rounds the following to bf16: the projection outputs, the conv result before SiLU, q/k after
+the L2 norm, and o; the gated norm is rounded before the gate. Conv and norm weights are bf16, while
+A_log and dt_bias stay fp32.
+
+Every comparison against the Megatron reference sets the aiter side to this mode. That covers
+diag `[4]`, the vs-megatron tier-1 and per-layer tests, the whole-net tests, and the benchmark
+(`--aiter-precision`, which defaults to `megatron` with `--reference megatron-fla`).
+
+Lumen sets the mode through `patch_kda_layers(kda_precision=)` or `LUMEN_KDA_AITER_PRECISION`, and
+`unpatch_kda_layers` resets it. It combines with `gemm_precision="mxfp8"` once that aiter mode
+lands. The aiter-torch comparisons keep aiter's default precision.
