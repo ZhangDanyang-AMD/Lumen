@@ -219,3 +219,28 @@ def grad_parity_vs_fp32(ref32, eager16, aiter16, num_heads, factor=BF16_VS_FP32_
     problems = problems + a_problems + [f"{n}: aiter {a:.3e} > limit {lim:.3e} (eager {e:.3e})"
                                         for n, (e, a, lim) in rows.items() if a > lim]  # fmt: skip
     return rows, problems
+
+
+def megatron_continuation_lr(step, lr_max=1e-5, lr_min=1e-6, decay_iters=50):
+    """LR at 0-indexed ``step`` of the #6872 continuation recipe: cosine 1e-5 -> 1e-6 over 50 iters, no warm-up."""
+    import math
+
+    t = min(step, decay_iters) / decay_iters
+    return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * t))
+
+
+# bf16 loss trajectories graded against an fp32 one, like the grads: |aiter - fp32| must stay within
+# max(LOSS_VS_FP32_FACTOR * |eager_bf16 - fp32|, MEGATRON_LOSS_PARITY_TOL) per step. The factor reuses
+# the grad bound (aiter measures 1.4-1.5x eager-bf16's grad error on gfx950); the floor is the #6872
+# tolerance itself, the loss difference Megatron accepts between two implementations.
+LOSS_VS_FP32_FACTOR = BF16_VS_FP32_FACTOR
+
+
+def loss_curve_vs_fp32(fp32, eager16, aiter16, factor=LOSS_VS_FP32_FACTOR, floor=MEGATRON_LOSS_PARITY_TOL):
+    """Per-step (|eager-fp32|, |aiter-fp32|, limit) and the steps that exceed the limit."""
+    rows = []
+    for f, e, a in zip(fp32, eager16, aiter16):
+        de, da = abs(e - f), abs(a - f)
+        rows.append((de, da, max(factor * de, floor)))
+    bad = [i + 1 for i, (_, da, lim) in enumerate(rows) if da > lim]
+    return rows, bad

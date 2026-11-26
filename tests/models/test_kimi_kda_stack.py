@@ -6,14 +6,17 @@
 
 """Tier 1: KDA-only K3 Tiny-L13 / K3.1-Pro stack (random init), ``LUMEN_KDA_AITER=1`` vs ``0``.
 
-Loss, logits and every parameter gradient, then a short SGD run whose loss
-curves must agree. The GPU test uses the real Tiny-L13 widths (9 KDA layers,
+Loss, logits and every parameter gradient, then an SGD trajectory following
+the Megatron-LM#6872 continuation protocol (32 steps, lr 1e-5 cosine to 1e-6;
+primary: per-step |aiter - eager| <= 1e-3). In bf16 the trajectories are also
+graded against an fp32 one: |aiter - fp32| <= max(4 x |eager_bf16 - fp32|, 1e-3). The GPU test uses the real Tiny-L13 widths (9 KDA layers,
 hidden 7168, 96 x 128 heads, vocab 163840) in BF16 on one gfx950 GPU; the CPU
 test uses tiny widths in fp32. Per-piece aiter kernels follow ``AITER_KDA_PIECES``.
 
     pytest -s tests/models/test_kimi_kda_stack.py
 """
 
+import contextlib
 import copy
 import os
 
@@ -36,7 +39,7 @@ def _skip_unless_precision(precision):
 
     if precision != "bf16" and not aiter_supports_gemm_precision():
         pytest.skip(f"aiter kda_layer_fwd has no gemm_precision={precision} (MXFP8 PR stacked on #8739)")
-STEPS = int(os.environ.get("LUMEN_KIMI_KDA_STACK_STEPS", "5"))
+STEPS = int(os.environ.get("LUMEN_KIMI_KDA_STACK_STEPS", str(kda_stack.MEGATRON_PARITY_STEPS)))
 
 
 def _gfx950():
@@ -65,6 +68,22 @@ def _fp32_reference(model, ids):
     return g
 
 
+def _sgd_curve(model, ids, aiter_kda, init, lr):
+    """SGD trajectory from ``init``; ``lr=None`` follows the #6872 continuation schedule."""
+    with torch.no_grad():
+        for n, p in model.named_parameters():
+            p.copy_(init[n])
+    curve = []
+    for step in range(STEPS):
+        l, _, grads = _step(model, ids, aiter_kda)
+        curve.append(l)
+        step_lr = kda_stack.megatron_continuation_lr(step) if lr is None else lr
+        with torch.no_grad():
+            for n, p in model.named_parameters():
+                p.add_(grads[n].to(p), alpha=-step_lr)
+    return curve
+
+
 def _check(model, ids, tol, loss_tol, lr, grad_tol=kda_stack.GRAD_REL_NORM_TOL, vs_fp32=False):
     init = {n: p.detach().clone() for n, p in model.named_parameters()}
     ref_loss, ref_logits, ref_g = _step(model, ids, False)
@@ -90,24 +109,21 @@ def _check(model, ids, tol, loss_tol, lr, grad_tol=kda_stack.GRAD_REL_NORM_TOL, 
         bad = {n: v for n, v in rel.items() if v > grad_tol}
         assert not bad, f"grad rel-norm over {grad_tol}: {bad}"
 
-    curves = {}
-    for aiter_kda in (False, True):
-        with torch.no_grad():
-            for n, p in model.named_parameters():
-                p.copy_(init[n])
-        curve = []
-        for _ in range(STEPS):
-            l, _, grads = _step(model, ids, aiter_kda)
-            curve.append(l)
-            with torch.no_grad():
-                for n, p in model.named_parameters():
-                    p.add_(grads[n].to(p), alpha=-lr)
-        curves[aiter_kda] = curve
-    print("loss curve eager:", curves[False])
-    print("loss curve aiter:", curves[True])
-    assert curves[False][-1] < curves[False][0]
-    for r, o in zip(curves[False], curves[True]):
-        assert abs(o - r) <= loss_tol, f"eager {curves[False]} vs aiter {curves[True]}"
+    curves = {"eager": _sgd_curve(model, ids, False, init, lr), "aiter": _sgd_curve(model, ids, True, init, lr)}
+    if vs_fp32:
+        ref = copy.deepcopy(model).float()
+        curves["fp32"] = _sgd_curve(ref, ids, False, {n: t.float() for n, t in init.items()}, lr)
+        del ref
+    for name, c in curves.items():
+        print(f"loss {name:6s}:", [f"{v:.6f}" for v in c])
+    d = [abs(o - r) for r, o in zip(curves["eager"], curves["aiter"])]
+    print(f"[primary] #6872 parity: max |aiter - eager| {max(d):.3e} at step {d.index(max(d)) + 1} (tol {loss_tol:g})")
+    assert max(d) <= loss_tol, f"step {d.index(max(d)) + 1}: |aiter - eager| {max(d):.3e} > {loss_tol:g}"
+    if vs_fp32:
+        rows, bad = kda_stack.loss_curve_vs_fp32(curves["fp32"], curves["eager"], curves["aiter"])
+        for i, (de, da, lim) in enumerate(rows, 1):
+            print(f"  step {i:2d} |eager-fp32| {de:.3e} |aiter-fp32| {da:.3e} limit {lim:.3e}")
+        assert not bad, f"|aiter - fp32| over max({kda_stack.LOSS_VS_FP32_FACTOR:g}x eager, floor) at steps {bad}"
 
 
 def test_k31_preset_layer_split():
@@ -118,6 +134,17 @@ def test_k31_preset_layer_split():
     k3 = tiny_l13.load_config(None)
     for key in ("hidden", "heads", "head_dim", "conv", "gate_rank", "eps", "gate_lower_bound", "vocab"):
         assert cfg[key] == k3[key], key
+
+
+@contextlib.contextmanager
+def _steps(n):
+    """Shorter trajectory for the small-width wiring check (a large lr makes 5 steps informative)."""
+    global STEPS
+    saved, STEPS = STEPS, n
+    try:
+        yield
+    finally:
+        STEPS = saved
 
 
 def _small_device():
@@ -137,7 +164,8 @@ def test_kda_stack_small_fp32(preset):
     cfg = dict(tiny_l13.load_config(None, preset=preset), hidden=64, heads=2, head_dim=16, gate_rank=16)
     model = kda_stack.build_kda_stack(cfg, vocab=97, num_layers=2, device=device, dtype=torch.float32)
     ids = torch.randint(0, 97, (1, 70), generator=torch.Generator().manual_seed(0)).to(device)
-    _check(model, ids, tol=1e-3, loss_tol=1e-4, lr=1e-1, grad_tol=1e-4)
+    with _steps(5):
+        _check(model, ids, tol=1e-3, loss_tol=1e-4, lr=1e-1, grad_tol=1e-4)
 
 
 @pytest.mark.skipif(not _gfx950(), reason="tier-1 KDA stack targets one gfx950 GPU")
@@ -147,7 +175,7 @@ def test_kda_stack_bf16(preset, num_layers):
     assert len(model.layers) == (num_layers or len(tiny_l13.KDA_LAYERS))
     ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
                         generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip
-    _check(model, ids, tol=5e-2, loss_tol=1e-3, lr=1e-3, vs_fp32=True)
+    _check(model, ids, tol=5e-2, loss_tol=kda_stack.MEGATRON_LOSS_PARITY_TOL, lr=None, vs_fp32=True)
 
 
 @pytest.mark.skipif(not _gfx950(), reason="tier-1 KDA stack targets one gfx950 GPU")
@@ -183,12 +211,12 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
             for n, p in model.named_parameters():
                 p.copy_(init[n])
         curve = []
-        for _ in range(max(STEPS, 2)):
+        for step in range(STEPS):
             l, _, grads = _step(model, ids, aiter_kda, prec)
             curve.append(l)
             with torch.no_grad():
                 for n, p in model.named_parameters():
-                    p.add_(grads[n].to(p), alpha=-1e-3)
+                    p.add_(grads[n].to(p), alpha=-kda_stack.megatron_continuation_lr(step))
         curves[aiter_kda] = curve
     d = [abs(a - b) for a, b in zip(curves[False], curves[True])]
     print("[primary] loss megatron-fla:", curves[False])

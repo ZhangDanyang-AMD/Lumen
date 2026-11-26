@@ -184,3 +184,20 @@ and tier-1 stack tests run an fp32 eager copy. For each tensor they require
 fp32 runs keep the strict `1e-2` direct comparison. The whole-net test and the benchmark have no fp32
 copy, so they compare aiter against eager directly at 3e-2. Tests, the diagnostic and the benchmark
 print `LAST_PIECES['gemm']`.
+
+## Loss-trajectory grading
+
+The tier-1 tests follow the Megatron-LM#6872 continuation protocol: 32 SGD steps from the same weights
+and data, with lr 1e-5 cosine to 1e-6 over 50 iterations and no warm-up. The primary check is
+per-step `|aiter − eager| ≤ 1e-3`.
+
+In BF16 the tests also run an fp32 trajectory and require, per step,
+`|aiter − fp32| ≤ max(4 × |eager_bf16 − fp32|, 1e-3)`:
+
+- **Factor 4:** the same bound as the grads. On gfx950, aiter measures 1.4–1.5× eager-bf16's grad
+  error against fp32.
+- **Floor 1e-3:** the #6872 tolerance, i.e. the loss difference Megatron accepts between two
+  implementations.
+
+All three trajectories are printed. The small-width fp32 wiring check keeps 5 steps at lr 0.1 so the
+trajectory moves.
