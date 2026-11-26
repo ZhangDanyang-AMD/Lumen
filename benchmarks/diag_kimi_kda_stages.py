@@ -164,14 +164,16 @@ def main():
     extra = {} if args.precision == "bf16" else {"gemm_precision": "mxfp8"}
     from lumen.models.kimi.kda_aiter import set_aiter_kda_precision
 
-    set_aiter_kda_precision("megatron")  # aiter rounds like #6872 for this comparison
+    # bf16: aiter rounds like #6872; fp32: aiter's default (fp32) precision, a pure wiring check
+    aiter_mode = "megatron" if dtype == torch.bfloat16 else "default"
+    set_aiter_kda_precision(aiter_mode)
     try:
         fused = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "fused", lower_bound=lb, **extra))
     finally:
         set_aiter_kda_precision(None)
     gemm = kfl.LAST_PIECES.get("gemm")
     torch_b = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "torch", lower_bound=lb))
-    print(f"  {'tensor':10s}{'aiter fused':>16s}{'aiter torch':>16s}   (||x - megatron|| / ||megatron||, gemm={gemm}; fused in aiter megatron precision)")
+    print(f"  {'tensor':10s}{'aiter fused':>16s}{'aiter torch':>16s}   (||x - megatron|| / ||megatron||, gemm={gemm}; fused in aiter {aiter_mode} precision)")
     for n, m, f, t in zip(["y"] + names, meg, fused, torch_b):
         print(f"  {n:10s}{rel(f.float(), m.float()):16.3e}{rel(t.float(), m.float()):16.3e}")
 
