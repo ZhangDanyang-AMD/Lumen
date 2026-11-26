@@ -13,10 +13,12 @@ real weights (including the padded [128] ``A_log``), otherwise random weights at
 the real shapes are used. Both sides use the safe gate (``gate_lower_bound=-5``).
 """
 
+import os
+
 import pytest
 import torch
 
-from lumen.models.kimi import tiny_l13
+from lumen.models.kimi import kda_reference, tiny_l13
 from lumen.models.kimi.kda_aiter import kda_layer_weights, patch_kda_layers, unpatch_kda_layers
 from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, KimiDeltaAttention, grad_parity_vs_fp32
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
@@ -138,4 +140,55 @@ def test_tiny_l13_kda_parity_bf16(layer, seqlen):
     rows, problems = grad_parity_vs_fp32(r32, e16, a16, cfg["heads"])
     print(f"layer {layer} T={seqlen} gemm={kfl.LAST_PIECES.get('gemm')} worst vs fp32 (eager_bf16, aiter_bf16, limit):",
           list(rows.items())[:5])  # fmt: skip
+    assert not problems, f"layer {layer}: {problems}"
+
+
+@pytest.mark.skipif(not _gfx950(), reason="Tiny-L13 KDA parity targets one gfx950 GPU")
+@pytest.mark.skipif(not kda_reference.fla_available(), reason="Megatron-LM#6872 reference needs fla-core (fla.ops.kda)")
+@pytest.mark.parametrize("seqlen", [100, 256])
+@pytest.mark.parametrize("layer", tiny_l13.KDA_LAYERS)
+def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
+    """aiter fused and Megatron-FLA, both bf16 activations with projections in ``LUMEN_KIMI_KDA_PRECISION``
+    (default mxfp8, as in the Megatron-LM#6872 recipes), graded against Megatron-FLA in fp32 with
+    unquantized projections (same rounded weights): aiter's error <= max(4 x Megatron's, 3e-2).
+
+    aiter torch bf16 is reported against the same reference as a secondary diagnostic.
+    """
+    from lumen.models.kimi.kda_aiter import aiter_supports_gemm_precision
+
+    prec = os.environ.get("LUMEN_KIMI_KDA_PRECISION", "mxfp8")
+    if prec != "bf16" and not aiter_supports_gemm_precision():
+        pytest.skip(f"aiter kda_layer_fwd has no gemm_precision={prec} (MXFP8 PR stacked on #8739)")
+    cfg = tiny_l13.load_config()
+    ts = tiny_l13.load_kda_tensors(layer, cfg=cfg)
+    lb = cfg["gate_lower_bound"]
+
+    def module(dtype, reference, precision="bf16"):
+        m = KimiDeltaAttention(cfg, 0, lb)
+        m.gemm_precision = precision
+        if dtype == torch.float32:
+            m.load_fields({n: t.to(torch.bfloat16).float() for n, t in ts.items()}).cuda()
+        else:
+            _to_train_dtype(m.load_fields(ts), "cuda", dtype)
+        m.reference = reference
+        return m
+
+    meg32, meg16 = module(torch.float32, "megatron-fla"), module(torch.bfloat16, "megatron-fla", prec)
+    torch16, fused16 = module(torch.bfloat16, "aiter-torch"), module(torch.bfloat16, "aiter-torch")
+    assert patch_kda_layers(fused16, backend="fused", gemm_precision=prec) == 1
+    g = torch.Generator(device="cuda").manual_seed(layer)
+    x = torch.randn(1, seqlen, cfg["hidden"], generator=g, device="cuda").to(torch.bfloat16)
+    dy = torch.randn(x.shape, generator=g, device="cuda").to(torch.bfloat16)
+    names = ["y", "dx"] + [n for n, _ in meg32.named_parameters()]
+    res = []
+    for m in (meg32, meg16, fused16, torch16):
+        xs = (x.float() if m is meg32 else x).clone().requires_grad_(True)
+        y = m(xs, attention_mask=None)
+        y.backward(dy.to(y.dtype))
+        torch.cuda.synchronize()
+        res.append({n: t.detach().float().cpu() for n, t in zip(names, [y, xs.grad] + [p.grad for p in m.parameters()])})
+    rows, problems = grad_parity_vs_fp32(res[0], res[1], res[2], cfg["heads"])
+    rows_t, _ = grad_parity_vs_fp32(res[0], res[1], res[3], cfg["heads"])
+    print(f"layer {layer} T={seqlen} precision={prec} vs Megatron-FLA fp32 (megatron_bf16, aiter_fused_bf16, limit):", list(rows.items())[:5])
+    print("  [secondary] aiter-torch bf16:", list(rows_t.items())[:5])
     assert not problems, f"layer {layer}: {problems}"

@@ -13,9 +13,11 @@ needed. K3 Tiny-L13 and K3.1-Pro share the KDA widths (hidden 7168, 96 heads x
 ``A_log`` padded to 128); they differ in which layers are KDA (9 of 13 vs 69 of 93).
 
 ``KimiDeltaAttention`` here has the remote-code parameter names and fp32
-conv/``A_log``/``dt_bias``/``o_norm``; its own forward is aiter's ``torch``
-reference (``kda_layer_fwd(backend="torch")``). ``patch_kda_layers`` swaps it
-for the aiter fused layer.
+conv/``A_log``/``dt_bias``/``o_norm``. Its own forward is selected by
+``reference``: ``"megatron-fla"`` (the Megatron-LM#6872 KDA layer with the FLA
+recurrence, ``kda_reference.megatron_kda_forward``) or ``"aiter-torch"``
+(``kda_layer_fwd(backend="torch")``). ``patch_kda_layers`` swaps it for the aiter
+fused layer.
 """
 
 import torch
@@ -46,6 +48,8 @@ class KimiDeltaAttention(nn.Module):
         D, H, K, W, R = (cfg[n] for n in ("hidden", "heads", "head_dim", "conv", "gate_rank"))
         HK = H * K
         self.layer_idx, self.num_heads, self.head_dim, self.gate_lower_bound = layer_idx, H, K, gate_lower_bound
+        self.reference = "aiter-torch"
+        self.gemm_precision = "bf16"
         self.q_proj, self.k_proj, self.v_proj = (nn.Linear(D, HK, bias=False) for _ in range(3))
         self.q_conv1d, self.k_conv1d, self.v_conv1d = (
             nn.Conv1d(HK, HK, W, groups=HK, padding=W - 1, bias=False) for _ in range(3)
@@ -73,8 +77,21 @@ class KimiDeltaAttention(nn.Module):
         return self
 
     def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
+        if self.reference == "megatron-fla":
+            from lumen.models.kimi.kda_reference import megatron_kda_forward
+
+            return megatron_kda_forward(
+                hidden_states,
+                kda_layer_weights(self),
+                self.num_heads,
+                lower_bound=self.gate_lower_bound,
+                eps=self.o_norm.eps,
+                cu_seqlens=kwargs.get("cu_seqlens"),
+                precision=self.gemm_precision,
+            )
         from aiter.ops.kda_fused_layer import kda_layer_fwd
 
+        extra = {} if self.gemm_precision == "bf16" else {"gemm_precision": self.gemm_precision}
         return kda_layer_fwd(
             hidden_states,
             kda_layer_weights(self),
@@ -83,6 +100,7 @@ class KimiDeltaAttention(nn.Module):
             backend="torch",
             cu_seqlens=kwargs.get("cu_seqlens"),
             lower_bound=self.gate_lower_bound,
+            **extra,
         )
 
 
@@ -135,6 +153,25 @@ def build_kda_stack(
             p.data = p.data.float()
     return model
 
+
+REFERENCES = ("aiter-torch", "megatron-fla")
+
+
+def set_reference(model, reference, precision=None):
+    """Select the unpatched KDA forward (and its GEMM precision) of every ``KimiDeltaAttention``."""
+    if reference not in REFERENCES:
+        raise ValueError(f"unknown KDA reference {reference!r}, expected {REFERENCES}")
+    for m in model.modules():
+        if isinstance(m, KimiDeltaAttention):
+            m.reference = reference
+            if precision is not None:
+                m.gemm_precision = precision
+    return model
+
+
+# Megatron-LM#6872 continuation protocol: 32 steps, max per-step LM-loss difference within 1e-3.
+MEGATRON_LOSS_PARITY_TOL = 1e-3
+MEGATRON_PARITY_STEPS = 32
 
 GRAD_REL_NORM_TOL = 1e-2
 

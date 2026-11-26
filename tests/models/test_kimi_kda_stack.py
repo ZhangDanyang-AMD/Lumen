@@ -20,13 +20,22 @@ import os
 import pytest
 import torch
 
-from lumen.models.kimi import kda_stack, tiny_l13
+from lumen.models.kimi import kda_reference, kda_stack, tiny_l13
 from lumen.models.kimi.kda_aiter import KDA_AITER_ENV, maybe_patch_kda_layers, unpatch_kda_layers
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 pytestmark = pytest.mark.skipif(not _probe_aiter_kda_fused_layer(), reason="aiter kda_fused_layer (aiter#8739) missing")
 
 SEQLEN = int(os.environ.get("LUMEN_KIMI_KDA_STACK_SEQLEN", "512"))
+# GEMM precision of the Megatron-LM#6872 comparison; mxfp8 matches its recipes (TE MXFP8BlockScaling)
+MEGATRON_PRECISION = os.environ.get("LUMEN_KIMI_KDA_PRECISION", "mxfp8")
+
+
+def _skip_unless_precision(precision):
+    from lumen.models.kimi.kda_aiter import aiter_supports_gemm_precision
+
+    if precision != "bf16" and not aiter_supports_gemm_precision():
+        pytest.skip(f"aiter kda_layer_fwd has no gemm_precision={precision} (MXFP8 PR stacked on #8739)")
 STEPS = int(os.environ.get("LUMEN_KIMI_KDA_STACK_STEPS", "5"))
 
 
@@ -34,10 +43,10 @@ def _gfx950():
     return torch.cuda.is_available() and "gfx950" in torch.cuda.get_device_properties(0).gcnArchName
 
 
-def _step(model, ids, aiter_kda):
+def _step(model, ids, aiter_kda, gemm_precision="bf16"):
     os.environ[KDA_AITER_ENV] = "1" if aiter_kda else "0"
     unpatch_kda_layers(model)
-    assert maybe_patch_kda_layers(model) == (len(model.layers) if aiter_kda else 0)
+    assert maybe_patch_kda_layers(model, gemm_precision=gemm_precision) == (len(model.layers) if aiter_kda else 0)
     model.zero_grad(set_to_none=True)
     loss, logits = model(ids, labels=ids)
     loss.backward()
@@ -139,3 +148,50 @@ def test_kda_stack_bf16(preset, num_layers):
     ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
                         generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip
     _check(model, ids, tol=5e-2, loss_tol=1e-3, lr=1e-3, vs_fp32=True)
+
+
+@pytest.mark.skipif(not _gfx950(), reason="tier-1 KDA stack targets one gfx950 GPU")
+@pytest.mark.skipif(not kda_reference.fla_available(), reason="Megatron-LM#6872 reference needs fla-core (fla.ops.kda)")
+@pytest.mark.parametrize("preset,num_layers", [("k3-tiny-l13", None), ("k3.1-pro", 9)])
+def test_kda_stack_vs_megatron_fla(preset, num_layers):
+    """Primary: Megatron-LM#6872 loss parity (per-step |dloss| <= 1e-3) of aiter vs the Megatron KDA
+    layer (FLA recurrence), both with KDA projections in ``LUMEN_KIMI_KDA_PRECISION`` (default mxfp8).
+    Secondary diagnostics: step-1 grads vs Megatron and vs aiter-torch (bf16 GEMMs)."""
+    prec = MEGATRON_PRECISION
+    _skip_unless_precision(prec)
+    model = kda_stack.build_kda_stack(preset=preset, num_layers=num_layers)
+    kda_stack.set_reference(model, "megatron-fla", prec)
+    ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
+                        generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip
+    init = {n: p.detach().clone() for n, p in model.named_parameters()}
+    heads = model.layers[0].self_attn.num_heads
+
+    _, _, g_meg = _step(model, ids, False)
+    _, _, g_aiter = _step(model, ids, True, prec)
+    kda_stack.set_reference(model, "aiter-torch", "bf16")
+    _, _, g_torch = _step(model, ids, False)
+    kda_stack.set_reference(model, "megatron-fla", prec)
+    print(f"precision={prec}")
+    rel_a, _, _ = kda_stack.grad_parity(g_meg, g_aiter, heads)
+    rel_t, _, _ = kda_stack.grad_parity(g_meg, g_torch, heads)
+    print("[secondary] step-1 grad ||x-megatron||/||megatron||, worst aiter-fused:", list(rel_a.items())[:5])
+    print("[secondary] worst aiter-torch:", list(rel_t.items())[:5])
+
+    curves = {}
+    for aiter_kda in (False, True):
+        with torch.no_grad():
+            for n, p in model.named_parameters():
+                p.copy_(init[n])
+        curve = []
+        for _ in range(max(STEPS, 2)):
+            l, _, grads = _step(model, ids, aiter_kda, prec)
+            curve.append(l)
+            with torch.no_grad():
+                for n, p in model.named_parameters():
+                    p.add_(grads[n].to(p), alpha=-1e-3)
+        curves[aiter_kda] = curve
+    d = [abs(a - b) for a, b in zip(curves[False], curves[True])]
+    print("[primary] loss megatron-fla:", curves[False])
+    print("[primary] loss aiter       :", curves[True])
+    print(f"[primary] max |dloss| {max(d):.3e} (tol {kda_stack.MEGATRON_LOSS_PARITY_TOL:g})")
+    assert max(d) <= kda_stack.MEGATRON_LOSS_PARITY_TOL

@@ -45,6 +45,8 @@ def parse_args():
     p.add_argument("--no-lower-bound", action="store_true", help="use the softplus gate instead of the safe gate")
     p.add_argument("--chunk-size", type=int, default=64)
     p.add_argument("--device", default="cuda")
+    p.add_argument("--precision", choices=["bf16", "mxfp8"], default="bf16",
+                   help="KDA projection GEMMs for section [4] (Megatron-LM#6872 reference vs aiter)")
     return p.parse_args()
 
 
@@ -131,6 +133,29 @@ def main():
         print(f"  pieces[{lbl}]: gemm={table[lbl][1].get('gemm')} {table[lbl][1]}")
     pad = dw_ref.A_log[H:].abs().max().item() if dw_ref.A_log.numel() > H else 0.0
     print(f"\n  padded A_log grad max |.|: eager {pad}")
+
+    from lumen.models.kimi import kda_reference
+
+    if not kda_reference.fla_available():
+        print("\n[4] skipped: Megatron-LM#6872 reference needs fla-core (fla.ops.kda)")
+        return
+    print(f"\n[4] vs Megatron-LM#6872 KDA layer (FLA recurrence), projections {args.precision}")
+
+    def run(fn):
+        xs = x.detach().requires_grad_(True)
+        ws = [t.detach().requires_grad_(True) for t in w.tensors()]
+        y = fn(xs, kfl.KDALayerWeights.from_tensors(ws))
+        dxw = torch.autograd.grad(y, [xs, *ws], dy)
+        return [y.detach(), *dxw]
+
+    meg = run(lambda xs, ww: kda_reference.megatron_kda_forward(xs, ww, H, lb, eps, precision=args.precision))
+    extra = {} if args.precision == "bf16" else {"gemm_precision": args.precision}
+    fused = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "fused", lower_bound=lb, **extra))
+    gemm = kfl.LAST_PIECES.get("gemm")
+    torch_b = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "torch", lower_bound=lb))
+    print(f"  {'tensor':10s}{'aiter fused':>16s}{'aiter torch':>16s}   (||x - megatron|| / ||megatron||, gemm={gemm})")
+    for n, m, f, t in zip(["y"] + names, meg, fused, torch_b):
+        print(f"  {n:10s}{rel(f.float(), m.float()):16.3e}{rel(t.float(), m.float()):16.3e}")
 
 
 if __name__ == "__main__":

@@ -36,13 +36,14 @@ starts from the same weights and token stream. Per-piece aiter kernels follow
 
 import argparse
 import json
+import math
 import os
 import statistics
 import time
 
 import torch
 
-from lumen.models.kimi import kda_stack, tiny_l13
+from lumen.models.kimi import kda_reference, kda_stack, tiny_l13
 from lumen.models.kimi.kda_aiter import KDA_AITER_ENV, maybe_patch_kda_layers, unpatch_kda_layers
 
 LOSS_PARITY_TOL = 1e-3  # Megatron-LM#6872 continuation protocol: max LM-loss difference within 1e-3
@@ -65,7 +66,14 @@ def parse_args():
     p.add_argument("--steps", type=int, default=50, help="total steps per mode (timing and loss curve)")
     p.add_argument("--warmup", type=int, default=5, help="steps excluded from the medians")
     p.add_argument("--parity-steps", type=int, default=32, help="leading steps used for loss parity")
-    p.add_argument("--modes", default="eager,aiter")
+    p.add_argument("--modes", default="eager,aiter", help="eager = the --reference KDA, aiter = kda_layer_fwd")
+    p.add_argument("--reference", choices=list(kda_stack.REFERENCES), default="megatron-fla",
+                   help="eager KDA: Megatron-LM#6872 KDA layer with the FLA recurrence (primary), or aiter torch")
+    p.add_argument("--precision", choices=list(kda_reference.PRECISIONS), default=None,
+                   help="KDA projection GEMMs on both sides (default: mxfp8 for megatron-fla, bf16 for aiter-torch)")
+    p.add_argument("--lr-schedule", choices=["megatron-continuation", "constant"], default=None,
+                   help="megatron-continuation: lr 1e-5 cosine to 1e-6 over 50 iters, no warm-up "
+                        "(default with megatron-fla); constant: --lr")
     p.add_argument("--optimizer", choices=["sgd", "adamw"], default="sgd")
     p.add_argument("--lr", type=float, default=1e-5)
     p.add_argument("--data", choices=["mock"], default="mock")
@@ -131,7 +139,7 @@ def lm_loss(model, ids):
 def run_mode(model, mode, args, init, ids_steps):
     os.environ[KDA_AITER_ENV] = "1" if mode == "aiter" else "0"
     unpatch_kda_layers(model)
-    patched = maybe_patch_kda_layers(model)
+    patched = maybe_patch_kda_layers(model, gemm_precision=args.precision)
     with torch.no_grad():
         for p, p0 in zip(trainable(model), init):
             p.copy_(p0)
@@ -144,6 +152,10 @@ def run_mode(model, mode, args, init, ids_steps):
     torch.cuda.reset_peak_memory_stats()
     records = []
     for step, ids in enumerate(ids_steps, start=1):
+        if args.lr_schedule == "megatron-continuation":
+            t = min(step - 1, 50) / 50
+            for group in opt.param_groups:
+                group["lr"] = 1e-6 + 0.5 * (1e-5 - 1e-6) * (1 + math.cos(math.pi * t))
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         opt.zero_grad(set_to_none=True)
@@ -195,19 +207,29 @@ def main():
         args.seq_len = 2048 if args.tier == "kda-only" else 4096
     if args.grad_check is None:
         args.grad_check = args.tier == "kda-only"
+    if args.precision is None:
+        args.precision = "mxfp8" if args.reference == "megatron-fla" else "bf16"
+    if args.lr_schedule is None:
+        args.lr_schedule = "megatron-continuation" if args.reference == "megatron-fla" else "constant"
+    if args.reference == "megatron-fla" and not kda_reference.fla_available():
+        raise SystemExit("--reference megatron-fla needs fla-core (fla.ops.kda); or pass --reference aiter-torch")
     tokens = args.micro_batch * args.seq_len
     if args.tier == "kda-only":
         cfg = tiny_l13.load_config(None, preset=args.model)
         if args.num_layers is None and args.model == "k3.1-pro":
             args.num_layers = 9  # all 69 K3.1 KDA layers (~41B params + grads) do not fit one GPU
         model = kda_stack.build_kda_stack(cfg, num_layers=args.num_layers)
+        kda_stack.set_reference(model, args.reference, args.precision if args.reference == "megatron-fla" else "bf16")
         vocab = cfg["vocab"]
-        recipe = f"{args.model} KDA-only ({len(model.layers)} of {len(cfg['kda_layers'])} KDA layers) BF16"
+        recipe = (f"{args.model} KDA-only ({len(model.layers)} of {len(cfg['kda_layers'])} KDA layers), "
+                  f"KDA GEMMs {args.precision}")  # fmt: skip
         flops = kda_only_flops_per_step(cfg, len(model.layers), vocab, tokens)
     else:
         model = tiny_l13.load_hf_model(args.ckpt)
+        if args.reference == "megatron-fla":
+            kda_reference.patch_kda_reference(model, args.precision)
         cfg_text = model.config.get_text_config()
-        vocab, recipe = cfg_text.vocab_size, "Tiny-L13 full BF16"
+        vocab, recipe = cfg_text.vocab_size, f"Tiny-L13 full, KDA GEMMs {args.precision}"
         flops = model_flops_per_step(cfg_text, tokens, args.seq_len)
     model.train()
     init = [p.detach().cpu().clone() for p in trainable(model)]
@@ -236,9 +258,11 @@ def main():
         dloss = [abs(a["loss"] - b["loss"]) for a, b in zip(ref, got)]
         dgn = [abs(a["grad_norm"] - b["grad_norm"]) / max(abs(a["grad_norm"]), 1e-12) for a, b in zip(ref, got)]
         ok = max(dloss) <= LOSS_PARITY_TOL
-        print(f"\nLM-loss parity over {n} steps: max |dloss| = {max(dloss):.3e} "
-              f"(step {dloss.index(max(dloss)) + 1}), final {dloss[-1]:.3e}, "
-              f"max rel grad-norm diff {max(dgn):.3e} -> {'PASS' if ok else 'FAIL'} (tol {LOSS_PARITY_TOL:g})")  # fmt: skip
+        print(f"\n[primary] Megatron-LM#6872 LM-loss parity vs {args.reference} ({args.precision}, "
+              f"lr {args.lr_schedule}) over {n} steps: max |dloss| = {max(dloss):.3e} "
+              f"(step {dloss.index(max(dloss)) + 1}), final {dloss[-1]:.3e} -> {'PASS' if ok else 'FAIL'} "
+              f"(tol {LOSS_PARITY_TOL:g})")  # fmt: skip
+        print(f"[secondary] max rel grad-norm diff {max(dgn):.3e}")
         print("aiter pieces:", by_mode["aiter"]["pieces"], "gemm:", by_mode["aiter"]["pieces"]["ran"].get("gemm"))
         if args.grad_check:
             gr, gg = by_mode["eager"]["grads_step1"], by_mode["aiter"]["grads_step1"]
@@ -246,7 +270,7 @@ def main():
             heads = next(m.num_heads for m in model.modules() if hasattr(m, "num_heads") and hasattr(m, "A_log"))
             rel, problems, diag = kda_stack.grad_parity(gr, gg, heads)
             bad = [n for n, e in rel.items() if e > args.grad_tol]
-            print(f"step-1 grads ({len(rel)} params), worst ||a-b||/||b||:")
+            print(f"[secondary] step-1 grads ({len(rel)} params), worst ||a-b||/||b||:")
             for n, e in list(rel.items())[:5]:
                 print(f"  {n}: {e:.3e}")
             for n, rows in list(diag.items())[:3]:

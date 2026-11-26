@@ -17,7 +17,8 @@ original parameters and no weight is copied.
 
 Enable with ``LUMEN_KDA_AITER=1`` (or ``patch_kda_layers(model)`` directly).
 ``LUMEN_KDA_AITER_BACKEND`` picks the aiter layer backend (``torch`` or
-``fused``, default ``fused``); per-piece kernels inside the fused backend are
+``fused``, default ``fused``); ``LUMEN_KDA_AITER_GEMM_PRECISION=mxfp8`` passes
+``gemm_precision="mxfp8"`` (needs the MXFP8 aiter PR stacked on #8739); per-piece kernels inside the fused backend are
 chosen by aiter's ``AITER_KDA_PIECES`` / ``set_kda_pieces``.
 
 ``A_log`` is per head and may be padded past ``num_heads`` (K3 checkpoints
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 KDA_AITER_ENV = "LUMEN_KDA_AITER"
 KDA_AITER_BACKEND_ENV = "LUMEN_KDA_AITER_BACKEND"
+KDA_AITER_GEMM_PRECISION_ENV = "LUMEN_KDA_AITER_GEMM_PRECISION"
 _ORIG_FORWARD = "_lumen_kda_orig_forward"
 _KDA_ATTRS = ("q_proj", "k_proj", "v_proj", "q_conv1d", "f_a_proj", "f_b_proj", "A_log", "o_norm", "o_proj")
 
@@ -121,12 +123,25 @@ def _unsupported_reason(mod, attention_mask, cache_params, kwargs):
     return None
 
 
-def _make_forward(mod, backend, chunk_size):
+def aiter_supports_gemm_precision():
+    from aiter.ops.kda_fused_layer import kda_layer_fwd
+
+    return "gemm_precision" in inspect.signature(kda_layer_fwd).parameters
+
+
+def _make_forward(mod, backend, chunk_size, gemm_precision="bf16"):
     from aiter.ops.kda_fused_layer import kda_layer_fwd
 
     orig = getattr(mod, _ORIG_FORWARD)
     if "lower_bound" not in inspect.signature(kda_layer_fwd).parameters:
         raise ImportError("aiter kda_layer_fwd lacks lower_bound; need ROCm/aiter#8739 at bbed79a or later")
+    extra = {}
+    if gemm_precision != "bf16":
+        if not aiter_supports_gemm_precision():
+            raise ImportError(
+                f"aiter kda_layer_fwd has no gemm_precision; {gemm_precision} needs the MXFP8 PR stacked on #8739"
+            )
+        extra["gemm_precision"] = gemm_precision
     warned = set()
 
     def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
@@ -146,6 +161,7 @@ def _make_forward(mod, backend, chunk_size):
             backend=backend,
             cu_seqlens=kwargs.get("cu_seqlens"),
             lower_bound=_gate_lower_bound(self),
+            **extra,
         )
 
     return types.MethodType(forward, mod)
@@ -164,7 +180,9 @@ def kda_layer_ids(model: torch.nn.Module):
     return frozenset(i - 1 for i in la["kda_layers"])
 
 
-def patch_kda_layers(model: torch.nn.Module, backend: str | None = None, chunk_size: int = 64) -> int:
+def patch_kda_layers(
+    model: torch.nn.Module, backend: str | None = None, chunk_size: int = 64, gemm_precision: str | None = None
+) -> int:
     """Replace every KDA layer forward in ``model`` with aiter's; returns the count patched.
 
     When the model config lists ``kda_layers``, only modules whose ``layer_idx`` is in it are patched.
@@ -175,6 +193,7 @@ def patch_kda_layers(model: torch.nn.Module, backend: str | None = None, chunk_s
             "(branch cursor/kda-fused-layer-bwd-8350)"
         )
     backend = backend or os.environ.get(KDA_AITER_BACKEND_ENV, "fused")
+    gemm_precision = gemm_precision or os.environ.get(KDA_AITER_GEMM_PRECISION_ENV, "bf16")
     layer_ids = kda_layer_ids(model)
     n = 0
     for name, mod in model.named_modules():
@@ -185,7 +204,7 @@ def patch_kda_layers(model: torch.nn.Module, backend: str | None = None, chunk_s
                            name, getattr(mod, "layer_idx", None))  # fmt: skip
             continue
         setattr(mod, _ORIG_FORWARD, mod.forward)
-        mod.forward = _make_forward(mod, backend, chunk_size)
+        mod.forward = _make_forward(mod, backend, chunk_size, gemm_precision)
         n += 1
         logger.debug("KDA aiter path: patched %s (backend=%s)", name, backend)
     logger.info("KDA aiter path: patched %d KDA layer(s), backend=%s", n, backend)
@@ -202,6 +221,6 @@ def unpatch_kda_layers(model: torch.nn.Module) -> int:
     return n
 
 
-def maybe_patch_kda_layers(model: torch.nn.Module) -> int:
+def maybe_patch_kda_layers(model: torch.nn.Module, gemm_precision: str | None = None) -> int:
     """``patch_kda_layers`` when ``LUMEN_KDA_AITER`` is set, else a no-op."""
-    return patch_kda_layers(model) if kda_aiter_enabled() else 0
+    return patch_kda_layers(model, gemm_precision=gemm_precision) if kda_aiter_enabled() else 0

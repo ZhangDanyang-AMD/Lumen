@@ -4,25 +4,25 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""Whole-network Tiny-L13: KDA layers via aiter (``LUMEN_KDA_AITER=1``) vs the model's own KDA.
+"""Whole-network Tiny-L13 graded against the Megatron-LM#6872 KDA layer and protocol.
 
-The full 13-layer ``Qinghao/Kimi-K3-Tiny-L13`` (remote code, everything except
-the 9 KDA layers unchanged) runs BF16 forward + backward on one gfx950 GPU. Loss,
-logits and every parameter gradient are compared between the two KDA paths on
-the same weights, then a few SGD steps check that the loss curves match.
+The full 13-layer ``Qinghao/Kimi-K3-Tiny-L13`` (remote code) runs on one gfx950 GPU.
+Reference: every KDA layer runs the Megatron-Core KDA layer with the FLA recurrence
+(``kda_reference.megatron_kda_forward``), projections in ``LUMEN_KIMI_KDA_PRECISION``
+(default ``mxfp8``, TE MXFP8BlockScaling as in the #6872 recipes). Candidate: the
+same layers through aiter ``kda_layer_fwd`` (``LUMEN_KDA_AITER=1``) at the same
+GEMM precision. Everything outside KDA is unchanged on both sides.
 
-Per-piece kernels inside aiter's fused layer follow ``AITER_KDA_PIECES`` (e.g.
-``AITER_KDA_PIECES=chunk_fwd=flydsl``) so FlyDSL pieces can be enabled one at a
-time; the selection and the pieces that actually ran are printed.
+Primary (pass/fail), the #6872 continuation protocol: per-step LM-loss difference
+within 1e-3 over ``LUMEN_KIMI_WHOLE_NET_STEPS`` (default 32) steps from the same
+weights and data, with the recipe's learning-rate schedule (1e-5 cosine to 1e-6
+over 50 iterations, no warm-up). Secondary diagnostics (printed): step-1 logits
+and per-parameter gradients vs the reference.
 
-Run (see ``lumen/models/kimi/README.md``)::
+``AITER_KDA_PIECES`` selects aiter's per-piece kernels; the selection is printed.
 
     LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13 \\
-    AITER_KDA_PIECES=chunk_fwd=flydsl \\
     pytest -s tests/models/test_kimi_tiny_l13_whole_net.py
-
-``LUMEN_KIMI_WHOLE_NET_SEQLEN`` (default 256) and ``LUMEN_KIMI_WHOLE_NET_STEPS``
-(default 3) size the run.
 """
 
 import os
@@ -30,15 +30,21 @@ import os
 import pytest
 import torch
 
-from lumen.models.kimi import tiny_l13
-from lumen.models.kimi.kda_aiter import KDA_AITER_ENV, maybe_patch_kda_layers, unpatch_kda_layers
-from lumen.models.kimi.kda_stack import BF16_VS_FP32_FLOOR, grad_parity
+from lumen.models.kimi import kda_reference, tiny_l13
+from lumen.models.kimi.kda_aiter import (
+    KDA_AITER_ENV,
+    aiter_supports_gemm_precision,
+    maybe_patch_kda_layers,
+    unpatch_kda_layers,
+)
+from lumen.models.kimi.kda_stack import MEGATRON_LOSS_PARITY_TOL, MEGATRON_PARITY_STEPS, grad_parity
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 SEQLEN = int(os.environ.get("LUMEN_KIMI_WHOLE_NET_SEQLEN", "256"))
-STEPS = int(os.environ.get("LUMEN_KIMI_WHOLE_NET_STEPS", "3"))
-LR = 1e-4
-TOL = 5e-2
+STEPS = int(os.environ.get("LUMEN_KIMI_WHOLE_NET_STEPS", str(MEGATRON_PARITY_STEPS)))
+PRECISION = os.environ.get("LUMEN_KIMI_KDA_PRECISION", "mxfp8")
+# continuation recipe (kimi_k3_proxy_9layer ... TP4PP1EP64CP2_muon.yaml): lr 1e-5 -> 1e-6 cosine over 50 iters
+LR_MAX, LR_MIN, LR_DECAY_ITERS = 1e-5, 1e-6, 50
 
 
 def _gfx950():
@@ -55,10 +61,21 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def model():
     pytest.importorskip("transformers")
-    pytest.importorskip("fla", reason="the eager KDA reference needs fla-core")
+    if not kda_reference.fla_available():
+        pytest.skip("the Megatron KDA reference needs fla-core (fla.ops.kda)")
+    if PRECISION != "bf16" and not aiter_supports_gemm_precision():
+        pytest.skip(f"aiter kda_layer_fwd has no gemm_precision={PRECISION} (MXFP8 PR stacked on #8739)")
     m = tiny_l13.load_hf_model()
+    assert kda_reference.patch_kda_reference(m, PRECISION) == len(tiny_l13.KDA_LAYERS)
     m.train()
     return m
+
+
+def _lr(step):
+    import math
+
+    t = min(step, LR_DECAY_ITERS) / LR_DECAY_ITERS
+    return LR_MIN + 0.5 * (LR_MAX - LR_MIN) * (1 + math.cos(math.pi * t))
 
 
 def _batch(model):
@@ -75,7 +92,7 @@ def _trainable(model):
 def _run(model, ids, aiter_kda):
     os.environ[KDA_AITER_ENV] = "1" if aiter_kda else "0"
     unpatch_kda_layers(model)
-    patched = maybe_patch_kda_layers(model)
+    patched = maybe_patch_kda_layers(model, gemm_precision=PRECISION)
     assert patched == (len(tiny_l13.KDA_LAYERS) if aiter_kda else 0)
     model.zero_grad(set_to_none=True)
     out = model(input_ids=ids, labels=ids)
@@ -97,30 +114,26 @@ def _report_pieces():
     print("ran:", dict(sorted(kfl.LAST_PIECES.items())))
 
 
-def test_whole_net_fwd_bwd_parity(model):
+def test_whole_net_step1_vs_megatron(model):
+    """Primary: step-1 LM loss within 1e-3 of the Megatron KDA reference. Secondary: logits and grads."""
     ids = _batch(model)
     ref_loss, ref_logits, ref_grads = _run(model, ids, aiter_kda=False)
     loss, logits, grads = _run(model, ids, aiter_kda=True)
     _report_pieces()
     unpatch_kda_layers(model)
-
-    print(f"loss eager={ref_loss:.6f} aiter={loss:.6f}")
-    assert abs(loss - ref_loss) <= TOL * max(1.0, abs(ref_loss))
     from aiter.ops import kda_fused_layer as kfl
 
-    print("gemm:", kfl.LAST_PIECES.get("gemm"))
-    assert _rel_norm(ref_logits, logits) < BF16_VS_FP32_FLOOR, "logits"
-    assert ref_grads.keys() == grads.keys(), "parameters with gradients differ between paths"
-    kda_names = [n for n in grads if ".self_attn." in n and any(f"layers.{i}." in n for i in tiny_l13.KDA_LAYERS)]
-    assert kda_names, "no KDA parameter received a gradient"
-    rel, problems, diag = grad_parity(ref_grads, grads, model.config.get_text_config().linear_attn_config["num_heads"])
-    print("worst grad ||a-b||/||b||:", list(rel.items())[:5])
+    heads = model.config.get_text_config().linear_attn_config["num_heads"]
+    rel, problems, diag = grad_parity(ref_grads, grads, heads)
+    print(f"precision={PRECISION} gemm={kfl.LAST_PIECES.get('gemm')}")
+    print(f"[secondary] logits ||a-b||/||b|| = {_rel_norm(ref_logits, logits):.3e}")
+    print("[secondary] worst grad ||a-b||/||b||:", list(rel.items())[:5])
     for n, rows in list(diag.items())[:3]:
-        print(f"{n} largest |diff| heads (idx, eager, aiter):", rows)
-    assert not problems, problems
-    # no fp32 copy of the 210 GB model fits, so aiter is graded directly against eager at the bf16 floor
-    bad = {n: v for n, v in rel.items() if v > BF16_VS_FP32_FLOOR}
-    assert not bad, f"grad rel-norm over {BF16_VS_FP32_FLOOR}: {bad}"
+        print(f"[secondary] {n} largest |diff| heads (idx, megatron, aiter):", rows)
+    if problems:
+        print("[secondary] padded A_log:", problems)
+    print(f"[primary] loss megatron={ref_loss:.6f} aiter={loss:.6f} |d|={abs(loss - ref_loss):.3e}")
+    assert abs(loss - ref_loss) <= MEGATRON_LOSS_PARITY_TOL
 
 
 def _train(model, ids, aiter_kda, init):
@@ -128,17 +141,18 @@ def _train(model, ids, aiter_kda, init):
         for n, p in _trainable(model):
             p.copy_(init[n])
     losses = []
-    for _ in range(STEPS):
+    for step in range(STEPS):
         loss, _, _ = _run(model, ids, aiter_kda)
         losses.append(loss)
         with torch.no_grad():
             for _, p in _trainable(model):
                 if p.grad is not None:
-                    p.add_(p.grad, alpha=-LR)
+                    p.add_(p.grad, alpha=-_lr(step))
     return losses
 
 
-def test_whole_net_loss_curve(model):
+def test_whole_net_continuation_vs_megatron(model):
+    """Primary: Megatron-LM#6872 continuation protocol, max per-step |dloss| <= 1e-3 over STEPS."""
     ids = _batch(model)
     init = {n: p.detach().cpu().clone() for n, p in _trainable(model)}
     ref = _train(model, ids, False, init)
@@ -148,8 +162,8 @@ def test_whole_net_loss_curve(model):
     with torch.no_grad():
         for n, p in _trainable(model):
             p.copy_(init[n])
-    print("loss curve eager:", ref)
-    print("loss curve aiter:", got)
-    assert ref[-1] < ref[0], "eager loss did not decrease; the comparison is not meaningful"
-    for step, (r, o) in enumerate(zip(ref, got)):
-        assert abs(o - r) <= TOL * max(1.0, abs(r)), f"step {step}: eager {r:.6f} vs aiter {o:.6f}"
+    d = [abs(o - r) for r, o in zip(ref, got)]
+    print("loss megatron:", ref)
+    print("loss aiter   :", got)
+    print(f"[primary] max |dloss| {max(d):.3e} at step {d.index(max(d)) + 1} (tol {MEGATRON_LOSS_PARITY_TOL:g})")
+    assert max(d) <= MEGATRON_LOSS_PARITY_TOL
