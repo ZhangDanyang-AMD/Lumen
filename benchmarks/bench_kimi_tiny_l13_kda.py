@@ -4,7 +4,15 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""Whole-network Kimi-K3 Tiny-L13 benchmark: aiter KDA vs the model's own KDA.
+"""Kimi-K3 Tiny-L13 benchmark: aiter KDA vs the model's own KDA.
+
+Tiers:
+
+* ``kda-only`` (default): the 9 Tiny-L13 KDA layers stacked (embedding, RMSNorm +
+  KDA + residual blocks, final norm, LM head; MLA and MoE omitted), random init
+  from the Tiny-L13 config. No checkpoint, no compressed-tensors, no fla-core.
+  The eager side is aiter's ``torch`` reference layer.
+* ``full``: the 13-layer remote-code checkpoint (``LUMEN_KIMI_TINY_L13_PATH``).
 
 Reporting follows NVIDIA/Megatron-LM#6872 ("Released recipes and benchmarks"
 and section 1.5) where one GPU allows:
@@ -20,9 +28,10 @@ Each mode (``eager``: ``LUMEN_KDA_AITER=0``; ``aiter``: ``LUMEN_KDA_AITER=1``)
 starts from the same weights and token stream. Per-piece aiter kernels follow
 ``AITER_KDA_PIECES``.
 
+    python benchmarks/bench_kimi_tiny_l13_kda.py                     # tier kda-only
+    AITER_KDA_PIECES=chunk_fwd=flydsl python benchmarks/bench_kimi_tiny_l13_kda.py
     LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13 \\
-    AITER_KDA_PIECES=chunk_fwd=flydsl \\
-    python benchmarks/bench_kimi_tiny_l13_kda.py --seq-len 4096 --steps 50 --warmup 5
+    python benchmarks/bench_kimi_tiny_l13_kda.py --tier full --seq-len 4096
 """
 
 import argparse
@@ -33,7 +42,7 @@ import time
 
 import torch
 
-from lumen.models.kimi import tiny_l13
+from lumen.models.kimi import kda_stack, tiny_l13
 from lumen.models.kimi.kda_aiter import KDA_AITER_ENV, maybe_patch_kda_layers, unpatch_kda_layers
 
 LOSS_PARITY_TOL = 1e-3  # Megatron-LM#6872 continuation protocol: max LM-loss difference within 1e-3
@@ -41,8 +50,12 @@ LOSS_PARITY_TOL = 1e-3  # Megatron-LM#6872 continuation protocol: max LM-loss di
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--ckpt", default=None, help="Tiny-L13 snapshot (default: $LUMEN_KIMI_TINY_L13_PATH)")
-    p.add_argument("--seq-len", type=int, default=4096)
+    p.add_argument("--tier", choices=["kda-only", "full"], default="kda-only")
+    p.add_argument("--ckpt", default=None, help="tier full: Tiny-L13 snapshot (default: $LUMEN_KIMI_TINY_L13_PATH)")
+    p.add_argument("--seq-len", type=int, default=None, help="default 2048 (kda-only) / 4096 (full)")
+    p.add_argument("--grad-check", action=argparse.BooleanOptionalAction, default=None,
+                   help="compare every parameter gradient at step 1 (default: on for kda-only)")
+    p.add_argument("--grad-tol", type=float, default=5e-2, help="max |dgrad| / max |grad_ref| per parameter")
     p.add_argument("--micro-batch", type=int, default=1)
     p.add_argument("--steps", type=int, default=50, help="total steps per mode (timing and loss curve)")
     p.add_argument("--warmup", type=int, default=5, help="steps excluded from the medians")
@@ -57,6 +70,13 @@ def parse_args():
 
 def trainable(model):
     return [p for p in model.parameters() if p.requires_grad and p.is_floating_point()]
+
+
+def kda_only_flops_per_step(cfg, n_layers, vocab, tokens):
+    """Fwd+bwd (3x forward) GEMM FLOPs of the KDA stack; the chunked recurrence is not counted."""
+    D, HK, R, H = cfg["hidden"], cfg["heads"] * cfg["head_dim"], cfg["gate_rank"], cfg["heads"]
+    per_layer = 5 * HK * D + D * R + R * HK + H * D
+    return 3 * 2 * tokens * (n_layers * per_layer + D * vocab)
 
 
 def model_flops_per_step(cfg_text, tokens, seq_len):
@@ -98,6 +118,11 @@ def model_flops_per_step(cfg_text, tokens, seq_len):
     return 3 * (gemm + mla_scores)
 
 
+def lm_loss(model, ids):
+    out = model(input_ids=ids, labels=ids)
+    return out[0] if isinstance(out, tuple) else out.loss
+
+
 def run_mode(model, mode, args, init, ids_steps):
     os.environ[KDA_AITER_ENV] = "1" if mode == "aiter" else "0"
     unpatch_kda_layers(model)
@@ -117,8 +142,10 @@ def run_mode(model, mode, args, init, ids_steps):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         opt.zero_grad(set_to_none=True)
-        loss = model(input_ids=ids, labels=ids).loss
+        loss = lm_loss(model, ids)
         loss.backward()
+        if step == 1 and args.grad_check:
+            grads1 = {n: p.grad.detach().cpu() for n, p in model.named_parameters() if p.grad is not None}
         gnorm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
         opt.step()
         torch.cuda.synchronize()
@@ -140,6 +167,7 @@ def run_mode(model, mode, args, init, ids_steps):
         "peak_alloc_gib": torch.cuda.max_memory_allocated() / 2**30,
         "pieces": pieces,
         "records": records,
+        "grads_step1": grads1 if args.grad_check else None,
     }
 
 
@@ -158,16 +186,27 @@ def summarize(res, args, flops):
 def main():
     args = parse_args()
     assert "gfx950" in torch.cuda.get_device_properties(0).gcnArchName, "benchmark targets one gfx950 GPU"
-    model = tiny_l13.load_hf_model(args.ckpt)
+    if args.seq_len is None:
+        args.seq_len = 2048 if args.tier == "kda-only" else 4096
+    if args.grad_check is None:
+        args.grad_check = args.tier == "kda-only"
+    tokens = args.micro_batch * args.seq_len
+    if args.tier == "kda-only":
+        cfg = tiny_l13.load_config(None)
+        model = kda_stack.build_kda_stack(cfg)
+        vocab, recipe = kda_stack.TINY_L13_VOCAB, f"Tiny-L13 KDA-only ({len(model.layers)} KDA layers) BF16"
+        flops = kda_only_flops_per_step(cfg, len(model.layers), vocab, tokens)
+    else:
+        model = tiny_l13.load_hf_model(args.ckpt)
+        cfg_text = model.config.get_text_config()
+        vocab, recipe = cfg_text.vocab_size, "Tiny-L13 full BF16"
+        flops = model_flops_per_step(cfg_text, tokens, args.seq_len)
     model.train()
-    cfg_text = model.config.get_text_config()
     init = [p.detach().cpu().clone() for p in trainable(model)]
     g = torch.Generator(device="cpu").manual_seed(1234)
     ids_steps = [
-        torch.randint(0, cfg_text.vocab_size, (args.micro_batch, args.seq_len), generator=g).cuda()
-        for _ in range(args.steps)
+        torch.randint(0, vocab, (args.micro_batch, args.seq_len), generator=g).cuda() for _ in range(args.steps)
     ]  # fixed-length mock documents, identical for every mode
-    flops = model_flops_per_step(cfg_text, args.micro_batch * args.seq_len, args.seq_len)
 
     results = [run_mode(model, m, args, init, ids_steps) for m in args.modes.split(",")]
     gpu = torch.cuda.get_device_name(0)
@@ -178,7 +217,7 @@ def main():
     for res in results:
         s = summarize(res, args, flops)
         res["summary"] = s
-        print(f"| Tiny-L13 BF16, KDA={res['mode']} (steps {s['window']}) | 1 {gpu} | 1 / 1 / 1 / 1 "
+        print(f"| {recipe}, KDA={res['mode']} (steps {s['window']}) | 1 {gpu} | 1 / 1 / 1 / 1 "
               f"| {args.micro_batch} | {args.seq_len} | {s['median_iter_s']:.4f} s | {s['median_tflops_gpu']:.1f} "
               f"| {s['tokens_per_s_gpu']:.0f} | {res['peak_alloc_gib']:.1f} GiB |")  # fmt: skip
 
@@ -193,6 +232,18 @@ def main():
               f"(step {dloss.index(max(dloss)) + 1}), final {dloss[-1]:.3e}, "
               f"max rel grad-norm diff {max(dgn):.3e} -> {'PASS' if ok else 'FAIL'} (tol {LOSS_PARITY_TOL:g})")  # fmt: skip
         print("aiter pieces:", by_mode["aiter"]["pieces"])
+        if args.grad_check:
+            gr, gg = by_mode["eager"]["grads_step1"], by_mode["aiter"]["grads_step1"]
+            assert gr.keys() == gg.keys(), "parameters with gradients differ between modes"
+            errs = {n: ((gg[n].float() - gr[n].float()).abs().max() / gr[n].float().abs().max().clamp_min(1e-6)).item()
+                    for n in gr}  # fmt: skip
+            worst = max(errs, key=errs.get)
+            bad = [n for n, e in errs.items() if e > args.grad_tol]
+            print(f"step-1 grads: {len(errs)} params, worst {worst} = {errs[worst]:.3e} "
+                  f"-> {'PASS' if not bad else 'FAIL ' + str(bad[:5])} (tol {args.grad_tol:g})")  # fmt: skip
+
+    for r in results:
+        r.pop("grads_step1", None)
     if args.json:
         with open(args.json, "w") as f:
             json.dump({"args": vars(args), "flops_per_step": flops, "results": results}, f, indent=2)

@@ -15,74 +15,21 @@ the real shapes are used. Both sides use the safe gate (``gate_lower_bound=-5``)
 
 import pytest
 import torch
-import torch.nn as nn
 
 from lumen.models.kimi import tiny_l13
 from lumen.models.kimi.kda_aiter import kda_layer_weights, patch_kda_layers, unpatch_kda_layers
+from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, KimiDeltaAttention
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 pytestmark = pytest.mark.skipif(not _probe_aiter_kda_fused_layer(), reason="aiter kda_fused_layer (aiter#8739) missing")
 
 
-class _RMSNorm(nn.Module):
-    def __init__(self, dim, eps):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(dim))
-        self.eps = eps
-
-
-class KimiDeltaAttention(nn.Module):
-    """HF-named KDA parameter layout; the eager forward is aiter's torch reference."""
-
-    def __init__(self, cfg, gate_lower_bound=tiny_l13.GATE_LOWER_BOUND):
-        super().__init__()
-        D, H, K, W, R = (cfg[n] for n in ("hidden", "heads", "head_dim", "conv", "gate_rank"))
-        HK = H * K
-        self.num_heads, self.head_dim, self.gate_lower_bound = H, K, gate_lower_bound
-        self.q_proj, self.k_proj, self.v_proj = (nn.Linear(D, HK, bias=False) for _ in range(3))
-        self.q_conv1d, self.k_conv1d, self.v_conv1d = (
-            nn.Conv1d(HK, HK, W, groups=HK, padding=W - 1, bias=False) for _ in range(3)
-        )
-        self.f_a_proj = nn.Linear(D, R, bias=False)
-        self.f_b_proj = nn.Linear(R, HK, bias=False)
-        self.A_log = nn.Parameter(torch.zeros(max(H, tiny_l13.A_LOG_LEN)))
-        self.dt_bias = nn.Parameter(torch.zeros(HK))
-        self.b_proj = nn.Linear(D, H, bias=False)
-        self.g_proj = nn.Linear(D, HK, bias=False)
-        self.o_norm = _RMSNorm(K, cfg["eps"])
-        self.o_proj = nn.Linear(HK, D, bias=False)
-
-    def load_fields(self, ts):
-        params = {
-            "w_q": self.q_proj.weight, "w_k": self.k_proj.weight, "w_v": self.v_proj.weight,
-            "conv_q": self.q_conv1d.weight, "conv_k": self.k_conv1d.weight, "conv_v": self.v_conv1d.weight,
-            "f_a": self.f_a_proj.weight, "f_b": self.f_b_proj.weight, "A_log": self.A_log,
-            "dt_bias": self.dt_bias, "w_beta": self.b_proj.weight, "g_proj": self.g_proj.weight,
-            "norm_w": self.o_norm.weight, "w_o": self.o_proj.weight,
-        }  # fmt: skip
-        with torch.no_grad():
-            for n, p in params.items():
-                p.copy_(ts[n].reshape(p.shape))
-        return self
-
-    def to_train_dtype(self, device, dtype):
-        self.to(device, dtype)
-        for m in (self.q_conv1d, self.k_conv1d, self.v_conv1d, self.o_norm):
-            m.weight.data = m.weight.data.float()
-        self.A_log.data, self.dt_bias.data = self.A_log.data.float(), self.dt_bias.data.float()
-        return self
-
-    def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
-        from aiter.ops.kda_fused_layer import kda_layer_fwd
-
-        return kda_layer_fwd(
-            hidden_states,
-            kda_layer_weights(self),
-            self.num_heads,
-            eps=self.o_norm.eps,
-            backend="torch",
-            lower_bound=self.gate_lower_bound,
-        )
+def _to_train_dtype(m, device, dtype):
+    m.to(device, dtype)
+    for name, p in m.named_parameters():
+        if name.endswith(FP32_KDA_PARAMS):
+            p.data = p.data.float()
+    return m
 
 
 def _small_cfg():
@@ -153,8 +100,8 @@ def test_tiny_l13_kda_parity_bf16(layer, seqlen):
     ts = tiny_l13.load_kda_tensors(layer, cfg=cfg)
     lb = cfg["gate_lower_bound"]
     assert lb == tiny_l13.GATE_LOWER_BOUND
-    ref = KimiDeltaAttention(cfg, lb).load_fields(ts).to_train_dtype("cuda", torch.bfloat16)
-    test = KimiDeltaAttention(cfg, lb).load_fields(ts).to_train_dtype("cuda", torch.bfloat16)
+    ref = _to_train_dtype(KimiDeltaAttention(cfg, 0, lb).load_fields(ts), "cuda", torch.bfloat16)
+    test = _to_train_dtype(KimiDeltaAttention(cfg, 0, lb).load_fields(ts), "cuda", torch.bfloat16)
     assert patch_kda_layers(test, backend="fused") == 1
 
     g = torch.Generator(device="cuda").manual_seed(layer)

@@ -38,6 +38,23 @@ LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13 \
 
 Without the env var, random weights at the real shapes are used.
 
+## Tier 1: KDA-only stack (no checkpoint)
+
+`lumen/models/kimi/kda_stack.py` builds the 9 Tiny-L13 KDA layers as a stack with random init from
+the Tiny-L13 config: embedding, RMSNorm + KDA + residual blocks, final RMSNorm and LM head. MLA and
+MoE are omitted. It keeps the real widths (hidden 7168, 96 × 128 heads, vocab 163840,
+`gate_lower_bound=-5`, padded `A_log`) and fp32 conv, `A_log`, `dt_bias` and `o_norm`, in BF16. With
+`LUMEN_KDA_AITER=0` each KDA layer runs aiter's `torch` reference; with `=1` it runs the fused layer.
+It needs no download, compressed-tensors or fla-core.
+
+```bash
+# benchmark (tier kda-only is the default): step-1 loss and all grads, 50-step loss parity, step-time table
+python benchmarks/bench_kimi_tiny_l13_kda.py --tier kda-only --seq-len 2048 --steps 50 --warmup 5 --parity-steps 32
+AITER_KDA_PIECES=chunk_fwd=flydsl python benchmarks/bench_kimi_tiny_l13_kda.py --tier kda-only
+# pytest: loss, logits, all grads, 5-step SGD loss curve (seq 512)
+pytest -s tests/models/test_kimi_kda_stack.py
+```
+
 ## Whole-network Tiny-L13 test
 
 This runs the full 13-layer model (remote code; only the 9 KDA layers change) in BF16
