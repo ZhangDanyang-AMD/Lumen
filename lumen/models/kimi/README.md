@@ -315,13 +315,13 @@ FLA's backward as-is. If that fails, it retries with FLA's own non-gather path
 (`chunk_intra.IS_GATHER_SUPPORTED = False`, a `tl.load` of the same value).
 
 When FLA's backward still fails, the Megatron reference keeps FLA for forward-only calls. For
-differentiable calls it runs the same Megatron layer with aiter#8755's `chunk_kda` as the recurrence
-(Megatron's own `kda_backend="aiter"`, the same bf16-operand / fp32-state precision as FLA and cuDNN).
-Only without aiter#8755 does it fall back to a PyTorch recurrence: aiter's `chunk_kda_torch` plus
-the in-kernel gate formula. The PyTorch recurrence computes in fp32 throughout, so it is more precise than Megatron's and gave a
-step-1 loss gap of about 8e-3 against aiter under MXFP8 on GPU. It matches aiter's torch layer to about 1e-7 in fp32,
-including varlen. The per-layer and recurrence tests then compare forward against FLA and backward
-against that PyTorch recurrence, and print the reason.
+differentiable calls it keeps the Megatron layer and swaps only the recurrence, by default for an
+independent PyTorch recurrence with FLA `chunk_kda`'s precision. That means chunk 64, gate cumsum,
+decays, A matrices and solve in fp32, every MMA operand (gated q/k, v, A_qk, u, state) rounded to
+bf16, and fp32 accumulation and state. `LUMEN_KDA_REFERENCE_FALLBACK=torch-fp32` selects an
+fp32-throughout recurrence, which is more precise than Megatron's. `LUMEN_KDA_REFERENCE_FALLBACK=aiter`
+selects aiter#8755's `chunk_kda`, as a diagnostic only, because it makes the reference partly aiter.
+`kda_reference.LAST_BACKEND` reports which recurrence ran, and the tests and diag print it.
 
 Lumen's fast `quantized_linear(scaling_type="mxfp8")` follows TE as well. The scale rule is TE's by
 default (`LUMEN_MXFP8_SCALE_MODE=te`), through aiter's `convert_to_mxfp8(scale_mode="te")` from #8757,

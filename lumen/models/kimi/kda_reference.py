@@ -40,11 +40,16 @@ way (see that module). ``"bf16"`` uses ``F.linear``.
 """
 
 import functools
+import os
 
 import torch
 import torch.nn.functional as F
 
-MEGATRON_KDA_BACKENDS = ("fla", "cudnn", "aiter", "torch")
+MEGATRON_KDA_BACKENDS = ("fla", "cudnn", "aiter", "torch", "torch-fp32")
+# Recurrence used for differentiable reference calls when FLA's backward cannot compile:
+# "torch" (default; FLA-precision PyTorch), "torch-fp32" (fp32 throughout) or "aiter" (diagnostic).
+REFERENCE_FALLBACK_ENV = "LUMEN_KDA_REFERENCE_FALLBACK"
+LAST_BACKEND = None  # recurrence the last megatron_kda_forward call used (printed by tests / diag)
 PRECISIONS = ("bf16", "mxfp8", "mxfp8-lumen")
 MXFP8_BLOCK = 32  # TE MXFP8BlockScaling: one E8M0 scale per 1x32 block
 
@@ -76,28 +81,61 @@ def aiter_recurrence_available():
         return False
 
 
-def _torch_chunk_kda(q, k, v, g, beta, A_log, dt_bias, safe_gate, lower_bound, cu_seqlens=None, **_):
+def _torch_chunk_kda(q, k, v, g, beta, A_log, dt_bias, safe_gate, lower_bound, cu_seqlens=None, mma_bf16=True, **_):
     """The KDA recurrence in plain PyTorch (aiter's differentiable ``chunk_kda_torch``) with the
     in-kernel gate of the FLA contract; used where FLA's backward does not compile."""
     from aiter.ops.kda_fused_layer import kda_gate
 
     B, T, H, K = q.shape
+    mma_bf16 = mma_bf16 and v.dtype == torch.bfloat16  # FLA on fp32 inputs computes in fp32
     z = g.float() + dt_bias.float().view(H, K)
     gate = kda_gate(z, A_log.float(), lower_bound if safe_gate else None)
     bounds = [0, T] if cu_seqlens is None else [int(b) for b in cu_seqlens.tolist()]
     outs = [
         _chunk_recurrence(q[:, s:e].float(), k[:, s:e].float(), v[:, s:e].float(), gate[:, s:e],
-                          beta[:, s:e].float(), K**-0.5)  # fmt: skip
+                          beta[:, s:e].float(), K**-0.5, mma_bf16=mma_bf16)  # fmt: skip
         for s, e in zip(bounds[:-1], bounds[1:])
     ]
     return torch.cat(outs, 1).to(v.dtype), None
 
 
-def _chunk_recurrence(q, k, v, g, beta, scale, chunk_size=64):
-    """aiter's chunked gated delta rule (``_chunk_step``) without its per-chunk checkpoints, so the
-    graph is the same in the forward and in an outer checkpoint's recomputation."""
+def _r16(t):
+    return t.to(torch.bfloat16).float()
+
+
+def _chunk_step_bf16_mma(S, q, k, v, g, beta):
+    """One chunk of the gated delta rule with FLA ``chunk_kda``'s precision: gate cumsum, decays,
+    the intra-chunk A matrices and the triangular solve in fp32; every MMA operand (the gated q/k,
+    v, A_qk, the WY-transformed values u, and the state S) rounded to bf16; fp32 accumulation and
+    an fp32 state. Same math as aiter's ``_chunk_step``."""
+    C = q.shape[-2]
+    G = g.cumsum(-2)
+    strict = torch.ones(C, C, dtype=torch.bool, device=q.device).tril(-1)
+    incl = torch.ones(C, C, dtype=torch.bool, device=q.device).tril()
+    dG = (G.unsqueeze(-2) - G.unsqueeze(-3)).masked_fill(~incl[..., None], float("-inf"))
+    decay = dG.exp()
+    qb, kb, vb = _r16(q), _r16(k), _r16(v)
+    A_kk = torch.einsum("bhik,bhjk,bhijk->bhij", kb, kb, decay) * strict
+    A_qk = torch.einsum("bhik,bhjk,bhijk->bhij", qb, kb, decay)
+    L = torch.eye(C, device=q.device, dtype=q.dtype) + beta.unsqueeze(-1) * A_kk
+    eg = G.exp()
+    Sb = _r16(S)
+    rhs = beta.unsqueeze(-1) * (vb - _r16(kb * eg) @ Sb)
+    u = torch.linalg.solve_triangular(L, rhs, upper=False, unitriangular=True)
+    ub = _r16(u)
+    o = _r16(qb * eg) @ Sb + _r16(A_qk) @ ub
+    k_end = _r16(kb * (G[..., -1:, :] - G).exp())
+    S = G[..., -1, :, None].exp() * S + k_end.transpose(-1, -2) @ ub
+    return o, S
+
+
+def _chunk_recurrence(q, k, v, g, beta, scale, chunk_size=64, mma_bf16=True):
+    """Chunked gated delta rule without per-chunk checkpoints, so the graph is the same in the
+    forward and in an outer checkpoint's recomputation. ``mma_bf16`` rounds the MMA operands like
+    FLA; otherwise aiter's fp32 ``_chunk_step``."""
     from aiter.ops.kda_fused_layer import _chunk_step
 
+    step = _chunk_step_bf16_mma if mma_bf16 else _chunk_step
     B, T, H, K = q.shape
     V = v.shape[-1]
     C = chunk_size
@@ -114,7 +152,7 @@ def _chunk_recurrence(q, k, v, g, beta, scale, chunk_size=64):
     S = q.new_zeros(B, H, K, V)
     out = []
     for n in range(N):
-        o, S = _chunk_step(S, q[:, :, n], k[:, :, n], v[:, :, n], g[:, :, n], beta[:, :, n])
+        o, S = step(S, q[:, :, n], k[:, :, n], v[:, :, n], g[:, :, n], beta[:, :, n])
         out.append(o)
     o = torch.stack(out, 2) * scale
     return o.permute(0, 2, 3, 1, 4).reshape(B, N * C, H, V)[:, :T]
@@ -214,12 +252,16 @@ def megatron_kda_forward(
     """
     if backend == "fla" and torch.is_grad_enabled() and not fla_backward_status().startswith("ok"):
         # FLA's chunk_kda backward does not compile here. Keep the Megatron layer and swap only the
-        # recurrence: aiter#8755's chunk_kda (Megatron kda_backend="aiter", FLA contract) has the
-        # bf16-operand / fp32-state precision of FLA and cuDNN; the PyTorch recurrence computes in
-        # fp32 throughout, which is more precise than Megatron's, so it is the last resort.
-        backend = "aiter" if aiter_recurrence_available() else "torch"
+        # recurrence, by default for an independent PyTorch one with FLA's precision (bf16 MMA
+        # operands, fp32 state and accumulation, chunk 64). aiter#8755's chunk_kda (Megatron
+        # kda_backend="aiter") is an opt-in diagnostic only: it would make the reference our own kernel.
+        backend = os.environ.get(REFERENCE_FALLBACK_ENV, "torch")
+        if backend == "aiter" and not aiter_recurrence_available():
+            backend = "torch"
         _warn_once(f"Megatron KDA reference: FLA chunk_kda backward unavailable ({fla_backward_status()}); "
                    f"using the {backend} recurrence for differentiable calls")  # fmt: skip
+    global LAST_BACKEND
+    LAST_BACKEND = backend
     if recompute and torch.is_grad_enabled():
         return torch.utils.checkpoint.checkpoint(
             _megatron_kda_forward, x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision,
@@ -236,7 +278,9 @@ def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens
     if backend == "aiter":
         from aiter.ops.kda import chunk_kda  # aiter#8755, FLA contract (Megatron kda_backend="aiter")
     elif backend == "torch":
-        chunk_kda = _torch_chunk_kda
+        chunk_kda = functools.partial(_torch_chunk_kda, mma_bf16=True)
+    elif backend == "torch-fp32":
+        chunk_kda = functools.partial(_torch_chunk_kda, mma_bf16=False)
     else:
         from fla.ops.kda import chunk_kda
 

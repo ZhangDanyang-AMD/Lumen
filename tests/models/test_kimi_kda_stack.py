@@ -228,7 +228,8 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
     kda_stack.set_reference(model, "aiter-torch", "bf16")
     _, _, g_torch = _step(model, ids, False)
     kda_stack.set_reference(model, "megatron-fla", prec)
-    print(f"precision={prec}")
+    print(f"precision={prec} megatron recurrence={kda_reference.LAST_BACKEND} "
+          f"(FLA backward: {kda_reference.fla_backward_status()})")
     rel_a, _, _ = kda_stack.grad_parity(g_meg, g_aiter, heads)
     rel_t, _, _ = kda_stack.grad_parity(g_meg, g_torch, heads)
     print("[secondary] step-1 grad ||x-megatron||/||megatron||, worst aiter-fused:", list(rel_a.items())[:5])

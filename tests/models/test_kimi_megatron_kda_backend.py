@@ -187,3 +187,51 @@ def test_cp2_tp2_via_torchrun():
     )  # fmt: skip
     print(r.stdout[-4000:], r.stderr[-4000:])
     assert r.returncode == 0
+
+
+def _recurrence_inputs(T=96, H=2, K=32, device="cpu", seed=0):
+    g = torch.Generator(device=device).manual_seed(seed)
+    r = lambda *s: torch.randn(*s, generator=g, device=device)  # noqa: E731
+    return dict(
+        q=F.normalize(r(1, T, H, K), dim=-1).bfloat16(), k=F.normalize(r(1, T, H, K), dim=-1).bfloat16(),
+        v=r(1, T, H, K).bfloat16(), g=r(1, T, H, K).bfloat16(), beta=torch.sigmoid(r(1, T, H)),
+        A_log=torch.log(torch.empty(H, device=device).uniform_(1, 16, generator=g)), dt_bias=r(H * K),
+    )  # fmt: skip
+
+
+def test_bf16_mma_recurrence_vs_fp32():
+    """The FLA-precision reference recurrence rounds its MMA operands: close to fp32, not equal;
+    fp32 inputs take the fp32 path exactly."""
+    x = _recurrence_inputs()
+    kw = dict(safe_gate=True, lower_bound=-5.0)
+    o16, _ = kda_reference._torch_chunk_kda(x["q"], x["k"], x["v"], x["g"], x["beta"], x["A_log"], x["dt_bias"], **kw)
+    o32, _ = kda_reference._torch_chunk_kda(x["q"], x["k"], x["v"], x["g"], x["beta"], x["A_log"], x["dt_bias"],
+                                            mma_bf16=False, **kw)  # fmt: skip
+    e = ((o16.float() - o32.float()).norm() / o32.float().norm()).item()
+    print(f"bf16-operand vs fp32 recurrence: {e:.3e}")
+    assert 0 < e < 2e-2
+    f32 = {n: (t.float() if t.is_floating_point() else t) for n, t in x.items()}
+    a, _ = kda_reference._torch_chunk_kda(**f32, **kw)
+    b, _ = kda_reference._torch_chunk_kda(**f32, mma_bf16=False, **kw)
+    assert torch.equal(a, b)
+
+
+@pytest.mark.skipif(not _gfx950(), reason="FLA forward needs the GPU")
+@pytest.mark.skipif(not kda_reference.fla_available(), reason="fla-core")
+def test_bf16_mma_recurrence_matches_fla_forward():
+    """FLA's chunk_kda forward (which compiles on ROCm) vs the independent FLA-precision reference."""
+    from fla.ops.kda import chunk_kda as fla_chunk_kda
+
+    x = _recurrence_inputs(T=1024, H=8, K=128, device="cuda")
+    cu = torch.tensor([0, 300, 1024], device="cuda", dtype=torch.int32)
+    kw = dict(safe_gate=True, lower_bound=-5.0)
+    with torch.no_grad():
+        o_fla, _ = fla_chunk_kda(x["q"], x["k"], x["v"], x["g"], x["beta"], A_log=x["A_log"], dt_bias=x["dt_bias"],
+                                 use_gate_in_kernel=True, use_qk_l2norm_in_kernel=False, cu_seqlens=cu, **kw)  # fmt: skip
+        out = {}
+        for name, mma in (("bf16-operand", True), ("fp32", False)):
+            o, _ = kda_reference._torch_chunk_kda(x["q"], x["k"], x["v"], x["g"], x["beta"], x["A_log"],
+                                                  x["dt_bias"], cu_seqlens=cu, mma_bf16=mma, **kw)  # fmt: skip
+            out[name] = ((o.float() - o_fla.float()).norm() / o_fla.float().norm()).item()
+    print("reference recurrence vs FLA forward:", out)
+    assert out["bf16-operand"] < 2e-3, out  # ~1e-3: bf16 output rounding and summation order only

@@ -161,6 +161,7 @@ def main():
         return [y.detach(), *dxw]
 
     meg = run(lambda xs, ww: kda_reference.megatron_kda_forward(xs, ww, H, lb, eps, precision=args.precision))
+    print(f"  Megatron reference recurrence: {kda_reference.LAST_BACKEND} (FLA backward: {kda_reference.fla_backward_status()})")
     extra = {} if args.precision == "bf16" else {"gemm_precision": "mxfp8"}
     from lumen.models.kimi.kda_aiter import set_aiter_kda_precision
 
