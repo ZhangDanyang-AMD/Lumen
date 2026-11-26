@@ -213,11 +213,13 @@ def megatron_kda_forward(
     forward and its recomputation run the same ops and save the same tensors.
     """
     if backend == "fla" and torch.is_grad_enabled() and not fla_backward_status().startswith("ok"):
-        # FLA's chunk_kda backward does not compile here; keep the Megatron layer and run the
-        # recurrence in PyTorch so gradients exist. Forward-only FLA calls are unaffected.
+        # FLA's chunk_kda backward does not compile here. Keep the Megatron layer and swap only the
+        # recurrence: aiter#8755's chunk_kda (Megatron kda_backend="aiter", FLA contract) has the
+        # bf16-operand / fp32-state precision of FLA and cuDNN; the PyTorch recurrence computes in
+        # fp32 throughout, which is more precise than Megatron's, so it is the last resort.
+        backend = "aiter" if aiter_recurrence_available() else "torch"
         _warn_once(f"Megatron KDA reference: FLA chunk_kda backward unavailable ({fla_backward_status()}); "
-                   "using the PyTorch recurrence for differentiable calls")  # fmt: skip
-        backend = "torch"
+                   f"using the {backend} recurrence for differentiable calls")  # fmt: skip
     if recompute and torch.is_grad_enabled():
         return torch.utils.checkpoint.checkpoint(
             _megatron_kda_forward, x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision,

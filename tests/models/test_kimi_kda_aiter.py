@@ -196,7 +196,7 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
     status = kda_reference.fla_backward_status()
     if not status.startswith("ok"):
         # backward graded against the PyTorch recurrence (Megatron layer unchanged); forward against FLA
-        print(f"FLA chunk_kda backward unavailable ({status}); Megatron reference backward uses the PyTorch recurrence")
+        print(f"FLA chunk_kda backward unavailable ({status}); Megatron reference backward uses the aiter#8755 (or PyTorch) recurrence")
         with torch.no_grad():
             y_fla = meg16(x, attention_mask=None)
         e = ((res[2]["y"] - y_fla.float().cpu()).norm() / y_fla.float().cpu().norm()).item()

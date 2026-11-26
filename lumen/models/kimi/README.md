@@ -315,8 +315,11 @@ FLA's backward as-is. If that fails, it retries with FLA's own non-gather path
 (`chunk_intra.IS_GATHER_SUPPORTED = False`, a `tl.load` of the same value).
 
 When FLA's backward still fails, the Megatron reference keeps FLA for forward-only calls. For
-differentiable calls it runs the same layer with a PyTorch recurrence: aiter's `chunk_kda_torch` plus
-the in-kernel gate formula. That recurrence matches aiter's torch layer to about 1e-7 in fp32,
+differentiable calls it runs the same Megatron layer with aiter#8755's `chunk_kda` as the recurrence
+(Megatron's own `kda_backend="aiter"`, the same bf16-operand / fp32-state precision as FLA and cuDNN).
+Only without aiter#8755 does it fall back to a PyTorch recurrence: aiter's `chunk_kda_torch` plus
+the in-kernel gate formula. The PyTorch recurrence computes in fp32 throughout, so it is more precise than Megatron's and gave a
+step-1 loss gap of about 8e-3 against aiter under MXFP8 on GPU. It matches aiter's torch layer to about 1e-7 in fp32,
 including varlen. The per-layer and recurrence tests then compare forward against FLA and backward
 against that PyTorch recurrence, and print the reason.
 
