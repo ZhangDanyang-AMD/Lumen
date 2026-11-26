@@ -7,7 +7,9 @@
 """Route Kimi Delta Attention (KDA) layers through ``aiter.ops.kda_fused_layer``.
 
 ``patch_kda_layers(model)`` swaps the forward of every KDA attention module
-(HF ``KimiDeltaAttention`` naming: ``q_proj``, ``q_conv1d``, ``f_a_proj``,
+(``KimiDeltaAttention`` in the ``Qinghao/Kimi-K3-Tiny-L13`` remote code
+``modeling_kimi_linear.py``: ``forward(hidden_states, attention_mask=None,
+cache_params=None, **kwargs) -> o``; parameter names ``q_proj``, ``q_conv1d``, ``f_a_proj``,
 ``f_b_proj``, ``A_log``, ``dt_bias``, ``b_proj``, ``g_proj``, ``o_norm``,
 ``o_proj``) for ``kda_layer_fwd``, whose autograd covers the whole layer
 backward. The module parameters are passed as views, so gradients land on the
@@ -22,7 +24,8 @@ chosen by aiter's ``AITER_KDA_PIECES`` / ``set_kda_pieces``.
 store [128] for 96 heads; aiter reads ``[:H]``). A ``gate_lower_bound`` from the
 module or its ``linear_attn_config`` (K3: -5) selects aiter's safe gate
 ``lower_bound * sigmoid(exp(A_log) * z)``. Calls the aiter layer cannot express
-(KV/conv cache, padded attention masks) run the original forward.
+(``cache_params`` decoding, padded attention masks, the low-rank
+``g_a_proj``/``g_b_proj`` gate) run the original forward.
 """
 
 import inspect
@@ -106,9 +109,13 @@ def kda_layer_weights(mod: torch.nn.Module):
     )
 
 
-def _unsupported_reason(attention_mask, past_key_values, use_cache):
-    if use_cache or past_key_values is not None:
-        return "KV/conv cache"
+def _unsupported_reason(mod, attention_mask, cache_params, kwargs):
+    if cache_params is not None:
+        return "cache_params (decoding)"
+    if not hasattr(mod, "g_proj"):
+        return "low-rank output gate (use_full_rank_gate=False)"
+    if attention_mask is not None and attention_mask.dim() != 2:
+        attention_mask = kwargs.get("padding_mask")
     if attention_mask is not None and not bool(attention_mask.all()):
         return "padded attention_mask (pack with cu_seqlens instead)"
     return None
@@ -122,21 +129,15 @@ def _make_forward(mod, backend, chunk_size):
         raise ImportError("aiter kda_layer_fwd lacks lower_bound; need ROCm/aiter#8739 at bbed79a or later")
     warned = set()
 
-    def forward(self, hidden_states, attention_mask=None, past_key_values=None, use_cache=False, **kwargs):
-        reason = _unsupported_reason(attention_mask, past_key_values, use_cache)
+    def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
+        reason = _unsupported_reason(self, attention_mask, cache_params, kwargs)
         if reason is not None:
             # The aiter layer cannot express this call; keep the model's own KDA forward.
             if reason not in warned:
                 warned.add(reason)
                 logger.warning("KDA aiter path: %s, falling back to the module forward", reason)
-            return orig(
-                hidden_states,
-                attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=use_cache,
-                **kwargs,
-            )
-        o = kda_layer_fwd(
+            return orig(hidden_states, attention_mask=attention_mask, cache_params=cache_params, **kwargs)
+        return kda_layer_fwd(
             hidden_states,
             kda_layer_weights(self),
             _num_heads(self),
@@ -146,7 +147,6 @@ def _make_forward(mod, backend, chunk_size):
             cu_seqlens=kwargs.get("cu_seqlens"),
             lower_bound=_gate_lower_bound(self),
         )
-        return o, None, past_key_values
 
     return types.MethodType(forward, mod)
 

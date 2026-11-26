@@ -72,10 +72,10 @@ class KimiDeltaAttention(nn.Module):
         self.A_log.data, self.dt_bias.data = self.A_log.data.float(), self.dt_bias.data.float()
         return self
 
-    def forward(self, hidden_states, attention_mask=None, past_key_values=None, use_cache=False, **kwargs):
+    def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
         from aiter.ops.kda_fused_layer import kda_layer_fwd
 
-        o = kda_layer_fwd(
+        return kda_layer_fwd(
             hidden_states,
             kda_layer_weights(self),
             self.num_heads,
@@ -83,7 +83,6 @@ class KimiDeltaAttention(nn.Module):
             backend="torch",
             lower_bound=self.gate_lower_bound,
         )
-        return o, None, past_key_values
 
 
 def _small_cfg():
@@ -123,7 +122,7 @@ def test_patched_matches_eager_with_safe_gate():
     outs = []
     for mod in (ref, m):
         xs = x.clone().requires_grad_(True)
-        y, _, _ = mod(xs, attention_mask=None)
+        y = mod(xs, attention_mask=None)
         y.sum().backward()
         outs.append([y.detach(), xs.grad] + [p.grad for p in mod.parameters()])
     for r, o in zip(*outs):
@@ -134,9 +133,11 @@ def test_patched_matches_eager_with_safe_gate():
 
 def test_cache_keeps_module_forward():
     m = KimiDeltaAttention(_small_cfg())
+    calls = []
+    m.forward = lambda h, attention_mask=None, cache_params=None, **kw: calls.append(cache_params) or h
     patch_kda_layers(m, backend="fused")
-    _, _, past = m(torch.randn(1, 8, 64), past_key_values="cache")
-    assert past == "cache"
+    m(torch.randn(1, 8, 64), cache_params="cache")
+    assert calls == ["cache"]
 
 
 def _gfx950():
@@ -162,7 +163,7 @@ def test_tiny_l13_kda_parity_bf16(layer, seqlen):
     outs = []
     for m in (ref, test):
         xs = x.clone().requires_grad_(True)
-        y, _, _ = m(xs, attention_mask=None)
+        y = m(xs, attention_mask=None)
         y.backward(dy)
         torch.cuda.synchronize()
         outs.append([y.detach(), xs.grad] + [p.grad for p in m.parameters()])

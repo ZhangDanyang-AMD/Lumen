@@ -37,3 +37,40 @@ LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13 \
 ```
 
 Without the env var, random weights at the real shapes are used.
+
+## Whole-network Tiny-L13 test
+
+This runs the full 13-layer model (remote code; only the 9 KDA layers change) in BF16
+fwd+bwd on one gfx950 GPU. It compares loss, logits and every parameter gradient with
+`LUMEN_KDA_AITER=1` vs `0`, then checks that the loss curve over a few SGD steps matches.
+To enable one aiter piece at a time, set `AITER_KDA_PIECES`:
+
+```bash
+export LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13   # huggingface-cli download Qinghao/Kimi-K3-Tiny-L13
+pytest -s tests/models/test_kimi_tiny_l13_whole_net.py                             # all pieces: aiter defaults
+AITER_KDA_PIECES=chunk_fwd=flydsl pytest -s tests/models/test_kimi_tiny_l13_whole_net.py
+AITER_KDA_PIECES=chunk_fwd=flydsl,chunk_bwd=flydsl pytest -s tests/models/test_kimi_tiny_l13_whole_net.py
+```
+
+`LUMEN_KIMI_WHOLE_NET_SEQLEN` (default 256) and `LUMEN_KIMI_WHOLE_NET_STEPS` (default 3)
+size the run. The test prints the selected pieces and the pieces that actually ran.
+It needs `transformers`, `fla-core` (the eager KDA reference) and `compressed-tensors`
+(MXFP4 experts).
+
+The checkpoint is 210 GB, mostly MXFP4-packed routed experts (896 experts × 12 MoE layers).
+The packed experts are not trainable, so "all parameter gradients" covers the floating-point
+params that get a gradient. Whether weights, activations and the CPU copies of the gradients
+fit on one 288 GB MI355X has not been measured.
+
+## Remote-code check (`modeling_kimi_linear.py`)
+
+* `KimiDeltaAttention.forward(hidden_states, attention_mask=None, cache_params=None, **kwargs)`
+  returns `o` (a tensor, not a tuple). `attention_mask` is the 2D padding mask; a non-2D mask
+  is replaced by `kwargs["padding_mask"]`. `cu_seqlens` arrives in kwargs.
+* Parameter names match the mapping: `q/k/v_proj`, `q/k/v_conv1d` (FLA `ShortConvolution`,
+  weight `[C,1,W]`), `f_a_proj`, `f_b_proj`, `A_log`, `dt_bias`, `b_proj`, `g_proj` (only with
+  `use_full_rank_gate=True`, which K3 sets; otherwise `g_a_proj`/`g_b_proj`), `o_norm`
+  (FLA `FusedRMSNormGated`, sigmoid), `o_proj`. The output gate is `o_norm(o, g_proj(x))`.
+* The remote code initializes `A_log` as `[num_heads]` (96), while the checkpoint holds `[128]`.
+  The whole-network test loads with `ignore_mismatched_sizes=True` and then restores the
+  checkpoint's `[128]` tensor.
