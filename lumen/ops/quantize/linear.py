@@ -1001,9 +1001,60 @@ def _gemm_mxfp8_triton(a_fp8, w_fp8, scale_a, scale_w):
     assert scale_w.shape[1] == expected_scale_k, (
         f"scale_w K-dim {scale_w.shape[1]} != expected {expected_scale_k}"
     )
+    if block_size == 32:
+        # 1x32 E8M0 (OCP MX) operands: gemm_a8w8_blockscale tiles K by BLOCK_SIZE_K and requires
+        # GROUP_K == BLOCK_SIZE_K, so it cannot take 32-wide scale groups. Use aiter's MXFP8 MFMA
+        # GEMM, the kernel behind ROCm/aiter#8757's mxfp8_linear.
+        return _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w)
     return gemm_a8w8_blockscale(
         a_fp8, w_fp8, _e8m0_to_fp32(scale_a), _e8m0_to_fp32(scale_w), dtype=torch.bfloat16,
     )
+
+
+def _pad_rows(t, mult, value=0):
+    pad = (-t.shape[0]) % mult
+    if not pad:
+        return t
+    return torch.cat([t, torch.full((pad, *t.shape[1:]), value, dtype=t.dtype, device=t.device)])
+
+
+def _gemm_mxfp8_1x32(a_fp8, w_fp8, scale_a, scale_w):
+    """Y = A @ W^T for E4M3 data with one E8M0 byte per 1x32 block along K (bf16 out).
+
+    aiter's ``gemm_a8w8_mxfp8_bpreshuffle`` needs K % 128 == 0 and N % 16 == 0. Padding K with
+    zero data adds nothing to the sum, and padded N rows are sliced off; padded scale bytes are
+    127 (2^0). Without that kernel the operands are dequantized and multiplied in fp32.
+    """
+    M, K = a_fp8.shape
+    N = w_fp8.shape[0]
+    try:
+        from aiter import dtypes
+        from aiter.ops.gemm_op_a8w8 import gemm_a8w8_mxfp8_bpreshuffle
+        from aiter.ops.shuffle import shuffle_weight
+
+        kp = (-K) % 128
+        a_d, w_d = a_fp8.view(torch.uint8), w_fp8.view(torch.uint8)
+        sa, sw = scale_a.view(torch.uint8), scale_w.view(torch.uint8)
+        if kp:
+            a_d = torch.nn.functional.pad(a_d, (0, kp))
+            w_d = torch.nn.functional.pad(w_d, (0, kp))
+            sa = torch.nn.functional.pad(sa, (0, kp // 32), value=127)
+            sw = torch.nn.functional.pad(sw, (0, kp // 32), value=127)
+        w_d, sw = _pad_rows(w_d, 16), _pad_rows(sw, 16, 127)
+        out = gemm_a8w8_mxfp8_bpreshuffle(
+            a_d.contiguous().view(dtypes.fp8),
+            shuffle_weight(w_d.contiguous().view(dtypes.fp8), layout=(16, 16)),
+            sa.contiguous().view(dtypes.fp8_e8m0),
+            sw.contiguous().view(dtypes.fp8_e8m0),
+            dtypes.bf16,
+        )
+        return out[:M, :N]
+    except (ImportError, AttributeError, RuntimeError, ValueError, AssertionError) as e:
+        # No native MXFP8 GEMM in this aiter / on this GPU: exact dequantized fp32 GEMM instead.
+        _logger.warning("gemm_mxfp8: aiter MXFP8 GEMM unavailable (%s), using dequantized fp32 GEMM", e)
+    a = a_fp8.float() * _e8m0_to_fp32(scale_a).repeat_interleave(32, dim=1)[:, :K]
+    w = w_fp8.float() * _e8m0_to_fp32(scale_w).repeat_interleave(32, dim=1)[:, :K]
+    return (a @ w.t()).to(torch.bfloat16)
 
 
 def gemm_mxfp8(a_fp8, w_fp8, scale_a, scale_w):

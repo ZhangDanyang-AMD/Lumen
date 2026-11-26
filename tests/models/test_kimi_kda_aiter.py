@@ -137,8 +137,8 @@ def test_tiny_l13_kda_parity_bf16(layer, seqlen):
         outs.append([y.detach(), xs.grad] + [p.grad for p in m.parameters()])
 
     names = ["y", "dx"] + [n for n, _ in ref.named_parameters()]
-    for name, r, o in zip(names, *outs):
-        assert r is not None and o is not None, f"layer {layer}: {name} has no gradient"
+    for name, *vals in zip(names, *outs):  # fp32 reference, eager bf16, aiter bf16
+        assert all(v is not None for v in vals), f"layer {layer}: {name} has no gradient"
     from aiter.ops import kda_fused_layer as kfl
 
     r32, e16, a16 = ({n: t.detach().float().cpu() for n, t in zip(names, ts)} for ts in outs)

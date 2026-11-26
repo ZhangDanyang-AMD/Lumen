@@ -12,6 +12,19 @@ handed to aiter as views, so no weight is copied.
 `lower_bound * sigmoid(exp(A_log) * (f_b(f_a(x)) + dt_bias))`. Only KV/conv-cache calls and
 padded `attention_mask` keep the original module forward.
 
+## FLA (Megatron reference, kda_backend checks)
+
+Megatron-LM#6872's container pins `flash-linear-attention==0.5.2` (Kimi-K3 Dockerfile). `fla.ops.kda`
+lives in `fla-core`, which is pinned to the same version. Install it without dependencies so that
+pip keeps the ROCm torch and triton:
+
+```bash
+pip install --no-deps "fla-core==0.5.2" && pip install einops
+```
+
+`check_fla_rocm()` (and the `test_fla_on_rocm_check_reports` test) report whether FLA's Triton
+`causal_conv1d` and `rms_norm_gated` actually run on the GPU with the installed triton.
+
 ## Required aiter branches
 
 | What | aiter PR / branch |
@@ -263,6 +276,19 @@ Tests and run commands:
 pytest -s tests/models/test_kimi_megatron_kda_backend.py           # registration, fla vs aiter, CP2/TP2 if 2 GPUs
 torchrun --nproc_per_node 2 benchmarks/dist_kimi_kda_cp_tp.py      # CP2 vs CP1, TP2 vs TP1, 32-step loss curve
 ```
+
+## FLA (Megatron reference, kda_backend checks)
+
+Megatron-LM#6872's container pins `flash-linear-attention==0.5.2` (Kimi-K3 Dockerfile). `fla.ops.kda`
+lives in `fla-core`, which is pinned to the same version. Install it without dependencies so that
+pip keeps the ROCm torch and triton:
+
+```bash
+pip install --no-deps "fla-core==0.5.2" && pip install einops
+```
+
+`check_fla_rocm()` (and the `test_fla_on_rocm_check_reports` test) report whether FLA's Triton
+`causal_conv1d` and `rms_norm_gated` actually run on the GPU with the installed triton.
 
 ## Required aiter branches
 
