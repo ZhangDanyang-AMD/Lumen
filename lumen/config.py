@@ -306,6 +306,11 @@ class LumenConfig:
         if self.lumen_linear:
             self._patch_linear(model)
 
+        # 1d. Kimi KDA layers -> aiter kda_layer_fwd (opt-in via LUMEN_KDA_AITER)
+        from lumen.models.kimi.kda_aiter import maybe_patch_kda_layers
+
+        maybe_patch_kda_layers(model)
+
         # 2. Pre-quant module attributes
         self._apply_pre_quant(model)
 
