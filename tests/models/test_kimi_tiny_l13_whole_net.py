@@ -51,26 +51,11 @@ pytestmark = [
 ]
 
 
-def _load_real_a_log(model, path):
-    """The checkpoint's per-head A_log is padded to [128]; the remote-code init is [num_heads]."""
-    cfg = tiny_l13.load_config(path)
-    names = {i: tiny_l13.HF_PREFIX.format(i) + "A_log" for i in cfg["kda_layers"]}
-    raw = tiny_l13._read(path, names.values())
-    for name, mod in model.named_modules():
-        if type(mod).__name__ == "KimiDeltaAttention":
-            t = raw[names[mod.layer_idx]].reshape(-1).float().to(mod.A_log.device)
-            mod.A_log = torch.nn.Parameter(t)
-
-
 @pytest.fixture(scope="module")
 def model():
-    transformers = pytest.importorskip("transformers")
+    pytest.importorskip("transformers")
     pytest.importorskip("fla", reason="the eager KDA reference needs fla-core")
-    path = tiny_l13.checkpoint_path()
-    m = transformers.AutoModelForCausalLM.from_pretrained(
-        path, trust_remote_code=True, torch_dtype="auto", device_map="cuda", ignore_mismatched_sizes=True
-    )
-    _load_real_a_log(m, path)
+    m = tiny_l13.load_hf_model()
     m.train()
     return m
 

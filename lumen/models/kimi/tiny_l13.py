@@ -192,3 +192,28 @@ def load_kda_layer(layer, path=None, dtype=torch.bfloat16, device="cuda", cfg=No
             for n, t in ts.items()
         }
     )
+
+
+def load_hf_model(path=None, device="cuda"):
+    """Full remote-code Tiny-L13 (``trust_remote_code``), checkpoint dtypes kept.
+
+    The remote code initializes ``A_log`` as [num_heads] while the checkpoint
+    stores it padded to [128], so the model is loaded with
+    ``ignore_mismatched_sizes`` and the checkpoint ``A_log`` is restored as fp32.
+    """
+    import transformers
+
+    path = checkpoint_path(path)
+    if path is None:
+        raise ValueError(f"no Tiny-L13 checkpoint; set one of {TINY_L13_PATH_ENVS}")
+    model = transformers.AutoModelForCausalLM.from_pretrained(
+        path, trust_remote_code=True, torch_dtype="auto", device_map=device, ignore_mismatched_sizes=True
+    )
+    cfg = load_config(path)
+    names = {i: HF_PREFIX.format(i) + "A_log" for i in cfg["kda_layers"]}
+    raw = _read(path, names.values())
+    for mod in model.modules():
+        if type(mod).__name__ == "KimiDeltaAttention":
+            t = raw[names[mod.layer_idx]].reshape(-1).float().to(mod.A_log.device)
+            mod.A_log = torch.nn.Parameter(t)
+    return model

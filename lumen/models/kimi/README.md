@@ -74,3 +74,40 @@ fit on one 288 GB MI355X has not been measured.
 * The remote code initializes `A_log` as `[num_heads]` (96), while the checkpoint holds `[128]`.
   The whole-network test loads with `ignore_mismatched_sizes=True` and then restores the
   checkpoint's `[128]` tensor.
+
+## Whole-network benchmark (modeled on NVIDIA/Megatron-LM#6872)
+
+```bash
+export LUMEN_KIMI_TINY_L13_PATH=/path/to/Kimi-K3-Tiny-L13
+python benchmarks/bench_kimi_tiny_l13_kda.py --seq-len 4096 --steps 50 --warmup 5 --parity-steps 32 \
+    --json kda_bench.json
+AITER_KDA_PIECES=chunk_fwd=flydsl python benchmarks/bench_kimi_tiny_l13_kda.py   # one FlyDSL piece at a time
+```
+
+Both modes, `eager` (`LUMEN_KDA_AITER=0`) and `aiter` (`=1`), start from the same weights and the
+same fixed-length mock token stream. The script prints a table in the issue's
+"Released recipes and benchmarks" format: recipe, hardware, TP/PP/EP/CP, GBS, median iteration
+time, median TFLOP/s/GPU, plus tokens/s/GPU and peak allocated memory. It then prints an LM-loss
+parity line.
+
+| Megatron-LM#6872 | This benchmark |
+| --- | --- |
+| Median iteration time and logged TFLOP/s/GPU, steps 6–50 | Same medians over steps `warmup+1`..`steps` (default 6–50). FLOPs are an analytic fwd+bwd model count: dense GEMMs, top-16 MoE from config shapes, causal MLA scores. KDA recurrence is not counted. |
+| Fixed-length mock documents | Same (`--data mock`). |
+| 32-step continuation, max LM-loss difference within `1e-3` | Max per-step \|Δloss\| over `--parity-steps` (default 32), tolerance `1e-3`, plus relative grad-norm trajectory. This uses mock data from the checkpoint, not LongAlign-10k. |
+| BF16 module-level fwd/bwd parity | `tests/models/test_kimi_kda_aiter.py` (per KDA layer) and `tests/models/test_kimi_tiny_l13_whole_net.py`. |
+
+What one gfx950 GPU cannot match:
+
+* Parallelism and scale: TP/PP/EP/CP are all 1, GBS = micro-batch. Megatron uses 64–512 GB300 GPUs,
+  16.7M tokens per step, CP8–32 and EP64.
+* Context: Megatron runs at 64K/256K/1M with THD packing. Here the limit is one GPU's memory after
+  210 GB of weights; the default is 4K and it is not yet measured.
+* Model: Tiny-L13 has 13 layers, versus the 93-block full model or 9-block proxy. It has no MTP depth.
+* Numerics: Megatron trains MXFP8 recipes. Here the run is BF16 compute with frozen MXFP4-packed
+  routed experts, so it is not QAT.
+* Optimizer: Megatron uses per-head Muon. Here it is SGD by default, because AdamW state for about
+  10B floating-point params does not fit next to the weights; `--optimizer adamw` is available.
+* Kernels and stack: cuDNN KDA, MoK, latent CP, fused AttnRes and Quantile Balancing have no
+  counterpart. MLA, MoE and AttnRes run the remote-code eager path.
+* Real-data continuation and checkpoint resume are out of scope.
