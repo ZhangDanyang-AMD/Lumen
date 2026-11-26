@@ -195,3 +195,20 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
     print("[primary] loss aiter       :", curves[True])
     print(f"[primary] max |dloss| {max(d):.3e} (tol {kda_stack.MEGATRON_LOSS_PARITY_TOL:g})")
     assert max(d) <= kda_stack.MEGATRON_LOSS_PARITY_TOL
+
+
+def test_kda_varlen_cu_seqlens_matches_separate_sequences():
+    """Packed THD (cu_seqlens) through the patched layer equals running each sequence alone."""
+    device = _small_device()
+    cfg = dict(tiny_l13.load_config(None), hidden=64, heads=2, head_dim=16, gate_rank=16)
+    attn = kda_stack.build_kda_stack(cfg, vocab=97, num_layers=1, device=device, dtype=torch.float32).layers[0].self_attn
+    from lumen.models.kimi.kda_aiter import patch_kda_layers
+
+    patch_kda_layers(attn, backend="fused")
+    lens = [37, 70, 21]
+    xs = [torch.randn(1, n, 64, device=device) for n in lens]
+    cu = torch.tensor([0, *torch.tensor(lens).cumsum(0).tolist()], device=device, dtype=torch.int32)
+    packed = attn(torch.cat(xs, 1), cu_seqlens=cu)
+    separate = torch.cat([attn(x) for x in xs], 1)
+    torch.testing.assert_close(packed, separate, rtol=1e-4, atol=1e-5)
+    unpatch_kda_layers(attn)

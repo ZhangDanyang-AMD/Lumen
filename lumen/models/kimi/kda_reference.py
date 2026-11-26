@@ -17,9 +17,11 @@ the ``kimi_k3_preview_20261126`` commit ``6e4ebe2``) selects the recurrence with
 Either way the preprocessing and output norm are shared: depthwise causal conv1d
 (no bias) + SiLU on q/k/v, raw decay ``g = f_b(f_a(x))`` passed to the kernel with
 ``A_log`` / ``dt_bias`` (``use_gate_in_kernel``), ``beta = sigmoid(b_proj(x))`` in
-fp32, ``kda_safe_gate=True`` / ``kda_lower_bound=-5``, q/k L2 norm in the kernel,
-then FLA ``rms_norm_gated(o, g_proj(x), activation="sigmoid", eps=layernorm_epsilon)``
-and ``out_proj``.
+fp32, ``kda_safe_gate=True`` / ``kda_lower_bound=-5``, then FLA
+``rms_norm_gated(o, g_proj(x), activation="sigmoid", eps=norm_epsilon)`` (1e-5) and
+``out_proj``. The recipes set ``gdn_pre_gated_delta_rule_fusion: true``, which
+L2-normalizes q/k before the kernel (``use_qk_l2norm_in_kernel=False``); the
+reference does the same with FLA's ``l2norm`` (eps 1e-6).
 
 ``megatron_kda_forward`` runs exactly that with ``chunk_kda`` (Triton, runs on
 ROCm). The cuDNN recurrence is CUDA/SM100-only and has no ROCm build; it computes
@@ -68,6 +70,18 @@ def _conv_silu(x, w):
     return F.silu(y[..., :T]).transpose(1, 2)
 
 
+L2NORM_EPS = 1e-6  # FLA l2norm default, used by Megatron's pre-GDR fusion
+
+
+def _l2norm(x):
+    try:
+        from fla.modules.l2norm import l2norm
+
+        return l2norm(x, eps=L2NORM_EPS)
+    except ImportError:
+        return F.normalize(x.float(), dim=-1, eps=L2NORM_EPS).to(x.dtype)
+
+
 def _rms_norm_gated(o, gate, weight, eps):
     try:
         from fla.modules.fused_norm_gate import rms_norm_gated
@@ -93,8 +107,8 @@ def megatron_kda_forward(
     H = num_heads
     dt = x.dtype
     lin = linear_fn(precision)
-    q = _conv_silu(lin(x, w.w_q.to(dt)), w.conv_q.to(dt)).reshape(B, T, H, -1)
-    k = _conv_silu(lin(x, w.w_k.to(dt)), w.conv_k.to(dt)).reshape(B, T, H, -1)
+    q = _l2norm(_conv_silu(lin(x, w.w_q.to(dt)), w.conv_q.to(dt)).reshape(B, T, H, -1))
+    k = _l2norm(_conv_silu(lin(x, w.w_k.to(dt)), w.conv_k.to(dt)).reshape(B, T, H, -1))
     v = _conv_silu(lin(x, w.w_v.to(dt)), w.conv_v.to(dt)).reshape(B, T, H, -1)
     raw_g = lin(lin(x, w.f_a.to(dt)), w.f_b.to(dt)).reshape(B, T, H, -1)
     beta = lin(x, w.w_beta.to(dt)).float().sigmoid()
@@ -108,7 +122,7 @@ def megatron_kda_forward(
         dt_bias=w.dt_bias,
         initial_state=None,
         output_final_state=False,
-        use_qk_l2norm_in_kernel=True,
+        use_qk_l2norm_in_kernel=False,
         use_gate_in_kernel=True,
         safe_gate=lower_bound is not None,
         lower_bound=lower_bound,
