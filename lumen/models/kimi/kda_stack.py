@@ -80,7 +80,7 @@ class KimiDeltaAttention(nn.Module):
         return self
 
     def forward(self, hidden_states, attention_mask=None, cache_params=None, **kwargs):
-        if self.reference == "megatron-fla":
+        if self.reference in ("megatron-fla", "megatron-aiter"):
             from lumen.models.kimi.kda_reference import megatron_kda_forward
 
             return megatron_kda_forward(
@@ -91,6 +91,7 @@ class KimiDeltaAttention(nn.Module):
                 eps=self.o_norm.eps,
                 cu_seqlens=kwargs.get("cu_seqlens"),
                 precision=self.gemm_precision,
+                backend="aiter" if self.reference == "megatron-aiter" else "fla",
             )
         from aiter.ops.kda_fused_layer import kda_layer_fwd
 
@@ -164,7 +165,7 @@ def build_kda_stack(
     return model
 
 
-REFERENCES = ("aiter-torch", "megatron-fla")
+REFERENCES = ("aiter-torch", "megatron-fla", "megatron-aiter")
 
 
 def set_reference(model, reference, precision=None):

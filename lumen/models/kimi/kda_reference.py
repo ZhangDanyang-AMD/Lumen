@@ -42,7 +42,7 @@ way (see that module). ``"bf16"`` uses ``F.linear``.
 import torch
 import torch.nn.functional as F
 
-MEGATRON_KDA_BACKENDS = ("fla", "cudnn")
+MEGATRON_KDA_BACKENDS = ("fla", "cudnn", "aiter")
 PRECISIONS = ("bf16", "mxfp8", "mxfp8-lumen")
 MXFP8_BLOCK = 32  # TE MXFP8BlockScaling: one E8M0 scale per 1x32 block
 
@@ -63,6 +63,15 @@ def linear_fn(precision):
         return quantized_linear(x, w, scaling_type="mxfp8", block_size=MXFP8_BLOCK)
 
     return mxfp8_linear
+
+
+def aiter_recurrence_available():
+    try:
+        from aiter.ops.kda import chunk_kda  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 def fla_available():
@@ -119,7 +128,10 @@ def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens
         raise NotImplementedError("cuDNN KDA needs CUDA SM100+; use backend='fla' (same recurrence) on ROCm")
     if backend not in MEGATRON_KDA_BACKENDS:
         raise ValueError(f"unknown Megatron KDA backend {backend!r}, expected {MEGATRON_KDA_BACKENDS}")
-    from fla.ops.kda import chunk_kda
+    if backend == "aiter":
+        from aiter.ops.kda import chunk_kda  # aiter#8755, FLA contract (Megatron kda_backend="aiter")
+    else:
+        from fla.ops.kda import chunk_kda
 
     B, T, _ = x.shape
     H = num_heads

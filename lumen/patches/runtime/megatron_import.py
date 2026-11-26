@@ -1202,6 +1202,18 @@ def install_cross_entropy(**_kwargs) -> None:
 from lumen.patches.registry import PatchPhase, register_patch
 
 
+def install_kda_aiter_backend():
+    """Register aiter as Megatron ``kda_backend`` (``LUMEN_KDA_MEGATRON_BACKEND``, e.g. ``aiter``).
+
+    See :mod:`lumen.models.kimi.megatron_kda_backend`: wraps ``select_kda_recurrence`` /
+    ``KDALayerConfig.validate_kda`` via aiter#8755, substitutes ``build_cp_context`` when FLA
+    lacks its CP extension, and checks FLA ``causal_conv1d`` / ``rms_norm_gated`` on ROCm.
+    """
+    from lumen.models.kimi.megatron_kda_backend import install_kda_aiter_backend as _install
+
+    return _install()
+
+
 def _env_flag(name: str, default: str = "0"):
     return lambda: os.environ.get(name, default) == "1"
 
@@ -1317,6 +1329,15 @@ register_patch(
     default=False,
     tags=frozenset({"core", "fusion", "lumen", "megatron"}),
 )(install_cross_entropy)
+
+
+register_patch(
+    "kda_aiter_backend",
+    PatchPhase.IMPORT,
+    description="aiter as Megatron kda_backend (aiter#8755) + FLA CP-context substitution",
+    enabled=lambda: bool(os.environ.get("LUMEN_KDA_MEGATRON_BACKEND")),
+    tags=frozenset({"kda", "kimi", "megatron"}),
+)(install_kda_aiter_backend)
 
 
 # ── Public API ──────────────────────────────────────────────────────────────

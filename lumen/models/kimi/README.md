@@ -235,3 +235,43 @@ diag `[4]`, the vs-megatron tier-1 and per-layer tests, the whole-net tests, and
 Lumen sets the mode through `patch_kda_layers(kda_precision=)` or `LUMEN_KDA_AITER_PRECISION`, and
 `unpatch_kda_layers` resets it. It combines with `gemm_precision="mxfp8"` once that aiter mode
 lands. The aiter-torch comparisons keep aiter's default precision.
+
+## aiter as Megatron `kda_backend` (aiter#8755)
+
+`LUMEN_KDA_MEGATRON_BACKEND=aiter` makes Lumen's `install_all()` call `install_kda_aiter_backend()`.
+That is `lumen.models.kimi.megatron_kda_backend` (re-exported in `lumen.models.megatron_patches`),
+and it does three things:
+
+1. **Registers the backend.** It registers `kda_backend="aiter"` through
+   `aiter.ops.kda.patch_megatron_kda_backend`. The recurrence comes from `LUMEN_KDA_AITER_RECURRENCE`,
+   which is `triton` by default, or `flydsl` or `auto`.
+2. **Substitutes the CP context.** Megatron's `build_cp_context` is `None` without FLA's CP extension.
+   In that case it is replaced by `aiter.ops.kda.build_kda_cp_context` (contiguous layout only).
+3. **Checks FLA on this GPU.** It checks FLA `causal_conv1d` (plain, varlen, and single-rank
+   `cp_context`) and `rms_norm_gated` against PyTorch. If `rms_norm_gated` fails, it is replaced by the
+   Megatron gated-norm formula. `causal_conv1d` has no substitute, so a failure is reported.
+
+Recipe knobs: `examples/kimi_k3/kda_aiter_cp2_overrides.yaml` sets `kda_backend: aiter`,
+`linear_cp_mode: chunkwise` and CP2.
+
+`--reference megatron-aiter` runs the same Megatron layer math with `aiter.ops.kda.chunk_kda` as the
+recurrence, for the tier-1 stack and the benchmark.
+
+Tests and run commands:
+
+```bash
+pytest -s tests/models/test_kimi_megatron_kda_backend.py           # registration, fla vs aiter, CP2/TP2 if 2 GPUs
+torchrun --nproc_per_node 2 benchmarks/dist_kimi_kda_cp_tp.py      # CP2 vs CP1, TP2 vs TP1, 32-step loss curve
+```
+
+## Required aiter branches
+
+| Feature | aiter PR / branch | Base |
+| --- | --- | --- |
+| `kda_layer_fwd`, safe gate, padded A_log, Megatron rounding (`AITER_KDA_PRECISION=megatron`) | #8739 `cursor/kda-fused-layer-bwd-8350` at `95a82cd` or later | main |
+| `gemm_precision="mxfp8"` (TE MXFP8BlockScaling, `convert_to_mxfp8(scale_mode="te")`) | #8757 `cursor/kda-mxfp8-gemm-precision-9e7f` | #8739 `95a82cd` |
+| Recurrence API `aiter.ops.kda`, chunkwise CP, `patch_megatron_kda_backend` | #8755 `cursor/kimi-k3-kda-recurrence-cp-backend-5470` | #8744 |
+
+The Megatron-reference comparisons default to `gemm_precision="mxfp8"` together with
+`AITER_KDA_PRECISION=megatron`. They need #8757, which contains #8739, and they skip when the
+installed aiter's `kda_layer_fwd` has no `gemm_precision`. The `kda_backend` tests need #8755.

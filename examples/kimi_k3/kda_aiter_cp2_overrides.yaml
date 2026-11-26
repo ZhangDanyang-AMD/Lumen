@@ -1,0 +1,24 @@
+# KDA overrides on top of Megatron-LM#6872's 9L continuation recipe
+# (yuzhongw-nvidia/Megatron-LM@6e4ebe2 examples/moe_recipes/kimi_k3_proxy_9layer/gb300/
+#  mxfp8_THD64K_64GPU_TP4PP1EP64CP2_muon.yaml), for ROCm with aiter as the KDA recurrence.
+#
+# Environment (Lumen registers the backend before the model is built):
+#   LUMEN_KDA_MEGATRON_BACKEND=aiter        # install_kda_aiter_backend() via lumen install_all()
+#   LUMEN_KDA_AITER_RECURRENCE=triton       # or flydsl / auto (aiter#8755 AITER_KDA_BACKEND)
+#   LUMEN_KDA_AITER_CP_CONTEXT=1            # optional: aiter build_kda_cp_context even if FLA has one
+#   LUMEN_KDA_FLA_ROCM_CHECK=1              # check FLA causal_conv1d(cp_context) / rms_norm_gated on this GPU
+# Required aiter: ROCm/aiter#8755 (cursor/kimi-k3-kda-recurrence-cp-backend-5470, on #8744).
+model:
+  experimental_attention_variant: kda
+  kda_backend: aiter                # was cudnn (SM100-only)
+  linear_cp_mode: chunkwise
+  context_parallel_size: 2
+  kda_f_lora_rank: 128
+  kda_safe_gate: true
+  kda_lower_bound: -5.0
+  gdn_pre_gated_delta_rule_fusion: true
+  gdn_gated_output_norm_fusion: true
+  norm_epsilon: 1.0e-05
+training:
+  recompute_granularity: selective
+  recompute_modules: [gdn]
