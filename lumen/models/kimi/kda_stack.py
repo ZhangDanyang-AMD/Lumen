@@ -29,6 +29,9 @@ from lumen.models.kimi.kda_aiter import kda_layer_weights
 
 TINY_L13_VOCAB = 163840
 FP32_KDA_PARAMS = ("q_conv1d.weight", "k_conv1d.weight", "v_conv1d.weight", "A_log", "dt_bias", "o_norm.weight")
+# Megatron-LM#6872: only the gate params stay fp32 at runtime; conv and out-norm weights are bf16
+# params with fp32 masters (precision map section 3).
+MEGATRON_FP32_KDA_PARAMS = ("A_log", "dt_bias")
 
 
 class RMSNorm(nn.Module):
@@ -136,7 +139,14 @@ class KDAStackLM(nn.Module):
 
 
 def build_kda_stack(
-    cfg=None, vocab=None, num_layers=None, device="cuda", dtype=torch.bfloat16, seed=0, preset="k3-tiny-l13"
+    cfg=None,
+    vocab=None,
+    num_layers=None,
+    device="cuda",
+    dtype=torch.bfloat16,
+    seed=0,
+    preset="k3-tiny-l13",
+    fp32_params=FP32_KDA_PARAMS,
 ):
     """Random-init KDA-only network over the first ``num_layers`` config KDA layers (all by default)."""
     cfg = cfg or tiny_l13.load_config(None, preset=preset)
@@ -149,7 +159,7 @@ def build_kda_stack(
     nn.init.normal_(model.lm_head.weight, std=cfg["hidden"] ** -0.5)
     model.to(device=device, dtype=dtype)
     for name, p in model.named_parameters():
-        if name.endswith(FP32_KDA_PARAMS):
+        if name.endswith(tuple(fp32_params)):
             p.data = p.data.float()
     return model
 

@@ -218,7 +218,10 @@ def main():
         cfg = tiny_l13.load_config(None, preset=args.model)
         if args.num_layers is None and args.model == "k3.1-pro":
             args.num_layers = 9  # all 69 K3.1 KDA layers (~41B params + grads) do not fit one GPU
-        model = kda_stack.build_kda_stack(cfg, num_layers=args.num_layers)
+        fp32_params = (
+            kda_stack.MEGATRON_FP32_KDA_PARAMS if args.reference == "megatron-fla" else kda_stack.FP32_KDA_PARAMS
+        )
+        model = kda_stack.build_kda_stack(cfg, num_layers=args.num_layers, fp32_params=fp32_params)
         kda_stack.set_reference(model, args.reference, args.precision if args.reference == "megatron-fla" else "bf16")
         vocab = cfg["vocab"]
         recipe = (f"{args.model} KDA-only ({len(model.layers)} of {len(cfg['kda_layers'])} KDA layers), "

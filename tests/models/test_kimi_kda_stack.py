@@ -187,7 +187,9 @@ def test_kda_stack_vs_megatron_fla(preset, num_layers):
     Secondary diagnostics: step-1 grads vs Megatron and vs aiter-torch (bf16 GEMMs)."""
     prec = MEGATRON_PRECISION
     _skip_unless_precision(prec)
-    model = kda_stack.build_kda_stack(preset=preset, num_layers=num_layers)
+    model = kda_stack.build_kda_stack(
+        preset=preset, num_layers=num_layers, fp32_params=kda_stack.MEGATRON_FP32_KDA_PARAMS
+    )
     kda_stack.set_reference(model, "megatron-fla", prec)
     ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
                         generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip

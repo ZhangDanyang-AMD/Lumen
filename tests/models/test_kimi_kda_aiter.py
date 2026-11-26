@@ -20,16 +20,21 @@ import torch
 
 from lumen.models.kimi import kda_reference, tiny_l13
 from lumen.models.kimi.kda_aiter import kda_layer_weights, patch_kda_layers, unpatch_kda_layers
-from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, KimiDeltaAttention, grad_parity_vs_fp32
+from lumen.models.kimi.kda_stack import (
+    FP32_KDA_PARAMS,
+    MEGATRON_FP32_KDA_PARAMS,
+    KimiDeltaAttention,
+    grad_parity_vs_fp32,
+)
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 pytestmark = pytest.mark.skipif(not _probe_aiter_kda_fused_layer(), reason="aiter kda_fused_layer (aiter#8739) missing")
 
 
-def _to_train_dtype(m, device, dtype):
+def _to_train_dtype(m, device, dtype, fp32_params=FP32_KDA_PARAMS):
     m.to(device, dtype)
     for name, p in m.named_parameters():
-        if name.endswith(FP32_KDA_PARAMS):
+        if name.endswith(tuple(fp32_params)):
             p.data = p.data.float()
     return m
 
@@ -169,7 +174,8 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
         if dtype == torch.float32:
             m.load_fields({n: t.to(torch.bfloat16).float() for n, t in ts.items()}).cuda()
         else:
-            _to_train_dtype(m.load_fields(ts), "cuda", dtype)
+            # Megatron runtime dtypes on every bf16 side: only A_log / dt_bias stay fp32
+            _to_train_dtype(m.load_fields(ts), "cuda", dtype, MEGATRON_FP32_KDA_PARAMS)
         m.reference = reference
         return m
 

@@ -17,9 +17,11 @@ the ``kimi_k3_preview_20261126`` commit ``6e4ebe2``) selects the recurrence with
 Either way the preprocessing and output norm are shared: depthwise causal conv1d
 (no bias) + SiLU on q/k/v, raw decay ``g = f_b(f_a(x))`` passed to the kernel with
 ``A_log`` / ``dt_bias`` (``use_gate_in_kernel``), ``beta = sigmoid(b_proj(x))`` in
-fp32, ``kda_safe_gate=True`` / ``kda_lower_bound=-5``, then FLA
-``rms_norm_gated(o, g_proj(x), activation="sigmoid", eps=norm_epsilon)`` (1e-5) and
-``out_proj``. The recipes set ``gdn_pre_gated_delta_rule_fusion: true``, which
+fp32, ``kda_safe_gate=True`` / ``kda_lower_bound=-5``, then the gated
+RMSNorm of Megatron's ``fused_gated_norm`` (eps ``norm_epsilon`` = 1e-5) and ``out_proj``.
+Op-by-op precision follows ``docs/megatron-kda-precision-map.md`` (F1-F14): conv and
+out-norm weights are used in the activation dtype (bf16 params in Megatron), ``A_log``
+and ``dt_bias`` in fp32. The recipes set ``gdn_pre_gated_delta_rule_fusion: true``, which
 L2-normalizes q/k before the kernel (``use_qk_l2norm_in_kernel=False``); the
 reference does the same with FLA's ``l2norm`` (eps 1e-6).
 
@@ -83,19 +85,26 @@ def _l2norm(x):
 
 
 def _rms_norm_gated(o, gate, weight, eps):
-    try:
-        from fla.modules.fused_norm_gate import rms_norm_gated
-
-        return rms_norm_gated(o, gate, weight, None, activation="sigmoid", eps=eps)
-    except ImportError:
-        of = o.float()
-        out = of * torch.rsqrt(of.pow(2).mean(-1, keepdim=True) + eps) * weight.float() * torch.sigmoid(gate.float())
-        return out.to(o.dtype)
+    """Megatron ``fused_gated_norm``: fp32 ``x * rsqrt(mean(x^2) + eps) * w``, rounded to the activation
+    dtype, then multiplied by ``sigmoid(gate)`` in fp32 and rounded again (precision map F13)."""
+    of = o.float()
+    normed = (of * torch.rsqrt(of.pow(2).mean(-1, keepdim=True) + eps) * weight.float()).to(o.dtype)
+    return (normed.float() * torch.sigmoid(gate.float())).to(o.dtype)
 
 
 def megatron_kda_forward(
-    x, w, num_heads, lower_bound=-5.0, eps=1e-5, backend="fla", cu_seqlens=None, precision="bf16"
+    x, w, num_heads, lower_bound=-5.0, eps=1e-5, backend="fla", cu_seqlens=None, precision="bf16", recompute=True
 ):
+    """``recompute=True`` mirrors ``recompute_gdn``: only the KDA input is kept for backward."""
+    if recompute and torch.is_grad_enabled():
+        return torch.utils.checkpoint.checkpoint(
+            _megatron_kda_forward, x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision,
+            use_reentrant=False,
+        )  # fmt: skip
+    return _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision)
+
+
+def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision):
     """y [B, T, D] for x [B, T, D] and ``KDALayerWeights`` w, differentiable through FLA's autograd."""
     if backend == "cudnn":
         raise NotImplementedError("cuDNN KDA needs CUDA SM100+; use backend='fla' (same recurrence) on ROCm")
@@ -129,7 +138,7 @@ def megatron_kda_forward(
         cu_seqlens=cu_seqlens,
     )
     gate = lin(x, w.g_proj.to(dt)).reshape(B, T, H, -1)
-    o = _rms_norm_gated(o, gate, w.norm_w, eps).reshape(B, T, -1)
+    o = _rms_norm_gated(o.to(dt), gate, w.norm_w.to(dt), eps).reshape(B, T, -1)
     return lin(o.to(dt), w.w_o.to(dt))
 
 
