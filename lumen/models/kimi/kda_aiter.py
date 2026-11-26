@@ -136,6 +136,7 @@ def _make_forward(mod, backend, chunk_size, gemm_precision="bf16"):
     if "lower_bound" not in inspect.signature(kda_layer_fwd).parameters:
         raise ImportError("aiter kda_layer_fwd lacks lower_bound; need ROCm/aiter#8739 at bbed79a or later")
     extra = {}
+    gemm_precision = "mxfp8" if gemm_precision.startswith("mxfp8") else gemm_precision
     if gemm_precision != "bf16":
         if not aiter_supports_gemm_precision():
             raise ImportError(

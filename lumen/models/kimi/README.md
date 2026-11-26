@@ -201,3 +201,22 @@ In BF16 the tests also run an fp32 trajectory and require, per step,
 
 All three trajectories are printed. The small-width fp32 wiring check keeps 5 steps at lr 0.1 so the
 trajectory moves.
+
+## MXFP8 numerics: Lumen vs TE
+
+`lumen/ops/quantize/mxfp8_te_reference.py` reproduces TE `MXFP8BlockScaling` in PyTorch:
+
+- **E8M0 scale:** the exponent is `ceil(log2(amax / 448))`, i.e. TE's `float_to_e8m0` rounding toward +inf. It is clamped to biased [0, 254], and a zero amax gives byte 0.
+- **E4M3 cast:** round-to-nearest-even with satfinite.
+- **Operand axes:** fprop uses X and W rowwise. dgrad uses dY rowwise × W columnwise. wgrad uses dY columnwise × X columnwise.
+- **Accumulation:** fp32, with optional accumulation into an fp32 `main_grad`.
+
+Lumen's fast `quantized_linear(scaling_type="mxfp8")` quantizes with aiter's
+`_convert_to_mxfp8_kernel`, which uses torchao's rule: `floor(log2(rne_3bit(amax))) - 8`. This gives
+the same byte or one byte less than TE. When it is one less, the block's largest values clip at 448:
+for example amax 460 or 230, whose mantissa rounds down. The Megatron KDA reference therefore defaults
+to the TE-faithful helper (`--precision mxfp8`). `--precision mxfp8-lumen` keeps the fast path, and
+`tests/ops/test_mxfp8_te_reference.py` reports the gap on gfx950.
+
+In the benchmark, `--main-grad` (on by default) keeps fp32 master weights. With `--precision mxfp8`,
+the reference accumulates the KDA projections' wgrad into fp32 `main_grad`.

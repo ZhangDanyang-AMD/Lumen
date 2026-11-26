@@ -76,6 +76,9 @@ def parse_args():
                         "(default with megatron-fla); constant: --lr")
     p.add_argument("--optimizer", choices=["sgd", "adamw"], default="sgd")
     p.add_argument("--lr", type=float, default=1e-5)
+    p.add_argument("--main-grad", action=argparse.BooleanOptionalAction, default=True,
+                   help="fp32 master weights; with --precision mxfp8 the reference accumulates KDA wgrad "
+                        "into fp32 main_grad (Megatron gradient_accumulation_fusion)")
     p.add_argument("--data", choices=["mock"], default="mock")
     p.add_argument("--json", default=None, help="write per-step records here")
     return p.parse_args()
@@ -144,10 +147,19 @@ def run_mode(model, mode, args, init, ids_steps):
         for p, p0 in zip(trainable(model), init):
             p.copy_(p0)
     params = trainable(model)
+    masters = None
+    if args.main_grad:
+        # Megatron: fp32 master weights; TE MXFP8 wgrad accumulates into fp32 main_grad
+        masters = [p.detach().float().clone().requires_grad_(True) for p in params]
+        if mode == "eager" and args.precision == "mxfp8":
+            from lumen.ops.quantize.mxfp8_te_reference import attach_main_grad
+
+            attach_main_grad([p for n, p in model.named_parameters() if p.dim() == 2 and ".self_attn." in n])
+    opt_params = masters if masters is not None else params
     opt = (
-        torch.optim.SGD(params, lr=args.lr)
+        torch.optim.SGD(opt_params, lr=args.lr)
         if args.optimizer == "sgd"
-        else torch.optim.AdamW(params, lr=args.lr, weight_decay=0.0)
+        else torch.optim.AdamW(opt_params, lr=args.lr, weight_decay=0.0)
     )
     torch.cuda.reset_peak_memory_stats()
     records = []
@@ -161,10 +173,24 @@ def run_mode(model, mode, args, init, ids_steps):
         opt.zero_grad(set_to_none=True)
         loss = lm_loss(model, ids)
         loss.backward()
+        if masters is not None:
+            for p in params:
+                mg = getattr(p, "main_grad", None)
+                if mg is not None:
+                    p.grad = mg.clone()
+                    mg.zero_()
         if step == 1 and args.grad_check:
             grads1 = {n: p.grad.detach().cpu() for n, p in model.named_parameters() if p.grad is not None}
         gnorm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
-        opt.step()
+        if masters is not None:
+            for p, m in zip(params, masters):
+                m.grad = None if p.grad is None else p.grad.float()
+            opt.step()
+            with torch.no_grad():
+                for p, m in zip(params, masters):
+                    p.copy_(m)
+        else:
+            opt.step()
         torch.cuda.synchronize()
         records.append(
             {"step": step, "loss": loss.item(), "grad_norm": gnorm.item(), "time_s": time.perf_counter() - t0}
@@ -172,6 +198,9 @@ def run_mode(model, mode, args, init, ids_steps):
         print(f"[{mode}] step {step:3d} loss {records[-1]['loss']:.6f} grad_norm {records[-1]['grad_norm']:.4e} "
               f"time {records[-1]['time_s']:.3f}s")  # fmt: skip
     del opt
+    for p in params:
+        if hasattr(p, "main_grad"):
+            del p.main_grad
     unpatch_kda_layers(model)
     pieces = None
     if mode == "aiter":

@@ -45,7 +45,7 @@ def parse_args():
     p.add_argument("--no-lower-bound", action="store_true", help="use the softplus gate instead of the safe gate")
     p.add_argument("--chunk-size", type=int, default=64)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--precision", choices=["bf16", "mxfp8"], default="bf16",
+    p.add_argument("--precision", choices=["bf16", "mxfp8", "mxfp8-lumen"], default="bf16",
                    help="KDA projection GEMMs for section [4] (Megatron-LM#6872 reference vs aiter)")
     return p.parse_args()
 
@@ -149,7 +149,7 @@ def main():
         return [y.detach(), *dxw]
 
     meg = run(lambda xs, ww: kda_reference.megatron_kda_forward(xs, ww, H, lb, eps, precision=args.precision))
-    extra = {} if args.precision == "bf16" else {"gemm_precision": args.precision}
+    extra = {} if args.precision == "bf16" else {"gemm_precision": "mxfp8"}
     fused = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "fused", lower_bound=lb, **extra))
     gemm = kfl.LAST_PIECES.get("gemm")
     torch_b = run(lambda xs, ww: kfl.kda_layer_fwd(xs, ww, H, args.chunk_size, eps, "torch", lower_bound=lb))

@@ -31,22 +31,31 @@ the same recurrence, so the FLA backend stands in for it here.
 
 Precision: the #6872 recipes run every linear in MXFP8 (TE ``MXFP8BlockScaling``:
 1x32 blocks, E8M0 scales, fprop/dgrad/wgrad) and the recurrence in bf16.
-``precision="mxfp8"`` routes the five projections and ``out_proj`` through Lumen's
-``quantized_linear(scaling_type="mxfp8", block_size=32)``; ``"bf16"`` uses ``F.linear``.
+``precision="mxfp8"`` runs the projections with TE-faithful MXFP8 numerics
+(``lumen.ops.quantize.mxfp8_te_reference``: E8M0 exponent ``ceil(log2(amax/448))``, fprop
+X/W rowwise, dgrad dY rowwise x W columnwise, wgrad dY/X columnwise, fp32 accumulation,
+optional fp32 ``main_grad``). ``"mxfp8-lumen"`` uses Lumen's fast ``quantized_linear(
+scaling_type="mxfp8", block_size=32)``, whose aiter quantizer rounds the scale the torchao
+way (see that module). ``"bf16"`` uses ``F.linear``.
 """
 
 import torch
 import torch.nn.functional as F
 
 MEGATRON_KDA_BACKENDS = ("fla", "cudnn")
-PRECISIONS = ("bf16", "mxfp8")
+PRECISIONS = ("bf16", "mxfp8", "mxfp8-lumen")
 MXFP8_BLOCK = 32  # TE MXFP8BlockScaling: one E8M0 scale per 1x32 block
 
 
 def linear_fn(precision):
     if precision == "bf16":
         return F.linear
-    if precision != "mxfp8":
+    if precision == "mxfp8":
+        # TE MXFP8BlockScaling numerics (scale rounding, operand axes); see mxfp8_te_reference
+        from lumen.ops.quantize.mxfp8_te_reference import te_mxfp8_linear
+
+        return te_mxfp8_linear
+    if precision != "mxfp8-lumen":
         raise ValueError(f"unknown precision {precision!r}, expected {PRECISIONS}")
     from lumen.ops.quantize.linear import quantized_linear
 
