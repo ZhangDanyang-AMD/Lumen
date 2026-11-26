@@ -156,3 +156,24 @@ python benchmarks/bench_kimi_tiny_l13_kda.py --tier kda-only --model k3.1-pro --
 Open: K3.1's KDA class name and forward are unverified until its modeling code is published. Patching
 matches the `KimiDeltaAttention` name or the parameter attributes, and assumes K3's forward signature.
 The DSA layers and the K3.1 full-network tier are out of scope here.
+
+## Localizing an eager-vs-aiter mismatch
+
+`benchmarks/diag_kimi_kda_stages.py` runs one KDA layer with the same weights and input on both sides.
+It prints the norm-relative error of each forward stage (q/k after conv + l2norm, v, gate g, beta,
+chunk o, y) and of the chunk-forward piece alone on eager inputs. It then prints every backward
+gradient with the selected pieces and with each stage forced to torch: `chunk_fwd`, `chunk_bwd`,
+`conv_bwd`, `proj` (FlyDSL gate and output-gate GEMM epilogues) and `rowops` (FlyDSL l2norm and
+gated-RMSNorm backward). The stage whose torch override removes the error is the one that is wrong;
+`all=torch` must match eager.
+
+```bash
+python benchmarks/diag_kimi_kda_stages.py --dtype fp32 --widths small --seq-len 256
+python benchmarks/diag_kimi_kda_stages.py --dtype bf16 --widths full --seq-len 512
+python benchmarks/diag_kimi_kda_stages.py --dtype bf16 --widths full --seq-len 512 --no-lower-bound
+```
+
+Both sides use one `eps` (`o_norm.eps`, 1e-5 for K3 and K3.1) for the q/k l2norm and the gated RMSNorm,
+because `kda_layer_fwd` takes a single `eps`. FLA's remote-code KDA uses its own l2norm eps (1e-6 by
+default) together with the config's 1e-5 RMSNorm. That does not affect eager-vs-aiter parity, but it
+is a small difference from the HF model.
