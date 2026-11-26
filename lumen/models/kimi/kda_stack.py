@@ -134,3 +134,30 @@ def build_kda_stack(
         if name.endswith(FP32_KDA_PARAMS):
             p.data = p.data.float()
     return model
+
+
+GRAD_REL_NORM_TOL = 1e-2
+
+
+def grad_parity(ref, out, num_heads, top=5):
+    """Per-parameter ||out - ref|| / ||ref|| and the padded-``A_log`` check.
+
+    A max-abs metric is dominated by a few elements of reduction-heavy gradients
+    (``A_log`` sums over every token and channel of a head), so parity is judged
+    on the norm ratio. ``A_log`` entries past ``num_heads`` are padding and must
+    get exactly zero gradient on both sides.
+    Returns (rel_by_param sorted worst-first, list of problems, A_log diagnostics).
+    """
+    rel, problems, diag = {}, [], {}
+    for n, r in ref.items():
+        r, o = r.float(), out[n].float()
+        rel[n] = ((o - r).norm() / r.norm().clamp_min(1e-30)).item()
+        if n.endswith("A_log"):
+            pad_r, pad_o = r[num_heads:].abs().max().item(), o[num_heads:].abs().max().item()
+            if r.numel() > num_heads and (pad_r != 0 or pad_o != 0):
+                problems.append(f"{n}: padded entries {num_heads}..{r.numel() - 1} have grad (eager {pad_r}, aiter {pad_o})")
+            d = (o[:num_heads] - r[:num_heads]).abs()
+            idx = d.topk(min(top, num_heads)).indices.tolist()
+            diag[n] = [(i, r[i].item(), o[i].item()) for i in idx]
+    rel = dict(sorted(rel.items(), key=lambda kv: -kv[1]))
+    return rel, problems, diag

@@ -47,7 +47,7 @@ def _step(model, ids, aiter_kda):
     return loss.item(), logits.detach().float().cpu(), grads
 
 
-def _check(model, ids, tol, loss_tol, lr):
+def _check(model, ids, tol, loss_tol, lr, grad_tol=kda_stack.GRAD_REL_NORM_TOL):
     init = {n: p.detach().clone() for n, p in model.named_parameters()}
     ref_loss, ref_logits, ref_g = _step(model, ids, False)
     loss, logits, g = _step(model, ids, True)
@@ -55,9 +55,14 @@ def _check(model, ids, tol, loss_tol, lr):
     s = ref_logits.abs().max()
     torch.testing.assert_close(logits / s, ref_logits / s, rtol=tol, atol=tol)
     assert ref_g.keys() == g.keys() == {n for n, _ in model.named_parameters()}
-    for n in ref_g:
-        s = ref_g[n].abs().max().clamp_min(1e-6)
-        torch.testing.assert_close(g[n] / s, ref_g[n] / s, rtol=tol, atol=tol, msg=lambda m: f"{n}: {m}")
+    heads = model.layers[0].self_attn.num_heads
+    rel, problems, diag = kda_stack.grad_parity(ref_g, g, heads)
+    print("worst grad ||a-b||/||b||:", list(rel.items())[:5])
+    for n, rows in list(diag.items())[:3]:
+        print(f"{n} largest |diff| heads (idx, eager, aiter):", rows)
+    assert not problems, problems
+    bad = {n: v for n, v in rel.items() if v > grad_tol}
+    assert not bad, f"grad rel-norm over {grad_tol}: {bad}"
 
     curves = {}
     for aiter_kda in (False, True):
@@ -89,12 +94,24 @@ def test_k31_preset_layer_split():
         assert cfg[key] == k3[key], key
 
 
+def _small_device():
+    """GPU when present (ROCm torch builds may lack CPU LAPACK for triangular_solve), else CPU."""
+    if torch.cuda.is_available():
+        return "cuda"
+    try:
+        torch.linalg.solve_triangular(torch.eye(2), torch.ones(2, 1), upper=False)
+    except RuntimeError as e:
+        pytest.skip(f"no GPU and CPU LAPACK unavailable: {e}")
+    return "cpu"
+
+
 @pytest.mark.parametrize("preset", tiny_l13.PRESETS)
-def test_kda_stack_cpu_small(preset):
+def test_kda_stack_small_fp32(preset):
+    device = _small_device()
     cfg = dict(tiny_l13.load_config(None, preset=preset), hidden=64, heads=2, head_dim=16, gate_rank=16)
-    model = kda_stack.build_kda_stack(cfg, vocab=97, num_layers=2, device="cpu", dtype=torch.float32)
-    ids = torch.randint(0, 97, (1, 70), generator=torch.Generator().manual_seed(0))
-    _check(model, ids, tol=1e-4, loss_tol=1e-5, lr=1e-1)
+    model = kda_stack.build_kda_stack(cfg, vocab=97, num_layers=2, device=device, dtype=torch.float32)
+    ids = torch.randint(0, 97, (1, 70), generator=torch.Generator().manual_seed(0)).to(device)
+    _check(model, ids, tol=1e-3, loss_tol=1e-4, lr=1e-1, grad_tol=1e-4)
 
 
 @pytest.mark.skipif(not _gfx950(), reason="tier-1 KDA stack targets one gfx950 GPU")

@@ -59,7 +59,8 @@ def parse_args():
     p.add_argument("--seq-len", type=int, default=None, help="default 2048 (kda-only) / 4096 (full)")
     p.add_argument("--grad-check", action=argparse.BooleanOptionalAction, default=None,
                    help="compare every parameter gradient at step 1 (default: on for kda-only)")
-    p.add_argument("--grad-tol", type=float, default=5e-2, help="max |dgrad| / max |grad_ref| per parameter")
+    p.add_argument("--grad-tol", type=float, default=kda_stack.GRAD_REL_NORM_TOL,
+                   help="per-parameter ||g_aiter - g_eager|| / ||g_eager||")
     p.add_argument("--micro-batch", type=int, default=1)
     p.add_argument("--steps", type=int, default=50, help="total steps per mode (timing and loss curve)")
     p.add_argument("--warmup", type=int, default=5, help="steps excluded from the medians")
@@ -242,12 +243,16 @@ def main():
         if args.grad_check:
             gr, gg = by_mode["eager"]["grads_step1"], by_mode["aiter"]["grads_step1"]
             assert gr.keys() == gg.keys(), "parameters with gradients differ between modes"
-            errs = {n: ((gg[n].float() - gr[n].float()).abs().max() / gr[n].float().abs().max().clamp_min(1e-6)).item()
-                    for n in gr}  # fmt: skip
-            worst = max(errs, key=errs.get)
-            bad = [n for n, e in errs.items() if e > args.grad_tol]
-            print(f"step-1 grads: {len(errs)} params, worst {worst} = {errs[worst]:.3e} "
-                  f"-> {'PASS' if not bad else 'FAIL ' + str(bad[:5])} (tol {args.grad_tol:g})")  # fmt: skip
+            heads = next(m.num_heads for m in model.modules() if hasattr(m, "num_heads") and hasattr(m, "A_log"))
+            rel, problems, diag = kda_stack.grad_parity(gr, gg, heads)
+            bad = [n for n, e in rel.items() if e > args.grad_tol]
+            print(f"step-1 grads ({len(rel)} params), worst ||a-b||/||b||:")
+            for n, e in list(rel.items())[:5]:
+                print(f"  {n}: {e:.3e}")
+            for n, rows in list(diag.items())[:3]:
+                print(f"  {n} largest |diff| heads (idx, eager, aiter): {rows}")
+            print(f"-> {'PASS' if not bad and not problems else 'FAIL ' + str(problems + bad[:5])} "
+                  f"(tol {args.grad_tol:g})")  # fmt: skip
 
     for r in results:
         r.pop("grads_step1", None)
