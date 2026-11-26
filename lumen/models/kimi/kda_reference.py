@@ -163,7 +163,7 @@ def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens
     return lin(o.to(dt), w.w_o.to(dt))
 
 
-def patch_kda_reference(model, precision="bf16"):
+def patch_kda_reference(model, precision="bf16", backend="fla"):
     """Run every KDA module's unpatched forward as ``megatron_kda_forward`` (for remote-code models).
 
     Returns the count patched. ``lumen.models.kimi.kda_aiter.patch_kda_layers`` may be applied on top
@@ -190,6 +190,7 @@ def patch_kda_reference(model, precision="bf16"):
                 eps=_eps(self),
                 cu_seqlens=kwargs.get("cu_seqlens"),
                 precision=precision,
+                backend=backend,
             )
 
         mod.forward = types.MethodType(forward, mod)

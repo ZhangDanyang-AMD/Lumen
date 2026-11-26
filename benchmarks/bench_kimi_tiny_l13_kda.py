@@ -239,11 +239,13 @@ def main():
     if args.grad_check is None:
         args.grad_check = args.tier == "kda-only"
     if args.precision is None:
-        args.precision = "mxfp8" if args.reference == "megatron-fla" else "bf16"
+        args.precision = "mxfp8" if args.reference.startswith("megatron") else "bf16"
     if args.aiter_precision is None:
-        args.aiter_precision = "megatron" if args.reference == "megatron-fla" else "default"
+        args.aiter_precision = "megatron" if args.reference.startswith("megatron") else "default"
     if args.lr_schedule is None:
-        args.lr_schedule = "megatron-continuation" if args.reference == "megatron-fla" else "constant"
+        args.lr_schedule = "megatron-continuation" if args.reference.startswith("megatron") else "constant"
+    if args.reference == "megatron-aiter" and not kda_reference.aiter_recurrence_available():
+        raise SystemExit("--reference megatron-aiter needs aiter.ops.kda (ROCm/aiter#8755)")
     if args.reference == "megatron-fla" and not kda_reference.fla_available():
         raise SystemExit("--reference megatron-fla needs fla-core (fla.ops.kda); or pass --reference aiter-torch")
     tokens = args.micro_batch * args.seq_len
@@ -252,18 +254,20 @@ def main():
         if args.num_layers is None and args.model == "k3.1-pro":
             args.num_layers = 9  # all 69 K3.1 KDA layers (~41B params + grads) do not fit one GPU
         fp32_params = (
-            kda_stack.MEGATRON_FP32_KDA_PARAMS if args.reference == "megatron-fla" else kda_stack.FP32_KDA_PARAMS
+            kda_stack.MEGATRON_FP32_KDA_PARAMS if args.reference.startswith("megatron") else kda_stack.FP32_KDA_PARAMS
         )
         model = kda_stack.build_kda_stack(cfg, num_layers=args.num_layers, fp32_params=fp32_params)
-        kda_stack.set_reference(model, args.reference, args.precision if args.reference == "megatron-fla" else "bf16")
+        kda_stack.set_reference(model, args.reference, args.precision if args.reference.startswith("megatron") else "bf16")
         vocab = cfg["vocab"]
         recipe = (f"{args.model} KDA-only ({len(model.layers)} of {len(cfg['kda_layers'])} KDA layers), "
                   f"KDA GEMMs {args.precision}")  # fmt: skip
         flops = kda_only_flops_per_step(cfg, len(model.layers), vocab, tokens)
     else:
         model = tiny_l13.load_hf_model(args.ckpt)
-        if args.reference == "megatron-fla":
-            kda_reference.patch_kda_reference(model, args.precision)
+        if args.reference.startswith("megatron"):
+            kda_reference.patch_kda_reference(
+                model, args.precision, backend="aiter" if args.reference == "megatron-aiter" else "fla"
+            )
         cfg_text = model.config.get_text_config()
         vocab, recipe = cfg_text.vocab_size, f"Tiny-L13 full, KDA GEMMs {args.precision}"
         flops = model_flops_per_step(cfg_text, tokens, args.seq_len)
