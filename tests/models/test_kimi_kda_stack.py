@@ -4,7 +4,7 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""Tier 1: KDA-only Tiny-L13 stack (random init), ``LUMEN_KDA_AITER=1`` vs ``0``.
+"""Tier 1: KDA-only K3 Tiny-L13 / K3.1-Pro stack (random init), ``LUMEN_KDA_AITER=1`` vs ``0``.
 
 Loss, logits and every parameter gradient, then a short SGD run whose loss
 curves must agree. The GPU test uses the real Tiny-L13 widths (9 KDA layers,
@@ -79,17 +79,29 @@ def _check(model, ids, tol, loss_tol, lr):
         assert abs(o - r) <= loss_tol, f"eager {curves[False]} vs aiter {curves[True]}"
 
 
-def test_kda_stack_cpu_small():
-    cfg = dict(tiny_l13.load_config(None), hidden=64, heads=2, head_dim=16, gate_rank=16)
+def test_k31_preset_layer_split():
+    cfg = tiny_l13.load_config(None, preset="k3.1-pro")
+    assert cfg["num_layers"] == 93 and len(cfg["kda_layers"]) == 69 and len(cfg["mla_layers"]) == 24
+    assert cfg["kda_layers"][:9] == (0, 1, 2, 4, 5, 6, 8, 9, 10)
+    assert cfg["mla_layers"][-2:] == (91, 92)
+    k3 = tiny_l13.load_config(None)
+    for key in ("hidden", "heads", "head_dim", "conv", "gate_rank", "eps", "gate_lower_bound", "vocab"):
+        assert cfg[key] == k3[key], key
+
+
+@pytest.mark.parametrize("preset", tiny_l13.PRESETS)
+def test_kda_stack_cpu_small(preset):
+    cfg = dict(tiny_l13.load_config(None, preset=preset), hidden=64, heads=2, head_dim=16, gate_rank=16)
     model = kda_stack.build_kda_stack(cfg, vocab=97, num_layers=2, device="cpu", dtype=torch.float32)
     ids = torch.randint(0, 97, (1, 70), generator=torch.Generator().manual_seed(0))
     _check(model, ids, tol=1e-4, loss_tol=1e-5, lr=1e-1)
 
 
 @pytest.mark.skipif(not _gfx950(), reason="tier-1 KDA stack targets one gfx950 GPU")
-def test_kda_stack_tiny_l13_bf16():
-    model = kda_stack.build_kda_stack()
-    assert len(model.layers) == len(tiny_l13.KDA_LAYERS)
+@pytest.mark.parametrize("preset,num_layers", [("k3-tiny-l13", None), ("k3.1-pro", 9)])
+def test_kda_stack_bf16(preset, num_layers):
+    model = kda_stack.build_kda_stack(preset=preset, num_layers=num_layers)
+    assert len(model.layers) == (num_layers or len(tiny_l13.KDA_LAYERS))
     ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
                         generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip
     _check(model, ids, tol=5e-2, loss_tol=1e-3, lr=1e-3)

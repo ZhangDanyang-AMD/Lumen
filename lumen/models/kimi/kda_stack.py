@@ -4,12 +4,13 @@
 # See LICENSE for license information.
 ###############################################################################
 
-"""KDA-only Kimi-K3 network built from the Tiny-L13 config, randomly initialized.
+"""KDA-only Kimi-K3 / K3.1 network built from a config preset, randomly initialized.
 
 Embedding -> N x (RMSNorm -> KDA -> residual) -> RMSNorm -> LM head. MLA and MoE
-blocks are omitted, so no checkpoint or compressed-tensors is needed. Widths are
-Tiny-L13's (hidden 7168, 96 heads x 128, conv 4, gate rank 128, vocab 163840,
-``gate_lower_bound=-5``, per-head ``A_log`` padded to 128).
+(and K3.1 DSA) blocks are omitted, so no checkpoint or compressed-tensors is
+needed. K3 Tiny-L13 and K3.1-Pro share the KDA widths (hidden 7168, 96 heads x
+128, conv 4, gate rank 128, vocab 163840, ``gate_lower_bound=-5``, per-head
+``A_log`` padded to 128); they differ in which layers are KDA (9 of 13 vs 69 of 93).
 
 ``KimiDeltaAttention`` here has the remote-code parameter names and fp32
 conv/``A_log``/``dt_bias``/``o_norm``; its own forward is aiter's ``torch``
@@ -96,7 +97,8 @@ class KDABlock(nn.Module):
 
 
 class KDAStackLM(nn.Module):
-    def __init__(self, cfg, vocab=TINY_L13_VOCAB, num_layers=None):
+    def __init__(self, cfg, vocab=None, num_layers=None):
+        vocab = vocab or cfg.get("vocab") or TINY_L13_VOCAB
         super().__init__()
         layers = cfg["kda_layers"][:num_layers] if num_layers else cfg["kda_layers"]
         self.embed_tokens = nn.Embedding(vocab, cfg["hidden"])
@@ -115,9 +117,11 @@ class KDAStackLM(nn.Module):
         return loss, logits
 
 
-def build_kda_stack(cfg=None, vocab=TINY_L13_VOCAB, num_layers=None, device="cuda", dtype=torch.bfloat16, seed=0):
-    """Random-init KDA-only network; KDA tensors follow ``tiny_l13.random_tensors`` per layer."""
-    cfg = cfg or tiny_l13.load_config(None)
+def build_kda_stack(
+    cfg=None, vocab=None, num_layers=None, device="cuda", dtype=torch.bfloat16, seed=0, preset="k3-tiny-l13"
+):
+    """Random-init KDA-only network over the first ``num_layers`` config KDA layers (all by default)."""
+    cfg = cfg or tiny_l13.load_config(None, preset=preset)
     torch.manual_seed(seed)
     model = KDAStackLM(cfg, vocab, num_layers)
     for block in model.layers:

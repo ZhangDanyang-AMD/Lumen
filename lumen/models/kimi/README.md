@@ -128,3 +128,31 @@ What one gfx950 GPU cannot match:
 * Kernels and stack: cuDNN KDA, MoK, latent CP, fused AttnRes and Quantile Balancing have no
   counterpart. MLA, MoE and AttnRes run the remote-code eager path.
 * Real-data continuation and checkpoint resume are out of scope.
+
+## K3.1 coverage
+
+I checked `moonshotai/Kimi-K3.1-Pro`'s `config.json` and the safetensors headers of layer 0.
+
+| | K3 (Tiny-L13 / config) | K3.1-Pro |
+| --- | --- | --- |
+| Layers | 13 (Tiny) | 93 |
+| KDA layers (1-indexed) | 1-3, 5-7, 9-11 (9) | every layer except 4k and 93 (69) |
+| Full-attention layers | gated MLA at 4, 8, 12, 13 | DSA (`dsa_config.dsa_layers`, 32-head top-2048 indexer) at 4, 8, …, 92, 93 (24) |
+| KDA widths | hidden 7168, 96 × 128, conv 4, gate rank 128, `use_full_rank_gate` | identical |
+| KDA params | `q/k/v_proj`, `q/k/v_conv1d` `[12288,1,4]` F32, `f_a_proj` `[128,7168]`, `f_b_proj` `[12288,128]`, `A_log` `[128]` F32, `dt_bias` `[12288]` F32, `b_proj` `[96,7168]`, `g_proj` `[12288,7168]`, `o_norm` `[128]` F32, `o_proj` | identical names, shapes and dtypes |
+| Gate | `gate_lower_bound = -5` | `-5` |
+| `rms_norm_eps` | 1e-5 | 1e-5 |
+| Remote code | `modeling_kimi_linear.py` (`KimiDeltaAttention`) | not published (`auto_map` has only `AutoConfig`; architecture `KimiK31ForConditionalGeneration`) |
+
+KDA itself is unchanged in K3.1, so `kda_layer_fwd` with the same mapping covers every K3.1 KDA layer.
+`patch_kda_layers` reads `linear_attn_config.kda_layers` from the model config and patches only those
+`layer_idx`. The tier-1 stack takes `--model k3.1-pro`; its default is the first 9 of the 69 KDA layers,
+because all 69 (about 41B params plus grads) do not fit on one GPU:
+
+```bash
+python benchmarks/bench_kimi_tiny_l13_kda.py --tier kda-only --model k3.1-pro --num-layers 9 --seq-len 2048
+```
+
+Open: K3.1's KDA class name and forward are unverified until its modeling code is published. Patching
+matches the `KimiDeltaAttention` name or the parameter attributes, and assumes K3's forward signature.
+The DSA layers and the K3.1 full-network tier are out of scope here.

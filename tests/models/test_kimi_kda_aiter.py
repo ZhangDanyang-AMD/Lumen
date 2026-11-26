@@ -36,6 +36,18 @@ def _small_cfg():
     return dict(tiny_l13.load_config(None), hidden=64, heads=2, head_dim=16, gate_rank=16)
 
 
+def test_patch_follows_config_kda_layers():
+    class _Cfg:
+        linear_attn_config = {"kda_layers": [1]}  # 1-indexed
+
+    root = torch.nn.Module()
+    root.config = _Cfg()
+    root.a = KimiDeltaAttention(_small_cfg(), layer_idx=0)
+    root.b = KimiDeltaAttention(_small_cfg(), layer_idx=3)
+    assert patch_kda_layers(root, backend="torch") == 1
+    assert unpatch_kda_layers(root) == 1
+
+
 def test_layer_split_and_checkpoint_findings():
     cfg = tiny_l13.load_config(None)
     assert cfg["kda_layers"] == (0, 1, 2, 4, 5, 6, 8, 9, 10)

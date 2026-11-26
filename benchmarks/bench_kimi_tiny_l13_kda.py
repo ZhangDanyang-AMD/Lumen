@@ -51,6 +51,10 @@ LOSS_PARITY_TOL = 1e-3  # Megatron-LM#6872 continuation protocol: max LM-loss di
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--tier", choices=["kda-only", "full"], default="kda-only")
+    p.add_argument("--model", choices=list(tiny_l13.PRESETS), default="k3-tiny-l13",
+                   help="kda-only config preset: K3 Tiny-L13 (9 KDA layers) or K3.1-Pro (69 KDA layers)")
+    p.add_argument("--num-layers", type=int, default=None,
+                   help="kda-only: first N config KDA layers (default: all for k3-tiny-l13, 9 for k3.1-pro)")
     p.add_argument("--ckpt", default=None, help="tier full: Tiny-L13 snapshot (default: $LUMEN_KIMI_TINY_L13_PATH)")
     p.add_argument("--seq-len", type=int, default=None, help="default 2048 (kda-only) / 4096 (full)")
     p.add_argument("--grad-check", action=argparse.BooleanOptionalAction, default=None,
@@ -192,9 +196,12 @@ def main():
         args.grad_check = args.tier == "kda-only"
     tokens = args.micro_batch * args.seq_len
     if args.tier == "kda-only":
-        cfg = tiny_l13.load_config(None)
-        model = kda_stack.build_kda_stack(cfg)
-        vocab, recipe = kda_stack.TINY_L13_VOCAB, f"Tiny-L13 KDA-only ({len(model.layers)} KDA layers) BF16"
+        cfg = tiny_l13.load_config(None, preset=args.model)
+        if args.num_layers is None and args.model == "k3.1-pro":
+            args.num_layers = 9  # all 69 K3.1 KDA layers (~41B params + grads) do not fit one GPU
+        model = kda_stack.build_kda_stack(cfg, num_layers=args.num_layers)
+        vocab = cfg["vocab"]
+        recipe = f"{args.model} KDA-only ({len(model.layers)} of {len(cfg['kda_layers'])} KDA layers) BF16"
         flops = kda_only_flops_per_step(cfg, len(model.layers), vocab, tokens)
     else:
         model = tiny_l13.load_hf_model(args.ckpt)

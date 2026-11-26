@@ -151,17 +151,38 @@ def _make_forward(mod, backend, chunk_size):
     return types.MethodType(forward, mod)
 
 
+def kda_layer_ids(model: torch.nn.Module):
+    """0-indexed KDA decoder layers from ``linear_attn_config.kda_layers`` (1-indexed in K3 / K3.1), else None."""
+    cfg = getattr(model, "config", None)
+    if cfg is None:
+        return None
+    if hasattr(cfg, "get_text_config"):
+        cfg = cfg.get_text_config()
+    la = getattr(cfg, "linear_attn_config", None)
+    if not isinstance(la, dict) or "kda_layers" not in la:
+        return None
+    return frozenset(i - 1 for i in la["kda_layers"])
+
+
 def patch_kda_layers(model: torch.nn.Module, backend: str | None = None, chunk_size: int = 64) -> int:
-    """Replace every KDA layer forward in ``model`` with aiter's; returns the count patched."""
+    """Replace every KDA layer forward in ``model`` with aiter's; returns the count patched.
+
+    When the model config lists ``kda_layers``, only modules whose ``layer_idx`` is in it are patched.
+    """
     if not _probe_aiter_kda_fused_layer():
         raise ImportError(
             "aiter.ops.kda_fused_layer is not available; install aiter with ROCm/aiter#8739 "
             "(branch cursor/kda-fused-layer-bwd-8350)"
         )
     backend = backend or os.environ.get(KDA_AITER_BACKEND_ENV, "fused")
+    layer_ids = kda_layer_ids(model)
     n = 0
     for name, mod in model.named_modules():
         if not is_kda_module(mod) or hasattr(mod, _ORIG_FORWARD):
+            continue
+        if layer_ids is not None and getattr(mod, "layer_idx", None) not in layer_ids:
+            logger.warning("KDA aiter path: %s (layer_idx=%s) is not in config kda_layers, left unpatched",
+                           name, getattr(mod, "layer_idx", None))  # fmt: skip
             continue
         setattr(mod, _ORIG_FORWARD, mod.forward)
         mod.forward = _make_forward(mod, backend, chunk_size)

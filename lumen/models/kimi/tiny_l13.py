@@ -40,7 +40,7 @@ FP32_FIELDS = ("conv_q", "conv_k", "conv_v", "A_log", "dt_bias", "norm_w")
 NUM_LAYERS = 13
 KDA_LAYERS = (0, 1, 2, 4, 5, 6, 8, 9, 10)
 MLA_LAYERS = (3, 7, 11, 12)
-RMS_NORM_EPS = 1e-6
+RMS_NORM_EPS = 1e-5
 GATE_LOWER_BOUND = -5.0
 
 HF_PREFIX = "language_model.model.layers.{}.self_attn."
@@ -71,8 +71,53 @@ def checkpoint_path(path=None):
     return None
 
 
-def load_config(path=None):
-    """KDA geometry and layer split; the published values when no checkpoint is given."""
+def _kda_cfg_from_text_config(tc):
+    """KDA geometry from a K3 / K3.1 ``text_config``; layer lists in config are 1-indexed."""
+    la = tc["linear_attn_config"]
+    return dict(
+        hidden=tc["hidden_size"],
+        heads=la["num_heads"],
+        head_dim=la["head_dim"],
+        conv=la["short_conv_kernel_size"],
+        gate_rank=la["head_dim"],
+        num_layers=tc["num_hidden_layers"],
+        kda_layers=tuple(i - 1 for i in la["kda_layers"]),
+        mla_layers=tuple(i - 1 for i in la["full_attn_layers"]),
+        eps=tc.get("rms_norm_eps", RMS_NORM_EPS),
+        gate_lower_bound=la.get("gate_lower_bound"),
+        full_rank_gate=la.get("use_full_rank_gate", False),
+        vocab=tc.get("vocab_size"),
+    )
+
+
+# moonshotai/Kimi-K3.1-Pro config.json: 93 layers, KDA at every layer except 4k (1-indexed) and 93;
+# the full-attention layers are DSA (dsa_config.dsa_layers), not gated MLA. KDA widths match K3.
+_K31_FULL_ATTN = tuple(range(4, 93, 4)) + (93,)
+K31_PRO_TEXT_CONFIG = {
+    "hidden_size": 7168,
+    "num_hidden_layers": 93,
+    "vocab_size": 163840,
+    "rms_norm_eps": 1e-5,
+    "linear_attn_config": {
+        "full_attn_layers": list(_K31_FULL_ATTN),
+        "kda_layers": [i for i in range(1, 94) if i not in _K31_FULL_ATTN],
+        "gate_lower_bound": -5.0,
+        "head_dim": 128,
+        "num_heads": 96,
+        "short_conv_kernel_size": 4,
+        "use_full_rank_gate": True,
+    },
+}
+PRESETS = ("k3-tiny-l13", "k3.1-pro")
+
+
+def load_config(path=None, preset="k3-tiny-l13"):
+    """KDA geometry and layer split from ``path``'s config.json, else from ``preset``."""
+    path = checkpoint_path(path) if preset == "k3-tiny-l13" else path
+    if path is None and preset == "k3.1-pro":
+        return _kda_cfg_from_text_config(K31_PRO_TEXT_CONFIG)
+    if preset not in PRESETS:
+        raise ValueError(f"unknown preset {preset!r}, expected one of {PRESETS}")
     cfg = {
         "hidden": HIDDEN,
         "heads": HEADS,
@@ -84,26 +129,14 @@ def load_config(path=None):
         "mla_layers": MLA_LAYERS,
         "eps": RMS_NORM_EPS,
         "gate_lower_bound": GATE_LOWER_BOUND,
+        "full_rank_gate": True,
+        "vocab": 163840,
     }
-    path = checkpoint_path(path)
     if path is None:
         return cfg
     with open(os.path.join(path, "config.json")) as f:
         tc = json.load(f)
-    tc = tc.get("text_config", tc)
-    la = tc["linear_attn_config"]
-    cfg.update(
-        hidden=tc["hidden_size"],
-        heads=la["num_heads"],
-        head_dim=la["head_dim"],
-        conv=la["short_conv_kernel_size"],
-        gate_rank=la["head_dim"],
-        num_layers=tc["num_hidden_layers"],
-        kda_layers=tuple(i - 1 for i in la["kda_layers"]),
-        mla_layers=tuple(i - 1 for i in la["full_attn_layers"]),
-        eps=tc.get("rms_norm_eps", RMS_NORM_EPS),
-        gate_lower_bound=la.get("gate_lower_bound"),
-    )
+    cfg.update(_kda_cfg_from_text_config(tc.get("text_config", tc)))
     return cfg
 
 
