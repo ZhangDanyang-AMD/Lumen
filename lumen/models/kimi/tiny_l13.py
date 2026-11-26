@@ -11,15 +11,14 @@ Tiny-L13 keeps the real K3 widths (hidden 7168, 96 KDA heads x 128, conv width
 ``config.json`` is 1-indexed: KDA layers [1,2,3,5,6,7,9,10,11] and gated-MLA
 layers [4,8,12,13], i.e. 0-indexed KDA 0-2, 4-6, 8-10 and MLA 3, 7, 11, 12.
 
-Known checkpoint/kernel gaps:
+Checkpoint layout:
 
-* ``A_log`` is stored as [head_dim] = [128], while ``KDALayerWeights`` (and HF
-  ``KimiDeltaAttention.__init__``) use one decay per head, [num_heads] = [96].
-  ``a_log="error"`` raises; ``a_log="random"`` keeps every other real tensor and
-  draws ``A_log`` the way the HF init does.
-* The config sets ``gate_lower_bound = -5`` (safe_gate); aiter#8739's
-  ``kda_layer_fwd`` does not implement it yet, so parity here is of the
-  unbounded gate on both sides.
+* ``A_log`` is one decay per head, padded to [128] for 96 heads; aiter#8739
+  (bbed79a+) reads ``A_log[:heads]``.
+* The config sets ``gate_lower_bound = -5``: the safe gate
+  ``g = lower_bound * sigmoid(exp(A_log) * (f_b(f_a(x)) + dt_bias))``, passed
+  to ``kda_layer_fwd(lower_bound=...)``.
+* Conv weights, ``A_log``, ``dt_bias`` and ``o_norm`` are fp32 and stay fp32.
 
 The checkpoint directory comes from ``path``, ``LUMEN_KIMI_TINY_L13_PATH`` or
 ``AITER_KIMI_TINY_L13_PATH`` (a local snapshot, e.g. from
@@ -36,6 +35,8 @@ TINY_L13_REPO = "Qinghao/Kimi-K3-Tiny-L13"
 TINY_L13_PATH_ENVS = ("LUMEN_KIMI_TINY_L13_PATH", "AITER_KIMI_TINY_L13_PATH")
 
 HIDDEN, HEADS, HEAD_DIM, CONV, GATE_RANK = 7168, 96, 128, 4, 128
+A_LOG_LEN = 128
+FP32_FIELDS = ("conv_q", "conv_k", "conv_v", "A_log", "dt_bias", "norm_w")
 NUM_LAYERS = 13
 KDA_LAYERS = (0, 1, 2, 4, 5, 6, 8, 9, 10)
 MLA_LAYERS = (3, 7, 11, 12)
@@ -112,7 +113,7 @@ def expected_shapes(cfg):
     return {
         "w_q": (HK, D), "w_k": (HK, D), "w_v": (HK, D),
         "conv_q": (HK, W), "conv_k": (HK, W), "conv_v": (HK, W),
-        "f_a": (R, D), "f_b": (HK, R), "A_log": (H,), "dt_bias": (HK,),
+        "f_a": (R, D), "f_b": (HK, R), "A_log": (max(H, A_LOG_LEN),), "dt_bias": (HK,),
         "w_beta": (H, D), "g_proj": (HK, D), "norm_w": (K,), "w_o": (D, HK),
     }  # fmt: skip
 
@@ -129,7 +130,7 @@ def random_tensors(cfg, dtype, seed=0):
     out = {}
     for name, shape in shapes.items():
         if name == "A_log":
-            out[name] = _hf_init_a_log(cfg["heads"], seed)
+            out[name] = _hf_init_a_log(shape[0], seed)
         elif name == "norm_w":
             out[name] = 1.0 + torch.randn(shape, generator=g) * 0.1
         elif name.startswith("conv"):
@@ -138,7 +139,7 @@ def random_tensors(cfg, dtype, seed=0):
             out[name] = torch.randn(shape, generator=g)
         else:
             out[name] = torch.randn(shape, generator=g) * shape[1] ** -0.5
-    return {n: t.to(dtype) for n, t in out.items()}
+    return {n: t if n in FP32_FIELDS else t.to(dtype) for n, t in out.items()}
 
 
 def _read(path, names):
@@ -157,7 +158,7 @@ def _read(path, names):
     return out
 
 
-def load_kda_tensors(layer, path=None, cfg=None, a_log="error"):
+def load_kda_tensors(layer, path=None, cfg=None):
     """{field: CPU tensor} for 0-indexed decoder ``layer``, in checkpoint dtype."""
     cfg = cfg or load_config(path)
     if layer not in cfg["kda_layers"]:
@@ -170,23 +171,24 @@ def load_kda_tensors(layer, path=None, cfg=None, a_log="error"):
     ts = {field: raw[name] for field, name in names.items()}
     for c in ("conv_q", "conv_k", "conv_v"):
         ts[c] = ts[c].reshape(ts[c].shape[0], -1)  # [C, 1, W] -> [C, W]
-    H = cfg["heads"]
-    if ts["A_log"].numel() != H:
-        if a_log != "random":
-            raise ValueError(
-                f"{names['A_log']} has shape {tuple(ts['A_log'].shape)}, expected [{H}] "
-                "(one decay per head); pass a_log='random' to substitute it"
-            )
-        ts["A_log"] = _hf_init_a_log(H, layer)
+    ts["A_log"] = ts["A_log"].reshape(-1)
     for n, want in expected_shapes(cfg).items():
-        if tuple(ts[n].shape) != want:
+        if n == "A_log":
+            if ts[n].numel() < cfg["heads"]:
+                raise ValueError(f"{names[n]}: {ts[n].numel()} values, expected >= {cfg['heads']} (one per head)")
+        elif tuple(ts[n].shape) != want:
             raise ValueError(f"{names[n]}: shape {tuple(ts[n].shape)}, expected {want}")
     return ts
 
 
-def load_kda_layer(layer, path=None, dtype=torch.bfloat16, device="cuda", cfg=None, a_log="error"):
-    """aiter ``KDALayerWeights`` for 0-indexed decoder ``layer`` of Tiny-L13."""
+def load_kda_layer(layer, path=None, dtype=torch.bfloat16, device="cuda", cfg=None):
+    """aiter ``KDALayerWeights`` for 0-indexed decoder ``layer``; ``FP32_FIELDS`` stay fp32."""
     from aiter.ops.kda_fused_layer import KDALayerWeights
 
-    ts = load_kda_tensors(layer, path, cfg, a_log)
-    return KDALayerWeights(**{n: t.to(device=device, dtype=dtype).contiguous() for n, t in ts.items()})
+    ts = load_kda_tensors(layer, path, cfg)
+    return KDALayerWeights(
+        **{
+            n: t.to(device=device, dtype=torch.float32 if n in FP32_FIELDS else dtype).contiguous()
+            for n, t in ts.items()
+        }
+    )

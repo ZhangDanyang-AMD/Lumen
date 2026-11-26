@@ -18,9 +18,11 @@ Enable with ``LUMEN_KDA_AITER=1`` (or ``patch_kda_layers(model)`` directly).
 ``fused``, default ``fused``); per-piece kernels inside the fused backend are
 chosen by aiter's ``AITER_KDA_PIECES`` / ``set_kda_pieces``.
 
-Calls the aiter layer cannot express (KV/conv cache, padded attention masks,
-a checkpoint ``A_log`` that is not one value per head, a low-rank ``g_proj``,
-or ``gate_lower_bound`` while aiter lacks it) run the original forward.
+``A_log`` is per head and may be padded past ``num_heads`` (K3 checkpoints
+store [128] for 96 heads; aiter reads ``[:H]``). A ``gate_lower_bound`` from the
+module or its ``linear_attn_config`` (K3: -5) selects aiter's safe gate
+``lower_bound * sigmoid(exp(A_log) * z)``. Calls the aiter layer cannot express
+(KV/conv cache, padded attention masks) run the original forward.
 """
 
 import inspect
@@ -84,9 +86,8 @@ def kda_layer_weights(mod: torch.nn.Module):
     hk = mod.q_proj.weight.shape[0]
     hv = mod.v_proj.weight.shape[0]
     a_log = mod.A_log.view(-1)
-    if a_log.numel() != H:
-        # Published K3 checkpoints store A_log as [head_dim]; aiter wants one decay per head.
-        raise ValueError(f"A_log has {a_log.numel()} values, expected one per head ({H})")
+    if a_log.numel() < H:
+        raise ValueError(f"A_log has {a_log.numel()} values, expected at least one per head ({H})")
     return KDALayerWeights(
         w_q=mod.q_proj.weight,
         w_k=mod.k_proj.weight,
@@ -105,13 +106,11 @@ def kda_layer_weights(mod: torch.nn.Module):
     )
 
 
-def _unsupported_reason(mod, attention_mask, past_key_values, use_cache, gate_kw):
+def _unsupported_reason(attention_mask, past_key_values, use_cache):
     if use_cache or past_key_values is not None:
         return "KV/conv cache"
     if attention_mask is not None and not bool(attention_mask.all()):
         return "padded attention_mask (pack with cu_seqlens instead)"
-    if _gate_lower_bound(mod) is not None and gate_kw is None:
-        return "gate_lower_bound (safe_gate) is not in this aiter kda_layer_fwd yet"
     return None
 
 
@@ -119,17 +118,12 @@ def _make_forward(mod, backend, chunk_size):
     from aiter.ops.kda_fused_layer import kda_layer_fwd
 
     orig = getattr(mod, _ORIG_FORWARD)
-    gate_kw = "gate_lower_bound" if "gate_lower_bound" in inspect.signature(kda_layer_fwd).parameters else None
+    if "lower_bound" not in inspect.signature(kda_layer_fwd).parameters:
+        raise ImportError("aiter kda_layer_fwd lacks lower_bound; need ROCm/aiter#8739 at bbed79a or later")
     warned = set()
 
     def forward(self, hidden_states, attention_mask=None, past_key_values=None, use_cache=False, **kwargs):
-        reason = _unsupported_reason(self, attention_mask, past_key_values, use_cache, gate_kw)
-        weights = None
-        if reason is None:
-            try:
-                weights = kda_layer_weights(self)
-            except ValueError as e:
-                reason = str(e)
+        reason = _unsupported_reason(attention_mask, past_key_values, use_cache)
         if reason is not None:
             # The aiter layer cannot express this call; keep the model's own KDA forward.
             if reason not in warned:
@@ -142,16 +136,15 @@ def _make_forward(mod, backend, chunk_size):
                 use_cache=use_cache,
                 **kwargs,
             )
-        extra = {gate_kw: _gate_lower_bound(self)} if gate_kw and _gate_lower_bound(self) is not None else {}
         o = kda_layer_fwd(
             hidden_states,
-            weights,
+            kda_layer_weights(self),
             _num_heads(self),
             chunk_size=chunk_size,
             eps=_eps(self),
             backend=backend,
             cu_seqlens=kwargs.get("cu_seqlens"),
-            **extra,
+            lower_bound=_gate_lower_bound(self),
         )
         return o, None, past_key_values
 
