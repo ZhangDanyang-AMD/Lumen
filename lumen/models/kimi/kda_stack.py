@@ -161,3 +161,24 @@ def grad_parity(ref, out, num_heads, top=5):
             diag[n] = [(i, r[i].item(), o[i].item()) for i in idx]
     rel = dict(sorted(rel.items(), key=lambda kv: -kv[1]))
     return rel, problems, diag
+
+
+# bf16 grading against an fp32 reference: the torch backend computes in fp32 from bf16 inputs while
+# the fused path feeds bf16 q/k/v to the chunk kernels, so aiter-bf16 may sit further from fp32 than
+# eager-bf16 does. ROCm/aiter#8739 measures about 2% grad deviation at K=128 from that quantization.
+BF16_VS_FP32_FACTOR = 4.0
+BF16_VS_FP32_FLOOR = 3e-2
+
+
+def grad_parity_vs_fp32(ref32, eager16, aiter16, num_heads, factor=BF16_VS_FP32_FACTOR, floor=BF16_VS_FP32_FLOOR):
+    """Grade both bf16 paths against fp32: aiter's error must stay within ``max(factor * eager_err, floor)``.
+
+    Returns ({name: (eager_err, aiter_err, limit)} sorted by aiter_err / limit, problems).
+    """
+    e_rel, problems, _ = grad_parity(ref32, eager16, num_heads)
+    a_rel, a_problems, _ = grad_parity(ref32, aiter16, num_heads)
+    rows = {n: (e_rel[n], a_rel[n], max(factor * e_rel[n], floor)) for n in ref32}
+    rows = dict(sorted(rows.items(), key=lambda kv: -kv[1][1] / kv[1][2]))
+    problems = problems + a_problems + [f"{n}: aiter {a:.3e} > limit {lim:.3e} (eager {e:.3e})"
+                                        for n, (e, a, lim) in rows.items() if a > lim]  # fmt: skip
+    return rows, problems

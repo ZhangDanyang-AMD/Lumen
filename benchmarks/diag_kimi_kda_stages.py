@@ -128,7 +128,7 @@ def main():
     for i, n in enumerate(names):
         print("  " + f"{n:10s}" + "".join(f"{table[lbl][0][i]:16.3e}" for lbl, _ in variants))
     for lbl, _ in variants:
-        print(f"  pieces[{lbl}]: {table[lbl][1]}")
+        print(f"  pieces[{lbl}]: gemm={table[lbl][1].get('gemm')} {table[lbl][1]}")
     pad = dw_ref.A_log[H:].abs().max().item() if dw_ref.A_log.numel() > H else 0.0
     print(f"\n  padded A_log grad max |.|: eager {pad}")
 

@@ -14,6 +14,7 @@ test uses tiny widths in fp32. Per-piece aiter kernels follow ``AITER_KDA_PIECES
     pytest -s tests/models/test_kimi_kda_stack.py
 """
 
+import copy
 import os
 
 import pytest
@@ -47,22 +48,38 @@ def _step(model, ids, aiter_kda):
     return loss.item(), logits.detach().float().cpu(), grads
 
 
-def _check(model, ids, tol, loss_tol, lr, grad_tol=kda_stack.GRAD_REL_NORM_TOL):
+def _fp32_reference(model, ids):
+    """Eager grads of an fp32 copy (bf16 weights upcast exactly)."""
+    ref = copy.deepcopy(model).float()
+    _, _, g = _step(ref, ids, False)
+    del ref
+    return g
+
+
+def _check(model, ids, tol, loss_tol, lr, grad_tol=kda_stack.GRAD_REL_NORM_TOL, vs_fp32=False):
     init = {n: p.detach().clone() for n, p in model.named_parameters()}
     ref_loss, ref_logits, ref_g = _step(model, ids, False)
     loss, logits, g = _step(model, ids, True)
+    from aiter.ops import kda_fused_layer as kfl
+
+    print("aiter pieces:", dict(sorted(kfl.LAST_PIECES.items())), "gemm:", kfl.LAST_PIECES.get("gemm"))
     assert abs(loss - ref_loss) <= loss_tol, f"loss eager {ref_loss} vs aiter {loss}"
     s = ref_logits.abs().max()
     torch.testing.assert_close(logits / s, ref_logits / s, rtol=tol, atol=tol)
     assert ref_g.keys() == g.keys() == {n for n, _ in model.named_parameters()}
     heads = model.layers[0].self_attn.num_heads
-    rel, problems, diag = kda_stack.grad_parity(ref_g, g, heads)
-    print("worst grad ||a-b||/||b||:", list(rel.items())[:5])
-    for n, rows in list(diag.items())[:3]:
-        print(f"{n} largest |diff| heads (idx, eager, aiter):", rows)
-    assert not problems, problems
-    bad = {n: v for n, v in rel.items() if v > grad_tol}
-    assert not bad, f"grad rel-norm over {grad_tol}: {bad}"
+    if vs_fp32:
+        rows, problems = kda_stack.grad_parity_vs_fp32(_fp32_reference(model, ids), ref_g, g, heads)
+        print("worst grad vs fp32 (eager_bf16, aiter_bf16, limit):", list(rows.items())[:5])
+        assert not problems, problems
+    else:
+        rel, problems, diag = kda_stack.grad_parity(ref_g, g, heads)
+        print("worst grad ||a-b||/||b||:", list(rel.items())[:5])
+        for n, rows in list(diag.items())[:3]:
+            print(f"{n} largest |diff| heads (idx, eager, aiter):", rows)
+        assert not problems, problems
+        bad = {n: v for n, v in rel.items() if v > grad_tol}
+        assert not bad, f"grad rel-norm over {grad_tol}: {bad}"
 
     curves = {}
     for aiter_kda in (False, True):
@@ -121,4 +138,4 @@ def test_kda_stack_bf16(preset, num_layers):
     assert len(model.layers) == (num_layers or len(tiny_l13.KDA_LAYERS))
     ids = torch.randint(0, kda_stack.TINY_L13_VOCAB, (1, SEQLEN), device="cuda",
                         generator=torch.Generator(device="cuda").manual_seed(0))  # fmt: skip
-    _check(model, ids, tol=5e-2, loss_tol=1e-3, lr=1e-3)
+    _check(model, ids, tol=5e-2, loss_tol=1e-3, lr=1e-3, vs_fp32=True)

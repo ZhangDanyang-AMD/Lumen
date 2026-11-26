@@ -173,7 +173,14 @@ python benchmarks/diag_kimi_kda_stages.py --dtype bf16 --widths full --seq-len 5
 python benchmarks/diag_kimi_kda_stages.py --dtype bf16 --widths full --seq-len 512 --no-lower-bound
 ```
 
-Both sides use one `eps` (`o_norm.eps`, 1e-5 for K3 and K3.1) for the q/k l2norm and the gated RMSNorm,
-because `kda_layer_fwd` takes a single `eps`. FLA's remote-code KDA uses its own l2norm eps (1e-6 by
-default) together with the config's 1e-5 RMSNorm. That does not affect eager-vs-aiter parity, but it
-is a small difference from the HF model.
+Since aiter#8739 `63497ee`, the q/k L2 norm uses a fixed eps of 1e-6, the same as FLA, on both sides.
+The gated RMSNorm uses `o_norm.eps` (1e-5).
+
+BF16 parity is graded against fp32. The torch backend computes in fp32 from bf16 inputs, while the
+fused path feeds bf16 q/k/v to the chunk kernels, so aiter-bf16 is expected to sit further from fp32
+than eager-bf16 (#8739 measures about 2% grad deviation at K=128, and 6–15% at K=16). The per-layer
+and tier-1 stack tests run an fp32 eager copy. For each tensor they require
+`err(aiter_bf16) <= max(4 × err(eager_bf16), 3e-2)`, plus zero grads on the padded `A_log` entries.
+fp32 runs keep the strict `1e-2` direct comparison. The whole-net test and the benchmark have no fp32
+copy, so they compare aiter against eager directly at 3e-2. Tests, the diagnostic and the benchmark
+print `LAST_PIECES['gemm']`.

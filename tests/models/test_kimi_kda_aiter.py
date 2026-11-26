@@ -18,7 +18,7 @@ import torch
 
 from lumen.models.kimi import tiny_l13
 from lumen.models.kimi.kda_aiter import kda_layer_weights, patch_kda_layers, unpatch_kda_layers
-from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, GRAD_REL_NORM_TOL, KimiDeltaAttention, grad_parity
+from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, KimiDeltaAttention, grad_parity_vs_fp32
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 pytestmark = pytest.mark.skipif(not _probe_aiter_kda_fused_layer(), reason="aiter kda_fused_layer (aiter#8739) missing")
@@ -107,32 +107,35 @@ def _gfx950():
 @pytest.mark.parametrize("seqlen", [100, 256])
 @pytest.mark.parametrize("layer", tiny_l13.KDA_LAYERS)
 def test_tiny_l13_kda_parity_bf16(layer, seqlen):
-    """BF16 fwd+bwd: patched module (aiter fused) vs the eager module forward (torch)."""
+    """BF16 fwd+bwd of the patched module (aiter fused) and the eager module (torch), both graded
+    against an fp32 eager run of the same bf16-rounded weights and inputs."""
     cfg = tiny_l13.load_config()
     ts = tiny_l13.load_kda_tensors(layer, cfg=cfg)
     lb = cfg["gate_lower_bound"]
     assert lb == tiny_l13.GATE_LOWER_BOUND
     ref = _to_train_dtype(KimiDeltaAttention(cfg, 0, lb).load_fields(ts), "cuda", torch.bfloat16)
     test = _to_train_dtype(KimiDeltaAttention(cfg, 0, lb).load_fields(ts), "cuda", torch.bfloat16)
+    ref32 = KimiDeltaAttention(cfg, 0, lb).load_fields({n: t.to(torch.bfloat16).float() for n, t in ts.items()}).cuda()
     assert patch_kda_layers(test, backend="fused") == 1
 
     g = torch.Generator(device="cuda").manual_seed(layer)
     x = torch.randn(1, seqlen, cfg["hidden"], generator=g, device="cuda").to(torch.bfloat16)
     dy = torch.randn(x.shape, generator=g, device="cuda").to(torch.bfloat16)
     outs = []
-    for m in (ref, test):
-        xs = x.clone().requires_grad_(True)
+    for m in (ref32, ref, test):
+        xs = (x.float() if m is ref32 else x).clone().requires_grad_(True)
         y = m(xs, attention_mask=None)
-        y.backward(dy)
+        y.backward(dy.to(y.dtype))
         torch.cuda.synchronize()
         outs.append([y.detach(), xs.grad] + [p.grad for p in m.parameters()])
 
     names = ["y", "dx"] + [n for n, _ in ref.named_parameters()]
     for name, r, o in zip(names, *outs):
         assert r is not None and o is not None, f"layer {layer}: {name} has no gradient"
-    ref_d, out_d = ({n: t.detach().float().cpu() for n, t in zip(names, ts)} for ts in outs)
-    rel, problems, diag = grad_parity(ref_d, out_d, cfg["heads"])
-    print(f"layer {layer} T={seqlen} worst ||a-b||/||b||:", list(rel.items())[:5], "A_log heads:", diag.get("A_log"))
-    assert not problems, problems
-    bad = {n: v for n, v in rel.items() if v > GRAD_REL_NORM_TOL}
-    assert not bad, f"layer {layer}: rel-norm over {GRAD_REL_NORM_TOL}: {bad}"
+    from aiter.ops import kda_fused_layer as kfl
+
+    r32, e16, a16 = ({n: t.detach().float().cpu() for n, t in zip(names, ts)} for ts in outs)
+    rows, problems = grad_parity_vs_fp32(r32, e16, a16, cfg["heads"])
+    print(f"layer {layer} T={seqlen} gemm={kfl.LAST_PIECES.get('gemm')} worst vs fp32 (eager_bf16, aiter_bf16, limit):",
+          list(rows.items())[:5])  # fmt: skip
+    assert not problems, f"layer {layer}: {problems}"

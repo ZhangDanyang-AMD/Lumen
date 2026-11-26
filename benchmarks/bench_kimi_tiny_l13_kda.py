@@ -59,7 +59,7 @@ def parse_args():
     p.add_argument("--seq-len", type=int, default=None, help="default 2048 (kda-only) / 4096 (full)")
     p.add_argument("--grad-check", action=argparse.BooleanOptionalAction, default=None,
                    help="compare every parameter gradient at step 1 (default: on for kda-only)")
-    p.add_argument("--grad-tol", type=float, default=kda_stack.GRAD_REL_NORM_TOL,
+    p.add_argument("--grad-tol", type=float, default=kda_stack.BF16_VS_FP32_FLOOR,
                    help="per-parameter ||g_aiter - g_eager|| / ||g_eager||")
     p.add_argument("--micro-batch", type=int, default=1)
     p.add_argument("--steps", type=int, default=50, help="total steps per mode (timing and loss curve)")
@@ -239,7 +239,7 @@ def main():
         print(f"\nLM-loss parity over {n} steps: max |dloss| = {max(dloss):.3e} "
               f"(step {dloss.index(max(dloss)) + 1}), final {dloss[-1]:.3e}, "
               f"max rel grad-norm diff {max(dgn):.3e} -> {'PASS' if ok else 'FAIL'} (tol {LOSS_PARITY_TOL:g})")  # fmt: skip
-        print("aiter pieces:", by_mode["aiter"]["pieces"])
+        print("aiter pieces:", by_mode["aiter"]["pieces"], "gemm:", by_mode["aiter"]["pieces"]["ran"].get("gemm"))
         if args.grad_check:
             gr, gg = by_mode["eager"]["grads_step1"], by_mode["aiter"]["grads_step1"]
             assert gr.keys() == gg.keys(), "parameters with gradients differ between modes"
