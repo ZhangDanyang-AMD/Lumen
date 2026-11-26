@@ -301,3 +301,21 @@ pip install --no-deps "fla-core==0.5.2" && pip install einops
 The Megatron-reference comparisons default to `gemm_precision="mxfp8"` together with
 `AITER_KDA_PRECISION=megatron`. They need #8757, which contains #8739, and they skip when the
 installed aiter's `kda_layer_fwd` has no `gemm_precision`. The `kda_backend` tests need #8755.
+
+## Known gap: FLA `chunk_kda` backward on ROCm
+
+With `fla-core==0.5.2` on triton 3.6 (ROCm, gfx950), FLA's `chunk_kda` **forward** compiles but the
+**backward** does not. `chunk_kda_bwd_intra`'s Triton kernel `chunk_kda_bwd_kernel_intra`
+(`fla/ops/kda/chunk_intra.py`) fails in the AMD backend with `PassManager::run failed`, raised from
+`chunk.py → chunk_bwd.py → chunk_intra.py:929`.
+
+The likely trigger is that kernel's safe-gate path. It calls `tl.gather` with an int16 index, which is
+used when `fla.utils.IS_GATHER_SUPPORTED` is true. `kda_reference.fla_backward_status()` first probes
+FLA's backward as-is. If that fails, it retries with FLA's own non-gather path
+(`chunk_intra.IS_GATHER_SUPPORTED = False`, a `tl.load` of the same value).
+
+When FLA's backward still fails, the Megatron reference keeps FLA for forward-only calls. For
+differentiable calls it runs the same layer with a PyTorch recurrence: aiter's `chunk_kda_torch` plus
+the in-kernel gate formula. That recurrence matches aiter's torch layer to about 1e-7 in fp32,
+including varlen. The per-layer and recurrence tests then compare forward against FLA and backward
+against that PyTorch recurrence, and print the reason.

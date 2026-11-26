@@ -135,12 +135,23 @@ def test_recurrence_fla_vs_aiter_megatron_kwargs():
     x = _megatron_inputs()
     cu = torch.tensor([0, 300, 1024], device="cuda", dtype=torch.int32)
     kw = dict(use_gate_in_kernel=True, safe_gate=True, lower_bound=-5.0, use_qk_l2norm_in_kernel=False, cu_seqlens=cu)
+    status = kda_reference.fla_backward_status()
+    with torch.no_grad():
+        o_fla, _ = fla_chunk_kda(x["q"], x["k"], x["v"], x["g"], x["beta"], A_log=x["A_log"], dt_bias=x["dt_bias"], **kw)
+    ref_fn = fla_chunk_kda
+    if not status.startswith("ok"):
+        # FLA forward still graded below; backward against the fp32 PyTorch recurrence instead
+        print(f"FLA chunk_kda backward unavailable ({status}); backward reference = PyTorch recurrence")
+        ref_fn = kda_reference._torch_chunk_kda
     outs = []
-    for fn in (fla_chunk_kda, aiter_kda.chunk_kda):
+    for fn in (ref_fn, aiter_kda.chunk_kda):
         t = {n: (v.clone().requires_grad_(True) if n in "qkvg" else v) for n, v in x.items()}
         o, _ = fn(t["q"], t["k"], t["v"], t["g"], t["beta"], A_log=t["A_log"], dt_bias=t["dt_bias"], **kw)
         o.float().pow(2).sum().backward()
         outs.append([o.detach()] + [t[n].grad for n in "qkvg"])
+    e = ((outs[1][0].float() - o_fla.float()).norm() / o_fla.float().norm()).item()
+    print(f"aiter vs fla forward o: {e:.3e}")
+    assert e < 2e-2, "forward o"
     for name, a, f in zip(["o", "dq", "dk", "dv", "dg"], outs[1], outs[0]):
         e = ((a.float() - f.float()).norm() / f.float().norm()).item()
         print(f"aiter vs fla {name}: {e:.3e}")

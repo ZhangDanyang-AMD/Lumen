@@ -39,10 +39,12 @@ scaling_type="mxfp8", block_size=32)``, whose aiter quantizer rounds the scale t
 way (see that module). ``"bf16"`` uses ``F.linear``.
 """
 
+import functools
+
 import torch
 import torch.nn.functional as F
 
-MEGATRON_KDA_BACKENDS = ("fla", "cudnn", "aiter")
+MEGATRON_KDA_BACKENDS = ("fla", "cudnn", "aiter", "torch")
 PRECISIONS = ("bf16", "mxfp8", "mxfp8-lumen")
 MXFP8_BLOCK = 32  # TE MXFP8BlockScaling: one E8M0 scale per 1x32 block
 
@@ -74,6 +76,66 @@ def aiter_recurrence_available():
         return False
 
 
+def _torch_chunk_kda(q, k, v, g, beta, A_log, dt_bias, safe_gate, lower_bound, cu_seqlens=None, **_):
+    """The KDA recurrence in plain PyTorch (aiter's differentiable ``chunk_kda_torch``) with the
+    in-kernel gate of the FLA contract; used where FLA's backward does not compile."""
+    from aiter.ops.kda_fused_layer import chunk_kda_torch, kda_gate
+
+    B, T, H, K = q.shape
+    z = g.float() + dt_bias.float().view(H, K)
+    gate = kda_gate(z, A_log.float(), lower_bound if safe_gate else None)
+    bounds = [0, T] if cu_seqlens is None else [int(b) for b in cu_seqlens.tolist()]
+    outs = [
+        chunk_kda_torch(q[:, s:e].float(), k[:, s:e].float(), v[:, s:e].float(), gate[:, s:e], beta[:, s:e].float(),
+                        K**-0.5)  # fmt: skip
+        for s, e in zip(bounds[:-1], bounds[1:])
+    ]
+    return torch.cat(outs, 1).to(v.dtype), None
+
+
+@functools.lru_cache(maxsize=None)
+def _warn_once(msg):
+    import logging
+
+    logging.getLogger(__name__).warning(msg)
+
+
+@functools.lru_cache(maxsize=1)
+def fla_backward_status():
+    """``"ok"``, ``"ok-nogather"`` (FLA's ``IS_GATHER_SUPPORTED`` fallback needed), or the error
+    string when FLA ``chunk_kda``'s backward does not run on this GPU (e.g. triton 3.6 on ROCm:
+    ``chunk_kda_bwd_intra`` fails with "PassManager::run failed")."""
+    if not (fla_available() and torch.cuda.is_available()):
+        return "unavailable"
+    from fla.ops.kda import chunk_kda
+
+    def probe():
+        T, H, K = 64, 2, 128
+        q = F.normalize(torch.randn(1, T, H, K, device="cuda"), dim=-1).bfloat16().requires_grad_(True)
+        k = F.normalize(torch.randn(1, T, H, K, device="cuda"), dim=-1).bfloat16().requires_grad_(True)
+        v = torch.randn(1, T, H, K, device="cuda").bfloat16().requires_grad_(True)
+        g = torch.randn(1, T, H, K, device="cuda").bfloat16().requires_grad_(True)
+        beta = torch.rand(1, T, H, device="cuda")
+        o, _ = chunk_kda(q=q, k=k, v=v, g=g, beta=beta, A_log=torch.zeros(H, device="cuda"),
+                         dt_bias=torch.zeros(H * K, device="cuda"), use_gate_in_kernel=True, safe_gate=True,
+                         lower_bound=-5.0)  # fmt: skip
+        o.float().sum().backward()
+        torch.cuda.synchronize()
+
+    try:
+        probe()
+        return "ok"
+    except Exception as first:  # noqa: BLE001 — reported to the caller
+        try:
+            import fla.ops.kda.chunk_intra as ci
+
+            ci.IS_GATHER_SUPPORTED = False  # use FLA's tl.load path instead of tl.gather
+            probe()
+            return "ok-nogather"
+        except Exception:  # noqa: BLE001
+            return f"{type(first).__name__}: {str(first).splitlines()[0][:200]}"
+
+
 def fla_available():
     try:
         from fla.ops.kda import chunk_kda  # noqa: F401
@@ -83,8 +145,12 @@ def fla_available():
         return False
 
 
-def _conv_silu(x, w):
-    # Megatron's deterministic / no-causal_conv1d path: F.conv1d with left padding, then SiLU.
+def _conv_silu(x, w, cu_seqlens=None):
+    # Megatron's deterministic / no-causal_conv1d path: F.conv1d with left padding, then SiLU; with
+    # packed sequences the causal window restarts at every cu_seqlens boundary (as causal_conv1d does).
+    if cu_seqlens is not None:
+        b = [int(v) for v in cu_seqlens.tolist()]
+        return torch.cat([_conv_silu(x[:, s:e], w) for s, e in zip(b[:-1], b[1:])], 1)
     T = x.shape[1]
     y = F.conv1d(x.transpose(1, 2), w.unsqueeze(1), padding=w.shape[1] - 1, groups=w.shape[0])
     return F.silu(y[..., :T]).transpose(1, 2)
@@ -123,6 +189,12 @@ def megatron_kda_forward(
 
 
 def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision):
+    if backend == "fla" and torch.is_grad_enabled() and not fla_backward_status().startswith("ok"):
+        # FLA's chunk_kda backward does not compile here; keep the Megatron layer and run the
+        # recurrence in PyTorch so gradients exist. Forward-only FLA calls are unaffected.
+        _warn_once(f"Megatron KDA reference: FLA chunk_kda backward unavailable ({fla_backward_status()}); "
+                   "using the PyTorch recurrence for differentiable calls")  # fmt: skip
+        backend = "torch"
     """y [B, T, D] for x [B, T, D] and ``KDALayerWeights`` w, differentiable through FLA's autograd."""
     if backend == "cudnn":
         raise NotImplementedError("cuDNN KDA needs CUDA SM100+; use backend='fla' (same recurrence) on ROCm")
@@ -130,6 +202,8 @@ def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens
         raise ValueError(f"unknown Megatron KDA backend {backend!r}, expected {MEGATRON_KDA_BACKENDS}")
     if backend == "aiter":
         from aiter.ops.kda import chunk_kda  # aiter#8755, FLA contract (Megatron kda_backend="aiter")
+    elif backend == "torch":
+        chunk_kda = _torch_chunk_kda
     else:
         from fla.ops.kda import chunk_kda
 
@@ -137,9 +211,9 @@ def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens
     H = num_heads
     dt = x.dtype
     lin = linear_fn(precision)
-    q = _l2norm(_conv_silu(lin(x, w.w_q.to(dt)), w.conv_q.to(dt)).reshape(B, T, H, -1))
-    k = _l2norm(_conv_silu(lin(x, w.w_k.to(dt)), w.conv_k.to(dt)).reshape(B, T, H, -1))
-    v = _conv_silu(lin(x, w.w_v.to(dt)), w.conv_v.to(dt)).reshape(B, T, H, -1)
+    q = _l2norm(_conv_silu(lin(x, w.w_q.to(dt)), w.conv_q.to(dt), cu_seqlens).reshape(B, T, H, -1))
+    k = _l2norm(_conv_silu(lin(x, w.w_k.to(dt)), w.conv_k.to(dt), cu_seqlens).reshape(B, T, H, -1))
+    v = _conv_silu(lin(x, w.w_v.to(dt)), w.conv_v.to(dt), cu_seqlens).reshape(B, T, H, -1)
     raw_g = lin(lin(x, w.f_a.to(dt)), w.f_b.to(dt)).reshape(B, T, H, -1)
     beta = lin(x, w.w_beta.to(dt)).float().sigmoid()
     o, _ = chunk_kda(

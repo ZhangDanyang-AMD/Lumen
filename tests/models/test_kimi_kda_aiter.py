@@ -193,6 +193,15 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
         y.backward(dy.to(y.dtype))
         torch.cuda.synchronize()
         res.append({n: t.detach().float().cpu() for n, t in zip(names, [y, xs.grad] + [p.grad for p in m.parameters()])})
+    status = kda_reference.fla_backward_status()
+    if not status.startswith("ok"):
+        # backward graded against the PyTorch recurrence (Megatron layer unchanged); forward against FLA
+        print(f"FLA chunk_kda backward unavailable ({status}); Megatron reference backward uses the PyTorch recurrence")
+        with torch.no_grad():
+            y_fla = meg16(x, attention_mask=None)
+        e = ((res[2]["y"] - y_fla.float().cpu()).norm() / y_fla.float().cpu().norm()).item()
+        print(f"  forward aiter vs FLA (bf16): {e:.3e}")
+        assert e < 3e-2, f"forward aiter vs FLA {e:.3e}"
     rows, problems = grad_parity_vs_fp32(res[0], res[1], res[2], cfg["heads"])
     rows_t, _ = grad_parity_vs_fp32(res[0], res[1], res[3], cfg["heads"])
     print(f"layer {layer} T={seqlen} precision={prec} vs Megatron-FLA fp32 (megatron_bf16, aiter_fused_bf16, limit):", list(rows.items())[:5])

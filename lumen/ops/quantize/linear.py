@@ -1011,6 +1011,19 @@ def _gemm_mxfp8_triton(a_fp8, w_fp8, scale_a, scale_w):
     )
 
 
+def _dequant_mxfp8(data, scale_e8m0):
+    """fp32 values of 1x32-along-the-last-axis MXFP8 data (padded columns kept)."""
+    s = _e8m0_to_fp32(scale_e8m0.view(torch.uint8)).repeat_interleave(32, dim=-1)
+    return data.float() * s[..., : data.shape[-1]]
+
+
+def _mxfp8_mm_requant(a, b, fp8_dtype):
+    """a [M, R] @ b [N, R]^T with both operands MXFP8-quantized (1x32) along R; bf16 out."""
+    a_desc = quantize_input(a, "mxfp8", fp8_dtype, 32)
+    b_desc = quantize_input(b, "mxfp8", fp8_dtype, 32)
+    return _gemm_mxfp8_1x32(a_desc.data, b_desc.data, a_desc.scale, b_desc.scale)
+
+
 def _pad_rows(t, mult, value=0):
     pad = (-t.shape[0]) % mult
     if not pad:
@@ -2641,6 +2654,36 @@ class QuantizedLinearFunction(torch.autograd.Function):
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             )
         # ----- end blockwise2d -----
+
+        # ----- MXFP8 (1x32 E8M0): DGrad + WGrad with TE MXFP8BlockScaling operand axes -----
+        # The 1x32-along-K blocks of the saved X / W do not survive transposition, so both are
+        # dequantized and re-quantized along each GEMM's reduction axis:
+        #   dgrad dX = dY (blocks along N) x W^T (blocks along N)
+        #   wgrad dW = dY^T (blocks along M) x X^T (blocks along M)
+        # TE quantizes the original bf16 columnwise instead; re-quantizing the rowwise copy rounds
+        # twice, which is the remaining difference.
+        if scaling_type == "mxfp8":
+            grad_flat = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
+            M, N = grad_flat.shape
+            K = weight_data.shape[-1]
+            w_hp = _dequant_mxfp8(weight_data, weight_scale)[:N, :K]
+            x_hp = _dequant_mxfp8(input_data.reshape(-1, input_data.shape[-1]), input_scale)[:M, :K]
+            dy = grad_flat.to(torch.bfloat16)
+            grad_input = _mxfp8_mm_requant(dy, w_hp.t().contiguous().to(torch.bfloat16), bwd_dtype)[:M, :K]
+            grad_input = grad_input.to(grad_output.dtype).view(*grad_output.shape[:-1], K)
+            grad_weight = _mxfp8_mm_requant(
+                dy.t().contiguous(), x_hp.t().contiguous().to(torch.bfloat16), bwd_dtype
+            )[:N, :K].to(ctx.weight_ref.dtype if ctx.weight_ref is not None else grad_output.dtype)
+            if mgr is not None:
+                grad_weight = mgr.quantize_grad(grad_weight)
+            if ctx.gradient_accumulation_fusion and hasattr(ctx.weight_ref, "main_grad"):
+                ctx.weight_ref.main_grad.add_(grad_weight)
+                grad_weight = None
+            grad_bias = grad_output.sum(dim=tuple(range(grad_output.dim() - 1))) if ctx.has_bias else None
+            return (
+                grad_input, grad_weight, grad_bias,
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            )
 
         # ----- MXFP4: FP4 DGrad + WGrad -----
         # Against the NVFP4 paper §4 baseline: DGrad reuses the FP4 weight cached
