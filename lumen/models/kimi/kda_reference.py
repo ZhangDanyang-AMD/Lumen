@@ -79,18 +79,45 @@ def aiter_recurrence_available():
 def _torch_chunk_kda(q, k, v, g, beta, A_log, dt_bias, safe_gate, lower_bound, cu_seqlens=None, **_):
     """The KDA recurrence in plain PyTorch (aiter's differentiable ``chunk_kda_torch``) with the
     in-kernel gate of the FLA contract; used where FLA's backward does not compile."""
-    from aiter.ops.kda_fused_layer import chunk_kda_torch, kda_gate
+    from aiter.ops.kda_fused_layer import kda_gate
 
     B, T, H, K = q.shape
     z = g.float() + dt_bias.float().view(H, K)
     gate = kda_gate(z, A_log.float(), lower_bound if safe_gate else None)
     bounds = [0, T] if cu_seqlens is None else [int(b) for b in cu_seqlens.tolist()]
     outs = [
-        chunk_kda_torch(q[:, s:e].float(), k[:, s:e].float(), v[:, s:e].float(), gate[:, s:e], beta[:, s:e].float(),
-                        K**-0.5)  # fmt: skip
+        _chunk_recurrence(q[:, s:e].float(), k[:, s:e].float(), v[:, s:e].float(), gate[:, s:e],
+                          beta[:, s:e].float(), K**-0.5)  # fmt: skip
         for s, e in zip(bounds[:-1], bounds[1:])
     ]
     return torch.cat(outs, 1).to(v.dtype), None
+
+
+def _chunk_recurrence(q, k, v, g, beta, scale, chunk_size=64):
+    """aiter's chunked gated delta rule (``_chunk_step``) without its per-chunk checkpoints, so the
+    graph is the same in the forward and in an outer checkpoint's recomputation."""
+    from aiter.ops.kda_fused_layer import _chunk_step
+
+    B, T, H, K = q.shape
+    V = v.shape[-1]
+    C = chunk_size
+    pad = (-T) % C
+    if pad:
+        q, k, v, g = (F.pad(t, (0, 0, 0, 0, 0, pad)) for t in (q, k, v, g))
+        beta = F.pad(beta, (0, 0, 0, pad))
+    N = (T + pad) // C
+
+    def chunks(t):  # [B, T, H, ...] -> [B, H, N, C, ...]
+        return t.reshape(B, N, C, H, *t.shape[3:]).transpose(1, 3).transpose(2, 3)
+
+    q, k, v, g, beta = map(chunks, (q, k, v, g, beta))
+    S = q.new_zeros(B, H, K, V)
+    out = []
+    for n in range(N):
+        o, S = _chunk_step(S, q[:, :, n], k[:, :, n], v[:, :, n], g[:, :, n], beta[:, :, n])
+        out.append(o)
+    o = torch.stack(out, 2) * scale
+    return o.permute(0, 2, 3, 1, 4).reshape(B, N * C, H, V)[:, :T]
 
 
 @functools.lru_cache(maxsize=None)
@@ -179,7 +206,18 @@ def _rms_norm_gated(o, gate, weight, eps):
 def megatron_kda_forward(
     x, w, num_heads, lower_bound=-5.0, eps=1e-5, backend="fla", cu_seqlens=None, precision="bf16", recompute=True
 ):
-    """``recompute=True`` mirrors ``recompute_gdn``: only the KDA input is kept for backward."""
+    """y [B, T, D] for x [B, T, D] and ``KDALayerWeights`` w.
+
+    ``recompute=True`` mirrors ``recompute_gdn``: only the KDA input is kept for backward and the
+    layer reruns in backward. The backend is resolved here, before the checkpointed region, so the
+    forward and its recomputation run the same ops and save the same tensors.
+    """
+    if backend == "fla" and torch.is_grad_enabled() and not fla_backward_status().startswith("ok"):
+        # FLA's chunk_kda backward does not compile here; keep the Megatron layer and run the
+        # recurrence in PyTorch so gradients exist. Forward-only FLA calls are unaffected.
+        _warn_once(f"Megatron KDA reference: FLA chunk_kda backward unavailable ({fla_backward_status()}); "
+                   "using the PyTorch recurrence for differentiable calls")  # fmt: skip
+        backend = "torch"
     if recompute and torch.is_grad_enabled():
         return torch.utils.checkpoint.checkpoint(
             _megatron_kda_forward, x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision,
@@ -189,13 +227,6 @@ def megatron_kda_forward(
 
 
 def _megatron_kda_forward(x, w, num_heads, lower_bound, eps, backend, cu_seqlens, precision):
-    if backend == "fla" and torch.is_grad_enabled() and not fla_backward_status().startswith("ok"):
-        # FLA's chunk_kda backward does not compile here; keep the Megatron layer and run the
-        # recurrence in PyTorch so gradients exist. Forward-only FLA calls are unaffected.
-        _warn_once(f"Megatron KDA reference: FLA chunk_kda backward unavailable ({fla_backward_status()}); "
-                   "using the PyTorch recurrence for differentiable calls")  # fmt: skip
-        backend = "torch"
-    """y [B, T, D] for x [B, T, D] and ``KDALayerWeights`` w, differentiable through FLA's autograd."""
     if backend == "cudnn":
         raise NotImplementedError("cuDNN KDA needs CUDA SM100+; use backend='fla' (same recurrence) on ROCm")
     if backend not in MEGATRON_KDA_BACKENDS:

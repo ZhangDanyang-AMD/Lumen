@@ -115,6 +115,18 @@ def main():
         t = {"q": q, "k": k, "v": v}[qn]
         print(f"  bf16 rounding of {qn} alone: {rel(t.bfloat16().float(), t):.3e}")
 
+    print("\n[2b] conv backward piece alone (fp32 inputs) vs fp64 autograd")
+    a_in = s["a"].float()
+    C = a_in.shape[-1]
+    dc = torch.randn(*a_in.shape[:-1], C, device=a_in.device)
+    hk, hv = w.w_q.shape[0], w.w_v.shape[0]
+    da_k, dw_k = kfl.conv_silu_bwd(a_in, s["conv_qkv"], *dc.split([hk, hk, hv], -1))
+    with torch.enable_grad():
+        a64 = a_in.double().requires_grad_(True)
+        w64 = s["conv_qkv"].double().requires_grad_(True)
+        da64, dw64 = torch.autograd.grad(kfl._short_conv(a64, w64), [a64, w64], dc.double())
+    print(f"  {kfl.LAST_PIECES.get('conv_bwd')}: da {rel(da_k, da64):.3e}  dw {rel(dw_k, dw64):.3e}")
+
     print("\n[3] backward, aiter vs eager, per piece forced to torch")
     dx_ref, dw_ref = kfl.kda_layer_bwd(dy, x, w, H, args.chunk_size, eps, backend="torch", lower_bound=lb)
     names = ["dx"] + [f.name for f in kfl.fields(kfl.KDALayerWeights)]

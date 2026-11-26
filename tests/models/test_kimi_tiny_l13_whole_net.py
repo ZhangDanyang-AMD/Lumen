@@ -33,6 +33,7 @@ import torch
 from lumen.models.kimi import kda_reference, tiny_l13
 from lumen.models.kimi.kda_aiter import (
     KDA_AITER_ENV,
+    invalidate_aiter_kda_weight_caches,
     aiter_supports_gemm_precision,
     maybe_patch_kda_layers,
     unpatch_kda_layers,
@@ -92,6 +93,7 @@ def _trainable(model):
 def _run(model, ids, aiter_kda):
     os.environ[KDA_AITER_ENV] = "1" if aiter_kda else "0"
     unpatch_kda_layers(model)
+    invalidate_aiter_kda_weight_caches()  # params change in place between calls
     patched = maybe_patch_kda_layers(model, gemm_precision=PRECISION, kda_precision="megatron")
     assert patched == (len(tiny_l13.KDA_LAYERS) if aiter_kda else 0)
     model.zero_grad(set_to_none=True)

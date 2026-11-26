@@ -208,3 +208,38 @@ def test_tiny_l13_kda_vs_megatron_fla(layer, seqlen):
     print("  [secondary] aiter-torch bf16:", list(rows_t.items())[:5])
     unpatch_kda_layers(fused16)
     assert not problems, f"layer {layer}: {problems}"
+
+
+def test_is_first_microbatch_and_optimizer_invalidation(monkeypatch):
+    """TE semantics (#8739 2130550): the flag set on the module reaches kda_layer_fwd; step() invalidates."""
+    from aiter.ops import kda_fused_layer as kfl
+
+    from lumen.models.kimi import kda_aiter
+
+    seen, calls = [], []
+    orig = kfl.kda_layer_fwd
+
+    import functools
+
+    @functools.wraps(orig)  # keeps the signature patch_kda_layers inspects
+    def spy(*a, is_first_microbatch=None, **k):
+        seen.append(is_first_microbatch)
+        return orig(*a, is_first_microbatch=is_first_microbatch, **k)
+
+    monkeypatch.setattr(kfl, "kda_layer_fwd", spy)
+    monkeypatch.setattr(kfl, "invalidate_weight_caches", lambda weights=None: calls.append(weights))
+    m = KimiDeltaAttention(_small_cfg())
+    patch_kda_layers(m, backend="torch")
+    x = torch.randn(1, 8, 64)
+    m(x)
+    kda_aiter.set_kda_is_first_microbatch(m, True)
+    m(x)
+    kda_aiter.set_kda_is_first_microbatch(m, False)
+    m(x)
+    assert seen == [None, True, False]
+    opt = torch.optim.SGD(m.parameters(), lr=0.1)
+    assert kda_aiter.register_kda_optimizer_hooks(opt)
+    m(x).sum().backward()
+    opt.step()
+    assert calls == [None]
+    unpatch_kda_layers(m)

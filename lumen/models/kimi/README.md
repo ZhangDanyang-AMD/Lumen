@@ -328,3 +328,24 @@ backward. dgrad then uses dY rowwise × W columnwise, and wgrad uses dY columnwi
 fp32 output that is optionally added into `main_grad`. No operand is re-quantized from a dequantized
 copy. `test_lumen_mxfp8_vs_te` requires every quantized operand to be bit-exact against
 `mxfp8_te_reference`.
+
+## aiter weight caches (#8739 `2130550`)
+
+aiter's KDA weight caches follow TE's `is_first_microbatch` semantics. `None`, Lumen's default, means
+no reuse across calls. `True` rebuilds the caches and `False` reuses them.
+
+- **Patched layers:** they forward a caller's `is_first_microbatch`, or the value set with
+  `kda_aiter.set_kda_is_first_microbatch(model, flag)`. The benchmark sets `True` on each step's
+  single microbatch.
+- **Optimizer hook:** `kda_aiter.register_kda_optimizer_hooks(optimizer)` calls
+  `invalidate_weight_caches()` after every `optimizer.step()`. Lumen's FSDP
+  `register_quant_optimizer_hooks` installs it whenever `LUMEN_KDA_AITER=1`.
+- **Tests:** the tests and the benchmark also invalidate after every in-place parameter update.
+
+## Megatron reference under recompute
+
+`megatron_kda_forward(recompute=True)` mirrors `recompute_gdn` with `torch.utils.checkpoint`. The
+recurrence backend, FLA or the PyTorch fallback when FLA's backward fails, is resolved before the
+checkpointed region, including the one-time FLA probe. The PyTorch recurrence has no inner
+per-chunk checkpoints. The forward and its recomputation therefore run the same ops and save the
+same tensors.

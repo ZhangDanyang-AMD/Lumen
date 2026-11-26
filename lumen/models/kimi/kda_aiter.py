@@ -157,6 +157,9 @@ def _make_forward(mod, backend, chunk_size, gemm_precision="bf16"):
         raise ImportError("aiter kda_layer_fwd lacks lower_bound; need ROCm/aiter#8739 at bbed79a or later")
     extra = {}
     gemm_precision = "mxfp8" if gemm_precision.startswith("mxfp8") else gemm_precision
+    # TE semantics for aiter's weight caches (#8739): None = no cross-call reuse, True = rebuild,
+    # False = reuse. Lumen never relies on cross-call reuse unless the caller passes the flag.
+    takes_microbatch = "is_first_microbatch" in inspect.signature(kda_layer_fwd).parameters
     if gemm_precision != "bf16":
         if not aiter_supports_gemm_precision():
             raise ImportError(
@@ -173,6 +176,10 @@ def _make_forward(mod, backend, chunk_size, gemm_precision="bf16"):
                 warned.add(reason)
                 logger.warning("KDA aiter path: %s, falling back to the module forward", reason)
             return orig(hidden_states, attention_mask=attention_mask, cache_params=cache_params, **kwargs)
+        # Megatron passes is_first_microbatch to TE layers per microbatch; HF-style callers set it
+        # on the module (set_kda_is_first_microbatch) since the decoder does not forward it.
+        flag = kwargs.get("is_first_microbatch", getattr(self, "_lumen_is_first_microbatch", None))
+        mb = {"is_first_microbatch": flag} if takes_microbatch else {}
         return kda_layer_fwd(
             hidden_states,
             kda_layer_weights(self),
@@ -183,6 +190,7 @@ def _make_forward(mod, backend, chunk_size, gemm_precision="bf16"):
             cu_seqlens=kwargs.get("cu_seqlens"),
             lower_bound=_gate_lower_bound(self),
             **extra,
+            **mb,
         )
 
     return types.MethodType(forward, mod)
@@ -237,6 +245,57 @@ def patch_kda_layers(
         logger.debug("KDA aiter path: patched %s (backend=%s)", name, backend)
     logger.info("KDA aiter path: patched %d KDA layer(s), backend=%s", n, backend)
     return n
+
+
+def invalidate_aiter_kda_weight_caches():
+    """Drop aiter's KDA weight caches (``invalidate_weight_caches``, #8739) if this aiter has them.
+
+    Megatron-style updates (``param.data`` copies, distributed-optimizer buffers) do not bump
+    ``_version``, so call this after every ``optimizer.step()``. Returns whether aiter had caches.
+    """
+    if not _probe_aiter_kda_fused_layer():
+        return False
+    from aiter.ops import kda_fused_layer as kfl
+
+    fn = getattr(kfl, "invalidate_weight_caches", None)
+    if fn is None:
+        return False
+    fn()
+    return True
+
+
+def set_kda_is_first_microbatch(model: torch.nn.Module, flag):
+    """TE ``is_first_microbatch`` for every patched KDA layer: ``True`` on the first microbatch of an
+    optimizer step (rebuild aiter's weight caches), ``False`` on the following ones (reuse), ``None``
+    for no cross-call reuse (the default)."""
+    n = 0
+    for mod in model.modules():
+        if hasattr(mod, _ORIG_FORWARD):
+            mod._lumen_is_first_microbatch = flag
+            n += 1
+    return n
+
+
+def register_kda_optimizer_hooks(optimizer):
+    """Call ``invalidate_aiter_kda_weight_caches()`` after every ``optimizer.step()``.
+
+    Belt and braces next to ``is_first_microbatch``: Megatron-style updates (``param.data`` copies,
+    distributed-optimizer buffers) do not bump ``_version``. Returns whether a hook was installed.
+    """
+    if hasattr(optimizer, "register_step_post_hook"):
+        optimizer.register_step_post_hook(lambda _opt, _a, _k: invalidate_aiter_kda_weight_caches())
+        return True
+    step = getattr(optimizer, "step", None)
+    if step is None:
+        return False
+
+    def _step(*args, **kwargs):
+        out = step(*args, **kwargs)
+        invalidate_aiter_kda_weight_caches()
+        return out
+
+    optimizer.step = _step  # Megatron optimizers are not torch.optim.Optimizer subclasses
+    return True
 
 
 def unpatch_kda_layers(model: torch.nn.Module) -> int:

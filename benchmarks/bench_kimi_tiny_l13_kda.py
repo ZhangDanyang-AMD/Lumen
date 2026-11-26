@@ -44,7 +44,13 @@ import time
 import torch
 
 from lumen.models.kimi import kda_reference, kda_stack, tiny_l13
-from lumen.models.kimi.kda_aiter import KDA_AITER_ENV, maybe_patch_kda_layers, unpatch_kda_layers
+from lumen.models.kimi.kda_aiter import (
+    KDA_AITER_ENV,
+    invalidate_aiter_kda_weight_caches,
+    set_kda_is_first_microbatch,
+    maybe_patch_kda_layers,
+    unpatch_kda_layers,
+)
 
 LOSS_PARITY_TOL = 1e-3  # Megatron-LM#6872 continuation protocol: max LM-loss difference within 1e-3
 
@@ -148,6 +154,7 @@ def run_mode(model, mode, args, init, ids_steps):
     with torch.no_grad():
         for p, p0 in zip(trainable(model), init):
             p.copy_(p0)
+    invalidate_aiter_kda_weight_caches()
     params = trainable(model)
     masters = None
     if args.main_grad:
@@ -173,6 +180,7 @@ def run_mode(model, mode, args, init, ids_steps):
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         opt.zero_grad(set_to_none=True)
+        set_kda_is_first_microbatch(model, True)  # one microbatch per step: rebuild aiter weight caches
         loss = lm_loss(model, ids)
         loss.backward()
         if masters is not None:
@@ -193,6 +201,7 @@ def run_mode(model, mode, args, init, ids_steps):
                     p.copy_(m)
         else:
             opt.step()
+        invalidate_aiter_kda_weight_caches()  # in-place updates need not bump _version
         torch.cuda.synchronize()
         records.append(
             {"step": step, "loss": loss.item(), "grad_norm": gnorm.item(), "time_s": time.perf_counter() - t0}
