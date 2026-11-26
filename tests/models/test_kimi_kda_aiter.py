@@ -18,7 +18,7 @@ import torch
 
 from lumen.models.kimi import tiny_l13
 from lumen.models.kimi.kda_aiter import kda_layer_weights, patch_kda_layers, unpatch_kda_layers
-from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, KimiDeltaAttention
+from lumen.models.kimi.kda_stack import FP32_KDA_PARAMS, GRAD_REL_NORM_TOL, KimiDeltaAttention, grad_parity
 from lumen.ops.dispatch import _probe_aiter_kda_fused_layer
 
 pytestmark = pytest.mark.skipif(not _probe_aiter_kda_fused_layer(), reason="aiter kda_fused_layer (aiter#8739) missing")
@@ -130,6 +130,9 @@ def test_tiny_l13_kda_parity_bf16(layer, seqlen):
     names = ["y", "dx"] + [n for n, _ in ref.named_parameters()]
     for name, r, o in zip(names, *outs):
         assert r is not None and o is not None, f"layer {layer}: {name} has no gradient"
-        # grade each output against its own scale so a small gradient is not hidden
-        s = r.float().abs().max().clamp_min(1e-6)
-        torch.testing.assert_close(o.float() / s, r.float() / s, rtol=5e-2, atol=5e-2, msg=f"layer {layer}: {name}")
+    ref_d, out_d = ({n: t.detach().float().cpu() for n, t in zip(names, ts)} for ts in outs)
+    rel, problems, diag = grad_parity(ref_d, out_d, cfg["heads"])
+    print(f"layer {layer} T={seqlen} worst ||a-b||/||b||:", list(rel.items())[:5], "A_log heads:", diag.get("A_log"))
+    assert not problems, problems
+    bad = {n: v for n, v in rel.items() if v > GRAD_REL_NORM_TOL}
+    assert not bad, f"layer {layer}: rel-norm over {GRAD_REL_NORM_TOL}: {bad}"
