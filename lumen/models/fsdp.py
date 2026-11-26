@@ -457,6 +457,11 @@ def register_quant_optimizer_hooks(model: nn.Module, optimizer, args) -> bool:
 
     Returns whether a hook was registered (i.e. whether MXFP4 is in use).
     """
+    from lumen.models.kimi.kda_aiter import kda_aiter_enabled, register_kda_optimizer_hooks
+
+    if kda_aiter_enabled():
+        # aiter KDA weight caches (is_first_microbatch) must not outlive an optimizer step
+        register_kda_optimizer_hooks(optimizer)
     if not getattr(args, "linear_fp4", False):
         return False
 

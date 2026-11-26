@@ -83,6 +83,16 @@ def _probe_aiter_triton_rmsnorm():
 
 
 @functools.lru_cache(maxsize=1)
+def _probe_aiter_kda_fused_layer():
+    try:
+        from aiter.ops.kda_fused_layer import kda_layer_fwd as _  # noqa: F401
+
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def _probe_aiter_triton_gemm():
     try:
         from aiter.ops.triton.gemm.basic.gemm_a8w8 import gemm_a8w8 as _  # noqa: F401
